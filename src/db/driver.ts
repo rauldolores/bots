@@ -1,6 +1,6 @@
 // Contrato mínimo que `Db` necesita de un driver de Postgres.
 //
-// Existe porque KontrolIA Bots se despliega en runtimes muy distintos (Node, workerd
+// Existe porque Nodia Agents se despliega en runtimes muy distintos (Node, workerd
 // y Vercel) y no todos aceptan el mismo driver: workerd necesita sockets
 // vía nodejs_compat, y Supabase cloud recomienda su pooler, que no admite
 // sentencias preparadas. Aislar el driver deja cambiarlo sin tocar las 61

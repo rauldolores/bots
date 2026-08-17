@@ -1,4 +1,4 @@
-// La puerta única a la base de datos. Todo el código de KontrolIA Bots pasa por
+// La puerta única a la base de datos. Todo el código de Nodia Agents pasa por
 // aquí — no hay una sola consulta suelta fuera de esta clase, y conviene que siga
 // siendo así: es lo que permitió cambiar D1 por Postgres sin tocar los 31
 // archivos que hablan con la base (ver docs/portabilidad.md).

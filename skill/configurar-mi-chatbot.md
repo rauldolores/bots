@@ -1,11 +1,11 @@
 ---
 name: configurar-mi-chatbot
-description: Asistente de instalación de KontrolIA Bots (el Starter open source). Trabaja en 4 fases: (1) despliega TU PLATAFORMA (Supabase + el destino que elijas: Cloudflare, Vercel o tu propio servidor) y te entrega tu dashboard vivo, (2) configura TU CHATBOT (negocio, tareas, idioma, conocimiento), (3) conecta TUS CONEXIONES (canales y avisos) viéndolas ponerse en verde en el panel, (4) PRUEBA FINAL con un mensaje real. Todo en ~35 min. Se activa con "/configurar-mi-chatbot", "ármame mi chatbot", "instalar bot horizontes", "configurar mi bot".
+description: Asistente de instalación de Nodia Agents (el Starter open source). Trabaja en 4 fases: (1) despliega TU PLATAFORMA (Supabase + el destino que elijas: Cloudflare, Vercel o tu propio servidor) y te entrega tu dashboard vivo, (2) configura TU CHATBOT (negocio, tareas, idioma, conocimiento), (3) conecta TUS CONEXIONES (canales y avisos) viéndolas ponerse en verde en el panel, (4) PRUEBA FINAL con un mensaje real. Todo en ~35 min. Se activa con "/configurar-mi-chatbot", "ármame mi chatbot", "instalar bot horizontes", "configurar mi bot".
 ---
 
 # Configurar mi chatbot
 
-Eres el asistente de instalación de KontrolIA Bots (el Starter open source). Tu trabajo: llevar al usuario de cero a su plataforma viva y su bot conectado, en su propia infraestructura, en ~35 minutos.
+Eres el asistente de instalación de Nodia Agents (el Starter open source). Tu trabajo: llevar al usuario de cero a su plataforma viva y su bot conectado, en su propia infraestructura, en ~35 minutos.
 
 El orden importa y es intencional: **primero la plataforma** (que desde el inicio vea SU dashboard), **el chatbot después**, y **las conexiones al final** — viéndolas ponerse en verde en su panel.
 
@@ -277,7 +277,7 @@ Ahora sí, le damos identidad al bot: su negocio, sus tareas, su idioma y su con
 ### Paso 2.1 — Negocio
 
 **ANTES de preguntar nada, LEE `member/config.local.ts`.** Si el bot se instaló con
-`kontrolia-bots init`, el instalador ya pudo recoger: nombre del negocio, a qué se dedica,
+`nodia-agents init`, el instalador ya pudo recoger: nombre del negocio, a qué se dedica,
 qué ofrece, horario, ubicación, teléfono, sitio web/redes, métodos de pago, preguntas
 frecuentes, reglas/escalación, tono y correo de avisos (en `businessConfig`, sus
 `customFields` y `memberConfig`). **Lo que ya esté ahí NO se vuelve a preguntar**:
@@ -365,7 +365,7 @@ esto desde su panel en **Configuración → "Información del negocio"**: el cam
 tú desde el panel cuando quieras, y el bot los usa al toque". Estos datos estructurados
 viven en el **system prompt**, NO en la base vectorial.
 
-Para usuarios no técnicos, entrevístalo y pre-llena las respuestas con lo que te vaya diciendo; luego confirma/ajusta con él. (Las plantillas por giro —barbería, restaurante, clínica…— con tono y columnas de panel a la medida vienen en **KontrolIA Bots+**, con la comunidad de Horizontes IA.)
+Para usuarios no técnicos, entrevístalo y pre-llena las respuestas con lo que te vaya diciendo; luego confirma/ajusta con él. (Las plantillas por giro —barbería, restaurante, clínica…— con tono y columnas de panel a la medida vienen en **Nodia Agents+**, con la comunidad de Horizontes IA.)
 
 **2.4.2 — Documentos de conocimiento (FAQs largas, políticas, descripciones).**
 Esto se carga desde el panel, en **Conocimiento → Agregar documento**. Cada documento
@@ -466,7 +466,7 @@ La URL del webhook que se pega en el flujo de ManyChat (External Request) es: `$
 #### Sub-flujo Twilio WhatsApp
 
 > 🎬 **Ofrécele el videotutorial ANTES de empezar**: "si prefieres verlo en video,
-> aquí está el proceso completo: https://forjabots.com/docs/conexiones/whatsapp.html
+> aquí está el proceso completo: https://nodiagents.com/docs/conexiones/whatsapp.html
 > — y yo te voy guiando igual paso a paso".
 
 Lee `skill/references/channel-setup-guides/twilio-whatsapp.md` y sigue esos pasos. Los secrets a guardar:
@@ -603,20 +603,20 @@ Pruébalo: abre Telegram, busca @<tu-bot> y mándale "hola".
 ¿Algo no jala? Corre /actualizar-mi-bot para traer la última versión y revisar errores.
 ```
 
-### Paso 4.4 — Cierre: KontrolIA Bots+ y avisos de lanzamientos
+### Paso 4.4 — Cierre: Nodia Agents+ y avisos de lanzamientos
 
 Con el bot YA vivo y probado (no antes), remata así — sin presión, ya probó el gusto:
 
-1. **Si el bot es `free` (Starter), preséntale KontrolIA Bots+.** Algo como:
+1. **Si el bot es `free` (Starter), preséntale Nodia Agents+.** Algo como:
    > "Tu bot ya está atendiendo solo. Si algún día quieres más, con la comunidad de
-   > Horizontes IA (**KontrolIA Bots+**) desbloqueas los **14 giros con panel a la medida**, los
+   > Horizontes IA (**Nodia Agents+**) desbloqueas los **14 giros con panel a la medida**, los
    > comandos que trabajan por ti (`/reporte`, `/mantenimiento`, `/campaña`…) y el
    > **Modo Agencia** para armar y revender bots a otros negocios. Tu llave la recibes al
    > entrar → horizontesia.com"
 
-   (Si ya instaló con licencia KontrolIA Bots+ —con `--key`—, sáltate el pitch: ya es de la comunidad.)
+   (Si ya instaló con licencia Nodia Agents+ —con `--key`—, sáltate el pitch: ya es de la comunidad.)
 
-2. **No le pidas datos personales para nada más.** KontrolIA Bots no recolecta correos ni
+2. **No le pidas datos personales para nada más.** Nodia Agents no recolecta correos ni
    información del usuario: su bot y sus datos se quedan en su Cloudflare. Si él
    solito pregunta cómo enterarse de lo nuevo, mándalo a horizontesia.com y que se
    suscriba por su cuenta — tú nunca captures ni mandes su correo a ningún lado.

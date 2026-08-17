@@ -1,4 +1,4 @@
-# KontrolIA Bots — instrucciones para Claude Code
+# Nodia Agents — instrucciones para Claude Code
 
 Chatbot de soporte con IA, open source. Una app **Hono** (Vercel AI SDK) con panel en
 `/admin`, que se despliega en **local, Docker, Cloudflare o Vercel** y guarda
@@ -94,8 +94,8 @@ llave de IA (~$1–2/mes).
 - `/exportar` — exporta leads y conversaciones (CSV/JSON).
 - `/actualizar-mi-bot` — trae la última versión conservando tu config.
 
-## ¿Quieres más? (KontrolIA Bots+)
+## ¿Quieres más? (Nodia Agents+)
 
 Este repo es el **Starter** genérico, sirve para cualquier negocio. Los **14 giros con
 panel a la medida**, los comandos que trabajan por ti (mantenimiento, campaña, Modo
-Agencia para revender…) y la comunidad viven en **KontrolIA Bots+** → https://horizontesia.com
+Agencia para revender…) y la comunidad viven en **Nodia Agents+** → https://horizontesia.com

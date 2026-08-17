@@ -23,7 +23,7 @@ const TICK_MS = Number(process.env.TICK_INTERVAL_MS ?? 2000);
 const env: Env = prepareEnv(process.env as Record<string, unknown>);
 
 const server = serve({ fetch: (req: Request) => app.fetch(req, env), port: PORT }, (info) => {
-  console.log(`KontrolIA Bots escuchando en http://localhost:${info.port}`);
+  console.log(`Nodia Agents escuchando en http://localhost:${info.port}`);
   console.log(`Panel: http://localhost:${info.port}/admin`);
 });
 

@@ -1,6 +1,6 @@
 // Spike de F0 (ver docs/portabilidad.md): ¿postgres.js sirve como driver único?
 //
-// No basta con "conecta". Lo que hay que probar es lo que el código de KontrolIA Bots
+// No basta con "conecta". Lo que hay que probar es lo que el código de Nodia Agents
 // realmente depende y que podría romperse en silencio al salir de D1:
 //
 //   1. La traducción `?` → `$n` sobre SQL real del repo.

@@ -1,4 +1,4 @@
--- Esquema inicial de KontrolIA Bots en Postgres. Traducción de src/db/schema.sql (D1/SQLite).
+-- Esquema inicial de Nodia Agents en Postgres. Traducción de src/db/schema.sql (D1/SQLite).
 -- Ver docs/portabilidad.md.
 --
 -- Dos cosas que cambiaron respecto del original y conviene tener presentes:

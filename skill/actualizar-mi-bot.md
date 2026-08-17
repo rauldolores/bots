@@ -1,6 +1,6 @@
 ---
 name: actualizar-mi-bot
-description: Actualiza tu instalación de KontrolIA Bots a la última versión sin romper el bot ni perder la configuración del usuario (carpeta member/, secrets de Cloudflare, datos en D1). Se activa con "/actualizar-mi-bot", "actualizar bot", "actualizar mi chatbot", "update forja".
+description: Actualiza tu instalación de Nodia Agents a la última versión sin romper el bot ni perder la configuración del usuario (carpeta member/, secrets de Cloudflare, datos en D1). Se activa con "/actualizar-mi-bot", "actualizar bot", "actualizar mi chatbot", "update forja".
 ---
 
 # Actualizar mi bot
@@ -26,10 +26,10 @@ Si en algún momento dudas: **member/ es sagrado, src/ se actualiza.**
 ## Sobre las actualizaciones
 
 No hay validación de nivel por API ni chequeos externos. Las actualizaciones vienen del
-repo público de KontrolIA Bots (`upstream`) y **conservan siempre tu `member/`**.
+repo público de Nodia Agents (`upstream`) y **conservan siempre tu `member/`**.
 
-No corras ningún `curl` a servicios externos para "chequear nivel": KontrolIA Bots es open source,
-las mejoras del Starter llegan por `git`. (Los giros y comandos de KontrolIA Bots+ viven aparte, en
+No corras ningún `curl` a servicios externos para "chequear nivel": Nodia Agents es open source,
+las mejoras del Starter llegan por `git`. (Los giros y comandos de Nodia Agents+ viven aparte, en
 la comunidad — no se actualizan por aquí.)
 
 ## Paso 0 — Pre-flight (chequeos antes de tocar nada)
@@ -48,9 +48,9 @@ la comunidad — no se actualizan por aquí.)
    ```
    Guarda ese valor como **VERSIÓN_ACTUAL** (ej. `0.1.0`).
 
-## Paso 1 — Configurar el remote de KontrolIA Bots (solo la primera vez)
+## Paso 1 — Configurar el remote de Nodia Agents (solo la primera vez)
 
-Las actualizaciones vienen del repo oficial de KontrolIA Bots, que añadimos como un remote llamado `upstream`.
+Las actualizaciones vienen del repo oficial de Nodia Agents, que añadimos como un remote llamado `upstream`.
 
 ```bash
 git remote -v

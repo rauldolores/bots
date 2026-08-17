@@ -1,6 +1,6 @@
 // Driver de Postgres sobre `postgres` (postgres.js).
 //
-// Se eligió porque es el único que corre en todos los destinos de KontrolIA Bots —
+// Se eligió porque es el único que corre en todos los destinos de Nodia Agents —
 // Node, workerd (con nodejs_compat) y Vercel — sin cambiar de API.
 // Ver docs/portabilidad.md, decisión D2.
 

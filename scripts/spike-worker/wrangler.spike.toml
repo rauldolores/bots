@@ -2,7 +2,7 @@
 # No tiene nada que ver con el wrangler.toml del bot: aquí solo se prueba si
 # postgres.js sobrevive dentro de workerd. Borrar junto con el spike.
 
-name = "kontrolia-bots-spike-postgres"
+name = "nodia-agents-spike-postgres"
 main = "worker.ts"
 compatibility_date = "2026-05-01"
 compatibility_flags = ["nodejs_compat"]

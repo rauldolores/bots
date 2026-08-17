@@ -1,4 +1,4 @@
-# Desplegar KontrolIA Bots
+# Desplegar Nodia Agents
 
 El bot corre en varios sitios distintos con el mismo código. Lo que cambia es quién
 despierta la cola del agente, y eso afecta **cuánto tarda en responder**.

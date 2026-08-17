@@ -1,6 +1,6 @@
 // Dashboard shell: a fixed 248px sidebar (grouped navigation) + a live-status
 // topbar, wrapping each tab's server-rendered body. Retro-terminal dark theme
-// ("KontrolIA Bots admin"): Space Grotesk + JetBrains Mono, brutalist buttons, scan
+// ("Nodia Agents admin"): Space Grotesk + JetBrains Mono, brutalist buttons, scan
 // lines. Design tokens are exposed both as CSS custom properties (for inline
 // styles) and mapped to Tailwind color names (for utility classes) — see
 // docs/design-system.md, the contract every view follows.
@@ -281,7 +281,7 @@ function sidebar(activeTab: string, pro: boolean, niche: NichePack | null): stri
           <i data-lucide="terminal" width="18" height="18" style="color:var(--accent)"></i>
         </div>
         <div style="line-height:1.05">
-          <div style="font-family:'Space Grotesk';font-weight:700;font-size:15px;letter-spacing:-.02em">KontrolIA Bots</div>
+          <div style="font-family:'Space Grotesk';font-weight:700;font-size:15px;letter-spacing:-.02em">Nodia Agents</div>
           <div style="font-size:9.5px;letter-spacing:.22em;color:var(--dim);text-transform:uppercase">Panel · ${pro ? "Pro" : "Free"}</div>
         </div>
       </div>

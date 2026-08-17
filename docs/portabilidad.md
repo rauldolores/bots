@@ -2,7 +2,7 @@
 
 Estado: **completado** (salvo el CLI) · 2026-08-16
 
-KontrolIA Bots nació atado a Cloudflare: D1 para datos, Vectorize para búsqueda, R2 para
+Nodia Agents nació atado a Cloudflare: D1 para datos, Vectorize para búsqueda, R2 para
 archivos, Workers AI para embeddings y voz, y un Durable Object para el agente.
 Este documento define cómo se desata, sin perder el comportamiento que hace que
 el bot se sienta bien.
@@ -24,7 +24,7 @@ el bot se sienta bien.
 | D4 | Los timestamps siguen siendo **epoch ms en `bigint`** | El código TS ya piensa en ms; migrar a `timestamptz` tocaría los 61 call sites sin ganar nada |
 | D5 | La traducción `?` → `$1..$n` vive **dentro de la clase `Db`** | Evita reescribir el SQL de 31 archivos; el sello ya existe y está limpio |
 | D6 | **R2 se elimina** | `CATALOG` estaba declarado en `env.ts` y no se usaba en ninguna parte |
-| D7 | En desarrollo, KontrolIA Bots vive en el **esquema `bots`** de la Supabase local que ya existía en la máquina | Esa base es compartida con el ecosistema KontrolIA (tiene `public.kontrolia_migrations`); un esquema propio evita mezclar 16 tablas con lo ajeno |
+| D7 | En desarrollo, Nodia Agents vive en el **esquema `bots`** de la Supabase local que ya existía en la máquina | Esa base es compartida con el ecosistema KontrolIA (tiene `public.kontrolia_migrations`); un esquema propio evita mezclar 16 tablas con lo ajeno |
 
 ## Entorno de desarrollo
 
@@ -218,7 +218,7 @@ con más riesgo de portarse distinto en cada plataforma.**
 
   **El CLI (`cli/`) queda fuera a propósito.** Sigue asumiendo Cloudflare de principio a
   fin, y tocarlo obliga a decidir antes sobre identidades publicadas que no son mías:
-  el paquete npm `forjabot`, el dominio `app.forjabots.com`, el repo
+  el paquete npm `forjabot`, el dominio `app.nodiagents.com`, el repo
   las variables `FORJA_*` y la carpeta `~/.forja/`.
   Renombrarlas rompe instalaciones existentes en silencio.
 

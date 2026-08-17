@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🔨 KontrolIA Bots
+# 🔨 Nodia Agents
 
 ### Tu chatbot de IA para WhatsApp, Instagram y Telegram — en **tu propia nube**, gratis y open source.
 
@@ -13,15 +13,15 @@
 [![Supabase](https://img.shields.io/badge/datos-Supabase-3ecf8e.svg)](https://supabase.com/)
 [![Hecho por Horizontes IA](https://img.shields.io/badge/por-Horizontes%20IA-38bdf8.svg)](https://horizontesia.com)
 
-[**Instalar**](#-instalar-en-5-minutos) · [**Cómo funciona**](#-cómo-funciona) · [**KontrolIA Bots+**](#-kontrolia-bots--los-14-giros-y-el-modo-agencia) · [**Comunidad**](https://horizontesia.com)
+[**Instalar**](#-instalar-en-5-minutos) · [**Cómo funciona**](#-cómo-funciona) · [**Nodia Agents+**](#-nodia-agents--los-14-giros-y-el-modo-agencia) · [**Comunidad**](https://horizontesia.com)
 
 </div>
 
 ---
 
-## ¿Qué es KontrolIA Bots?
+## ¿Qué es Nodia Agents?
 
-Un asistente de soporte con IA que montas **en tu propia infraestructura** en una tarde — sin saber programar. En lugar de pagar una mensualidad a un SaaS que se queda con tus conversaciones, KontrolIA Bots vive donde tú elijas, con tu base de datos y tu llave de IA, y **todo es tuyo**.
+Un asistente de soporte con IA que montas **en tu propia infraestructura** en una tarde — sin saber programar. En lugar de pagar una mensualidad a un SaaS que se queda con tus conversaciones, Nodia Agents vive donde tú elijas, con tu base de datos y tu llave de IA, y **todo es tuyo**.
 
 - 💬 **Multicanal** — WhatsApp, Instagram, Messenger y Telegram desde un mismo cerebro.
 - 📚 **Aprende de tus documentos** — subes tus FAQ, políticas y guías; el bot busca ahí antes de responder (RAG con base vectorial).
@@ -31,7 +31,7 @@ Un asistente de soporte con IA que montas **en tu propia infraestructura** en un
 - ☁️ **Despliégalo donde quieras** — tu computadora, Docker, Cloudflare o Vercel. El mismo código.
 - 🧠 **Tu cerebro, tu llave** — Claude, ChatGPT o Grok; tú eliges y pagas solo lo que piensa.
 
-> **No necesitas saber programar.** KontrolIA Bots se instala y configura con [Claude Code](https://claude.com/claude-code) como tu copiloto — él corre los comandos por ti, paso a paso.
+> **No necesitas saber programar.** Nodia Agents se instala y configura con [Claude Code](https://claude.com/claude-code) como tu copiloto — él corre los comandos por ti, paso a paso.
 
 ---
 
@@ -42,13 +42,13 @@ Un asistente de soporte con IA que montas **en tu propia infraestructura** en un
 Abre [Claude Code](https://claude.com/claude-code) en tu terminal y dile:
 
 ```
-ármame un chatbot con KontrolIA Bots
+ármame un chatbot con Nodia Agents
 ```
 
 Claude te explica cómo funciona y cuánto cuesta, verifica que tengas lo necesario, y monta todo por ti: crea tu Cloudflare, despliega el bot y te entrega tu panel vivo. Por debajo corre:
 
 ```bash
-npx kontrolia-bots init
+npx nodia-agents init
 ```
 
 ### Opción B — manual (si ya programas)
@@ -72,7 +72,7 @@ Para publicarlo en Cloudflare, Vercel o tu propio servidor: **[docs/despliegue.m
 
 ## 💸 Cuánto cuesta
 
-KontrolIA Bots es **gratis y open source**. Lo único que pagas es tu propia infraestructura, y arranca casi en cero:
+Nodia Agents es **gratis y open source**. Lo único que pagas es tu propia infraestructura, y arranca casi en cero:
 
 | Pieza | Costo | Notas |
 |---|---|---|
@@ -88,7 +88,7 @@ Nadie más toca tus datos ni tus conversaciones.
 
 ```mermaid
 flowchart LR
-    C["Cliente<br/>(WhatsApp / IG / Telegram)"] -->|mensaje| W["KontrolIA Bots<br/>Node · Cloudflare · Vercel"]
+    C["Cliente<br/>(WhatsApp / IG / Telegram)"] -->|mensaje| W["Nodia Agents<br/>Node · Cloudflare · Vercel"]
     W -->|encola| Q[("Cola en Supabase<br/>espera ~15s")]
     Q --> A["Agente<br/>contexto + herramientas"]
     A -->|busca| V[("Base de conocimiento<br/>pgvector")]
@@ -115,9 +115,9 @@ Un solo código para todos los destinos. Cómo desplegar en cada uno: **[docs/de
 
 ---
 
-## ⭐ KontrolIA Bots+ — los 14 giros y el Modo Agencia
+## ⭐ Nodia Agents+ — los 14 giros y el Modo Agencia
 
-El Starter de este repo sirve para **cualquier negocio**. Si quieres ir más allá, **KontrolIA Bots+** (con la comunidad de [Horizontes IA](https://horizontesia.com)) desbloquea:
+El Starter de este repo sirve para **cualquier negocio**. Si quieres ir más allá, **Nodia Agents+** (con la comunidad de [Horizontes IA](https://horizontesia.com)) desbloquea:
 
 - 🎯 **14 giros con panel a la medida** — barbería, restaurante, inmobiliaria, clínica, spa, gimnasio, hotelería y más, cada uno con sus herramientas (reservaciones, agenda, calificar prospectos…).
 - 🤖 **Comandos que trabajan por ti** — `/mantenimiento`, `/campaña`, `/afinar`, `/clonar` (arma tu KB desde tu web), `/precios`…
@@ -130,7 +130,7 @@ El Starter de este repo sirve para **cualquier negocio**. Si quieres ir más all
 
 ## 🔒 Privacidad — quién ve los datos
 
-**Nadie más que tú.** KontrolIA Bots corre en TU cuenta de Cloudflare con TUS llaves: las conversaciones de tus clientes viven en tu base de datos y **el bot no envía telemetría ni datos de uso a Horizontes IA ni a nadie**. No hay ping de activación ni analíticas ocultas — puedes revisarlo tú mismo en `src/`.
+**Nadie más que tú.** Nodia Agents corre en TU cuenta de Cloudflare con TUS llaves: las conversaciones de tus clientes viven en tu base de datos y **el bot no envía telemetría ni datos de uso a Horizontes IA ni a nadie**. No hay ping de activación ni analíticas ocultas — puedes revisarlo tú mismo en `src/`.
 
 - Los **mensajes se borran solos a los 90 días** (cron diario). Los leads y tickets se quedan hasta que tú los borres.
 - **No se guardan audios ni imágenes**: se transcriben o describen y solo queda el texto.
@@ -144,7 +144,7 @@ Como dueño del negocio, **tú eres el responsable** de esos datos: avisa a tus 
 
 ## 🤝 Contribuir
 
-Los PRs son bienvenidos. Lee [`CONTRIBUTING.md`](./CONTRIBUTING.md) para el flujo, y abre un issue si tienes una idea o encuentras un bug. Este repo es el **Starter** open source; los giros y comandos de KontrolIA Bots+ viven aparte.
+Los PRs son bienvenidos. Lee [`CONTRIBUTING.md`](./CONTRIBUTING.md) para el flujo, y abre un issue si tienes una idea o encuentras un bug. Este repo es el **Starter** open source; los giros y comandos de Nodia Agents+ viven aparte.
 
 ## 📄 Licencia
 

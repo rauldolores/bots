@@ -1,10 +1,10 @@
 {
-  "name": "kontrolia-bots",
+  "name": "nodia-agents",
   "version": "2.0.0",
-  "description": "KontrolIA Bots — instala bots de IA en tu propia infraestructura, en un comando. Las piezas las ponemos nosotros; tu agente las arma. Por Horizontes IA.",
+  "description": "Nodia Agents — instala bots de IA en tu propia infraestructura, en un comando. Las piezas las ponemos nosotros; tu agente las arma. Por Horizontes IA.",
   "license": "MIT",
   "author": "Horizontes IA (Santiago Muñoz) <contacto@innovandohorizontes.com>",
-  "homepage": "https://forjabots.com/docs/",
+  "homepage": "https://nodiagents.com/docs/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/rauldolores/bots.git",
@@ -15,7 +15,7 @@
   },
   "type": "module",
   "bin": {
-    "kontrolia-bots": "bin/cli.js"
+    "nodia-agents": "bin/cli.js"
   },
   "engines": {
     "node": ">=18"
@@ -23,11 +23,11 @@
   "keywords": [
     "chatbot",
     "ai",
+    "agents",
     "whatsapp",
     "supabase",
     "postgres",
-    "kontrolia",
-    "horizontes"
+    "nodia"
   ],
   "files": [
     "bin"
