@@ -8,6 +8,12 @@ export default defineConfig({
     // Un solo proceso: el helper de Postgres crea un esquema por PID y lo
     // reutiliza. Con varios procesos habría varios esquemas vivos a la vez.
     forks: { singleFork: true },
+    // Y un archivo a la vez. `singleFork` limita los PROCESOS, no los archivos:
+    // vitest los corre en paralelo dentro del mismo proceso, y como todos
+    // comparten el esquema `test_bots_<pid>`, uno podía borrarlo mientras otro
+    // estaba a media prueba. Se manifestaba como fallos aleatorios en CI —
+    // aquí no, porque una base con pgvector ya instalado esconde el síntoma.
+    fileParallelism: false,
     setupFiles: ["test/setup.ts"],
     // Son tests de integración contra un Postgres real; el default de 5s se
     // queda corto cuando la máquina está cargada.
