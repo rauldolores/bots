@@ -49,7 +49,7 @@ Cuando instalas KontrolIA Bots, **tú eres el responsable** de los datos persona
 
 ## 5. Si conectas el panel de KontrolIA Bots Cloud (opcional)
 
-Si decides usar `forjabot pair` para ver tus bots en app.forjabots.com, ese panel solo lee la API de conteos descrita arriba: **números, nunca conversaciones**. Si no quieres ni eso, no configures `CONTROL_PLANE_TOKEN` y el bot funciona igual.
+Si decides usar `kontrolia-bots pair` para ver tus bots en app.kontrolia.com, ese panel solo lee la API de conteos descrita arriba: **números, nunca conversaciones**. Si no quieres ni eso, no configures `CONTROL_PLANE_TOKEN` y el bot funciona igual.
 
 ---
 

@@ -277,7 +277,7 @@ Ahora sí, le damos identidad al bot: su negocio, sus tareas, su idioma y su con
 ### Paso 2.1 — Negocio
 
 **ANTES de preguntar nada, LEE `member/config.local.ts`.** Si el bot se instaló con
-`forjabot init`, el instalador ya pudo recoger: nombre del negocio, a qué se dedica,
+`kontrolia-bots init`, el instalador ya pudo recoger: nombre del negocio, a qué se dedica,
 qué ofrece, horario, ubicación, teléfono, sitio web/redes, métodos de pago, preguntas
 frecuentes, reglas/escalación, tono y correo de avisos (en `businessConfig`, sus
 `customFields` y `memberConfig`). **Lo que ya esté ahí NO se vuelve a preguntar**:

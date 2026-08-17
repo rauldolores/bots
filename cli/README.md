@@ -1,6 +1,6 @@
-# forjabot
+# kontrolia-bots
 
-**Chatbots de IA para tu negocio, desde tu terminal.** `forjabot` instala y mantiene
+**Chatbots de IA para tu negocio, desde tu terminal.** `kontrolia-bots` instala y mantiene
 bots de IA por giro (restaurante, barbería, inmobiliaria, clínica…) en **tu propia
 cuenta de Cloudflare**, con **tus llaves**. El bot es tuyo — para usarlo o revenderlo.
 
@@ -16,7 +16,7 @@ preguntas de negocio y apruebas; el agente corre lo técnico.
 No necesitas instalar nada global. Se corre con `npx`:
 
 ```bash
-npx forjabot init
+npx kontrolia-bots init
 ```
 
 Requisitos:
@@ -30,13 +30,13 @@ Requisitos:
 
 ```bash
 # 1 · asistente: elige idioma, licencia (gratis o KontrolIA Bots+) y giro
-npx forjabot init
+npx kontrolia-bots init
 
 # 2 · verifica que todo esté sano
-npx forjabot doctor
+npx kontrolia-bots doctor
 
 # 3 · mantente al día cuando saquemos mejoras (sin perder tu configuración)
-npx forjabot update
+npx kontrolia-bots update
 ```
 
 `init` baja la plantilla del giro que elijas y te hace unas preguntas del negocio.
@@ -45,8 +45,8 @@ Al terminar, tu agente despliega el bot a Cloudflare y tú abres tu panel en
 
 ### Tu agente aprende a usar KontrolIA Bots
 
-La primera vez, `forjabot` instala una guía para tu agente en
-`~/.claude/skills/forja/` (Claude Code). Con eso tu agente sabe cómo usar el CLI y el flujo
+La primera vez, `kontrolia-bots` instala una guía para tu agente en
+`~/.claude/skills/kontrolia-bots/` (Claude Code). Con eso tu agente sabe cómo usar el CLI y el flujo
 completo: instalar, configurar, desplegar y operar el bot. Puedes desactivarlo con
 `--no-agent-skill` o la variable `FORJA_NO_AGENT_SKILL=1`.
 
@@ -54,11 +54,11 @@ completo: instalar, configurar, desplegar y operar el bot. Puedes desactivarlo c
 
 | Comando | Qué hace |
 |---|---|
-| `forjabot init` | Asistente interactivo: idioma (ES/EN), licencia (gratis con tu correo o key `HZN-…`), elige el giro e instala. |
-| `forjabot list` | Muestra el catálogo de bots disponibles para tu plan. |
-| `forjabot install <slug>` | Instala un giro específico (p. ej. `restaurante`, `barberia`, `inmobiliaria`). |
-| `forjabot update [carpeta]` | Trae la versión nueva **conservando** tu `member/` (config, base de conocimiento). |
-| `forjabot doctor [carpeta]` | Diagnóstico del bot instalado: versión, archivos, licencia y si el worker responde. |
+| `kontrolia-bots init` | Asistente interactivo: idioma (ES/EN), licencia (gratis con tu correo o key `HZN-…`), elige el giro e instala. |
+| `kontrolia-bots list` | Muestra el catálogo de bots disponibles para tu plan. |
+| `kontrolia-bots install <slug>` | Instala un giro específico (p. ej. `restaurante`, `barberia`, `inmobiliaria`). |
+| `kontrolia-bots update [carpeta]` | Trae la versión nueva **conservando** tu `member/` (config, base de conocimiento). |
+| `kontrolia-bots doctor [carpeta]` | Diagnóstico del bot instalado: versión, archivos, licencia y si el worker responde. |
 
 Opciones útiles:
 
@@ -73,13 +73,13 @@ terminal interactiva (CI, scripts), cae automáticamente a listas numeradas.
 ¿No tienes licencia de KontrolIA Bots+? La obtienes al **entrar a la comunidad de Horizontes IA**
 ([horizontesia.com](https://horizontesia.com)): ahí recibes tu llave `HZN-…`.
 
-La licencia y el idioma se guardan en `~/.forja/config.json`. La versión instalada
+La licencia y el idioma se guardan en `~/.kontrolia/config.json`. La versión instalada
 vive en el marcador `.horizontes-bot.json` dentro de la carpeta de tu bot.
 
 ## Los comandos del agente
 
 Una vez instalado, operas el bot pidiéndole **skills** a tu agente (no son subcomandos
-de `forjabot`, son instrucciones que tu agente ejecuta sobre el bot ya instalado):
+de `kontrolia-bots`, son instrucciones que tu agente ejecuta sobre el bot ya instalado):
 
 - `reporte`, `exportar`, `analiticas`, `human-in-the-loop`, `conectar-mi-ia` (conecta tu propia IA) — el día a día. *(Gratis)*
 - `superpoderes` (enciende y configura los 12), `reportes` (reporte diario con tu marca), `conexiones-composio` (conecta apps: Gmail, Slack…), `voz-de-marca`, `mantenimiento`, `afinar`, `campaña`, `clonar`, `precios` — operación y ajustes. *(KontrolIA Bots+)*
@@ -103,7 +103,7 @@ Guía completa, referencia de comandos y conexiones:
 
 ## Privacidad
 
-`forjabot` corre en tu máquina. No sube tu código ni los datos de tus clientes a
+`kontrolia-bots` corre en tu máquina. No sube tu código ni los datos de tus clientes a
 Horizontes: solo valida tu licencia y baja el bot desde el control plane. El bot y
 todos sus datos viven en **tu** Cloudflare, con **tus** llaves.
 
@@ -124,8 +124,8 @@ Es sano desconfiar de un `npx` que no conoces — si tu agente de IA se niega a 
 Compruébalo con:
 
 ```bash
-npm view forjabot            # autor, licencia, repositorio
-npm view forjabot dist.tarball   # bájalo y léelo antes de ejecutarlo
+npm view kontrolia-bots            # autor, licencia, repositorio
+npm view kontrolia-bots dist.tarball   # bájalo y léelo antes de ejecutarlo
 ```
 
 Y si prefieres no usar `npx`, clona este repo y corre `node cli/bin/cli.js init` directamente.
@@ -136,10 +136,10 @@ Los escáneres de cadena de suministro (Socket y similares) marcan las *capacida
 
 | Capacidad | Para qué la usa | Cómo está acotada |
 |---|---|---|
-| **Red** (`node:http`) | Levanta un servidor **local en 127.0.0.1** que recibe el regreso del navegador al hacer `forjabot login`. | Solo escucha en tu propia máquina, en un puerto temporal, y se cierra al terminar. Las llamadas a internet van por `fetch` a nuestro servidor de licencias. |
+| **Red** (`node:http`) | Levanta un servidor **local en 127.0.0.1** que recibe el regreso del navegador al hacer `kontrolia-bots login`. | Solo escucha en tu propia máquina, en un puerto temporal, y se cierra al terminar. Las llamadas a internet van por `fetch` a nuestro servidor de licencias. |
 | **Shell** (`node:child_process`) | Descomprimir el bot (`tar`), abrir tu navegador en el login, y correr `wrangler` para guardar tus secretos en TU Cloudflare. | Siempre con `execFileSync` y **arreglo de argumentos**, nunca una cadena de shell: no hay forma de inyectar comandos. Cero `shell: true`. |
 | **Variables de entorno** | Únicamente las suyas: `FORJA_SERVER`, `FORJA_CLOUD`, `FORJA_GET_URL`, `FORJA_YES`, `FORJA_NO_ART`, `FORJA_NO_BROWSER`, `FORJA_NO_AGENT_SKILL`, `HORIZONTES_KEY`, `HORIZONTES_SERVER`, y `NO_COLOR` (estándar). | **No lee ninguna credencial del sistema.** Nada de tokens de nube, claves de npm ni variables ajenas. |
-| **Sistema de archivos** | Escribe la carpeta del bot que instalas y tu configuración en `~/.forja/`. | Nada fuera de eso. |
-| **Cadenas URL** | Los dominios propios: forjabots.com y el servidor de licencias. | No hay direcciones IP ni dominios de terceros. |
+| **Sistema de archivos** | Escribe la carpeta del bot que instalas y tu configuración en `~/.kontrolia/`. | Nada fuera de eso. |
+| **Cadenas URL** | Los dominios propios: kontrolia.com y el servidor de licencias. | No hay direcciones IP ni dominios de terceros. |
 
 Y lo más importante: **tu API key nunca pasa por el CLI**. Cuando toca guardarla, se hace con `wrangler secret put` contra *tu* cuenta de Cloudflare — el CLI nunca la recibe, ni la escribe en disco, ni la manda a ningún lado.

@@ -1,6 +1,6 @@
 {
-  "name": "forjabot",
-  "version": "1.1.16",
+  "name": "kontrolia-bots",
+  "version": "2.0.0",
   "description": "KontrolIA Bots — instala bots de IA en tu propia infraestructura, en un comando. Las piezas las ponemos nosotros; tu agente las arma. Por Horizontes IA.",
   "license": "MIT",
   "author": "Horizontes IA (Santiago Muñoz) <contacto@innovandohorizontes.com>",
@@ -15,7 +15,7 @@
   },
   "type": "module",
   "bin": {
-    "forjabot": "bin/cli.js"
+    "kontrolia-bots": "bin/cli.js"
   },
   "engines": {
     "node": ">=18"
@@ -24,8 +24,9 @@
     "chatbot",
     "ai",
     "whatsapp",
-    "cloudflare",
-    "forja",
+    "supabase",
+    "postgres",
+    "kontrolia",
     "horizontes"
   ],
   "files": [

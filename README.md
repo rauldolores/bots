@@ -48,7 +48,7 @@ Abre [Claude Code](https://claude.com/claude-code) en tu terminal y dile:
 Claude te explica cómo funciona y cuánto cuesta, verifica que tengas lo necesario, y monta todo por ti: crea tu Cloudflare, despliega el bot y te entrega tu panel vivo. Por debajo corre:
 
 ```bash
-npx forjabot init
+npx kontrolia-bots init
 ```
 
 ### Opción B — manual (si ya programas)
