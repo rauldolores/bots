@@ -1,57 +1,63 @@
-# Member replaces {{BOT_SLUG}} via the skill /configurar-mi-chatbot.
-# DO NOT commit member-specific values to git.
+# Configuración de Cloudflare Workers.
+#
+# Este archivo viene listo para desplegar: `git clone` → `npm run deploy:cf`.
+# Antes traía placeholders ({{BOT_SLUG}}) que rellenaba el instalador, y wrangler
+# ni siquiera podía leerlo — un resto del modelo viejo, cuando el código se
+# distribuía como artefacto en vez de clonarse.
+#
+# Cambia `name` si vas a correr más de un bot en la misma cuenta: es lo que
+# decide el subdominio (https://<name>.<cuenta>.workers.dev) y dos bots con el
+# mismo nombre se pisan.
 
-name = "horizontes-bot-{{BOT_SLUG}}"
+name = "nodia-agents"
 main = "src/runtime/cloudflare.ts"
 compatibility_date = "2026-05-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Workers AI: en Cloudflare cubre los embeddings de la base de conocimiento y la
+# transcripción de notas de voz, sin llave de OpenAI aparte.
 [ai]
 binding = "AI"
 
-# El Durable Object se eliminó (F3): el buffer de mensajes, el estado del
-# agente y el temporizador de 15s viven ahora en Postgres. Ver
-# docs/portabilidad.md.
-
-# D1, Vectorize y R2 se eliminaron: los datos y la búsqueda vectorial viven en
-# Supabase, a la que se llega con el secret DATABASE_URL. Ver docs/portabilidad.md.
+# Aquí ya no hay Durable Object, D1, Vectorize ni R2. Los datos, la búsqueda
+# vectorial y la cola del agente viven en Supabase, a la que se llega con el
+# secret DATABASE_URL. Ver docs/portabilidad.md.
 
 [vars]
-BOT_NAME = "{{BOT_NAME}}"
-BUSINESS_NAME = "{{BUSINESS_NAME}}"
-BOT_LANGUAGE = "{{BOT_LANGUAGE}}"
-BOT_TIER = "{{BOT_TIER}}"  # 'free' | 'pro'
+BOT_NAME = "Asistente"
+BUSINESS_NAME = "Mi Negocio"
+BOT_LANGUAGE = "es"
+BOT_TIER = "free"  # 'free' | 'pro'
 BUFFER_SECONDS = "15"
-DASHBOARD_BASE_URL = "https://horizontes-bot-{{BOT_SLUG}}.workers.dev"
+# Vacío = el bot usa su propio origin. Ponlo solo si sirves el panel tras un
+# dominio propio; si no, los enlaces del panel se arman solos.
+DASHBOARD_BASE_URL = ""
 
-# Secrets (set with `wrangler secret put <NAME>` — never commit values):
-#   DATABASE_URL               required — cadena de conexión de Supabase
+# Secrets (con `wrangler secret put <NOMBRE>` — nunca los escribas aquí):
+#   DATABASE_URL               obligatorio — cadena de conexión de Supabase
 #                              (Project Settings → Database → Connection string).
-#                              Usa el pooler (puerto 6543) para serverless.
-#   ANTHROPIC_API_KEY          required — Claude API
-#   DASHBOARD_PASSWORD         required (Pro) — HTTP Basic Auth for /admin (user: admin)
-#   KB_REINDEX_TOKEN           required — guards POST /kb/reindex (header: X-Reindex-Token)
-#   TICK_TOKEN                 optional — protege POST /tick. En Cloudflare no
-#                              hace falta: el cron invoca el handler directo.
-#   TELEGRAM_BOT_TOKEN         per-channel — Telegram bot
-#   MANYCHAT_API_KEY           per-channel — ManyChat (Pro)
-#   TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_WA_FROM   per-channel — Twilio WhatsApp (Pro)
-#   CALCOM_API_KEY             optional — scheduleAppointment (Pro)
-#   GOOGLE_SERVICE_ACCOUNT_JSON  optional — Sheets export (Pro)
-#   RESEND_API_KEY             optional — handoff email
-#   OWNER_EMAIL                handoff email recipient
-#   OWNER_TELEGRAM_CHAT_ID     handoff notification (default channel — owner /start's the bot)
-#   OWNER_WA_NUMBER            handoff WhatsApp DM recipient (Pro)
-#   TWILIO_HANDOFF_CONTENT_SID approved WhatsApp template SID for the handoff DM (Pro)
-#   CONTROL_PLANE_TOKEN        optional (secret) — Bearer the hosted control plane presents to call /api/*
-#                              set with: wrangler secret put CONTROL_PLANE_TOKEN
-#   CONTROL_PLANE_URL          optional (var) — base URL of the control plane (future reports / license check)
+#                              Usa el POOLER (puerto 6543): las funciones
+#                              efímeras agotan una conexión directa.
+#   ANTHROPIC_API_KEY          obligatorio — el cerebro (o OPENAI/XAI)
+#   DASHBOARD_PASSWORD         obligatorio — Basic Auth de /admin (usuario: admin)
+#   KB_REINDEX_TOKEN           obligatorio — protege POST /kb/reindex
+#   TICK_TOKEN                 no hace falta en Cloudflare: el cron invoca el
+#                              handler directo, sin pasar por HTTP.
+#   TELEGRAM_BOT_TOKEN         por canal — Telegram
+#   MANYCHAT_API_KEY           por canal — ManyChat
+#   TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_WA_FROM   por canal — WhatsApp vía Twilio
+#   WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_ACCESS_TOKEN / WHATSAPP_VERIFY_TOKEN /
+#   WHATSAPP_APP_SECRET        por canal — WhatsApp Cloud API (Meta)
+#   META_PAGE_ACCESS_TOKEN / META_VERIFY_TOKEN / META_APP_SECRET   por canal — Messenger e Instagram
+#   CALCOM_API_KEY             opcional — agenda real en scheduleAppointment
+#   RESEND_API_KEY             opcional — aviso al dueño por correo
+#   OWNER_EMAIL                a dónde avisarte cuando el bot necesite un humano
+#   OWNER_TELEGRAM_CHAT_ID     aviso por Telegram (dale /start a tu propio bot)
+#   CONTROL_PLANE_TOKEN        opcional — Bearer que un control plane externo
+#                              presenta para llamar /api/*
 
 [triggers]
 crons = [
   "* * * * *",   # cada minuto: red de seguridad de la cola del agente
   "0 3 * * *",   # 3am UTC: purga, insights y flywheel
 ]
-
-# DASHBOARD_PASSWORD  (secret) — HTTP Basic Auth password for the admin dashboard; username is always "admin".
-# Set it with: wrangler secret put DASHBOARD_PASSWORD
