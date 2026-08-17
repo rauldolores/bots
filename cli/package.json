@@ -7,11 +7,11 @@
   "homepage": "https://forjabots.com/docs/",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/santmun/forja.git",
+    "url": "git+https://github.com/rauldolores/bots.git",
     "directory": "cli"
   },
   "bugs": {
-    "url": "https://github.com/santmun/forja/issues"
+    "url": "https://github.com/rauldolores/bots/issues"
   },
   "type": "module",
   "bin": {

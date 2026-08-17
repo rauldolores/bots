@@ -56,7 +56,7 @@ npx kontrolia-bots init
 Crea una [Supabase](https://supabase.com) gratis, copia su cadena de conexión, y:
 
 ```bash
-git clone https://github.com/santmun/forja mi-chatbot
+git clone https://github.com/rauldolores/bots.git mi-chatbot
 cd mi-chatbot
 npm install
 cp .env.example .env        # pon ahí DATABASE_URL y tu llave de IA

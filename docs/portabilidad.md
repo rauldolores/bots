@@ -219,7 +219,7 @@ con más riesgo de portarse distinto en cada plataforma.**
   **El CLI (`cli/`) queda fuera a propósito.** Sigue asumiendo Cloudflare de principio a
   fin, y tocarlo obliga a decidir antes sobre identidades publicadas que no son mías:
   el paquete npm `forjabot`, el dominio `app.forjabots.com`, el repo
-  `github.com/santmun/forja`, las variables `FORJA_*` y la carpeta `~/.forja/`.
+  las variables `FORJA_*` y la carpeta `~/.forja/`.
   Renombrarlas rompe instalaciones existentes en silencio.
 
 ## Deuda conocida que esto genera
@@ -241,6 +241,14 @@ con más riesgo de portarse distinto en cada plataforma.**
   ruteo, no consultas.
 
 ## Cambios posteriores al cierre
+
+- **2026-08-17 — Corregido el repo de referencia.** Varios archivos apuntaban a
+  `santmun/forja`, que NO es este proyecto: este repo (`rauldolores/bots`) es un
+  fork que siguió su propio camino. Lo grave estaba en `/actualizar-mi-bot`, que
+  mandaba a hacer `git fetch upstream main` desde ahí — y ese repo continuó siendo
+  Cloudflare-only con D1, Vectorize y Durable Objects, así que mezclarlo habría
+  arrastrado la arquitectura vieja encima de esta y dejado el bot roto. El skill
+  ahora apunta al repo correcto y avisa explícitamente de ese riesgo.
 
 - **2026-08-16 — Netlify descartado.** Se evaluó y se quitó (adaptador, funciones,
   `netlify.toml` y su documentación). Sin `waitUntil` la cola solo avanza con la

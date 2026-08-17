@@ -59,10 +59,20 @@ git remote -v
 - Si **ya aparece `upstream`** → perfecto, continúa.
 - Si **NO aparece `upstream`** → agrégalo apuntando al repo oficial:
   ```bash
-  git remote add upstream https://github.com/santmun/forja.git
+  git remote add upstream https://github.com/rauldolores/bots.git
   ```
 
-> Nota: si el usuario clonó directo el repo oficial (su `origin` ya apunta a `santmun/forja`), puede usar `origin` en lugar de `upstream` en todos los pasos siguientes.
+> Nota: si el usuario clonó directo el repo oficial (su `origin` ya apunta a
+> `rauldolores/bots`), puede usar `origin` en lugar de `upstream` en todos los pasos siguientes.
+
+> ⚠️ **Verifica a dónde apunta `upstream` antes de traer nada.** Si apunta a
+> `santmun/forja` —el proyecto del que este salió— **NO lo uses**: ese repo siguió
+> otro camino (Cloudflare-only, con D1, Vectorize y Durable Objects) y mezclarlo
+> arrastraría la arquitectura vieja encima de esta, dejando el bot roto. En ese
+> caso corrígelo antes:
+> ```bash
+> git remote set-url upstream https://github.com/rauldolores/bots.git
+> ```
 
 ## Paso 2 — Traer la última versión y comparar
 
