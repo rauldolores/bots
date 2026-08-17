@@ -1,7 +1,7 @@
 // Driver de Postgres sobre `postgres` (postgres.js).
 //
-// Se eligió porque es el único que corre en los cuatro destinos de KontrolIA Bots —
-// Node, workerd (con nodejs_compat), Vercel y Netlify — sin cambiar de API.
+// Se eligió porque es el único que corre en todos los destinos de KontrolIA Bots —
+// Node, workerd (con nodejs_compat) y Vercel — sin cambiar de API.
 // Ver docs/portabilidad.md, decisión D2.
 
 import postgres from "postgres";

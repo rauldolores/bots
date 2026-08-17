@@ -1,6 +1,6 @@
 ---
 name: configurar-mi-chatbot
-description: Asistente de instalación de KontrolIA Bots (el Starter open source). Trabaja en 4 fases: (1) despliega TU PLATAFORMA (Supabase + el destino que elijas: Cloudflare, Vercel, Netlify o tu propio servidor) y te entrega tu dashboard vivo, (2) configura TU CHATBOT (negocio, tareas, idioma, conocimiento), (3) conecta TUS CONEXIONES (canales y avisos) viéndolas ponerse en verde en el panel, (4) PRUEBA FINAL con un mensaje real. Todo en ~35 min. Se activa con "/configurar-mi-chatbot", "ármame mi chatbot", "instalar bot horizontes", "configurar mi bot".
+description: Asistente de instalación de KontrolIA Bots (el Starter open source). Trabaja en 4 fases: (1) despliega TU PLATAFORMA (Supabase + el destino que elijas: Cloudflare, Vercel o tu propio servidor) y te entrega tu dashboard vivo, (2) configura TU CHATBOT (negocio, tareas, idioma, conocimiento), (3) conecta TUS CONEXIONES (canales y avisos) viéndolas ponerse en verde en el panel, (4) PRUEBA FINAL con un mensaje real. Todo en ~35 min. Se activa con "/configurar-mi-chatbot", "ármame mi chatbot", "instalar bot horizontes", "configurar mi bot".
 ---
 
 # Configurar mi chatbot
@@ -54,7 +54,6 @@ cambia es dónde se ponen, según el destino que el miembro eligió en el Paso 1
 |---|---|
 | **Cloudflare** | `npx wrangler secret put NOMBRE` (entrada oculta) · las no-secretas en `[vars]` de `wrangler.toml` |
 | **Vercel** | Panel del proyecto → Settings → Environment Variables |
-| **Netlify** | Panel del sitio → Site configuration → Environment variables |
 | **Local / servidor** | El archivo `.env` de la carpeta del bot (parte de `.env.example`) |
 
 Cuando más abajo diga «guarda `X`», hazlo por la vía que le toque a SU destino.
@@ -141,7 +140,6 @@ una**: la mayoría no tiene criterio para elegir y agradece que decidas tú.
 | **Cloudflare** *(recomendada)* | Gratis para empezar, responde al instante, cero mantenimiento |
 | **Vercel** | Si ya usa Vercel para otras cosas |
 | **Tu computadora / un servidor** | Si quiere control total, o para probar antes de publicar |
-| **Netlify** | Solo si ya vive ahí — **avísale que el bot responderá más lento** (hasta ~1 min en vez de 15s) |
 
 Guarda su elección en el checkpoint: `{ "fase": 1, "paso": "destino", "destino": "cloudflare" }`.
 
@@ -168,7 +166,7 @@ Luego pídele que cree un proyecto y te pase **la cadena de conexión**:
 ⚠️ **La cadena trae la contraseña de su base. NO la escribas de vuelta en el chat.**
 Guárdala como variable de entorno según el destino (ver Paso 1.4) y sigue.
 
-> **Por qué el pooler y no la conexión directa:** en Cloudflare, Vercel y Netlify el bot
+> **Por qué el pooler y no la conexión directa:** en Cloudflare y Vercel el bot
 > corre en funciones que nacen y mueren con cada mensaje. Sin el pooler agotarían el
 > límite de conexiones del proyecto en cuanto haya tráfico. En un servidor propio da
 > igual cuál uses.
@@ -209,7 +207,6 @@ que eligió en el Paso 1.1 — en todos es una variable de entorno, cambia el d�
 |---|---|
 | **Cloudflare** | `npx wrangler secret put NOMBRE` (pide el valor en una entrada oculta) |
 | **Vercel** | Panel del proyecto → Settings → Environment Variables |
-| **Netlify** | Panel del sitio → Site configuration → Environment variables |
 | **Local / servidor** | Un archivo `.env` en la carpeta del bot (parte de `.env.example`) |
 
 Las que hay que poner AHORA:
@@ -220,8 +217,8 @@ Las que hay que poner AHORA:
   entiende las notas de voz y busca en su base de conocimiento. En Cloudflare eso lo
   cubre Workers AI sin llave extra; en el resto de destinos no existe.
 - `KB_REINDEX_TOKEN` — invéntale una cadena larga, no se la tiene que aprender.
-- `TICK_TOKEN` — **solo en Vercel y Netlify.** Otra cadena larga: es lo que deja al
-  programador de la plataforma despertar al bot.
+- `TICK_TOKEN` — **solo en Vercel.** Otra cadena larga: es lo que deja al cron de
+  la plataforma despertar al bot.
 
 (Si no tiene la llave, mándalo a la consola del proveedor que eligió, espera a que la
 tenga, y luego guárdala. La llave de pago es lo único que cuesta: fracciones de centavo
@@ -245,9 +242,6 @@ npm run deploy:cf
 
 # Vercel  (o conectando el repo desde su panel, que es más simple)
 npx vercel deploy --prod
-
-# Netlify
-npx netlify deploy --prod
 
 # Local o servidor propio
 npm start
@@ -638,7 +632,7 @@ Con el bot YA vivo y probado (no antes), remata así — sin presión, ya probó
 - `ANTHROPIC_API_KEY` **o** `OPENAI_API_KEY` — requerido (el cerebro del bot, según el proveedor elegido en la Fase 1; se puede cambiar después desde el panel → Configuración → Modelo de IA).
 - `OPENAI_API_KEY` — **también fuera de Cloudflare**, aunque el cerebro sea Claude: es lo que transcribe las notas de voz y busca en la base de conocimiento.
 - `KB_REINDEX_TOKEN` — requerido. Protege el reindexado de la base de conocimiento.
-- `TICK_TOKEN` — **solo en Vercel y Netlify.** Deja que el programador de la plataforma despierte al bot.
+- `TICK_TOKEN` — **solo en Vercel.** Deja que el cron de la plataforma despierte al bot.
 - `DASHBOARD_PASSWORD` — requerido en Pro (Basic Auth del panel; usuario fijo `admin`).
 - `TELEGRAM_BOT_TOKEN` — si usa Telegram.
 - `OWNER_TELEGRAM_CHAT_ID` — chat_id del dueño para los avisos por Telegram (el dueño le da `/start` a su propio bot).

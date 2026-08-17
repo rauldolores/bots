@@ -20,7 +20,7 @@ import { ingestMessage } from "./agent/runner";
 import { wakeTickAfter } from "./queue/wake";
 import { tick } from "./queue/tick";
 
-/** La expresión del cron nocturno (wrangler.toml, vercel.json, netlify.toml). */
+/** La expresión del cron nocturno (wrangler.toml, vercel.json). */
 export const DAILY_CRON = "0 3 * * *";
 
 /**
@@ -252,9 +252,8 @@ app.post("/kb/reindex", async (c) => {
 });
 
 // Crons por HTTP. Existen para las plataformas cuyo programador dispara una
-// PETICIÓN (Vercel Cron, Netlify Scheduled) en vez de invocar un handler, como
-// hace Cloudflare. En un servidor Node no se usan: el proceso corre sus propios
-// temporizadores.
+// PETICIÓN (Vercel Cron) en vez de invocar un handler, como hace Cloudflare. En
+// un servidor Node no se usan: el proceso corre sus propios temporizadores.
 //
 // Se acepta el token por `X-Tick-Token` o por `Authorization: Bearer` — Vercel
 // Cron manda lo segundo y no deja elegir cabecera.

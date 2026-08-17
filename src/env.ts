@@ -106,8 +106,8 @@ export interface Env {
   // Token guarding POST /kb/reindex (header: X-Reindex-Token). Secret.
   KB_REINDEX_TOKEN: string;
 
-  // Protege POST /tick (header: X-Tick-Token). Lo usan los crons que disparan
-  // por HTTP (Vercel, Netlify). Sin él, el endpoint queda cerrado — dejarlo
+  // Protege /cron/* (header: X-Tick-Token o Authorization). Lo usa el cron de
+  // Vercel, que dispara por HTTP. Sin él, queda cerrado — dejarlo
   // abierto permitiría a cualquiera forzar turnos del agente y gastar LLM.
   // En un servidor Node no hace falta: el tick corre por dentro del proceso.
   TICK_TOKEN?: string;

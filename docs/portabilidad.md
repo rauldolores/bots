@@ -9,7 +9,7 @@ el bot se sienta bien.
 
 ## Objetivo
 
-- **Desplegable en**: local (Node/Docker), Vercel, Netlify, Cloudflare Workers,
+- **Desplegable en**: local (Node/Docker), Vercel, Cloudflare Workers,
   y cualquier servidor con Node (Railway, Render, Fly, VPS).
 - **Base de datos**: Supabase (local o cloud). Postgres es la única base.
 - Un solo código, sin forks por plataforma.
@@ -52,7 +52,7 @@ src/
     env.ts          ← construye el driver desde DATABASE_URL y lo cachea por URL
     node.ts         ← servidor de larga vida (local, Docker, Railway…)
     cloudflare.ts   ← el `main` de wrangler.toml
-    vercel.ts · netlify.ts
+    vercel.ts
   queue/
     jobs.ts         ← la cola: debounce, lease, buffer, reenvío
     tick.ts         ← procesa lo vencido
@@ -65,10 +65,9 @@ src/
   db/client.ts · db/driver.ts · db/drivers/postgresJs.ts · db/placeholders.ts
 ```
 
-Fuera de `src/`: `api/index.ts` (Vercel), `netlify/functions/` (Netlify),
-`supabase/migrations/` (el esquema), `scripts/db-apply.ts` y `scripts/db-query.ts`.
+Fuera de `src/`: `api/index.ts` (Vercel), `supabase/migrations/` (el esquema), `scripts/db-apply.ts` y `scripts/db-query.ts`.
 
-Hono no se tocó: ya era portable a los cuatro destinos.
+Hono no se tocó: ya era portable a todos los destinos.
 
 ### El agente sin Durable Object
 
@@ -96,7 +95,6 @@ on conflict (conversation_key)
 | Node / Docker | `setInterval` cada 2s | — |
 | Cloudflare | `ctx.waitUntil` tras el ingest | cron de 1 min |
 | Vercel | `waitUntil` tras el ingest | Vercel Cron (1 min) |
-| Netlify | Scheduled Function | — |
 
 Donde hay `waitUntil` la latencia queda igual que hoy (15s exactos); el cron es
 solo la red de seguridad para lo que se haya caído. **Este es el punto del plan
@@ -188,7 +186,7 @@ con más riesgo de portarse distinto en cada plataforma.**
   | Node / Docker | `npm start` | `setInterval` cada 2s |
   | Cloudflare | `npm run deploy:cf` | `waitUntil` + cron de 1 min |
   | Vercel | `api/index.ts` + `vercel.json` | `waitUntil` + Vercel Cron |
-  | Netlify | `netlify/functions/` + `netlify.toml` | **solo** Scheduled Function |
+  | ~~Netlify~~ | ~~`netlify/functions/`~~ | ~~**solo** Scheduled Function~~ — *descartado después, ver abajo* |
 
   Dos defectos que solo aparecieron al correrlo de verdad, y que ningún test
   cubría:
@@ -237,10 +235,16 @@ con más riesgo de portarse distinto en cada plataforma.**
   bge-m3 y los de OpenAI no son comparables entre sí aunque midan lo mismo. El
   esquema no cambia, pero el contenido indexado hay que rehacerlo (`/admin/kb`,
   botón de reindexar).
-- **Netlify responde más lento que los demás**: sin `waitUntil`, la cola solo
-  avanza con la Scheduled Function, así que el bot contesta en el siguiente
-  disparo en vez de a los 15s. Hay que decirlo en la documentación de instalación.
 - **El CLI `cli/` sigue sin migrar**, por las identidades publicadas (ver F5).
 - **`test/admin/routes.test.ts` sigue usando un driver simulado.** Ya no es un agujero
   —`render-all.test.ts` cubre el SQL real— pero conviene recordar que ese archivo prueba
   ruteo, no consultas.
+
+## Cambios posteriores al cierre
+
+- **2026-08-16 — Netlify descartado.** Se evaluó y se quitó (adaptador, funciones,
+  `netlify.toml` y su documentación). Sin `waitUntil` la cola solo avanza con la
+  función programada, así que el bot contestaría hasta un minuto tarde: inaceptable
+  para atención al cliente, y mantener un destino que damos por malo solo confunde a
+  quien instala. La sección «Por qué no Netlify» de `docs/despliegue.md` deja el
+  razonamiento por escrito para que nadie lo reintente sin saberlo.

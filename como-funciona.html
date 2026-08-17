@@ -27,7 +27,7 @@
   .row{display:grid;grid-template-columns:150px 34px 1fr 34px 150px;align-items:center}
   .wire{position:relative;height:2px;background:repeating-linear-gradient(90deg,var(--acc) 0 7px,transparent 7px 13px)}
   .wire::after{content:"";position:absolute;right:-1px;top:-4px;border:5px solid transparent;border-left-color:var(--acc)}
-  /* contenedor cloudflare */
+  /* contenedor de "tu nube" */
   .cfbox{position:relative;border:1.5px solid rgba(246,130,31,.5);border-radius:20px;background:radial-gradient(120% 140% at 50% 0%,rgba(246,130,31,.09),transparent 60%),rgba(23,19,14,.82);padding:44px 16px 18px}
   .cfhead{position:absolute;top:-16px;left:50%;transform:translateX(-50%);display:inline-flex;align-items:center;gap:8px;background:#20140a;border:1px solid rgba(246,130,31,.55);border-radius:999px;padding:6px 14px;white-space:nowrap}
   .cfhead img{width:22px;height:22px}
@@ -79,7 +79,7 @@
 <div class="wrap">
   <span class="tag">KontrolIA Bots · mapa de tu bot</span>
   <h1>Así funciona tu bot, de mensaje a respuesta 🗺️</h1>
-  <p class="sub">Tu cliente escribe… y su respuesta regresa sola. En medio, todo vive en <b>tu</b> nube. Tú solo pones tres piezas: la cuenta de Cloudflare, tu modelo de IA y tus conexiones.</p>
+  <p class="sub">Tu cliente escribe… y su respuesta regresa sola. En medio, todo vive en <b>tu</b> nube. Tú solo pones tres piezas: dónde vive el bot, su base de datos y tu modelo de IA (más tus conexiones).</p>
 
   <div class="row">
     <div class="node">
@@ -92,7 +92,7 @@
     <div class="wire"></div>
 
     <div class="cfbox">
-      <div class="cfhead"><img src="data:image/svg+xml;base64,PHN2ZyByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+Q2xvdWRmbGFyZTwvdGl0bGU+PHBhdGggZmlsbD0iI2YzODAyMCIgZD0iTTE2LjUwODggMTYuODQ0N2MuMTQ3NS0uNTA2OC4wOTA4LS45NzA3LS4xNTUzLTEuMzE1NC0uMjI0Ni0uMzE2NC0uNjA0NS0uNDk5LTEuMDYxNS0uNTIwNWwtOC42NTkyLS4xMTIzYS4xNTU5LjE1NTkgMCAwIDEtLjEzMzMtLjA3MTNjLS4wMjgzLS4wNDItLjAzNTEtLjA5ODYtLjAyMS0uMTU1My4wMjc4LS4wODQuMTEyMy0uMTQ4NC4yMDM2LS4xNTYybDguNzM1OS0uMTEyM2MxLjAzNTEtLjA0ODkgMi4xNjAxLS44ODY4IDIuNTUzNy0xLjkxMzZsLjQ5OS0xLjMwMTNjLjAyMTUtLjA1NjEuMDI5My0uMTEyOC4wMTQ3LS4xNjgtLjU2MjUtMi41NDYzLTIuODM1LTQuNDQ1My01LjU0OTktNC40NDUzLTIuNTAzOSAwLTQuNjI4NCAxLjYxNzctNS4zODc2IDMuODYxNC0uNDkyNy0uMzY1OC0xLjExODctLjU2MjUtMS43OTQtLjQ5OS0xLjIwMjYuMTE5LTIuMTY2NSAxLjA4My0yLjI4NjEgMi4yODU2LS4wMjgzLjMxLS4wMDY5LjYxMjguMDYzNS44OTRDMS41NjgzIDEzLjE3MSAwIDE0Ljc3NTQgMCAxNi43NTJjMCAuMTc0OC4wMTQyLjM1MTUuMDM1Mi41MjczLjAxNDEuMDgzLjA4NDQuMTQ3NS4xNjg5LjE0NzVoMTUuOTgxNGMuMDkwOSAwIC4xNzU4LS4wNjQ1LjIwMzItLjE1NTNsLjEyLS40MjY4em0yLjc1NjgtNS41NjM0Yy0uMDc3MSAwLS4xNjExIDAtLjIzODMuMDExMi0uMDU2NiAwLS4xMDU0LjA0MTUtLjEyNy4wOTc2bC0uMzM3OCAxLjE3NDRjLS4xNDc1LjUwNjgtLjA5MTguOTcwNy4xNTQzIDEuMzE2NC4yMjU2LjMxNjQuNjA1NS40OTggMS4wNjI1LjUxOTVsMS44NDM3LjExMzNjLjA1NTcgMCAuMTA1NS4wMjYzLjEzMjkuMDcwMy4wMjgzLjA0My4wMzUxLjEwNzQuMDIxNC4xNTYyLS4wMjgzLjA4NC0uMTEzMi4xNDg1LS4yMDQuMTU1M2wtMS45MjEuMTEyM2MtMS4wNDEuMDQ4OC0yLjE1ODIuODg2Ny0yLjU1MjcgMS45MTRsLS4xNDA2LjM1ODVjLS4wMjgzLjA3MTMuMDIxNS4xNDE2LjA5ODYuMTQxNmg2LjU5NzdjLjA3NzEgMCAuMTQ3NC0uMDQ4OS4xNjktLjEyNi4xMTIyLS40MDgyLjE3NTctLjgzNy4xNzU3LTEuMjgwMyAwLTIuNjAyNS0yLjEyNS00LjcyNy00LjczNDQtNC43MjciLz48L3N2Zz4=" alt="Cloudflare"><b>Esto se aloja en Cloudflare — en TU cuenta</b></div>
+      <div class="cfhead"><img src="data:image/svg+xml;base64,PHN2ZyByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+VHUgbnViZTwvdGl0bGU+PHBhdGggZmlsbD0iI2YzODAyMCIgZD0iTTE5LjM1IDEwLjA0QTcuNDkgNy40OSAwIDAgMCAxMiA0YTcuNDggNy40OCAwIDAgMC02LjYzIDQuMDRBNS45OTQgNS45OTQgMCAwIDAgMCAxNGMwIDMuMzEgMi42OSA2IDYgNmgxM2MyLjc2IDAgNS0yLjI0IDUtNSAwLTIuNjQtMi4wNS00Ljc4LTQuNjUtNC45NnoiLz48L3N2Zz4=" alt="Tu nube"><b>Esto vive en TU infraestructura — donde tú elijas</b></div>
       <div class="cfnote">tu propiedad · tus datos · gratis al inicio, ~$5/mes con clientes</div>
       <div class="hub">
         <div class="node panelnode">

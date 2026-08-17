@@ -1,7 +1,7 @@
 # KontrolIA Bots — instrucciones para Claude Code
 
 Chatbot de soporte con IA, open source. Una app **Hono** (Vercel AI SDK) con panel en
-`/admin`, que se despliega en **local, Docker, Cloudflare, Vercel o Netlify** y guarda
+`/admin`, que se despliega en **local, Docker, Cloudflare o Vercel** y guarda
 todo en **Supabase**. Quien lo clona probablemente **no sabe programar** — tú corres
 todo por él.
 
@@ -19,10 +19,10 @@ cliente sigue escribiendo, y contesta una sola vez a todo junto. Ese retraso es
 deliberado y es lo que hace que no se sienta robot: si tocas la cola, no lo rompas.
 
 - `src/app.ts` — la app Hono: webhooks, `/admin`, `/cron/*`. **Sin nada de plataforma.**
-- `src/runtime/` — un adaptador por destino (`node`, `cloudflare`, `vercel`, `netlify`).
+- `src/runtime/` — un adaptador por destino (`node`, `cloudflare`, `vercel`).
   Es quien construye el driver de Postgres y lo mete en `env.DB`.
 - `src/agent/runner.ts` — `ingestMessage()` (guardas + buffer) y `runTurn()` (el turno).
-- `src/queue/` — `jobs.ts` (cola y lease), `tick.ts` (procesa vencidos), `wake.ts`.
+- `src/queue/` — `jobs.ts` (cola, lease y reenvío), `tick.ts` (procesa vencidos), `wake.ts`.
 - `src/db/client.ts` — **la única puerta a la base**. Mantenla así.
 - `src/vector/pgvector.ts` — búsqueda de la base de conocimiento.
 - `src/ai/embeddings.ts` — embeddings intercambiables (Workers AI / OpenAI).
@@ -58,7 +58,7 @@ npm install
 npm run db:apply       # aplica supabase/migrations/ a DATABASE_URL
 npm start              # servidor Node (local/Docker)
 npm run dev            # igual, recargando al guardar
-npm test               # 534 tests
+npm test               # 535 tests
 npm run typecheck
 npm run deploy:cf      # desplegar a Cloudflare
 ```
@@ -82,7 +82,7 @@ llave de IA (~$1–2/mes).
 
 - **Habla en español sencillo (LATAM)**, una pregunta a la vez.
 - **Nunca pegues tokens ni llaves en el chat.** Van como variables de entorno o secretos
-  de la plataforma (`wrangler secret put`, el panel de Vercel/Netlify, o un `.env` local).
+  de la plataforma (`wrangler secret put`, el panel de Vercel, o un `.env` local).
 - **No toques `member/`** más allá de lo que indican los skills: ahí viven los datos del
   negocio del usuario y se respetan en cada actualización.
 - **No despliegues ni hagas commit sin que el usuario lo confirme.**

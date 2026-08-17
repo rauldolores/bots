@@ -1,8 +1,8 @@
 // Arma el `Env` que espera la aplicación a partir de lo que da cada plataforma.
 //
 // El código del bot pide un `env.DB` que ya es un driver de Postgres. Quien lo
-// construye es esto: en Cloudflare las variables llegan como bindings, en Node
-// y Vercel/Netlify como `process.env`, pero de ahí para adentro todo es igual.
+// construye es esto: en Cloudflare las variables llegan como bindings, y en Node
+// o Vercel como `process.env`, pero de ahí para adentro todo es igual.
 
 import type { Env } from "../env";
 import type { SqlDriver } from "../db/driver";

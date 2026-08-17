@@ -34,7 +34,6 @@ cliente sigue escribiendo, y responde en el siguiente "tick". Si el mensaje apar
 | Local / servidor | ¿El proceso sigue vivo? El tick corre dentro de `npm start` |
 | Cloudflare | Que `wrangler.toml` tenga el cron `* * * * *` y el deploy sea reciente |
 | Vercel | Que exista `TICK_TOKEN` y que los crons estén activos (requieren plan Pro) |
-| Netlify | Normal que tarde hasta ~1 min: ahí la cola solo avanza con la función programada |
 
 Para comprobarlo a mano:
 
@@ -103,7 +102,7 @@ bindings creados. Si falta algo, se detiene y te dice qué.
 
 > Las **variables** (no secretas) como `BOT_NAME`, `BUSINESS_NAME`, `BOT_LANGUAGE`,
 > `BOT_TIER`, `BUFFER_SECONDS` y `DASHBOARD_BASE_URL` van en `[vars]` de
-> `wrangler.toml` (Cloudflare), en el panel de variables (Vercel/Netlify) o en el
+> `wrangler.toml` (Cloudflare), en el panel de variables (Vercel) o en el
 > `.env` (local).
 
 ---

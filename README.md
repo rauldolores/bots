@@ -4,9 +4,9 @@
 
 ### Tu chatbot de IA para WhatsApp, Instagram y Telegram — en **tu propia nube**, gratis y open source.
 
-**Atiende a tus clientes 24/7, responde desde tu base de conocimiento, y te avisa a ti cuando algo lo amerita.** Vive donde tú digas —tu computadora, Cloudflare, Vercel, Netlify o tu propio servidor—, con tu base de datos y tu llave de IA. Tus datos son tuyos. Sin mensualidades de SaaS.
+**Atiende a tus clientes 24/7, responde desde tu base de conocimiento, y te avisa a ti cuando algo lo amerita.** Vive donde tú digas —tu computadora, Cloudflare, Vercel o tu propio servidor—, con tu base de datos y tu llave de IA. Tus datos son tuyos. Sin mensualidades de SaaS.
 
-<em>Self-hosted, open-source AI support bot for small businesses. Runs on Node, Docker, Cloudflare, Vercel or Netlify. Your Supabase, your AI key. Spanish-first. Deploy in minutes.</em>
+<em>Self-hosted, open-source AI support bot for small businesses. Runs on Node, Docker, Cloudflare or Vercel. Your Supabase, your AI key. Spanish-first. Deploy in minutes.</em>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-f59e0b.svg)](./LICENSE)
 [![Multiplataforma](https://img.shields.io/badge/corre_en-Node%20·%20Docker%20·%20Cloudflare%20·%20Vercel-38bdf8.svg)](./docs/despliegue.md)
@@ -28,7 +28,7 @@ Un asistente de soporte con IA que montas **en tu propia infraestructura** en un
 - 🎙️ **Entiende notas de voz** — transcribe los audios de tus clientes automáticamente.
 - 🙋 **Sabe cuándo pedir ayuda** — si algo es delicado o no está seguro, te hace *handoff* a ti.
 - 📊 **Panel de administración** — conversaciones, leads, base de conocimiento y métricas, todo en `/admin`.
-- ☁️ **Despliégalo donde quieras** — tu computadora, Docker, Cloudflare, Vercel o Netlify. El mismo código.
+- ☁️ **Despliégalo donde quieras** — tu computadora, Docker, Cloudflare o Vercel. El mismo código.
 - 🧠 **Tu cerebro, tu llave** — Claude, ChatGPT o Grok; tú eliges y pagas solo lo que piensa.
 
 > **No necesitas saber programar.** KontrolIA Bots se instala y configura con [Claude Code](https://claude.com/claude-code) como tu copiloto — él corre los comandos por ti, paso a paso.
@@ -66,7 +66,7 @@ npm start                   # ¡listo!
 
 Tu panel queda en `http://localhost:8787/admin`.
 
-Para publicarlo en Cloudflare, Vercel, Netlify o tu propio servidor: **[docs/despliegue.md](./docs/despliegue.md)**.
+Para publicarlo en Cloudflare, Vercel o tu propio servidor: **[docs/despliegue.md](./docs/despliegue.md)**.
 
 ---
 
@@ -88,7 +88,7 @@ Nadie más toca tus datos ni tus conversaciones.
 
 ```mermaid
 flowchart LR
-    C["Cliente<br/>(WhatsApp / IG / Telegram)"] -->|mensaje| W["KontrolIA Bots<br/>Node · Cloudflare · Vercel…"]
+    C["Cliente<br/>(WhatsApp / IG / Telegram)"] -->|mensaje| W["KontrolIA Bots<br/>Node · Cloudflare · Vercel"]
     W -->|encola| Q[("Cola en Supabase<br/>espera ~15s")]
     Q --> A["Agente<br/>contexto + herramientas"]
     A -->|busca| V[("Base de conocimiento<br/>pgvector")]
@@ -105,13 +105,13 @@ Un mensaje entra por un canal → **el bot espera unos segundos por si sigues es
 
 ## 🧩 Stack
 
-- **[Hono](https://hono.dev/)** — el runtime, portable a Node, workerd, Vercel y Netlify.
+- **[Hono](https://hono.dev/)** — el runtime, portable a Node, workerd y Vercel.
 - **[Vercel AI SDK](https://sdk.vercel.ai/)** — capa de LLM (Anthropic / OpenAI / xAI, con llave propia).
 - **[Supabase](https://supabase.com/)** (Postgres) — conversaciones, leads, configuración **y** la cola del agente.
 - **pgvector** — base de conocimiento / RAG, en la misma base.
 - Embeddings y transcripción de voz con proveedor intercambiable (Workers AI en Cloudflare, OpenAI fuera).
 
-Un solo código para los cinco destinos. Cómo desplegar en cada uno: **[docs/despliegue.md](./docs/despliegue.md)**.
+Un solo código para todos los destinos. Cómo desplegar en cada uno: **[docs/despliegue.md](./docs/despliegue.md)**.
 
 ---
 

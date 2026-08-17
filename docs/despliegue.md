@@ -1,6 +1,6 @@
 # Desplegar KontrolIA Bots
 
-El bot corre en cinco sitios distintos con el mismo código. Lo que cambia es quién
+El bot corre en varios sitios distintos con el mismo código. Lo que cambia es quién
 despierta la cola del agente, y eso afecta **cuánto tarda en responder**.
 
 ## Antes que nada: la base de datos
@@ -9,7 +9,7 @@ Todos los destinos necesitan lo mismo — una Supabase y su cadena de conexión.
 
 1. Crea un proyecto en [supabase.com](https://supabase.com) (el plan gratis alcanza).
 2. Copia la cadena de **Project Settings → Database → Connection string**.
-   - **En serverless (Vercel, Netlify, Cloudflare) usa el pooler**, el del puerto
+   - **En serverless (Vercel, Cloudflare) usa el pooler**, el del puerto
      `6543`. Las funciones efímeras abren y cierran conexiones sin parar y una conexión
      directa agota el límite del proyecto. El código detecta el `:6543` y desactiva las
      sentencias preparadas, que ese modo no admite.
@@ -33,7 +33,7 @@ en cada actualización sin miedo.
 | `BUSINESS_NAME`, `BOT_NAME`, `BOT_LANGUAGE` | sí | Identidad del bot |
 | `BUFFER_SECONDS` | no (15) | Cuánto espera antes de responder |
 | `OPENAI_API_KEY` | fuera de Cloudflare | Embeddings y notas de voz |
-| `TICK_TOKEN` | Vercel y Netlify | Protege `/cron/*` |
+| `TICK_TOKEN` | Vercel | Protege `/cron/*` |
 | `KB_REINDEX_TOKEN` | sí | Protege `/kb/reindex` |
 | `TELEGRAM_BOT_TOKEN`, `WHATSAPP_*`, `META_*`… | por canal | Ver `/admin/conexiones` |
 
@@ -85,18 +85,6 @@ así como por `X-Tick-Token`. Responde a los 15s exactos, igual que Cloudflare.
 > `waitUntil`; lo que pierdes es la red de seguridad si una instancia muere a media
 > respuesta.
 
-## Netlify
-
-1. Conecta el repo.
-2. Pon las variables, incluido `TICK_TOKEN`.
-3. Despliega. `netlify.toml` declara las funciones programadas.
-
-**Este destino responde más lento y conviene saberlo antes de elegirlo.** Netlify no
-ofrece `waitUntil`: la función muere en cuanto contesta el webhook, así que la cola solo
-avanza cuando salta la función programada. En la práctica el bot contesta **en el
-siguiente disparo** (hasta ~1 minuto) en vez de a los 15 segundos. Si la conversación
-fluida importa, elige otro destino.
-
 ---
 
 ## Cuál elegir
@@ -107,7 +95,7 @@ fluida importa, elige otro destino.
 | Quieres lo más barato y rápido, sin servidor | **Cloudflare** |
 | Ya vives en Vercel | **Vercel** |
 | Quieres control total o correr otras cosas al lado | **Docker / VPS** |
-| Ya vives en Netlify | **Netlify**, sabiendo lo de la latencia |
+
 
 ## Comprobar que quedó bien
 
@@ -119,3 +107,13 @@ curl -u admin:<tu-password> https://<tu-bot>/admin # -> el panel
 Y manda un mensaje real por tu canal. Si el bot no contesta, mira `/admin/conversaciones`:
 si el mensaje aparece pero no hay respuesta, el problema está en la cola (revisa que el
 cron esté corriendo); si no aparece, el problema está en el webhook del canal.
+
+---
+
+## Por qué no Netlify
+
+Se evaluó y se descartó. Netlify no ofrece `waitUntil`: su función muere en cuanto
+responde el webhook, así que la cola solo puede avanzar cuando salta la función
+programada — el bot contestaría hasta un minuto tarde. Para un bot de atención al
+cliente eso no es aceptable, y mantener un destino que damos por malo solo confunde a
+quien instala.
