@@ -1,7 +1,7 @@
 /**
  * Applying a flywheel suggestion — the owner's one click.
  *
- *  • kb_entry → creates a kb_doc and indexes it into Vectorize immediately
+ *  • kb_entry → creates a kb_doc and indexes it into pgvector immediately
  *    (reuses the Conocimiento pipeline), so the gap closes on the next message.
  *  • leccion → appends the rule to the learned_lessons setting (FIFO, capped),
  *    which the generated system prompt injects as <lecciones_aprendidas>.

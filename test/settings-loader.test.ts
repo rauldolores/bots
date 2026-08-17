@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestMiniflare } from "./helpers/miniflareSetup";
-import { Db } from "../src/db/client";
+import { createTestDb } from "./helpers/pgSetup";
 import { SettingsRepo, SETTING_KEYS } from "../src/db/settings";
 import { resolveAgentConfig } from "../src/settings-loader";
 
@@ -10,17 +9,16 @@ let env: any;
 let repo: SettingsRepo;
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = await mf.getD1Database("DB");
+  const d1 = await createTestDb();
   env = {
-    DB: d1,
+    DB: d1.driver,
     BOT_NAME: "Asistente",
     BUSINESS_NAME: "Test Business",
     BOT_LANGUAGE: "es",
     BOT_TIER: "pro",
     BUFFER_SECONDS: "12",
   };
-  repo = new SettingsRepo(new Db(d1 as any));
+  repo = new SettingsRepo(d1);
 });
 
 describe("resolveAgentConfig", () => {

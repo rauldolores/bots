@@ -101,7 +101,11 @@ export class InsightsRepo {
     }>(
       `SELECT COUNT(*) as analyzed,
               SUM(CASE WHEN resolution = 'resolved' THEN 1 ELSE 0 END) as resolved,
-              AVG(bot_score) as avg_score,
+              -- El AVG de Postgres devuelve numeric, que el driver entrega como
+              -- string para no perder precisión. Acá es un promedio de 1 a 5:
+              -- castear a float lo devuelve como number, que es lo que espera
+              -- el tipo de arriba.
+              AVG(bot_score)::float8 as avg_score,
               SUM(CASE WHEN sentiment IN ('frustrated', 'angry') THEN 1 ELSE 0 END) as negative
        FROM conversation_insights WHERE analyzed_at > ?`,
       [sinceMs],

@@ -68,8 +68,12 @@ const WINDOW_MS = 24 * 3600_000;
 const WINDOW_SAFE_MS = 23 * 3600_000;
 
 const MEMBER_SELECT = `
-  SELECT c.id AS conversationId, c.channel AS channel, c.channel_user_id AS channelUserId,
-         c.display_name AS name, MAX(m.created_at) AS lastUserAt
+  -- Los alias en camelCase VAN ENTRE COMILLAS: Postgres pasa a minúsculas todo
+  -- identificador sin comillar, así que AS channelUserId llegaría como
+  -- channeluserid y el código de arriba leería undefined. SQLite respetaba las
+  -- mayúsculas y por eso esto funcionaba sin comillas.
+  SELECT c.id AS "conversationId", c.channel AS channel, c.channel_user_id AS "channelUserId",
+         c.display_name AS name, MAX(m.created_at) AS "lastUserAt"
   FROM conversations c
   JOIN messages m ON m.conversation_id = c.id AND m.role = 'user'`;
 
@@ -125,7 +129,7 @@ export async function segmentMembers(
      ${joins}
      ${where}
      GROUP BY c.id
-     ORDER BY lastUserAt DESC`,
+     ORDER BY "lastUserAt" DESC`,
   );
   return rows.map((r) => ({
     ...r,

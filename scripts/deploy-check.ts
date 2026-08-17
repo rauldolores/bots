@@ -3,11 +3,12 @@
  *
  * The Free vs Pro distinction lives in separate repos, so there is nothing to
  * validate against a remote service: we just make sure the secrets and vars
- * this bot needs are present before `wrangler deploy` runs. Run via
- * `pnpm exec tsx scripts/deploy-check.ts` (or wire it as a predeploy step).
+ * this bot needs are present before deploying. Run via
+ * `npm run deploy-check` (or wire it as a predeploy step).
  */
 
 export interface DeployConfig {
+  DATABASE_URL?: string;
   ANTHROPIC_API_KEY?: string;
   BOT_NAME?: string;
   BOT_TIER?: string;
@@ -28,6 +29,13 @@ export interface DeployCheckResult {
 export function validateDeployConfig(cfg: DeployConfig): DeployCheckResult {
   const errors: string[] = [];
 
+  // Sin base no hay bot: es lo primero que se revisa y el fallo más común de
+  // quien instala.
+  if (!cfg.DATABASE_URL) {
+    errors.push(
+      "Falta DATABASE_URL (la cadena de conexión de tu Supabase: Project Settings → Database).",
+    );
+  }
   if (!cfg.ANTHROPIC_API_KEY) errors.push("Falta ANTHROPIC_API_KEY (Claude API).");
   if (!cfg.BOT_NAME) errors.push("Falta BOT_NAME.");
   if (!cfg.BOT_TIER) errors.push("Falta BOT_TIER ('free' | 'pro').");
@@ -84,7 +92,7 @@ if (isMain) {
   const warnings: string[] = [];
   if (!cfg.BOT_NAME) errors.push("Falta BOT_NAME en wrangler.toml.");
   if (!cfg.BOT_TIER) errors.push("Falta BOT_TIER ('free' | 'pro') en wrangler.toml.");
-  if (!cfg.DASHBOARD_PASSWORD) errors.push("Falta el secret DASHBOARD_PASSWORD (créalo: pnpm exec wrangler secret put DASHBOARD_PASSWORD).");
+  if (!cfg.DASHBOARD_PASSWORD) errors.push("Falta el secret DASHBOARD_PASSWORD (créalo: npx wrangler secret put DASHBOARD_PASSWORD).");
   if (!cfg.ANTHROPIC_API_KEY && !cfg.OPENAI_API_KEY && !cfg.XAI_API_KEY) {
     warnings.push("Aún no hay llave de IA como secret — el bot desplegará pero no contestará. Ponla con `wrangler secret put ANTHROPIC_API_KEY` (o desde el panel: Configuración → Modelo de IA).");
   }

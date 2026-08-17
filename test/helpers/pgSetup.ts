@@ -1,0 +1,107 @@
+// Reemplaza a miniflareSetup.ts para los tests que solo necesitan la base.
+//
+// Antes cada test levantaba un workerd completo con D1. Ahora hablan con el
+// mismo Postgres que usa producción, que es justo lo que queremos probar: el
+// dialecto, los claims atómicos y el traductor de placeholders no se pueden
+// verificar contra SQLite.
+//
+// Para que siga siendo rápido, el esquema se crea UNA vez por proceso y entre
+// tests solo se truncan las tablas. Crear 16 tablas en cada `beforeEach` de 32
+// archivos costaría minutos.
+//
+// La base sale de TEST_DATABASE_URL; por defecto, la Supabase local.
+
+import { Db } from "../../src/db/client";
+import { createPostgresDriver } from "../../src/db/drivers/postgresJs";
+import type { SqlDriver } from "../../src/db/driver";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(HERE, "..", "..");
+const MIGRATIONS_DIR = path.join(ROOT, "supabase", "migrations");
+
+const BASE_URL =
+  process.env.TEST_DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+
+/** Un esquema propio por proceso: los tests nunca pisan datos reales. */
+const SCHEMA = `test_bots_${process.pid}`;
+
+let shared: { db: Db; driver: SqlDriver; tables: string[] } | null = null;
+
+export async function createTestDb(): Promise<Db> {
+  if (!shared) shared = await initSchema();
+  await truncateAll(shared);
+  return shared.db;
+}
+
+/** Cierra el pool y borra el esquema. Lo llama test/setup.ts al terminar. */
+export async function dropTestDb(): Promise<void> {
+  if (!shared) return;
+  const { driver } = shared;
+  shared = null;
+  await driver.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`, []).catch(() => {});
+  await driver.close().catch(() => {});
+}
+
+async function initSchema() {
+  // Conexión sin search_path para poder crear el esquema.
+  const admin = createPostgresDriver({ url: BASE_URL });
+  try {
+    await admin.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`, []);
+    await admin.query(`CREATE SCHEMA ${SCHEMA}`, []);
+  } finally {
+    await admin.close();
+  }
+
+  // `public` va en el search_path porque ahí vive el tipo `vector` de pgvector:
+  // sin él, `vector(1024)` no resuelve y la migración de kb_chunks falla.
+  const driver = createPostgresDriver({
+    url: `${BASE_URL}${BASE_URL.includes("?") ? "&" : "?"}options=-c%20search_path%3D${SCHEMA}%2Cpublic`,
+  });
+  const db = new Db(driver);
+
+  // TODAS las migraciones, en orden: el esquema de prueba tiene que ser el
+  // mismo que produce `npm run db:apply` en producción.
+  const archivos = fs
+    .readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+  for (const archivo of archivos) {
+    for (const stmt of statementsOf(fs.readFileSync(path.join(MIGRATIONS_DIR, archivo), "utf-8"))) {
+      await db.run(stmt);
+    }
+  }
+
+  const tables = (
+    await db.all<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = ?",
+      [SCHEMA],
+    )
+  ).map((r) => r.table_name);
+
+  return { db, driver, tables };
+}
+
+/** Reinicia el estado entre tests. Un solo TRUNCATE para todas las tablas. */
+async function truncateAll(s: { db: Db; tables: string[] }): Promise<void> {
+  if (s.tables.length === 0) return;
+  const list = s.tables.map((t) => `${SCHEMA}.${t}`).join(", ");
+  await s.db.run(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`);
+}
+
+/**
+ * Parte el archivo en sentencias. Quita las líneas de comentario ANTES de
+ * cortar por `;`, así un punto y coma dentro de un comentario deja de ser un
+ * peligro — el esquema viejo tenía que advertirlo a mano.
+ */
+function statementsOf(sql: string): string[] {
+  return sql
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("--"))
+    .join("\n")
+    .split(";")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}

@@ -3,51 +3,48 @@ import { adminApp } from "../../src/admin/routes";
 import { ADMIN_USERNAME } from "../../src/admin/auth";
 import { SETTING_KEYS } from "../../src/db/settings";
 import type { Env } from "../../src/env";
+import type { SqlDriver } from "../../src/db/driver";
 
 type Row = Record<string, unknown>;
 
 /**
- * Minimal in-memory D1 stub: returns canned results based on a matcher list.
- * Each query is matched in order; the first matching SQL fragment wins.
- * `run` records executed SQL + bound params for assertions.
+ * Driver en memoria: devuelve resultados prearmados según una lista de
+ * matchers. Cada consulta se compara en orden y gana el primer fragmento que
+ * coincida. `runLog` registra el SQL y sus parámetros para poder afirmar sobre
+ * ellos.
+ *
+ * Estos tests son de ruteo, no de base: nunca tocan Postgres. Lo único que
+ * cambió al migrar es la forma del stub — antes imitaba `prepare().bind()` de
+ * D1, ahora implementa `query()`, que es lo que `Db` usa.
  */
-function makeStubDb(
+function makeStubDriver(
   matchers: Array<{ frag: string; first?: Row; all?: Row[] }> = [],
   runLog?: Array<{ sql: string; params: unknown[] }>,
-): D1Database {
+): SqlDriver {
   const handler = (sql: string) => {
     for (const m of matchers) {
       if (sql.includes(m.frag)) return m;
     }
     return { first: undefined, all: [] as Row[] };
   };
-  const makeStmt = (sql: string) => {
-    const matched = handler(sql);
-    let bound: unknown[] = [];
-    const stmt: any = {
-      bind: (...args: unknown[]) => {
-        bound = args;
-        return stmt;
-      },
-      first: async () => matched.first ?? null,
-      all: async () => ({ results: matched.all ?? [] }),
-      run: async () => {
-        runLog?.push({ sql, params: bound });
-        return {};
-      },
-    };
-    return stmt;
-  };
   return {
-    prepare: (sql: string) => makeStmt(sql),
-  } as unknown as D1Database;
+    async query(sql: string, params: unknown[]) {
+      const matched = handler(sql);
+      runLog?.push({ sql, params });
+      // `first()` toma rows[0] y `all()` toma rows: con devolver las filas
+      // prearmadas (o la única de `first`) ambos caminos quedan cubiertos.
+      const rows = matched.all ?? (matched.first ? [matched.first] : []);
+      return { rows: rows as Record<string, unknown>[], rowsAffected: 0 };
+    },
+    async close() {},
+  };
 }
 
 const PASSWORD = "secret123";
 
-function makeEnv(db: D1Database = makeStubDb()): Env {
+function makeEnv(driver: SqlDriver = makeStubDriver()): Env {
   return {
-    DB: db,
+    DB: driver,
     DASHBOARD_PASSWORD: PASSWORD,
     BUSINESS_NAME: "Test Biz",
     BOT_LANGUAGE: "es",
@@ -82,7 +79,7 @@ describe("admin routes — auth", () => {
 
   it("returns 200 with correct credentials", async () => {
     const env = makeEnv(
-      makeStubDb([
+      makeStubDriver([
         { frag: "FROM messages WHERE created_at", first: { n: 3 } },
         { frag: "FROM leads WHERE created_at", first: { n: 1 } },
         { frag: "GROUP BY model_used", all: [] },
@@ -138,7 +135,7 @@ describe("admin routes — mutations", () => {
 
   it("sets a lead status and redirects back to /admin/leads", async () => {
     const runLog: Array<{ sql: string; params: unknown[] }> = [];
-    const env = makeEnv(makeStubDb([], runLog));
+    const env = makeEnv(makeStubDriver([], runLog));
     const body = new URLSearchParams({ status: "sold" });
     const res = await adminApp.fetch(
       req("/leads/lead-1/status", {
@@ -158,7 +155,7 @@ describe("admin routes — mutations", () => {
 
   it("falls back to status 'new' for an invalid status", async () => {
     const runLog: Array<{ sql: string; params: unknown[] }> = [];
-    const env = makeEnv(makeStubDb([], runLog));
+    const env = makeEnv(makeStubDriver([], runLog));
     const body = new URLSearchParams({ status: "bogus" });
     await adminApp.fetch(
       req("/leads/lead-2/status", {
@@ -174,7 +171,7 @@ describe("admin routes — mutations", () => {
 
   it("resolves a ticket and redirects back to /admin/tickets", async () => {
     const runLog: Array<{ sql: string; params: unknown[] }> = [];
-    const env = makeEnv(makeStubDb([], runLog));
+    const env = makeEnv(makeStubDriver([], runLog));
     const body = new URLSearchParams({ resolved_by: "me@example.com" });
     const res = await adminApp.fetch(
       req("/tickets/ticket-1/resolve", {
@@ -194,7 +191,7 @@ describe("admin routes — mutations", () => {
 
   it("returns a conversation back to the bot (clears paused_until)", async () => {
     const runLog: Array<{ sql: string; params: unknown[] }> = [];
-    const env = makeEnv(makeStubDb([], runLog));
+    const env = makeEnv(makeStubDriver([], runLog));
     const res = await adminApp.fetch(
       req("/conversations/telegram:42/resume", { method: "POST", headers: authHeaders }),
       env,
@@ -237,7 +234,7 @@ describe("admin routes — config save (POST /config)", () => {
 
   it("maps card selections (labels and values) to persisted values", async () => {
     const runLog: Array<{ sql: string; params: unknown[] }> = [];
-    const env = makeEnv(makeStubDb([], runLog));
+    const env = makeEnv(makeStubDriver([], runLog));
     const body = new URLSearchParams({
       [SETTING_KEYS.tone]: "Formal", // label -> "formal y profesional"
       [SETTING_KEYS.bufferSeconds]: "Rápido", // label -> "5"
@@ -266,7 +263,7 @@ describe("admin routes — config save (POST /config)", () => {
 
   it("stores free-text fields verbatim (trimmed)", async () => {
     const runLog: Array<{ sql: string; params: unknown[] }> = [];
-    const env = makeEnv(makeStubDb([], runLog));
+    const env = makeEnv(makeStubDriver([], runLog));
     const body = new URLSearchParams({
       [SETTING_KEYS.botName]: "  Barbería Pro  ",
       [SETTING_KEYS.businessContext]: "Abrimos 9-7. Corte $150.",
@@ -291,7 +288,7 @@ describe("admin routes — config save (POST /config)", () => {
 
   it("falls back to the first option for an unknown card value", async () => {
     const runLog: Array<{ sql: string; params: unknown[] }> = [];
-    const env = makeEnv(makeStubDb([], runLog));
+    const env = makeEnv(makeStubDriver([], runLog));
     const body = new URLSearchParams({ [SETTING_KEYS.tone]: "bogus" });
     await adminApp.fetch(
       req("/config", {
@@ -308,7 +305,7 @@ describe("admin routes — config save (POST /config)", () => {
 
   it("blocks saving config without auth (401)", async () => {
     const runLog: Array<{ sql: string; params: unknown[] }> = [];
-    const env = makeEnv(makeStubDb([], runLog));
+    const env = makeEnv(makeStubDriver([], runLog));
     const res = await adminApp.fetch(
       req("/config", {
         method: "POST",

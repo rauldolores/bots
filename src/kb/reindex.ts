@@ -1,20 +1,23 @@
 import type { Env } from "../env";
+import { Db } from "../db/client";
+import { getEmbeddingProvider } from "../ai/embeddings";
+import { PgVectorStore } from "../vector/pgvector";
 import kbChunks from "../../scripts/kb-fixtures.json";
 
 /**
- * KB → Vectorize ingestion pipeline.
+ * Pipeline de ingesta de la base de conocimiento.
  *
- * Reads the build-time manifest produced by `scripts/generate-fixtures.ts`
- * (`scripts/kb-fixtures.json`), embeds every chunk's `content` with the
- * multilingual `@cf/baai/bge-m3` model (1024-dim — the SAME model `searchKb`
- * uses for queries, so vectors actually match), and upserts the results into
- * the Vectorize index bound as `KB`.
+ * Lee el manifiesto que produce `scripts/generate-fixtures.ts`
+ * (`scripts/kb-fixtures.json`), calcula el embedding del `content` de cada
+ * chunk con el MISMO proveedor que usa `searchKb` para las consultas — si no
+ * fueran el mismo, los vectores no se parecerían entre sí y la búsqueda daría
+ * basura — y los guarda en la tabla `kb_chunks`.
  *
- * `upsert` overwrites by `id`, so re-running this is idempotent: a redeploy +
- * reindex safely replaces the index contents.
+ * El upsert pisa por `id`, así que volver a correr esto es idempotente: un
+ * redeploy + reindex reemplaza el contenido sin duplicar.
  *
- * searchKb reads `m.metadata.title` and `m.metadata.content` from results, so
- * each upserted vector carries `metadata: { title, content }`.
+ * `searchKb` lee `title` y `content` de cada match, por eso cada vector los
+ * lleva como metadatos.
  */
 
 export interface KbChunk {
@@ -34,24 +37,23 @@ export async function reindexKb(
     return { indexed: 0 };
   }
 
+  const embeddings = getEmbeddingProvider(env);
+  const store = new PgVectorStore(new Db(env.DB));
   let indexed = 0;
 
   for (let start = 0; start < chunks.length; start += BATCH_SIZE) {
     const batch = chunks.slice(start, start + BATCH_SIZE);
     try {
-      const embeddings = await env.AI.run("@cf/baai/bge-m3", {
-        text: batch.map((c) => c.content),
-      });
-      const data = (embeddings as { data: number[][] }).data;
+      const vectores = await embeddings.embed(batch.map((c) => c.content));
 
-      const vectors: VectorizeVector[] = batch.map((c, i) => ({
-        id: c.id,
-        values: data[i],
-        metadata: { title: c.title ?? "", content: c.content },
-      }));
-
-      await env.KB.upsert(vectors);
-      indexed += vectors.length;
+      await store.upsert(
+        batch.map((c, i) => ({
+          id: c.id,
+          values: vectores[i],
+          metadata: { title: c.title ?? "", content: c.content },
+        })),
+      );
+      indexed += batch.length;
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error(

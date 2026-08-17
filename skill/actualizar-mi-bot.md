@@ -1,6 +1,6 @@
 ---
 name: actualizar-mi-bot
-description: Actualiza tu instalación de Forja a la última versión sin romper el bot ni perder la configuración del usuario (carpeta member/, secrets de Cloudflare, datos en D1). Se activa con "/actualizar-mi-bot", "actualizar bot", "actualizar mi chatbot", "update forja".
+description: Actualiza tu instalación de Nodia Agents a la última versión sin romper el bot ni perder la configuración del usuario (carpeta member/, secrets de Cloudflare, datos en D1). Se activa con "/actualizar-mi-bot", "actualizar bot", "actualizar mi chatbot", "update forja".
 ---
 
 # Actualizar mi bot
@@ -26,10 +26,10 @@ Si en algún momento dudas: **member/ es sagrado, src/ se actualiza.**
 ## Sobre las actualizaciones
 
 No hay validación de nivel por API ni chequeos externos. Las actualizaciones vienen del
-repo público de Forja (`upstream`) y **conservan siempre tu `member/`**.
+repo público de Nodia Agents (`upstream`) y **conservan siempre tu `member/`**.
 
-No corras ningún `curl` a servicios externos para "chequear nivel": Forja es open source,
-las mejoras del Starter llegan por `git`. (Los giros y comandos de Forja+ viven aparte, en
+No corras ningún `curl` a servicios externos para "chequear nivel": Nodia Agents es open source,
+las mejoras del Starter llegan por `git`. (Los giros y comandos de Nodia Agents+ viven aparte, en
 la comunidad — no se actualizan por aquí.)
 
 ## Paso 0 — Pre-flight (chequeos antes de tocar nada)
@@ -48,9 +48,9 @@ la comunidad — no se actualizan por aquí.)
    ```
    Guarda ese valor como **VERSIÓN_ACTUAL** (ej. `0.1.0`).
 
-## Paso 1 — Configurar el remote de Forja (solo la primera vez)
+## Paso 1 — Configurar el remote de Nodia Agents (solo la primera vez)
 
-Las actualizaciones vienen del repo oficial de Forja, que añadimos como un remote llamado `upstream`.
+Las actualizaciones vienen del repo oficial de Nodia Agents, que añadimos como un remote llamado `upstream`.
 
 ```bash
 git remote -v
@@ -59,10 +59,20 @@ git remote -v
 - Si **ya aparece `upstream`** → perfecto, continúa.
 - Si **NO aparece `upstream`** → agrégalo apuntando al repo oficial:
   ```bash
-  git remote add upstream https://github.com/santmun/forja.git
+  git remote add upstream https://github.com/rauldolores/bots.git
   ```
 
-> Nota: si el usuario clonó directo el repo oficial (su `origin` ya apunta a `santmun/forja`), puede usar `origin` en lugar de `upstream` en todos los pasos siguientes.
+> Nota: si el usuario clonó directo el repo oficial (su `origin` ya apunta a
+> `rauldolores/bots`), puede usar `origin` en lugar de `upstream` en todos los pasos siguientes.
+
+> ⚠️ **Verifica a dónde apunta `upstream` antes de traer nada.** Si apunta a
+> `santmun/forja` —el proyecto del que este salió— **NO lo uses**: ese repo siguió
+> otro camino (Cloudflare-only, con D1, Vectorize y Durable Objects) y mezclarlo
+> arrastraría la arquitectura vieja encima de esta, dejando el bot roto. En ese
+> caso corrígelo antes:
+> ```bash
+> git remote set-url upstream https://github.com/rauldolores/bots.git
+> ```
 
 ## Paso 2 — Traer la última versión y comparar
 
@@ -153,30 +163,30 @@ Verifica que `member/` siga intacto comparándola contra antes del merge (debe e
 
 ## Paso 6 — Reinstalar dependencias si cambiaron
 
-Solo si cambió `package.json` o `pnpm-lock.yaml`:
+Solo si cambió `package.json` o `package-lock.json`:
 ```bash
-git diff HEAD@{1} HEAD --name-only | grep -E "package.json|pnpm-lock.yaml" && pnpm install
+git diff HEAD@{1} HEAD --name-only | grep -E "package.json|package-lock.json" && npm install
 ```
-Si no cambiaron, te puedes saltar este paso. Si dudas, corre `pnpm install` de todos modos — es seguro.
+Si no cambiaron, te puedes saltar este paso. Si dudas, corre `npm install` de todos modos — es seguro.
 
 ## Paso 7 — Aplicar migraciones de base de datos (si las hay)
 
-Si la versión nueva trae cambios en el esquema de la base (`src/db/schema.sql` cambió):
+Si la versión nueva trae migraciones nuevas (`supabase/migrations/` cambió):
 ```bash
-git diff HEAD@{1} HEAD --name-only | grep "src/db/schema.sql" && pnpm db:apply:remote
+git diff HEAD@{1} HEAD --name-only | grep "supabase/migrations/" && npm run db:apply
 ```
 Esto **agrega** columnas/tablas nuevas. No borra los datos existentes (conversaciones, leads).
 
 ## Paso 8 — Publicar y sincronizar la base de conocimiento
 
 Esto deja el bot en la última versión **y** mantiene su base de conocimiento
-(`member/kb/`) sincronizada con la memoria del bot (Vectorize). Hazlo **siempre**,
+(`member/kb/`) sincronizada con la memoria del bot (el indice vectorial). Hazlo **siempre**,
 sin importar si el cambio fue del miembro (editó su KB) o mío (versión nueva): así
 "un solo comando" cubre todo.
 
 **8.1 — Regenera la base de conocimiento (fixtures) desde `member/kb/`:**
 ```bash
-pnpm kb:reindex
+npm run kb:reindex
 ```
 Reconstruye el manifiesto de la KB que el deploy va a embarcar. (Si `member/kb/` está
 vacío, no pasa nada: indexará 0 documentos.)
@@ -197,12 +207,12 @@ reutilicen el mismo token sin rotarlo.)
 
 **8.3 — Publica:**
 ```bash
-pnpm run deploy
+npm run deploy
 ```
 El deploy embarca los fixtures nuevos (8.1) y el secret (8.2). El `predeploy` escribe
 `.bot-version` solo; no lo toques a mano.
 
-**8.4 — Reindexa en Vectorize** (usa el `worker_url` de `.bot-state.json` y el token de `.dev.vars`):
+**8.4 — Reindexa la base de conocimiento** (usa el `worker_url` de `.bot-state.json` y el token de `.dev.vars`):
 ```bash
 WORKER_URL=$(node -e "console.log(require('./.bot-state.json').worker_url)" 2>/dev/null)
 TOKEN=$(grep '^KB_REINDEX_TOKEN=' .dev.vars | cut -d= -f2-)
@@ -235,7 +245,7 @@ Si el deploy falla o `/health` no responde:
 
 2. Vuelve a publicar la versión que funcionaba:
    ```bash
-   pnpm run deploy
+   npm run deploy
    ```
 
 3. Si el miembro tenía cambios respaldados con `git stash`, recupéralos:

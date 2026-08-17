@@ -113,7 +113,7 @@ el sub-flujo de `configurar-mi-chatbot.md` (Paso 3.1).
 
 ## CLIs que pueden hacer falta (resumen de instalaciones)
 - **Cloudflare `wrangler` (obligatorio):** ya lo instalaste/usaste en la FASE 1
-  (crea D1/Vectorize/R2, guarda secrets, despliega). Es EL CLI del proyecto.
+  (prepara la base, guarda secrets, despliega). Es EL CLI del proyecto.
 - **Twilio CLI (opcional):** solo si eligen WhatsApp por Twilio y quieren
   automatizar sender/webhook. Si no, el dashboard basta.
 - **Meta:** no usa CLI — todo se hace en `developers.facebook.com` y

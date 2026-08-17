@@ -2,14 +2,14 @@
  * Live eval runner — corre los escenarios de eval contra el bot DESPLEGADO
  * (o cualquier endpoint configurable) y usa Claude Sonnet 4.x como JUEZ.
  *
- * Esto es un script CLI (`pnpm eval`), NO un test de vitest:
+ * Esto es un script CLI (`npm run eval`), NO un test de vitest:
  *  - NO corre en la suite de tests.
  *  - NO hace red en CI (solo cuando se invoca manualmente con las env vars puestas).
  *
  * Uso:
  *   ANTHROPIC_API_KEY=... BOT_URL=https://mi-bot.workers.dev \
  *   TELEGRAM_BOT_TOKEN=... [EVAL_THRESHOLD=0.85] [EVAL_WAIT_MS=20000] \
- *   pnpm eval
+ *   npm run eval
  *
  * Fuente de escenarios: test/fixtures/eval-scenarios.json (vía
  * scripts/eval-scenarios.ts) — la única fuente de verdad, compartida con los

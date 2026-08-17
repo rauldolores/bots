@@ -1,11 +1,10 @@
 /**
- * Tests for dashboard-editable KB docs: chunker, D1 repo, and the Vectorize
- * lifecycle (index on save, blanket-delete on remove, global reindex).
- * Vectorize + Workers AI are stubbed; D1 is real via miniflare.
+ * Tests de los docs de KB editables desde el panel: el troceador, el repo y el
+ * ciclo de vida vectorial (indexar al guardar, borrado en bloque al eliminar,
+ * reindex global). Workers AI va simulado; la base y pgvector son reales.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createTestMiniflare } from "../helpers/miniflareSetup";
-import { Db } from "../../src/db/client";
+import { createTestDb } from "../helpers/pgSetup";
 import {
   KbDocsRepo,
   chunkContent,
@@ -16,29 +15,35 @@ import {
   FIXTURE_CHUNKS,
   MAX_CHUNKS,
 } from "../../src/kb/docs";
+import { EMBEDDING_DIMENSIONS } from "../../src/ai/embeddings";
+import { PgVectorStore } from "../../src/vector/pgvector";
+import type { Db } from "../../src/db/client";
 import type { Env } from "../../src/env";
 
 let env: Env;
 let repo: KbDocsRepo;
-let kbUpsert: ReturnType<typeof vi.fn>;
-let kbDelete: ReturnType<typeof vi.fn>;
+let db: Db;
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = (await mf.getD1Database("DB")) as any;
-  kbUpsert = vi.fn(async () => ({}));
-  kbDelete = vi.fn(async () => ({}));
+  db = await createTestDb();
   env = {
-    DB: d1,
-    KB: { upsert: kbUpsert, deleteByIds: kbDelete },
+    DB: db.driver,
     AI: {
       run: vi.fn(async (_model: string, input: { text: string[] }) => ({
-        data: input.text.map(() => [0.1, 0.2, 0.3]),
+        // 1024 dims: es lo que declara la columna vector(1024) de kb_chunks.
+        data: input.text.map(() => Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1)),
       })),
     },
   } as unknown as Env;
-  repo = new KbDocsRepo(new Db(d1));
+  repo = new KbDocsRepo(db);
 });
+
+/** Los ids realmente indexados, que es lo que antes se espiaba por mock. */
+function idsIndexados() {
+  return db
+    .all<{ id: string }>("SELECT id FROM kb_chunks ORDER BY id")
+    .then((rows) => rows.map((r) => r.id));
+}
 
 describe("chunkContent", () => {
   it("keeps a short doc as a single chunk", () => {
@@ -78,24 +83,44 @@ describe("KbDocsRepo + vector lifecycle", () => {
     const r = await indexDoc(env, doc);
     expect(r.indexed).toBe(1);
 
-    // Blanket delete covers the full possible chunk range for the doc.
-    expect(kbDelete).toHaveBeenCalledTimes(1);
-    const deletedIds = kbDelete.mock.calls[0][0] as string[];
-    expect(deletedIds).toHaveLength(MAX_CHUNKS);
-    expect(deletedIds[0]).toBe("dash:d2#0");
+    expect(await idsIndexados()).toEqual(["dash:d2#0"]);
 
-    // Upserted vectors carry title+content metadata (searchKb reads them).
-    const vectors = kbUpsert.mock.calls[0][0] as any[];
-    expect(vectors[0].id).toBe("dash:d2#0");
-    expect(vectors[0].metadata.title).toBe("Precios");
-    expect(vectors[0].metadata.content).toContain("Corte $150");
+    // El chunk lleva title+content, que es lo que searchKb devuelve al modelo.
+    const fila = await db.first<{ title: string; content: string }>(
+      "SELECT title, content FROM kb_chunks WHERE id = ?",
+      ["dash:d2#0"],
+    );
+    expect(fila!.title).toBe("Precios");
+    expect(fila!.content).toContain("Corte $150");
+  });
+
+  it("indexDoc removes chunks that a shorter edit no longer produces", async () => {
+    // Doc largo → varios chunks. Al acortarlo, los viejos NO deben sobrevivir:
+    // el borrado en bloque cubre todo el rango posible de ids del doc.
+    await repo.upsert({
+      id: "d5",
+      title: "Largo",
+      content: Array(6).fill("x".repeat(500)).join("\n\n"),
+    });
+    await indexDoc(env, (await repo.getById("d5"))!);
+    expect((await idsIndexados()).length).toBeGreaterThan(1);
+
+    await repo.upsert({ id: "d5", title: "Corto", content: "Ahora es corto." });
+    await indexDoc(env, (await repo.getById("d5"))!);
+    expect(await idsIndexados()).toEqual(["dash:d5#0"]);
   });
 
   it("removeDocVectors deletes the doc's id range", async () => {
-    await removeDocVectors(env, "gone");
-    expect(kbDelete).toHaveBeenCalledWith(
-      expect.arrayContaining(["dash:gone#0", `dash:gone#${MAX_CHUNKS - 1}`]),
+    await new PgVectorStore(db).upsert(
+      Array.from({ length: 3 }, (_, i) => ({
+        id: `dash:gone#${i}`,
+        values: Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1),
+        metadata: { title: "T", content: "C" },
+      })),
     );
+
+    await removeDocVectors(env, "gone");
+    expect(await idsIndexados()).toEqual([]);
   });
 
   it("reindexAll combines repo fixtures with dashboard docs", async () => {

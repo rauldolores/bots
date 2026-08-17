@@ -1,14 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestMiniflare } from "../helpers/miniflareSetup";
-import { Db } from "../../src/db/client";
+import { createTestDb } from "../helpers/pgSetup";
 import { MagicLinksRepo } from "../../src/db/magicLinks";
 
 let repo: MagicLinksRepo;
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = await mf.getD1Database("DB");
-  repo = new MagicLinksRepo(new Db(d1 as any));
+  const d1 = await createTestDb();
+  repo = new MagicLinksRepo(d1);
 });
 
 describe("MagicLinksRepo", () => {

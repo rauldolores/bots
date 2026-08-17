@@ -1,40 +1,44 @@
 {
-  "name": "forja",
+  "name": "nodia-agents",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "tsx watch --env-file-if-exists=.env src/runtime/node.ts",
     "version:write": "node -e \"require('fs').writeFileSync('.bot-version', require('./package.json').version + '\\n')\"",
     "deploy-check": "tsx scripts/deploy-check.ts",
-    "predeploy": "pnpm deploy-check && pnpm version:write",
+    "predeploy": "npm run deploy-check && npm run version:write",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:apply": "wrangler d1 execute horizontes_bot_db --file=src/db/schema.sql",
-    "db:apply:remote": "wrangler d1 execute horizontes_bot_db --file=src/db/schema.sql --remote",
+    "db:apply": "tsx scripts/db-apply.ts",
     "kb:reindex": "tsx scripts/generate-fixtures.ts",
-    "eval": "tsx scripts/eval-bot-live.ts"
+    "eval": "tsx scripts/eval-bot-live.ts",
+    "start": "tsx --env-file-if-exists=.env src/runtime/node.ts",
+    "dev:cf": "wrangler dev",
+    "deploy:cf": "wrangler deploy",
+    "db:query": "tsx --env-file-if-exists=.env scripts/db-query.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.0",
     "@ai-sdk/openai": "^3.0.68",
     "@ai-sdk/xai": "^3.0.106",
     "@anthropic-ai/sdk": "^0.90.0",
-    "agents": "^0.1.0",
+    "@hono/node-server": "^2.1.1",
     "ai": "^6.0.0",
     "hono": "^4.10.0",
+    "postgres": "^3.4.9",
     "resend": "^6.12.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "latest",
-    "@types/node": "latest",
-    "miniflare": "latest",
-    "tsx": "latest",
-    "typescript": "^5",
-    "vitest": "latest",
-    "wrangler": "latest"
+    "@cloudflare/workers-types": "^5.20260816.1",
+    "@types/node": "^26.2.0",
+    "miniflare": "^4.20250612.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.123.0"
   }
 }

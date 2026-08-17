@@ -11,7 +11,7 @@ Eres el encargado de la **portabilidad de datos** del chatbot del miembro. Él N
 del miembro y él tiene todo el derecho a sacarlos cuando quiera.** El protagonista es el
 **archivo entregado** (sus leads, sus conversaciones), nunca el código ni el SQL.
 
-El bot guarda todo en una base de datos en Cloudflare (`horizontes_bot_db`). Tú la consultas,
+El bot guarda todo en su Supabase. Tú la consultas con `npm run db:query`,
 armas los archivos y se los entregas. **Solo lectura: este skill NUNCA borra ni modifica nada.**
 Esta función vive **en el nivel gratis y en el de pago** — es sobre propiedad de datos, así que
 **no hay candado de nivel**. Solo te adaptas a lo que EXISTA: si es un bot Starter no habrá
@@ -28,17 +28,17 @@ SIGUE ESTAS REGLAS AL PIE DE LA LETRA.
 1. Confirma que estás en la carpeta del bot: deben existir `package.json` y `wrangler.toml`.
    Si no, **detente y dilo** — no adivines la carpeta.
 2. Detecta el **nivel** solo para saber qué esperar (NO para bloquear nada): mira `BOT_TIER`
-   en `wrangler.toml` o el campo `tier:` en `member/config.local.ts` (`'free'` | `'pro'`). En
+   en el entorno o el campo `tier:` en `member/config.local.ts` (`'free'` | `'pro'`). En
    Starter la tabla de leads casi siempre está vacía; en Pro puede tener prospectos. Esto solo
    ajusta lo que le ofreces, **no impide exportar**.
 3. Descubre **qué tablas existen de verdad** (no asumas). Corre:
    ```
-   wrangler d1 execute horizontes_bot_db --remote --command "SELECT name FROM sqlite_master WHERE type='table';"
+   npm run db:query -- "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()"
    ```
    En todo bot habrá `conversations`, `messages`, `tickets`. La tabla `leads` existe siempre
    pero puede estar **vacía**.
-4. `wrangler` necesita estar conectado a Cloudflare. Si un comando da error de acceso, dile:
-   *"Necesito conectar Cloudflare una vez. Escribe `! pnpm wrangler login` y sigue los pasos."*
+4. Las consultas leen `DATABASE_URL` (del `.env` o del entorno). Si da error de conexión, dile:
+   *"Necesito la conexión a tu base. Ponla en el archivo `.env` como `DATABASE_URL` (la sacas de Supabase → Project Settings → Database)."*
    No inventes credenciales ni pegues tokens en el chat.
 5. Pregúntale **qué quiere exportar** (una pregunta a la vez, en su idioma):
    - **Leads / prospectos** — los contactos que el bot capturó (nombre, contacto, intención…).
@@ -53,8 +53,9 @@ SIGUE ESTAS REGLAS AL PIE DE LA LETRA.
 > Nota técnica (úsala, no la expliques al miembro): todas las fechas se guardan en
 > **milisegundos** (`Date.now()`). Para "últimos 30 días" el filtro es
 > `created_at >= (strftime('%s','now') - 30*86400) * 1000`; para "todo el historial" **quita el
-> `WHERE`**. Para leer una fecha en humano usa `datetime(<columna>/1000,'unixepoch')`. Si
-> `wrangler` no está en PATH, antepón `pnpm` → `pnpm wrangler d1 execute ...`. Sin `--remote`
+> `WHERE`**. Para leer una fecha en humano usa
+> `to_timestamp(<columna>/1000.0) AT TIME ZONE 'UTC'`. La consulta es de solo lectura:
+> `db:query` rechaza cualquier cosa que no sea un SELECT. Sin `DATABASE_URL`
 > consultas la base local de dev (vacía) — siempre `--remote`.
 
 ## PASO 1 — Saca los datos (consultas de solo lectura)
@@ -65,8 +66,8 @@ completo** si eligió "todo el historial". **Cuenta primero** para saber si hay 
 
 **Leads / prospectos** (Pro y solo si hay filas):
 ```
-wrangler d1 execute horizontes_bot_db --remote --command "SELECT COUNT(*) AS total FROM leads;"
-wrangler d1 execute horizontes_bot_db --remote --json --command "SELECT id, name, contact, channel_user_id, intent, status, notes, exported_to, external_id, metadata, datetime(created_at/1000,'unixepoch') AS creado, datetime(updated_at/1000,'unixepoch') AS actualizado FROM leads WHERE created_at >= <DESDE> ORDER BY created_at DESC;"
+npm run db:query -- "SELECT COUNT(*) AS total FROM leads;"
+npm run db:query -- "SELECT id, name, contact, channel_user_id, intent, status, notes, exported_to, external_id, metadata, to_timestamp(created_at/1000.0) AT TIME ZONE 'UTC' AS creado, to_timestamp(updated_at/1000.0) AT TIME ZONE 'UTC' AS actualizado FROM leads WHERE created_at >= <DESDE> ORDER BY created_at DESC;"
 ```
 La columna `metadata` trae los campos propios del giro en formato JSON (ej. reservación
 `{fecha,hora,personas}`, inmobiliaria `{presupuesto,zona,operacion}`). Déjala tal cual como una
@@ -75,14 +76,14 @@ columna; si el miembro quiere esos campos en columnas separadas, puedes sacarlos
 
 **Conversaciones** (lista de clientes; existe en todo bot):
 ```
-wrangler d1 execute horizontes_bot_db --remote --command "SELECT COUNT(*) AS total FROM conversations;"
-wrangler d1 execute horizontes_bot_db --remote --json --command "SELECT id, channel, channel_user_id, display_name, datetime(started_at/1000,'unixepoch') AS primer_contacto, datetime(last_message_at/1000,'unixepoch') AS ultima_actividad FROM conversations WHERE last_message_at >= <DESDE> ORDER BY last_message_at DESC;"
+npm run db:query -- "SELECT COUNT(*) AS total FROM conversations;"
+npm run db:query -- "SELECT id, channel, channel_user_id, display_name, to_timestamp(started_at/1000.0) AT TIME ZONE 'UTC' AS primer_contacto, to_timestamp(last_message_at/1000.0) AT TIME ZONE 'UTC' AS ultima_actividad FROM conversations WHERE last_message_at >= <DESDE> ORDER BY last_message_at DESC;"
 ```
 
 **Mensajes / transcripciones** (historial de chat; puede ser grande — avísale):
 ```
-wrangler d1 execute horizontes_bot_db --remote --command "SELECT COUNT(*) AS total FROM messages;"
-wrangler d1 execute horizontes_bot_db --remote --json --command "SELECT m.conversation_id, c.channel, c.display_name, m.role, m.content, datetime(m.created_at/1000,'unixepoch') AS fecha FROM messages m LEFT JOIN conversations c ON c.id = m.conversation_id WHERE m.created_at >= <DESDE> ORDER BY m.conversation_id, m.created_at;"
+npm run db:query -- "SELECT COUNT(*) AS total FROM messages;"
+npm run db:query -- "SELECT m.conversation_id, c.channel, c.display_name, m.role, m.content, to_timestamp(m.created_at/1000.0) AT TIME ZONE 'UTC' AS fecha FROM messages m LEFT JOIN conversations c ON c.id = m.conversation_id WHERE m.created_at >= <DESDE> ORDER BY m.conversation_id, m.created_at;"
 ```
 El campo `role` viene en clave: **tradúcelo en el archivo** — `user`→cliente, `assistant`→bot,
 `owner`→dueño, `tool`→sistema. Si son muchísimos mensajes, ofrécele acotar por periodo o exportar
@@ -126,7 +127,7 @@ Lee cada resultado y guárdalo en memoria; **no le pegues el volcado crudo al mi
 
 ## Reglas de seguridad (no las rompas)
 - **Solo lectura.** Únicamente `SELECT`. NUNCA corras `INSERT`, `UPDATE`, `DELETE`, `DROP` ni
-  `wrangler d1 execute ... --file=...schema.sql` desde este skill.
+  `npm run db:apply` desde este skill.
 - **NUNCA** hagas `deploy` ni `git push` ni commits por tu cuenta. Este skill no toca el bot en
   vivo — solo lee y escribe archivos dentro de `member/exportes/`.
 - Pide confirmación antes de **instalar** cualquier cosa o de tocar archivos fuera de

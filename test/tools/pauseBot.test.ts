@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestMiniflare } from "../helpers/miniflareSetup";
-import { Db } from "../../src/db/client";
+import { createTestDb } from "../helpers/pgSetup";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { pauseBotTool } from "../../src/tools/pauseBot";
 
@@ -9,12 +8,11 @@ let convs: ConversationsRepo;
 let convId: string;
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = await mf.getD1Database("DB");
-  convs = new ConversationsRepo(new Db(d1 as any));
+  const d1 = await createTestDb();
+  convs = new ConversationsRepo(d1);
   const conv = await convs.getOrCreate("telegram", "u1");
   convId = conv.id;
-  env = { DB: d1 };
+  env = { DB: d1.driver };
 });
 
 describe("pauseBotTool", () => {

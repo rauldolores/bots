@@ -1,14 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 
-// `src/index.ts` re-exports `SupportAgent` from `./agent`, which imports the
-// `agents` SDK. `agents` (via `partyserver`) imports the virtual
-// `cloudflare:workers` module at load time, which Node's ESM loader can't
-// resolve outside workerd. Mock the `agents` package so the import graph stays
-// in Node-land — we only exercise the Hono router here. Tests that need real
-// agent/runtime behavior use Miniflare instead.
-vi.mock("agents", () => ({ Agent: class {} }));
-
-import worker from "../src/index";
+import worker from "../src/app";
 
 describe("Worker entry", () => {
   const env = {

@@ -1,7 +1,7 @@
 /**
  * Tests for the F5 flywheel: detectors (KB gaps, takeover lessons), the apply
- * pipeline (kb_entry → kb_docs+Vectorize, leccion → learned_lessons setting),
- * dedupe by fingerprint, and the Mejoras routes. LLM + Vectorize stubbed.
+ * pipeline (kb_entry → kb_docs + indice vectorial, leccion → learned_lessons),
+ * dedupe by fingerprint, and the Mejoras routes. LLM simulado.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -24,7 +24,7 @@ vi.mock("../../src/businessContext", () => ({
   renderBusinessContext: () => "CONTEXTO DE NEGOCIO DE PRUEBA",
 }));
 
-import { createTestMiniflare } from "../helpers/miniflareSetup";
+import { createTestDb } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
@@ -71,14 +71,16 @@ async function seedTakeover(userId: string): Promise<string> {
 }
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = (await mf.getD1Database("DB")) as any;
+  const d1 = (await createTestDb()) as any;
   env = {
-    DB: d1,
-    KB: { upsert: vi.fn(async () => ({})), deleteByIds: vi.fn(async () => ({})) },
+    DB: d1.driver,
+    // Ya no hay binding KB: la búsqueda vectorial vive en la misma Postgres.
+    // El stub de Workers AI debe devolver vectores de 1024 dimensiones, que es
+    // lo que declara la columna `vector(1024)` de kb_chunks — con menos, el
+    // INSERT falla.
     AI: {
       run: vi.fn(async (_m: string, input: { text: string[] }) => ({
-        data: input.text.map(() => [0.1, 0.2]),
+        data: input.text.map(() => Array.from({ length: 1024 }, () => 0.1)),
       })),
     },
     ANTHROPIC_API_KEY: "sk-test",
@@ -89,7 +91,7 @@ beforeEach(async () => {
     BUFFER_SECONDS: "8",
     DASHBOARD_PASSWORD: PASSWORD,
   } as unknown as Env;
-  db = new Db(d1);
+  db = d1;
   convs = new ConversationsRepo(db);
   msgs = new MessagesRepo(db);
   insights = new InsightsRepo(db);
@@ -173,7 +175,13 @@ describe("apply / dismiss", () => {
     const docs = await new KbDocsRepo(db).list();
     expect(docs).toHaveLength(1);
     expect(docs[0].title).toBe("Envíos");
-    expect((env.KB as any).upsert).toHaveBeenCalledTimes(1);
+    // Antes esto espiaba el mock de Vectorize. Ahora se puede verificar el
+    // efecto de verdad: el chunk quedó indexado en la base.
+    const chunks = await db.all<{ id: string; title: string }>(
+      "SELECT id, title FROM kb_chunks",
+    );
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].title).toBe("Envíos");
     expect((await suggestions.getById(id))?.status).toBe("applied");
 
     // Re-applying an already-applied suggestion is a no-op.

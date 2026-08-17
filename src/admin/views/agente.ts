@@ -167,11 +167,13 @@ async function loadAgenteData(env: Env): Promise<AgenteData> {
 
   const usageRows = await db
     .all<ToolUsageRow>(
-      `SELECT json_extract(value, '$.toolName') as tool,
+      // json_each de SQLite → jsonb_array_elements de Postgres (ver stats.ts).
+      `SELECT elem->>'toolName' as tool,
               COUNT(*) as n,
               MAX(messages.created_at) as last
-       FROM messages, json_each(messages.tool_calls)
-       WHERE messages.tool_calls IS NOT NULL AND messages.created_at > ?
+       FROM messages, LATERAL jsonb_array_elements(messages.tool_calls::jsonb) as elem
+       WHERE messages.tool_calls IS NOT NULL AND messages.tool_calls <> ''
+         AND messages.created_at > ?
        GROUP BY tool`,
       [thirtyDays],
     )

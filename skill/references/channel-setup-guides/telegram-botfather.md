@@ -57,7 +57,7 @@ El token se guarda como un "secret" para que tu Worker pueda usarlo de forma
 segura. Abre tu terminal **dentro de la carpeta de tu bot** y corre:
 
 ```bash
-pnpm exec wrangler secret put TELEGRAM_BOT_TOKEN
+npx wrangler secret put TELEGRAM_BOT_TOKEN
 ```
 
 Cuando te pregunte el valor, **pega el token** que te dio BotFather y presiona
@@ -76,7 +76,7 @@ manda el mensaje a mi Worker"*. Tu Worker lo configura solo al publicarse.
 1. Publica tu bot con:
 
    ```bash
-   pnpm run deploy
+   npm run deploy
    ```
 
 2. Al terminar, el Worker registra el webhook automáticamente apuntando a:
@@ -94,7 +94,7 @@ manda el mensaje a mi Worker"*. Tu Worker lo configura solo al publicarse.
 
 > **¿No responde?** Revisa el archivo
 > `skill/references/troubleshooting.md`. Lo más común es que el token esté mal
-> copiado o que falte volver a correr `pnpm run deploy`.
+> copiado o que falte volver a correr `npm run deploy`.
 
 ---
 
@@ -112,7 +112,7 @@ Telegram). Es muy fácil:
 4. Guárdalo como secret:
 
    ```bash
-   pnpm exec wrangler secret put OWNER_TELEGRAM_CHAT_ID
+   npx wrangler secret put OWNER_TELEGRAM_CHAT_ID
    ```
 
    Pega el número y presiona Enter.
@@ -120,7 +120,7 @@ Telegram). Es muy fácil:
 5. Vuelve a publicar para aplicar el cambio:
 
    ```bash
-   pnpm run deploy
+   npm run deploy
    ```
 
 A partir de aquí, cada vez que un cliente quiera hablar contigo, recibirás un
@@ -136,9 +136,9 @@ A partir de aquí, cada vez que un cliente quiera hablar contigo, recibirás un
 Si prefieres que el handoff te llegue también a tu email:
 
 ```bash
-pnpm exec wrangler secret put RESEND_API_KEY
-pnpm exec wrangler secret put OWNER_EMAIL
-pnpm run deploy
+npx wrangler secret put RESEND_API_KEY
+npx wrangler secret put OWNER_EMAIL
+npm run deploy
 ```
 
 - `RESEND_API_KEY`: la llave de tu cuenta en [resend.com](https://resend.com)
@@ -167,12 +167,12 @@ Business aprobado.
 3. Guarda todos los secrets:
 
    ```bash
-   pnpm exec wrangler secret put TWILIO_ACCOUNT_SID
-   pnpm exec wrangler secret put TWILIO_AUTH_TOKEN
-   pnpm exec wrangler secret put TWILIO_WA_FROM
-   pnpm exec wrangler secret put TWILIO_HANDOFF_CONTENT_SID
-   pnpm exec wrangler secret put OWNER_WA_NUMBER
-   pnpm run deploy
+   npx wrangler secret put TWILIO_ACCOUNT_SID
+   npx wrangler secret put TWILIO_AUTH_TOKEN
+   npx wrangler secret put TWILIO_WA_FROM
+   npx wrangler secret put TWILIO_HANDOFF_CONTENT_SID
+   npx wrangler secret put OWNER_WA_NUMBER
+   npm run deploy
    ```
 
    - `TWILIO_WA_FROM`: el número de WhatsApp **de Twilio** (el que envía).
@@ -205,11 +205,11 @@ Business aprobado.
 
 - [ ] Creé el bot con @BotFather y copié el token.
 - [ ] Guardé `TELEGRAM_BOT_TOKEN` con `wrangler secret put`.
-- [ ] Corrí `pnpm run deploy` y el webhook quedó conectado.
+- [ ] Corrí `npm run deploy` y el webhook quedó conectado.
 - [ ] Le mandé un mensaje a mi bot y me respondió.
 - [ ] Mandé `/start`, copié mi chat ID del dashboard y guardé
       `OWNER_TELEGRAM_CHAT_ID`.
-- [ ] Volví a correr `pnpm run deploy` y recibí un aviso de prueba al pedir
+- [ ] Volví a correr `npm run deploy` y recibí un aviso de prueba al pedir
       "hablar con un humano".
 
 Si todos están marcados, tu bot ya vive en Telegram. 🎉

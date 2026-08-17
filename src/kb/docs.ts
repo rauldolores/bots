@@ -1,5 +1,5 @@
 /**
- * Dashboard-editable KB documents (D1 `kb_docs`) + their Vectorize lifecycle.
+ * Dashboard-editable KB documents (`kb_docs`) + their pgvector lifecycle.
  *
  * Two KB sources coexist:
  *  • Repo fixtures (scripts/kb-fixtures.json) — packaged with the template.
@@ -12,6 +12,7 @@
  */
 import type { Env } from "../env";
 import { Db } from "../db/client";
+import { PgVectorStore } from "../vector/pgvector";
 import { reindexKb, type KbChunk } from "./reindex";
 import kbFixtures from "../../scripts/kb-fixtures.json";
 
@@ -92,13 +93,13 @@ export function docChunks(doc: KbDoc): KbChunk[] {
 
 /** Re-embed one doc: blanket-delete its old vectors, then upsert fresh ones. */
 export async function indexDoc(env: Env, doc: KbDoc): Promise<{ indexed: number }> {
-  await env.KB.deleteByIds(vectorIds(doc.id));
+  await new PgVectorStore(new Db(env.DB)).deleteByIds(vectorIds(doc.id));
   return reindexKb(env, docChunks(doc));
 }
 
 /** Remove a deleted doc's vectors from the index. */
 export async function removeDocVectors(env: Env, docId: string): Promise<void> {
-  await env.KB.deleteByIds(vectorIds(docId));
+  await new PgVectorStore(new Db(env.DB)).deleteByIds(vectorIds(docId));
 }
 
 /** All dashboard docs as chunks (for the global reindex). */

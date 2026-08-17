@@ -1,21 +1,21 @@
 {
-  "name": "forjabot",
-  "version": "1.1.16",
-  "description": "Forja — instala bots de IA en tu propia infraestructura, en un comando. Las piezas las ponemos nosotros; tu agente las arma. Por Horizontes IA.",
+  "name": "nodia-agents",
+  "version": "2.0.0",
+  "description": "Nodia Agents — instala bots de IA en tu propia infraestructura, en un comando. Las piezas las ponemos nosotros; tu agente las arma. Por Horizontes IA.",
   "license": "MIT",
   "author": "Horizontes IA (Santiago Muñoz) <contacto@innovandohorizontes.com>",
-  "homepage": "https://forjabots.com/docs/",
+  "homepage": "https://nodiagents.com/docs/",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/santmun/forja.git",
+    "url": "git+https://github.com/rauldolores/bots.git",
     "directory": "cli"
   },
   "bugs": {
-    "url": "https://github.com/santmun/forja/issues"
+    "url": "https://github.com/rauldolores/bots/issues"
   },
   "type": "module",
   "bin": {
-    "forjabot": "bin/cli.js"
+    "nodia-agents": "bin/cli.js"
   },
   "engines": {
     "node": ">=18"
@@ -23,10 +23,11 @@
   "keywords": [
     "chatbot",
     "ai",
+    "agents",
     "whatsapp",
-    "cloudflare",
-    "forja",
-    "horizontes"
+    "supabase",
+    "postgres",
+    "nodia"
   ],
   "files": [
     "bin"

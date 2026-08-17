@@ -11,7 +11,8 @@ export class AdminEmailsRepo {
 
   async add(email: string, role: "owner" | "staff" = "owner"): Promise<void> {
     await this.db.run(
-      "INSERT OR REPLACE INTO admin_emails (email, role, added_at) VALUES (?, ?, ?)",
+      `INSERT INTO admin_emails (email, role, added_at) VALUES (?, ?, ?)
+       ON CONFLICT (email) DO UPDATE SET role = EXCLUDED.role, added_at = EXCLUDED.added_at`,
       [email.toLowerCase(), role, Date.now()],
     );
   }

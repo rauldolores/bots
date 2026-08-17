@@ -14,7 +14,7 @@ ayudas un montón.
 ## ¿Quieres mandar un arreglo? → Pull Request (vía fork)
 1. Dale **Fork** a este repo (botón arriba a la derecha).
 2. En tu fork, crea una rama y haz tu cambio. Si usas Claude Code, pídele que lo haga y que
-   corra `pnpm test` + `pnpm typecheck` antes.
+   corra `npm test` + `npm run typecheck` antes.
 3. Abre un **Pull Request** hacia `main` de este repo, explicando **qué cambia y por qué**.
 4. El CI corre los tests solo. Un maintainer lo revisa y lo mergea. (Tú no mergeas directo —
    así protegemos la plantilla de todos.)

@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestMiniflare } from "../helpers/miniflareSetup";
-import { Db } from "../../src/db/client";
+import { createTestDb } from "../helpers/pgSetup";
 import { SettingsRepo } from "../../src/db/settings";
 import {
   type LearnedMapping,
@@ -16,9 +15,8 @@ import {
 let repo: SettingsRepo;
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = await mf.getD1Database("DB");
-  repo = new SettingsRepo(new Db(d1 as any));
+  const d1 = await createTestDb();
+  repo = new SettingsRepo(d1);
 });
 
 describe("learned mapping persistence", () => {

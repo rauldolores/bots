@@ -2,33 +2,19 @@
 # DO NOT commit member-specific values to git.
 
 name = "horizontes-bot-{{BOT_SLUG}}"
-main = "src/index.ts"
+main = "src/runtime/cloudflare.ts"
 compatibility_date = "2026-05-01"
 compatibility_flags = ["nodejs_compat"]
 
 [ai]
 binding = "AI"
 
-[[durable_objects.bindings]]
-name = "AGENT"
-class_name = "SupportAgent"
+# El Durable Object se eliminó (F3): el buffer de mensajes, el estado del
+# agente y el temporizador de 15s viven ahora en Postgres. Ver
+# docs/portabilidad.md.
 
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["SupportAgent"]
-
-[[d1_databases]]
-binding = "DB"
-database_name = "horizontes_bot_db"
-database_id = "{{D1_DATABASE_ID}}"  # filled in by skill at deploy time
-
-[[vectorize]]
-binding = "KB"
-index_name = "horizontes_bot_kb"
-
-[[r2_buckets]]
-binding = "CATALOG"
-bucket_name = "horizontes-bot-catalog-{{BOT_SLUG}}"
+# D1, Vectorize y R2 se eliminaron: los datos y la búsqueda vectorial viven en
+# Supabase, a la que se llega con el secret DATABASE_URL. Ver docs/portabilidad.md.
 
 [vars]
 BOT_NAME = "{{BOT_NAME}}"
@@ -39,10 +25,14 @@ BUFFER_SECONDS = "15"
 DASHBOARD_BASE_URL = "https://horizontes-bot-{{BOT_SLUG}}.workers.dev"
 
 # Secrets (set with `wrangler secret put <NAME>` — never commit values):
+#   DATABASE_URL               required — cadena de conexión de Supabase
+#                              (Project Settings → Database → Connection string).
+#                              Usa el pooler (puerto 6543) para serverless.
 #   ANTHROPIC_API_KEY          required — Claude API
 #   DASHBOARD_PASSWORD         required (Pro) — HTTP Basic Auth for /admin (user: admin)
 #   KB_REINDEX_TOKEN           required — guards POST /kb/reindex (header: X-Reindex-Token)
-#                              set with: wrangler secret put KB_REINDEX_TOKEN
+#   TICK_TOKEN                 optional — protege POST /tick. En Cloudflare no
+#                              hace falta: el cron invoca el handler directo.
 #   TELEGRAM_BOT_TOKEN         per-channel — Telegram bot
 #   MANYCHAT_API_KEY           per-channel — ManyChat (Pro)
 #   TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_WA_FROM   per-channel — Twilio WhatsApp (Pro)
@@ -58,7 +48,10 @@ DASHBOARD_BASE_URL = "https://horizontes-bot-{{BOT_SLUG}}.workers.dev"
 #   CONTROL_PLANE_URL          optional (var) — base URL of the control plane (future reports / license check)
 
 [triggers]
-crons = ["0 3 * * *"]  # daily 3am UTC: purge old messages
+crons = [
+  "* * * * *",   # cada minuto: red de seguridad de la cola del agente
+  "0 3 * * *",   # 3am UTC: purga, insights y flywheel
+]
 
 # DASHBOARD_PASSWORD  (secret) — HTTP Basic Auth password for the admin dashboard; username is always "admin".
 # Set it with: wrangler secret put DASHBOARD_PASSWORD

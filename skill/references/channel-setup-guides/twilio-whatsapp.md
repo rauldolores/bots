@@ -80,21 +80,21 @@ Claude Code va a guardar estas credenciales como "secrets" (datos secretos) de t
 
 ```bash
 # El "usuario" de tu cuenta Twilio (AC...)
-pnpm wrangler secret put TWILIO_ACCOUNT_SID
+npx wrangler secret put TWILIO_ACCOUNT_SID
 
 # La "contraseña" de tu cuenta Twilio (el Auth Token)
-pnpm wrangler secret put TWILIO_AUTH_TOKEN
+npx wrangler secret put TWILIO_AUTH_TOKEN
 
 # El número de WhatsApp DESDE el que sale tu bot — SOLO el número: +14155238886
 # (NO le pongas "whatsapp:", el bot lo agrega solo)
-pnpm wrangler secret put TWILIO_WA_FROM
+npx wrangler secret put TWILIO_WA_FROM
 
 # (Pro) El Content SID de la plantilla aprobada para avisarte (HX...)
-pnpm wrangler secret put TWILIO_HANDOFF_CONTENT_SID
+npx wrangler secret put TWILIO_HANDOFF_CONTENT_SID
 
 # (Pro) Tu propio número de WhatsApp para recibir los avisos — SOLO el número: +521559876543
 # (tampoco lleva "whatsapp:")
-pnpm wrangler secret put OWNER_WA_NUMBER
+npx wrangler secret put OWNER_WA_NUMBER
 ```
 
 Cada comando te va a pedir que pegues el valor. Pega solo el dato (sin comillas) y dale Enter.
@@ -107,7 +107,7 @@ El **webhook** es la "dirección" a la que Twilio le avisa a tu bot que llegó u
 https://TU-WORKER.workers.dev/webhooks/twilio
 ```
 
-Cambia `TU-WORKER.workers.dev` por la dirección real de tu Worker (Claude Code te la da después de hacer el deploy; suele aparecer al terminar `pnpm run deploy`).
+Cambia `TU-WORKER.workers.dev` por la dirección real de tu Worker (Claude Code te la da después de hacer el deploy; suele aparecer al terminar `npm run deploy`).
 
 Para configurar el webhook en Twilio:
 
@@ -136,7 +136,7 @@ Telegram es la forma más rápida y gratis de probar tu bot. También sirve para
 ### Paso 2 — Guarda el token
 
 ```bash
-pnpm wrangler secret put TELEGRAM_BOT_TOKEN
+npx wrangler secret put TELEGRAM_BOT_TOKEN
 ```
 
 Pega el token cuando te lo pida.
@@ -170,7 +170,7 @@ Por **default**, cuando el bot necesita avisarte que una conversación requiere 
 4. Guárdalo en tu bot:
 
 ```bash
-pnpm wrangler secret put OWNER_TELEGRAM_CHAT_ID
+npx wrangler secret put OWNER_TELEGRAM_CHAT_ID
 ```
 
 Pega tu chat id (solo el número) cuando te lo pida.
@@ -192,7 +192,7 @@ Si ya manejas tu negocio con **ManyChat**, puedes conectar tu bot a Instagram, F
 ### Paso 2 — Guarda la API Key
 
 ```bash
-pnpm wrangler secret put MANYCHAT_API_KEY
+npx wrangler secret put MANYCHAT_API_KEY
 ```
 
 Pega la API Key cuando te lo pida.
@@ -244,4 +244,4 @@ El bot te puede avisar de tres formas. Elige al menos una:
 - **"El bot no responde en WhatsApp"** → Revisa que el webhook en Twilio esté en `https://TU-WORKER.workers.dev/webhooks/twilio`, en **POST**, y con la dirección correcta de tu Worker. Si usas Sandbox, asegúrate de haberte "unido" con el mensaje `join ...`.
 - **"No me llega el aviso de humano por WhatsApp"** → Tu plantilla (`TWILIO_HANDOFF_CONTENT_SID`) probablemente todavía no está **Approved**, o no guardaste `OWNER_WA_NUMBER`. Mientras tanto, usa Telegram o correo.
 - **"Telegram no me da mi chat id"** → Asegúrate de haberle dado **`/start`** a tu propio bot primero.
-- **"No sé la URL de mi Worker"** → Aparece al final de `pnpm run deploy`. También puedes verla en el panel de Cloudflare, en Workers & Pages.
+- **"No sé la URL de mi Worker"** → Aparece al final de `npm run deploy`. También puedes verla en el panel de Cloudflare, en Workers & Pages.

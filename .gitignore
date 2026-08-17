@@ -10,12 +10,19 @@ dist/
 .bot-state.json
 .bot-version
 .env*
+# La plantilla SÍ se versiona (no lleva valores).
 !.env.example
 
 # build artifacts
 # NOTE: scripts/kb-fixtures.json is imported by the Worker at build time
 # (src/kb/reindex.ts) so it MUST be tracked. Default content is `[]`;
-# regenerate from member/kb/ with `pnpm kb:reindex`.
+# regenerate from member/kb/ with `npm run kb:reindex`.
 docs/_recon-digest.json
 .mc-credentials.local
 .dashboard-credentials.local
+
+# Despliegue por plataforma
+public/*
+!public/.gitkeep
+.vercel/
+.netlify/

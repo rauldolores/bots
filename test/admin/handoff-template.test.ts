@@ -4,9 +4,8 @@
  * el endpoint de status lo consulta. D1 real via miniflare.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTestMiniflare } from "../helpers/miniflareSetup";
+import { createTestDb } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
-import { Db } from "../../src/db/client";
 import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
 import type { Env } from "../../src/env";
 
@@ -21,10 +20,9 @@ const realFetch = globalThis.fetch;
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = (await mf.getD1Database("DB")) as any;
+  const d1 = (await createTestDb()) as any;
   env = {
-    DB: d1,
+    DB: d1.driver,
     TWILIO_ACCOUNT_SID: "ACtest",
     TWILIO_AUTH_TOKEN: "tok",
     BOT_NAME: "TestBot",
@@ -34,7 +32,7 @@ beforeEach(async () => {
     BUFFER_SECONDS: "8",
     DASHBOARD_PASSWORD: PASSWORD,
   } as unknown as Env;
-  settings = new SettingsRepo(new Db(d1));
+  settings = new SettingsRepo(d1);
   fetchMock = vi.fn();
   globalThis.fetch = fetchMock as any;
 });

@@ -3,7 +3,7 @@
  * the pure downgrade decision the agent applies.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestMiniflare } from "./helpers/miniflareSetup";
+import { createTestDb } from "./helpers/pgSetup";
 import { Db } from "../src/db/client";
 import { ConversationsRepo } from "../src/db/conversations";
 import { MessagesRepo } from "../src/db/messages";
@@ -34,8 +34,7 @@ describe("monthIaCostUsd", () => {
   let msgs: MessagesRepo;
 
   beforeEach(async () => {
-    const mf = await createTestMiniflare();
-    db = new Db((await mf.getD1Database("DB")) as any);
+    db = await createTestDb();
     convs = new ConversationsRepo(db);
     msgs = new MessagesRepo(db);
   });

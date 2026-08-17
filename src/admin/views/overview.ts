@@ -93,7 +93,7 @@ export async function renderOverview(env: Env): Promise<string> {
 
   // --- Actividad 7 días ---------------------------------------------------------
   const activityRows = await db.all<{ day: string; msgs: number }>(
-    `SELECT date(created_at / 1000, 'unixepoch') as day, COUNT(*) as msgs
+    `SELECT to_char(to_timestamp(created_at / 1000.0) AT TIME ZONE 'UTC', 'YYYY-MM-DD') as day, COUNT(*) as msgs
      FROM messages WHERE created_at > ? GROUP BY day ORDER BY day ASC`,
     [sevenDays],
   );

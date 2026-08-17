@@ -5,8 +5,8 @@
 <!-- Qué problema resuelve / qué issue cierra. Ej: "Closes #12" -->
 
 ## Cómo lo probaste
-- [ ] `pnpm test` pasa
-- [ ] `pnpm typecheck` limpio
+- [ ] `npm test` pasa
+- [ ] `npm run typecheck` limpio
 - [ ] (si aplica) probado contra un bot real
 
 ## Checklist

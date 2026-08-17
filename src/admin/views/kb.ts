@@ -1,7 +1,7 @@
 // Tab "Conocimiento" — la KB editable desde el dashboard (F4).
 //
 // El dueño escribe documentos (horarios, políticas, FAQ, promos) y quedan
-// indexados en Vectorize AL GUARDAR: el bot los usa vía searchKb desde el
+// indexados en el indice vectorial AL GUARDAR: el bot los usa via searchKb desde el
 // siguiente mensaje. Los fragmentos precargados del repo conviven con estos.
 import type { Env } from "../../env";
 import { Db } from "../../db/client";

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTestMiniflare } from "../helpers/miniflareSetup";
-import { Db } from "../../src/db/client";
+import { createTestDb } from "../helpers/pgSetup";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { handoffHumanTool } from "../../src/tools/handoffHuman";
 
@@ -19,13 +18,12 @@ let convId: string;
 let fetchSpy: any;
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = await mf.getD1Database("DB");
-  const db = new Db(d1 as any);
+  const d1 = await createTestDb();
+  const db = d1;
   const conv = await new ConversationsRepo(db).getOrCreate("telegram", "owner-test");
   convId = conv.id;
   env = {
-    DB: d1,
+    DB: d1.driver,
     OWNER_EMAIL: "hugo@hugohair.com",
     BUSINESS_NAME: "Hugo Hair",
     DASHBOARD_BASE_URL: "https://dash.test",

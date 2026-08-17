@@ -1,19 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createTestMiniflare } from "../helpers/miniflareSetup";
-import { Db } from "../../src/db/client";
+import { createTestDb } from "../helpers/pgSetup";
 import { SettingsRepo } from "../../src/db/settings";
 import { startLearnMode, loadCapture } from "../../src/learn/mapping";
 import { detectKind } from "../../src/learn/fieldPath";
 
-// `src/index.ts` re-exports `SupportAgent` from `./agent`, which imports the
-// `agents` SDK. `agents` (via `partyserver`) imports the virtual
-// `cloudflare:workers` module at load time, which Node's ESM loader can't
-// resolve outside workerd. Mock the `agents` package so the import graph stays
-// in Node-land — we only exercise the Hono router here. The D1 binding comes
-// from Miniflare and is injected into the `env` object the worker receives.
-vi.mock("agents", () => ({ Agent: class {} }));
-
-import worker from "../../src/index";
+import worker from "../../src/app";
 
 // detectKind already lives in fieldPath.ts; the endpoint just delegates to it.
 // Re-test the heuristic here so the endpoint contract (captured: <kind>) is
@@ -67,9 +58,8 @@ describe("POST /webhooks/learn/:channel", () => {
   let repo: SettingsRepo;
 
   beforeEach(async () => {
-    const mf = await createTestMiniflare();
-    const d1 = await mf.getD1Database("DB");
-    repo = new SettingsRepo(new Db(d1 as any));
+    const d1 = await createTestDb();
+    repo = new SettingsRepo(d1);
     env = {
       BOT_NAME: "Testi",
       BUSINESS_NAME: "Test",
@@ -77,7 +67,7 @@ describe("POST /webhooks/learn/:channel", () => {
       BOT_TIER: "pro",
       BUFFER_SECONDS: "15",
       DASHBOARD_BASE_URL: "https://test.workers.dev",
-      DB: d1,
+      DB: d1.driver,
     };
   });
 

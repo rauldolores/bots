@@ -4,6 +4,7 @@
  * alerta al dueño con umbral de 3 fallos/30min y throttle de 6h. notifyOwner
  * mockeado; D1 real via miniflare.
  */
+import { EMBEDDING_DIMENSIONS } from "../../src/ai/embeddings";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const notifyOwnerMock = vi.fn(async (..._args: unknown[]) => {});
@@ -14,7 +15,7 @@ vi.mock("../../src/tools/handoffHuman", () => ({
   handoffHumanTool: () => ({}),
 }));
 
-import { createTestMiniflare } from "../helpers/miniflareSetup";
+import { createTestDb } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
@@ -39,14 +40,12 @@ let suggestions: SuggestionsRepo;
 let settings: SettingsRepo;
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = (await mf.getD1Database("DB")) as any;
+  const d1 = (await createTestDb()) as any;
   env = {
-    DB: d1,
-    KB: { upsert: vi.fn(async () => ({})), deleteByIds: vi.fn(async () => ({})) },
+    DB: d1.driver,
     AI: {
       run: vi.fn(async (_m: string, input: { text: string[] }) => ({
-        data: input.text.map(() => [0.1, 0.2]),
+        data: input.text.map(() => Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1)),
       })),
     },
     ANTHROPIC_API_KEY: "sk-test",
@@ -57,7 +56,7 @@ beforeEach(async () => {
     BUFFER_SECONDS: "8",
     DASHBOARD_PASSWORD: PASSWORD,
   } as unknown as Env;
-  db = new Db(d1);
+  db = d1;
   suggestions = new SuggestionsRepo(db);
   settings = new SettingsRepo(db);
   notifyOwnerMock.mockClear();

@@ -81,6 +81,6 @@ export class MessagesRepo {
       "DELETE FROM messages WHERE created_at < ?",
       [cutoffMs],
     );
-    return res.meta.changes ?? 0;
+    return res.rowsAffected;
   }
 }

@@ -3,6 +3,7 @@ import { validateDeployConfig } from "../../scripts/deploy-check";
 
 describe("validateDeployConfig", () => {
   const full = {
+    DATABASE_URL: "postgresql://user:pw@host:6543/postgres",
     ANTHROPIC_API_KEY: "sk-x",
     BOT_NAME: "Testi",
     BOT_TIER: "pro",
@@ -12,6 +13,15 @@ describe("validateDeployConfig", () => {
 
   it("passes with a complete Pro config", () => {
     expect(validateDeployConfig(full)).toEqual({ ok: true, errors: [] });
+  });
+
+  it("fails when DATABASE_URL is missing", () => {
+    // Sin base no hay bot: es el fallo más común de quien instala, y descubrirlo
+    // al primer mensaje del primer cliente sería mucho peor que aquí.
+    const { DATABASE_URL, ...rest } = full;
+    const r = validateDeployConfig(rest);
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(" ")).toContain("DATABASE_URL");
   });
 
   it("passes a Free config without DASHBOARD_PASSWORD", () => {

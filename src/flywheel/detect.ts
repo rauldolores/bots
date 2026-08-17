@@ -97,10 +97,15 @@ export async function detectLessons(env: Env, limit = 3): Promise<FlywheelResult
   const sevenDays = Date.now() - 7 * 86_400_000;
 
   const convs = await db.all<{ conversation_id: string; display_name: string | null }>(
-    `SELECT DISTINCT m.conversation_id, c.display_name
+    // Postgres rechaza SELECT DISTINCT con un ORDER BY que no esté en el SELECT.
+    // Agrupar por conversación además arregla una ambigüedad que traía el
+    // original: con DISTINCT, cuál de los created_at de la conversación mandaba
+    // en el orden quedaba al azar. Ahora es explícito: el más reciente.
+    `SELECT m.conversation_id, c.display_name
      FROM messages m LEFT JOIN conversations c ON c.id = m.conversation_id
      WHERE m.role = 'owner' AND m.created_at > ?
-     ORDER BY m.created_at DESC LIMIT 10`,
+     GROUP BY m.conversation_id, c.display_name
+     ORDER BY MAX(m.created_at) DESC LIMIT 10`,
     [sevenDays],
   );
 

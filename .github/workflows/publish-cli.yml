@@ -1,4 +1,4 @@
-# Publica el CLI `forjabot` a npm con PROCEDENCIA (provenance), usando
+# Publica el CLI `nodia-agents` a npm con PROCEDENCIA (provenance), usando
 # Trusted Publishing: npm confía en este repositorio vía OIDC, así que NO hay
 # ningún token guardado en GitHub. Nada que robar, nada que rotar.
 #
@@ -7,10 +7,16 @@
 # "Provenance" enlazando al commit y a la corrida que lo publicó.
 #
 # Configuración previa (una sola vez, en npmjs.com):
-#   Paquete forjabot → Settings → Trusted Publisher → GitHub Actions
-#     Organization or user: santmun
-#     Repository:           forja
+#   Paquete nodia-agents → Settings → Trusted Publisher → GitHub Actions
+#     Organization or user: rauldolores
+#     Repository:           bots
 #     Workflow filename:    publish-cli.yml
+#
+# OJO con la PRIMERA publicación de `nodia-agents`: Trusted Publishing solo
+# funciona sobre un paquete que YA existe en npm, así que no hay nada que
+# configurar hasta que exista. Esa primera versión se publica a mano
+# (`cd cli && npm publish --access public`) y DESPUÉS se registra el Trusted
+# Publisher aquí arriba. De ahí en adelante, este workflow se encarga.
 #
 # Cómo se dispara: a mano desde la pestaña Actions, o al publicar un release.
 name: Publicar CLI en npm
