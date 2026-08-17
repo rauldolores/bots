@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestMiniflare } from "../helpers/miniflareSetup";
-import { Db } from "../../src/db/client";
+import { createTestDb } from "../helpers/pgSetup";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { MessagesRepo } from "../../src/db/messages";
 
@@ -9,9 +8,8 @@ let msgRepo: MessagesRepo;
 let convId: string;
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = await mf.getD1Database("DB");
-  const db = new Db(d1 as any);
+  const d1 = await createTestDb();
+  const db = d1;
   convRepo = new ConversationsRepo(db);
   msgRepo = new MessagesRepo(db);
   const conv = await convRepo.getOrCreate("telegram", "user_999");

@@ -1,0 +1,12 @@
+-- Guarda la respuesta ya redactada mientras se intenta enviarla.
+--
+-- El problema que arregla: el turno persiste el mensaje del asistente y DESPUÉS
+-- lo manda por el canal. Si el envío fallaba (canal caído, token vencido, rate
+-- limit de Telegram), el reintento encontraba el buffer ya vacío, cerraba el
+-- trabajo, y el cliente se quedaba esperando una respuesta que sí existía pero
+-- nunca salió.
+--
+-- Con esto, el reintento reenvía el texto ya redactado en vez de volver a
+-- empezar: sin gastar LLM otra vez, y sin duplicar el mensaje del cliente ni el
+-- del asistente en el historial.
+ALTER TABLE agent_jobs ADD COLUMN IF NOT EXISTS pending_reply TEXT;

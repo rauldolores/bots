@@ -1,0 +1,14 @@
+# Config desechable para la mitad workerd del spike de F0.
+# No tiene nada que ver con el wrangler.toml del bot: aquí solo se prueba si
+# postgres.js sobrevive dentro de workerd. Borrar junto con el spike.
+
+name = "kontrolia-bots-spike-postgres"
+main = "worker.ts"
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Supabase local ya existente en la máquina, esquema `bots` para no mezclarse
+# con las tablas de KontrolIA. Credenciales de desarrollo públicas por diseño —
+# no son secretos.
+DATABASE_URL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres?options=-c%20search_path%3Dbots"

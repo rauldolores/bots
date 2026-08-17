@@ -1,0 +1,20 @@
+[build]
+  command = "npm run build:netlify"
+  publish = "public"
+
+# Todo el tráfico va a la función: el bot es una sola app Hono.
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/bot/:splat"
+  status = 200
+  force = true
+
+# Netlify NO ofrece `waitUntil`: la función muere al responder el webhook. Por
+# eso aquí la cola SOLO avanza con estos disparos programados, y la respuesta
+# del bot llega en el siguiente — no a los 15s exactos como en las otras
+# plataformas. Es el destino con peor latencia de los cuatro.
+[functions."tick"]
+  schedule = "* * * * *"
+
+[functions."nightly"]
+  schedule = "0 3 * * *"

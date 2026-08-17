@@ -5,7 +5,7 @@
  * (apiApp.request), the same way the admin tests hit adminApp.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestMiniflare } from "../helpers/miniflareSetup";
+import { createTestDb } from "../helpers/pgSetup";
 import { apiApp, type MetricsResponse } from "../../src/api";
 import { Db } from "../../src/db/client";
 import { BOT_VERSION } from "../../src/version";
@@ -21,7 +21,7 @@ let db: Db;
 /** env WITH the control-plane token configured (auth can pass). */
 function authedEnv(): Env {
   return {
-    DB: d1,
+    DB: d1.driver,
     BOT_NAME: "Testi",
     BUSINESS_NAME: "Test",
     BOT_LANGUAGE: "es",
@@ -41,9 +41,8 @@ function noTokenEnv(): Env {
 const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  d1 = (await mf.getD1Database("DB")) as any;
-  db = new Db(d1);
+  d1 = (await createTestDb()) as any;
+  db = d1;
 });
 
 /** Seed: 2 conversations (one escalated via a ticket), 3 messages, 2 leads. */

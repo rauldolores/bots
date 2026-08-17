@@ -8,7 +8,7 @@
  * image- and voice-input handling).
  *
  * Consumed by:
- *   - `scripts/eval-bot-live.ts` (`pnpm eval`) to drive the live bot, and
+ *   - `scripts/eval-bot-live.ts` (`npm run eval`) to drive the live bot, and
  *   - unit tests that assert the fixture set stays well-formed.
  *
  * The JSON is the single source of truth; this file just adds the type shape

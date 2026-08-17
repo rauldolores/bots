@@ -139,12 +139,13 @@ export async function runFollowups(
 
   for (const cand of candidates) {
     // Claim ANTES de enviar: si otra corrida (o un tick concurrente) ya lo
-    // tomó, INSERT OR IGNORE no escribe y saltamos — imposible duplicar.
+    // tomó, el ON CONFLICT no escribe y saltamos — imposible duplicar.
     const claim = await db.run(
-      "INSERT OR IGNORE INTO followup_sends (conversation_id, reason, sent_at) VALUES (?, ?, ?)",
+      `INSERT INTO followup_sends (conversation_id, reason, sent_at)
+       VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
       [cand.id, cand.reason, now],
     );
-    if ((claim.meta.changes ?? 0) === 0) {
+    if (claim.rowsAffected === 0) {
       skipped++;
       continue;
     }

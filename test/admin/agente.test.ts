@@ -4,7 +4,7 @@
  * happen in these routes (tool construction is side-effect free).
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestMiniflare } from "../helpers/miniflareSetup";
+import { createTestDb } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { Db } from "../../src/db/client";
 import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
@@ -28,10 +28,9 @@ let env: Env;
 let settings: SettingsRepo;
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = (await mf.getD1Database("DB")) as any;
+  const d1 = (await createTestDb()) as any;
   env = {
-    DB: d1,
+    DB: d1.driver,
     ANTHROPIC_API_KEY: "sk-test",
     BOT_NAME: "TestBot",
     BUSINESS_NAME: "Negocio de Prueba",
@@ -40,7 +39,7 @@ beforeEach(async () => {
     BUFFER_SECONDS: "8",
     DASHBOARD_PASSWORD: PASSWORD,
   } as unknown as Env;
-  settings = new SettingsRepo(new Db(d1));
+  settings = new SettingsRepo(d1);
 });
 
 describe("Mi Agente — page and canvas", () => {

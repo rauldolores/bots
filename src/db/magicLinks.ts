@@ -45,6 +45,6 @@ export class MagicLinksRepo {
       "DELETE FROM magic_links WHERE expires_at < ? OR used_at IS NOT NULL",
       [Date.now()],
     );
-    return res.meta.changes ?? 0;
+    return res.rowsAffected;
   }
 }

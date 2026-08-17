@@ -1,6 +1,9 @@
 import { tool } from "ai";
 import { z } from "zod";
 import type { Env } from "../env";
+import { Db } from "../db/client";
+import { getEmbeddingProvider } from "../ai/embeddings";
+import { PgVectorStore } from "../vector/pgvector";
 
 export interface SearchKbResult {
   title: string;
@@ -17,18 +20,15 @@ export function searchKbTool(env: Env) {
     }),
     execute: async ({ query }) => {
       try {
-        const embedding = await env.AI.run("@cf/baai/bge-m3", {
-          text: query,
-        });
-        const vec = (embedding as any).data?.[0];
+        const [vec] = await getEmbeddingProvider(env).embed([query]);
         if (!Array.isArray(vec)) {
           return { error: "transient" as const, message: "embedding shape unexpected" };
         }
-        const matches = await env.KB.query(vec, { topK: 5 });
-        const results: SearchKbResult[] = (matches.matches ?? []).map((m: any) => ({
-          title: (m.metadata?.title as string) ?? "",
-          content: (m.metadata?.content as string) ?? "",
-          score: m.score ?? 0,
+        const matches = await new PgVectorStore(new Db(env.DB)).query(vec, 5);
+        const results: SearchKbResult[] = matches.map((m) => ({
+          title: m.metadata.title,
+          content: m.metadata.content,
+          score: m.score,
         }));
         return { results };
       } catch (e: any) {

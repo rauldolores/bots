@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { createTestMiniflare } from "./helpers/miniflareSetup";
+import { createTestDb } from "./helpers/pgSetup";
 import { Db } from "../src/db/client";
 import { ConversationsRepo } from "../src/db/conversations";
 
@@ -35,15 +35,14 @@ async function seedConv(userId: string, lastMsgAt: number) {
 }
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = await mf.getD1Database("DB");
+  const d1 = await createTestDb();
   env = {
-    DB: d1,
+    DB: d1.driver,
     TWILIO_ACCOUNT_SID: "ACtest",
     TWILIO_AUTH_TOKEN: "tok",
     TWILIO_WA_FROM: "+15550001111",
   };
-  db = new Db(d1 as any);
+  db = d1;
   freeformSends.length = 0;
   templateCalls.length = 0;
   vi.stubGlobal("fetch", async (url: any) => {

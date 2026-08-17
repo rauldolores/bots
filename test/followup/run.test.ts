@@ -26,7 +26,7 @@ vi.mock("../../src/replies/sender", () => ({
   pickAdapter: () => ({ sendReply: (...a: unknown[]) => sendReplyMock(...a) }),
 }));
 
-import { createTestMiniflare } from "../helpers/miniflareSetup";
+import { createTestDb } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { MessagesRepo } from "../../src/db/messages";
@@ -81,10 +81,9 @@ async function markHot(convId: string) {
 }
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = (await mf.getD1Database("DB")) as any;
+  const d1 = (await createTestDb()) as any;
   env = {
-    DB: d1,
+    DB: d1.driver,
     BOT_NAME: "Ana",
     BUSINESS_NAME: "Mi Negocio",
     BOT_LANGUAGE: "es",
@@ -92,7 +91,7 @@ beforeEach(async () => {
     BUFFER_SECONDS: "8",
     MANYCHAT_API_KEY: "mc-test",
   } as unknown as Env;
-  db = new Db(d1);
+  db = d1;
   convs = new ConversationsRepo(db);
   msgs = new MessagesRepo(db);
   insights = new InsightsRepo(db);

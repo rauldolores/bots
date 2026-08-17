@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestMiniflare } from "../helpers/miniflareSetup";
+import { createTestDb } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { MessagesRepo } from "../../src/db/messages";
@@ -12,10 +12,9 @@ let convId: string;
 const DAY = 24 * 60 * 60 * 1000;
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = await mf.getD1Database("DB");
-  env = { DB: d1 };
-  db = new Db(d1 as any);
+  const d1 = await createTestDb();
+  env = { DB: d1.driver };
+  db = d1;
   const conv = await new ConversationsRepo(db).getOrCreate("telegram", "purge-test");
   convId = conv.id;
 });

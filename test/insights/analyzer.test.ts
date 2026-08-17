@@ -22,7 +22,7 @@ vi.mock("../../src/llm/provider", () => ({
   }),
 }));
 
-import { createTestMiniflare } from "../helpers/miniflareSetup";
+import { createTestDb } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { MessagesRepo } from "../../src/db/messages";
@@ -62,10 +62,9 @@ async function seedIdleConversation(userId: string): Promise<string> {
 }
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = (await mf.getD1Database("DB")) as any;
-  env = { DB: d1, ANTHROPIC_API_KEY: "sk-test", BUSINESS_NAME: "Negocio Test" } as unknown as Env;
-  db = new Db(d1);
+  const d1 = (await createTestDb()) as any;
+  env = { DB: d1.driver, ANTHROPIC_API_KEY: "sk-test", BUSINESS_NAME: "Negocio Test" } as unknown as Env;
+  db = d1;
   convs = new ConversationsRepo(db);
   msgs = new MessagesRepo(db);
   insights = new InsightsRepo(db);

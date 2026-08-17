@@ -1,9 +1,10 @@
 /**
  * Tests for the Conocimiento (KB) tab routes + the budget save route.
- * Vectorize/AI stubbed; D1 real via miniflare.
+ * Workers AI simulado; la base y pgvector son reales.
  */
+import { EMBEDDING_DIMENSIONS } from "../../src/ai/embeddings";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createTestMiniflare } from "../helpers/miniflareSetup";
+import { createTestDb } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { Db } from "../../src/db/client";
 import { KbDocsRepo } from "../../src/kb/docs";
@@ -26,20 +27,15 @@ const FORM = { ...AUTH, "Content-Type": "application/x-www-form-urlencoded" };
 
 let env: Env;
 let repo: KbDocsRepo;
-let kbUpsert: ReturnType<typeof vi.fn>;
-let kbDelete: ReturnType<typeof vi.fn>;
+let db: Db;
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = (await mf.getD1Database("DB")) as any;
-  kbUpsert = vi.fn(async () => ({}));
-  kbDelete = vi.fn(async () => ({}));
+  db = await createTestDb();
   env = {
-    DB: d1,
-    KB: { upsert: kbUpsert, deleteByIds: kbDelete },
+    DB: db.driver,
     AI: {
       run: vi.fn(async (_m: string, input: { text: string[] }) => ({
-        data: input.text.map(() => [0.1, 0.2]),
+        data: input.text.map(() => Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1)),
       })),
     },
     BOT_NAME: "TestBot",
@@ -49,8 +45,15 @@ beforeEach(async () => {
     BUFFER_SECONDS: "8",
     DASHBOARD_PASSWORD: PASSWORD,
   } as unknown as Env;
-  repo = new KbDocsRepo(new Db(d1));
+  repo = new KbDocsRepo(db);
 });
+
+/** Lo que quedó indexado de verdad, en vez de espiar un mock de Vectorize. */
+function chunks() {
+  return db.all<{ id: string; content: string }>(
+    "SELECT id, content FROM kb_chunks ORDER BY id",
+  );
+}
 
 describe("KB tab", () => {
   it("renders the list (empty state)", async () => {
@@ -61,7 +64,7 @@ describe("KB tab", () => {
     expect(html).toContain("Nuevo documento");
   });
 
-  it("save persists the doc AND indexes it into Vectorize", async () => {
+  it("save persists the doc AND indexes it", async () => {
     const res = await adminApp.request(
       "/kb/save",
       {
@@ -78,11 +81,10 @@ describe("KB tab", () => {
     expect(docs).toHaveLength(1);
     expect(docs[0].title).toBe("Horarios");
 
-    // Indexed on save: stale range deleted + fresh vector upserted.
-    expect(kbDelete).toHaveBeenCalledTimes(1);
-    expect(kbUpsert).toHaveBeenCalledTimes(1);
-    const vectors = kbUpsert.mock.calls[0][0] as any[];
-    expect(vectors[0].metadata.content).toContain("Abrimos 9-7");
+    // Se indexa al guardar.
+    const indexado = await chunks();
+    expect(indexado).toHaveLength(1);
+    expect(indexado[0].content).toContain("Abrimos 9-7");
   });
 
   it("editing keeps the same id (hidden field) and re-indexes", async () => {
@@ -101,7 +103,10 @@ describe("KB tab", () => {
     const docs = await repo.list();
     expect(docs).toHaveLength(1);
     expect(docs[0].content).toBe("v2");
-    expect(kbUpsert).toHaveBeenCalledTimes(2);
+    // Reindexado: el chunk refleja la edición, sin dejar el viejo atrás.
+    const indexado = await chunks();
+    expect(indexado).toHaveLength(1);
+    expect(indexado[0].content).toBe("v2");
   });
 
   it("rejects an empty save without touching the index", async () => {
@@ -112,7 +117,7 @@ describe("KB tab", () => {
     );
     expect(res.status).toBe(302);
     expect(await repo.list()).toHaveLength(0);
-    expect(kbUpsert).not.toHaveBeenCalled();
+    expect(await chunks()).toHaveLength(0);
   });
 
   it("delete removes the doc and its vectors", async () => {
@@ -122,7 +127,7 @@ describe("KB tab", () => {
       env,
     );
     const [doc] = await repo.list();
-    kbDelete.mockClear();
+    expect(await chunks()).toHaveLength(1);
 
     const res = await adminApp.request(
       `/kb/${encodeURIComponent(doc.id)}/delete`,
@@ -131,8 +136,9 @@ describe("KB tab", () => {
     );
     expect(res.status).toBe(302);
     expect(await repo.list()).toHaveLength(0);
-    expect(kbDelete).toHaveBeenCalledTimes(1);
-    expect((kbDelete.mock.calls[0][0] as string[])[0]).toBe(`dash:${doc.id}#0`);
+    // Borrar el doc también saca sus vectores: si no, searchKb seguiría
+    // devolviendo contenido que el dueño ya eliminó del panel.
+    expect(await chunks()).toHaveLength(0);
   });
 
   it("requires auth", async () => {

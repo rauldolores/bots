@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestMiniflare } from "./helpers/miniflareSetup";
+import { createTestDb } from "./helpers/pgSetup";
 import { Db } from "../src/db/client";
 import { ConversationsRepo } from "../src/db/conversations";
 import { normalizeForSpam, isRepeatSpam, isOverDailyCap, DAILY_TURN_CAP, DAILY_CAP_MESSAGE } from "../src/spam";
@@ -15,9 +15,8 @@ async function addUserMsg(content: string, createdAt: number) {
 }
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = await mf.getD1Database("DB");
-  db = new Db(d1 as any);
+  const d1 = await createTestDb();
+  db = d1;
   const conv = await new ConversationsRepo(db).getOrCreate("telegram", "spam-test");
   convId = conv.id;
 });

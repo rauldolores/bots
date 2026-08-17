@@ -5,7 +5,7 @@
  * Walks the member knowledge base (`member/kb/`) and produces a flat
  * `scripts/kb-fixtures.json` snapshot of every source document. This snapshot
  * is the deterministic input that:
- *   - `pnpm kb:reindex` feeds into the Vectorize reindex RPC, and
+ *   - `npm run kb:reindex` feeds into the KB reindex endpoint, and
  *   - eval / unit tests consume so they never have to hit the real filesystem
  *     or a live embedding model.
  *
@@ -144,7 +144,7 @@ function main(): void {
     console.log("ℹ️  KB is empty. Drop .md / .json docs into member/kb/ then re-run.");
   }
   console.log(
-    "ℹ️  Manifest regenerated. Trigger the real Vectorize reindex AFTER deploy:\n" +
+    "ℹ️  Manifest regenerated. Trigger the real KB reindex AFTER deploy:\n" +
       '    curl -X POST https://<worker>/kb/reindex -H "X-Reindex-Token: $KB_REINDEX_TOKEN"',
   );
 }

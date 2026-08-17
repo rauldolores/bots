@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createTestMiniflare } from "../helpers/miniflareSetup";
-import { Db } from "../../src/db/client";
+import { createTestDb } from "../helpers/pgSetup";
 import { SettingsRepo } from "../../src/db/settings";
 import { saveLearnedMapping, type LearnedMapping } from "../../src/learn/mapping";
 import { makeLearnedAdapter } from "../../src/channels/learned";
@@ -11,10 +10,9 @@ let repo: SettingsRepo;
 let env: Env;
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  d1 = await mf.getD1Database("DB");
-  repo = new SettingsRepo(new Db(d1));
-  env = { DB: d1, MANYCHAT_API_KEY: "key" } as unknown as Env;
+  d1 = await createTestDb();
+  repo = new SettingsRepo(d1);
+  env = { DB: d1.driver, MANYCHAT_API_KEY: "key" } as unknown as Env;
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -221,7 +219,7 @@ describe("makeLearnedAdapter.sendReply — content.type (auto-channel)", () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response("{}", { status: 200 }));
-    const envWa = { DB: d1, MANYCHAT_API_KEY: "key", MANYCHAT_CONTENT_TYPE: "whatsapp" } as unknown as Env;
+    const envWa = { DB: d1.driver, MANYCHAT_API_KEY: "key", MANYCHAT_CONTENT_TYPE: "whatsapp" } as unknown as Env;
     const adapter = makeLearnedAdapter("zapier");
     // No channel in payload, no mapping, env override present.
     await adapter.parseIncoming(req({ id: "u4", last_input_text: "x" }), envWa);
@@ -277,7 +275,7 @@ describe("makeLearnedAdapter.sendReply — content.type (auto-channel)", () => {
     await expect(
       adapter.sendReply(
         { channel: "manychat", channelUserId: "abc", chunks: ["hi"] },
-        { DB: d1 } as unknown as Env,
+        { DB: d1.driver } as unknown as Env,
       ),
     ).rejects.toThrow("MANYCHAT_API_KEY not set");
   });

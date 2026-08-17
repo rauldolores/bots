@@ -1,14 +1,30 @@
-import type { D1Database, DurableObjectNamespace, R2Bucket, VectorizeIndex, Ai } from "@cloudflare/workers-types";
-import type { SupportAgent } from "./agent";
+import type { Ai } from "@cloudflare/workers-types";
+import type { SqlDriver } from "./db/driver";
 
 export interface Env {
   // Bindings
-  // Typed namespace so we can call the agent's methods via RPC (stub.ingest()).
-  AGENT: DurableObjectNamespace<SupportAgent>;
-  DB: D1Database;
-  KB: VectorizeIndex;
-  CATALOG: R2Bucket;
-  AI: Ai;
+  //
+  // El Durable Object desapareció (F3): el buffer, el estado y el temporizador
+  // del agente viven en Postgres (agent_jobs / agent_state / pending_messages),
+  // que es lo único que funciona igual en las cuatro plataformas.
+  // Ya no es un binding de D1 sino el driver de Postgres que arma el adaptador
+  // de cada plataforma. Los 61 `new Db(env.DB)` del código siguen igual.
+  DB: SqlDriver;
+  // Cadena de conexión de Supabase. La lee el adaptador de la plataforma para
+  // construir `DB`; el resto del código no la toca. Ver src/runtime/env.ts.
+  DATABASE_URL?: string;
+  // La búsqueda vectorial dejó de ser un binding: vive en la misma Postgres
+  // (tabla kb_chunks). Se construye con `new PgVectorStore(new Db(env.DB))`.
+  // R2 (CATALOG) se eliminó: estaba declarado y no se usaba en ninguna parte.
+  //
+  // Workers AI es OPCIONAL: solo existe corriendo en Cloudflare. Fuera de ahí,
+  // los embeddings y la transcripción salen por OpenAI. Ver src/ai/embeddings.ts.
+  AI?: Ai;
+
+  // Proveedor de embeddings: "workers-ai" | "openai" | "auto" (default).
+  EMBEDDING_PROVIDER?: string;
+  OPENAI_EMBEDDING_MODEL?: string;
+  OPENAI_TRANSCRIBE_MODEL?: string;
 
   // Vars (member-set)
   BOT_NAME: string;
@@ -88,8 +104,13 @@ export interface Env {
   DASHBOARD_PUBLIC?: string;
 
   // Token guarding POST /kb/reindex (header: X-Reindex-Token). Secret.
-  // Set via `wrangler secret put KB_REINDEX_TOKEN`.
   KB_REINDEX_TOKEN: string;
+
+  // Protege POST /tick (header: X-Tick-Token). Lo usan los crons que disparan
+  // por HTTP (Vercel, Netlify). Sin él, el endpoint queda cerrado — dejarlo
+  // abierto permitiría a cualquiera forzar turnos del agente y gastar LLM.
+  // En un servidor Node no hace falta: el tick corre por dentro del proceso.
+  TICK_TOKEN?: string;
 
   // Control plane (hosted): glue para que un plano de control externo lea este
   // bot self-hosted vía los endpoints /api/*. Ambos opcionales; sin el token,

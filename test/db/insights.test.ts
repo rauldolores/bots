@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestMiniflare } from "../helpers/miniflareSetup";
+import { createTestDb } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { InsightsRepo, type UpsertInsightInput } from "../../src/db/insights";
@@ -23,8 +23,7 @@ function makeInput(conversationId: string, overrides: Partial<UpsertInsightInput
 }
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  db = new Db((await mf.getD1Database("DB")) as any);
+  db = await createTestDb();
   convs = new ConversationsRepo(db);
   repo = new InsightsRepo(db);
 });

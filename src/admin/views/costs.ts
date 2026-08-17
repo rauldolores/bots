@@ -35,7 +35,7 @@ export async function renderCosts(env: Env, saved = false): Promise<string> {
     cached: number;
     msgs: number;
   }>(
-    `SELECT date(created_at / 1000, 'unixepoch') as day, model_used,
+    `SELECT to_char(to_timestamp(created_at / 1000.0) AT TIME ZONE 'UTC', 'YYYY-MM-DD') as day, model_used,
             SUM(COALESCE(input_tokens, 0)) as input,
             SUM(COALESCE(output_tokens, 0)) as output,
             SUM(COALESCE(cached_input_tokens, 0)) as cached,

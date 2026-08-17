@@ -135,7 +135,7 @@ adminApp.get("/kb/:id/edit", async (c) => {
   return c.html(renderKbEditor(doc, c.env));
 });
 
-// Save = persist in D1 + index into Vectorize immediately (stale vectors for
+// Save = persist in Postgres + index into pgvector immediately (stale vectors for
 // the doc are blanket-deleted first), so searchKb uses it on the next message.
 adminApp.post("/kb/save", async (c) => {
   const form = await c.req.formData();

@@ -1,4 +1,4 @@
-# Forja Admin — Design System
+# KontrolIA Bots Admin — Design System
 
 Retro-terminal dark theme for the bot admin dashboard. This is the **contract**
 for every view under `src/admin/views/`. The shell (`layout.ts`) already loads

@@ -16,7 +16,7 @@ Que cuando un cliente le escriba a tu número de WhatsApp, tu bot le responda so
 
 - Necesitas una cuenta de **Facebook** y acceso a **https://developers.facebook.com** (Meta for Developers). Es gratis.
 - Un **Business Portfolio** (portafolio de negocio) en **https://business.facebook.com**. Si no tienes, el asistente te deja crear uno en el camino.
-- Tu Worker ya desplegado (Claude Code te da la URL al terminar `pnpm run deploy`, algo como `https://TU-WORKER.workers.dev`).
+- Tu Worker ya desplegado (Claude Code te da la URL al terminar `npm run deploy`, algo como `https://TU-WORKER.workers.dev`).
 
 ---
 
@@ -79,21 +79,21 @@ Claude Code las guarda como "secrets" del Worker en Cloudflare. Cuando te lo pid
 
 ```bash
 # El Phone Number ID del número (el número largo, NO el teléfono)
-pnpm wrangler secret put WHATSAPP_PHONE_NUMBER_ID
+npx wrangler secret put WHATSAPP_PHONE_NUMBER_ID
 
 # El access token del System User (no expira)
-pnpm wrangler secret put WHATSAPP_ACCESS_TOKEN
+npx wrangler secret put WHATSAPP_ACCESS_TOKEN
 
 # El verify token que TÚ inventaste (Paso 5)
 # — puedes saltarlo si vas a reutilizar META_VERIFY_TOKEN
-pnpm wrangler secret put WHATSAPP_VERIFY_TOKEN
+npx wrangler secret put WHATSAPP_VERIFY_TOKEN
 
 # El App Secret de Settings → Basic
 # — puedes saltarlo si vas a reutilizar META_APP_SECRET
-pnpm wrangler secret put WHATSAPP_APP_SECRET
+npx wrangler secret put WHATSAPP_APP_SECRET
 ```
 
-Después de guardarlos, Claude corre `pnpm run deploy` para que el Worker tome los secrets.
+Después de guardarlos, Claude corre `npm run deploy` para que el Worker tome los secrets.
 
 > ⚠️ **Nunca** pegues estos valores en el chat. Solo van en la terminal con `wrangler secret put` (la entrada va oculta).
 
@@ -131,7 +131,7 @@ Cuando ya funcione con el número de prueba y quieras atender a **cualquier** cl
 1. En **WhatsApp → API Setup** dale **Add phone number** y registra tu número de negocio (uno que **no** esté ya en la app de WhatsApp normal).
 2. Haz la **verificación de negocio** de Meta en **business.facebook.com → Security Center**. Tarda desde horas hasta varios días; pide documentos del negocio.
 3. Sube el número a un **nivel de mensajería** (Meta arranca en 250 conversaciones/día y sube solo según tu calidad).
-4. Copia el **nuevo Phone Number ID** de ese número y actualízalo: `pnpm wrangler secret put WHATSAPP_PHONE_NUMBER_ID` → `pnpm run deploy`.
+4. Copia el **nuevo Phone Number ID** de ese número y actualízalo: `npx wrangler secret put WHATSAPP_PHONE_NUMBER_ID` → `npm run deploy`.
 
 ### La regla de las 24 horas (plantillas)
 
@@ -156,7 +156,7 @@ Solo necesitas una **plantilla aprobada** (Message Template) si quieres que el b
 
 ## Problemas comunes
 
-- **"Verify and save" falla** → El `WHATSAPP_VERIFY_TOKEN` guardado en el bot y el que pegaste en Meta **no son idénticos**, o todavía no corriste `pnpm run deploy` después de guardarlo. Revisa que coincidan y vuelve a desplegar.
+- **"Verify and save" falla** → El `WHATSAPP_VERIFY_TOKEN` guardado en el bot y el que pegaste en Meta **no son idénticos**, o todavía no corriste `npm run deploy` después de guardarlo. Revisa que coincidan y vuelve a desplegar.
 - **El bot no responde** → 1) ¿Suscribiste el campo **`messages`** en Webhook fields? 2) ¿El teléfono está en la lista de destinatarios verificados (modo prueba)? 3) Revisa que el token no sea el temporal de 24 h — usa el del System User.
 - **Respondía y dejó de responder al día siguiente** → Probablemente usaste el **access token temporal** (dura 24 h). Cámbialo por el **token de System User** permanente (Paso 4).
 - **"No me deja escribirle a un cliente nuevo"** → En modo prueba solo puedes hablar con números verificados. Para cualquier cliente necesitas número real + negocio verificado (sección de producción).

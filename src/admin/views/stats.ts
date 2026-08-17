@@ -104,7 +104,7 @@ export async function renderStats(env: Env): Promise<string> {
   const [byDay, convs30, leadStatuses, heatRows, tokenRows, assistantMsgs, channels, tools, insightStats] =
     await Promise.all([
       db.all<{ day: string; msgs: number }>(
-        `SELECT date(created_at / 1000, 'unixepoch') as day, COUNT(*) as msgs
+        `SELECT to_char(to_timestamp(created_at / 1000.0) AT TIME ZONE 'UTC', 'YYYY-MM-DD') as day, COUNT(*) as msgs
          FROM messages WHERE created_at > ? GROUP BY day ORDER BY day ASC`,
         [thirtyDays],
       ),
@@ -117,8 +117,12 @@ export async function renderStats(env: Env): Promise<string> {
         [thirtyDays],
       ),
       db.all<{ dow: number; hour: number; n: number }>(
-        `SELECT CAST(strftime('%w', created_at / 1000, 'unixepoch') AS INTEGER) as dow,
-                CAST(strftime('%H', created_at / 1000, 'unixepoch') AS INTEGER) as hour,
+        // El AT TIME ZONE 'UTC' no es adorno: `to_timestamp` devuelve timestamptz
+        // y EXTRACT lo leería en la zona de la sesión, corriendo el mapa de calor
+        // según dónde esté el servidor. SQLite con 'unixepoch' siempre daba UTC.
+        // Domingo = 0 en ambos motores, así que el eje de días no cambia.
+        `SELECT EXTRACT(DOW FROM to_timestamp(created_at / 1000.0) AT TIME ZONE 'UTC')::int as dow,
+                EXTRACT(HOUR FROM to_timestamp(created_at / 1000.0) AT TIME ZONE 'UTC')::int as hour,
                 COUNT(*) as n
          FROM messages WHERE role = 'user' AND created_at > ?
          GROUP BY dow, hour`,
@@ -145,9 +149,13 @@ export async function renderStats(env: Env): Promise<string> {
       ),
       db
         .all<{ tool: string; n: number }>(
-          `SELECT json_extract(value, '$.toolName') as tool, COUNT(*) as n
-           FROM messages, json_each(messages.tool_calls)
-           WHERE messages.tool_calls IS NOT NULL AND messages.created_at > ?
+          // json_each de SQLite → jsonb_array_elements de Postgres. El `<> ''`
+          // evita que una fila con tool_calls vacío tumbe la consulta entera al
+          // castear a jsonb (el .catch de abajo es la red final).
+          `SELECT elem->>'toolName' as tool, COUNT(*) as n
+           FROM messages, LATERAL jsonb_array_elements(messages.tool_calls::jsonb) as elem
+           WHERE messages.tool_calls IS NOT NULL AND messages.tool_calls <> ''
+             AND messages.created_at > ?
            GROUP BY tool ORDER BY n DESC`,
           [thirtyDays],
         )

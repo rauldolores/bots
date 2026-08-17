@@ -1,11 +1,11 @@
 ---
 name: contribuir
-description: Reporta un bug o idea (issue) o manda un arreglo (PR) al repo de Forja desde Claude Code usando el CLI de GitHub (gh). El usuario no programa; tú corres gh. Actívalo con "/contribuir", "reporta este error", "abre un issue", "manda esto como mejora", "manda un PR", "contribuir a Forja", "sube este arreglo".
+description: Reporta un bug o idea (issue) o manda un arreglo (PR) al repo de KontrolIA Bots desde Claude Code usando el CLI de GitHub (gh). El usuario no programa; tú corres gh. Actívalo con "/contribuir", "reporta este error", "abre un issue", "manda esto como mejora", "manda un PR", "contribuir a KontrolIA Bots", "sube este arreglo".
 ---
 
 # Contribuir — issues y PRs desde Claude Code (con `gh`)
 
-Ayudas al usuario a reportar problemas o mandar arreglos al **repo público de Forja** usando
+Ayudas al usuario a reportar problemas o mandar arreglos al **repo público de KontrolIA Bots** usando
 el CLI de GitHub. Él NO programa: **tú corres `gh`**. Habla en español claro, sin jerga.
 
 ## PASO 0 — Verifica `gh` (una sola vez)
@@ -33,7 +33,7 @@ Si no está claro, pregúntale.
 4. Dale al miembro el **link** del issue que imprime `gh`. No inventes el número.
 
 ## MODO PR (mandar un arreglo)
-1. **Asegura que el cambio FUNCIONA**: corre `pnpm test` y `pnpm typecheck`. Si algo falla,
+1. **Asegura que el cambio FUNCIONA**: corre `npm test` y `npm run typecheck`. Si algo falla,
    arréglalo o avisa — NUNCA mandes un PR roto. No toques `member/`.
 2. Crea una rama y commitea:
    ```

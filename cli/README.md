@@ -7,7 +7,7 @@ cuenta de Cloudflare**, con **tus llaves**. El bot es tuyo — para usarlo o rev
 Pensado para que lo maneje tu **agente de IA** (Claude Code o Codex): tú respondes
 preguntas de negocio y apruebas; el agente corre lo técnico.
 
-> Parte de [Forja](https://horizontesia.com), la plataforma de chatbots de Horizontes IA.
+> Parte de [KontrolIA Bots](https://horizontesia.com), la plataforma de chatbots de Horizontes IA.
 
 ---
 
@@ -29,7 +29,7 @@ Requisitos:
 ## Inicio rápido
 
 ```bash
-# 1 · asistente: elige idioma, licencia (gratis o Forja+) y giro
+# 1 · asistente: elige idioma, licencia (gratis o KontrolIA Bots+) y giro
 npx forjabot init
 
 # 2 · verifica que todo esté sano
@@ -43,7 +43,7 @@ npx forjabot update
 Al terminar, tu agente despliega el bot a Cloudflare y tú abres tu panel en
 `https://<tu-worker>.workers.dev/admin`.
 
-### Tu agente aprende a usar Forja
+### Tu agente aprende a usar KontrolIA Bots
 
 La primera vez, `forjabot` instala una guía para tu agente en
 `~/.claude/skills/forja/` (Claude Code). Con eso tu agente sabe cómo usar el CLI y el flujo
@@ -62,7 +62,7 @@ completo: instalar, configurar, desplegar y operar el bot. Puedes desactivarlo c
 
 Opciones útiles:
 
-- `--key HZN-XXXX-XXXX-XXXX` — pasa tu licencia de Forja+ sin el asistente (`install` / `update` / `init`).
+- `--key HZN-XXXX-XXXX-XXXX` — pasa tu licencia de KontrolIA Bots+ sin el asistente (`install` / `update` / `init`).
 - `--email tu@correo.com` `--name "Tu Nombre"` — para el arranque gratis sin teclear (útil si tu teclado no mete la `@` en la terminal).
 - Todo el onboarding acepta flags (pensado para que tu **agente** lo corra sin menús):
   `--giro --negocio --que --ofrece --horario --ubicacion --telefono --web --pagos --faq --reglas --tono --cerebro --yes`.
@@ -70,7 +70,7 @@ Opciones útiles:
 El asistente usa **menús con flechas** (↑/↓ + enter). Si corres en un entorno sin
 terminal interactiva (CI, scripts), cae automáticamente a listas numeradas.
 
-¿No tienes licencia de Forja+? La obtienes al **entrar a la comunidad de Horizontes IA**
+¿No tienes licencia de KontrolIA Bots+? La obtienes al **entrar a la comunidad de Horizontes IA**
 ([horizontesia.com](https://horizontesia.com)): ahí recibes tu llave `HZN-…`.
 
 La licencia y el idioma se guardan en `~/.forja/config.json`. La versión instalada
@@ -82,16 +82,16 @@ Una vez instalado, operas el bot pidiéndole **skills** a tu agente (no son subc
 de `forjabot`, son instrucciones que tu agente ejecuta sobre el bot ya instalado):
 
 - `reporte`, `exportar`, `analiticas`, `human-in-the-loop`, `conectar-mi-ia` (conecta tu propia IA) — el día a día. *(Gratis)*
-- `superpoderes` (enciende y configura los 12), `reportes` (reporte diario con tu marca), `conexiones-composio` (conecta apps: Gmail, Slack…), `voz-de-marca`, `mantenimiento`, `afinar`, `campaña`, `clonar`, `precios` — operación y ajustes. *(Forja+)*
-- **Modo Agencia:** `cliente-nuevo`, `cliente-misterioso` (demo para un prospecto), `roi`, `cotizar`, `propuesta`, `cobrar` — para revender. *(Forja+)*
+- `superpoderes` (enciende y configura los 12), `reportes` (reporte diario con tu marca), `conexiones-composio` (conecta apps: Gmail, Slack…), `voz-de-marca`, `mantenimiento`, `afinar`, `campaña`, `clonar`, `precios` — operación y ajustes. *(KontrolIA Bots+)*
+- **Modo Agencia:** `cliente-nuevo`, `cliente-misterioso` (demo para un prospecto), `roi`, `cotizar`, `propuesta`, `cobrar` — para revender. *(KontrolIA Bots+)*
 
 Le hablas normal a tu agente ("hazme el reporte del mes") y él sabe cuál usar.
 
 ## Planes
 
 - **Gratis** — instala el bot Starter, captura leads, panel básico. Se obtiene con tu correo.
-- **Forja +** — los 14 giros con sus paneles, los comandos recurrentes y el Modo Agencia.
-  Se activa con una key `HZN-…`. → [Únete a Forja +](https://horizontesia.com)
+- **KontrolIA Bots +** — los 14 giros con sus paneles, los comandos recurrentes y el Modo Agencia.
+  Se activa con una key `HZN-…`. → [Únete a KontrolIA Bots +](https://horizontesia.com)
 
 La licencia se hace cumplir en la distribución: sin licencia activa no bajas bots
 premium ni actualizas. **Tu bot instalado nunca se apaga por esto** — sigue corriendo.

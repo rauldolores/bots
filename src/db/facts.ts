@@ -19,7 +19,8 @@ export class CustomerFactsRepo {
       const fact = raw.trim().slice(0, 300);
       if (!fact) continue;
       await this.db.run(
-        "INSERT OR IGNORE INTO customer_facts (conversation_id, fact, learned_at) VALUES (?, ?, ?)",
+        `INSERT INTO customer_facts (conversation_id, fact, learned_at) VALUES (?, ?, ?)
+         ON CONFLICT DO NOTHING`,
         [conversationId, fact, now],
       );
     }

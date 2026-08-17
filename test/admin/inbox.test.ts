@@ -12,7 +12,7 @@ vi.mock("../../src/replies/sender", () => ({
   pickAdapter: (channel: unknown) => pickAdapterMock(channel),
 }));
 
-import { createTestMiniflare } from "../helpers/miniflareSetup";
+import { createTestDb } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
@@ -39,10 +39,9 @@ let convs: ConversationsRepo;
 let msgs: MessagesRepo;
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = (await mf.getD1Database("DB")) as any;
+  const d1 = (await createTestDb()) as any;
   env = {
-    DB: d1,
+    DB: d1.driver,
     BOT_NAME: "TestBot",
     BUSINESS_NAME: "Negocio de Prueba",
     BOT_LANGUAGE: "es",
@@ -50,7 +49,7 @@ beforeEach(async () => {
     BUFFER_SECONDS: "8",
     DASHBOARD_PASSWORD: PASSWORD,
   } as unknown as Env;
-  db = new Db(d1);
+  db = d1;
   convs = new ConversationsRepo(db);
   msgs = new MessagesRepo(db);
   sendReplyMock.mockReset().mockResolvedValue(undefined);

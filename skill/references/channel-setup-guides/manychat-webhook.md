@@ -29,7 +29,7 @@ Al terminar esta guía, cuando un cliente te escriba por Instagram (o Messenger,
 3. Copia tu **API Key**. Es la llave que conecta ManyChat con tu bot.
 4. Guárdala como secreto. En tu compu, dentro de la carpeta del proyecto, corre:
    ```bash
-   pnpm wrangler secret put MANYCHAT_API_KEY
+   npx wrangler secret put MANYCHAT_API_KEY
    ```
    Cuando te lo pida, pega la API Key y dale Enter.
 
@@ -56,7 +56,7 @@ Aquí le dices a ManyChat: "cuando llegue un mensaje, pregúntale a mi bot qué 
 3. Configura así:
    - **Método (Method):** `POST`
    - **URL:** `<worker-url>/webhooks/manychat`
-     (la URL de tu Worker la ves cuando corres `pnpm run deploy`, algo como `https://horizontes-bot.TU-CUENTA.workers.dev`)
+     (la URL de tu Worker la ves cuando corres `npm run deploy`, algo como `https://horizontes-bot.TU-CUENTA.workers.dev`)
 4. En el **Body** (cuerpo), pega este JSON:
    ```json
    {
@@ -90,7 +90,7 @@ Cuando el bot necesita pasarte un cliente a ti (handoff), **no** te avisa por Ma
 
 - **Telegram a ti (recomendado, gratis):** escríbele `/start` a tu propio bot de Telegram para obtener tu chat_id y guárdalo:
   ```bash
-  pnpm wrangler secret put OWNER_TELEGRAM_CHAT_ID
+  npx wrangler secret put OWNER_TELEGRAM_CHAT_ID
   ```
   (Los pasos completos para sacar tu chat_id están en `telegram-direct.md`.)
 - **WhatsApp por Twilio (opcional, Pro):** WhatsApp **no deja** mandar texto libre, así que el aviso al dueño por WhatsApp **requiere una plantilla aprobada** (Content Template). Necesitas el `TWILIO_HANDOFF_CONTENT_SID` y el `OWNER_WA_NUMBER`. Ver `whatsapp-twilio.md`.
@@ -102,7 +102,7 @@ Cuando el bot necesita pasarte un cliente a ti (handoff), **no** te avisa por Ma
 ## Si algo falla
 
 - **El bot no contesta en el canal:** revisa que la URL del External Request termine en `/webhooks/manychat` y que el método sea `POST`.
-- **Error de autorización / rechaza el mensaje:** confirma que agregaste el header `X-Api-Key` con tu `MANYCHAT_API_KEY` exacta, y que corriste `pnpm run deploy` después de guardar el secreto.
+- **Error de autorización / rechaza el mensaje:** confirma que agregaste el header `X-Api-Key` con tu `MANYCHAT_API_KEY` exacta, y que corriste `npm run deploy` después de guardar el secreto.
 - **El cliente no ve la respuesta:** asegúrate de que mapeaste el campo `reply` en la acción "Send Message".
 - **No llega ningún mensaje a tu bot:** revisa que el canal (Instagram/Messenger/etc.) esté bien conectado en ManyChat y que el flujo esté activo (publicado).
 

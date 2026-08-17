@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestMiniflare } from "../helpers/miniflareSetup";
-import { Db } from "../../src/db/client";
+import { createTestDb } from "../helpers/pgSetup";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { LeadsRepo } from "../../src/db/leads";
 import { captureLeadTool } from "../../src/tools/captureLead";
@@ -10,16 +9,15 @@ let leads: LeadsRepo;
 let convId: string;
 
 beforeEach(async () => {
-  const mf = await createTestMiniflare();
-  const d1 = await mf.getD1Database("DB");
-  const db = new Db(d1 as any);
+  const d1 = await createTestDb();
+  const db = d1;
   leads = new LeadsRepo(db);
   // The leads table FKs conversation_id -> conversations(id), so we need a real
   // conversation row before the tool can attach a lead to it (same pattern as
   // the green handoffHuman/pauseBot tool tests).
   const conv = await new ConversationsRepo(db).getOrCreate("telegram", "u1");
   convId = conv.id;
-  env = { DB: d1, BOT_TIER: "pro" };
+  env = { DB: d1.driver, BOT_TIER: "pro" };
 });
 
 describe("captureLeadTool", () => {
