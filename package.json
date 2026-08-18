@@ -20,7 +20,7 @@
     "deploy:cf": "wrangler deploy",
     "db:query": "tsx --env-file-if-exists=.env scripts/db-query.ts",
     "db:check": "tsx --env-file-if-exists=.env scripts/db-check.ts",
-    "build": "esbuild src/runtime/vercel.ts --bundle --platform=node --format=esm --target=node20 --outfile=api/index.js --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\""
+    "build": "esbuild src/runtime/vercel.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/vercel.js --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\""
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.0",

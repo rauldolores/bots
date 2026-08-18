@@ -27,6 +27,3 @@ public/*
 .vercel/
 .netlify/
 .vercel
-
-# La función de Vercel se genera con `npm run build` (bundle de esbuild).
-api/index.js
