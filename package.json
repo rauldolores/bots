@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=.env src/runtime/node.ts",
     "version:write": "node -e \"require('fs').writeFileSync('.bot-version', require('./package.json').version + '\\n')\"",
-    "deploy-check": "tsx scripts/deploy-check.ts",
+    "deploy-check": "tsx --env-file-if-exists=.env scripts/deploy-check.ts",
     "predeploy": "npm run deploy-check && npm run version:write",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",

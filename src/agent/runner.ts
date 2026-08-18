@@ -179,24 +179,29 @@ export async function runTurn(env: Env, conversationKey: string): Promise<boolea
   const stateRepo = new AgentStateRepo(db);
 
   // ¿Quedó una respuesta a medio enviar? Entonces el turno anterior ya pensó y
-  // ya guardó todo: lo único que falló fue el envío. Reenviar y salir, sin
-  // volver a gastar LLM ni duplicar el historial.
+  // ya guardó todo: lo único que falló fue el envío. Se reenvía sin volver a
+  // gastar LLM ni duplicar el historial.
+  //
+  // Ojo: NO se sale aquí. Mientras el envío estaba caído pudo llegar otro
+  // mensaje del cliente, y el tick cierra el trabajo al terminar — si se
+  // devolviera antes de vaciar el buffer, ese mensaje quedaría sin turno
+  // programado y sin respuesta para siempre. Pasó de verdad en el primer
+  // despliegue.
+  let reenviada = false;
   const aMedioEnviar = await jobs.getPendingReply(conversationKey);
   if (aMedioEnviar) {
     const estado = await stateRepo.get(conversationKey);
     if (estado) {
-      const cfgReenvio = await resolveAgentConfig(env, []);
-      await enviarRespuesta(env, estado, aMedioEnviar, cfgReenvio);
-      await jobs.clearPendingReply(conversationKey);
+      await enviarRespuesta(env, estado, aMedioEnviar, await resolveAgentConfig(env, []));
       console.log(`[runTurn] reenvío exitoso para ${conversationKey}`);
-      return true;
+      reenviada = true;
     }
-    // Sin estado no hay a quién mandarla; se descarta para no trabarse.
+    // Si no hay estado no hay a quién mandarla: se descarta para no trabarse.
     await jobs.clearPendingReply(conversationKey);
   }
 
   const buffered = await jobs.drainPending(conversationKey);
-  if (buffered.length === 0) return false;
+  if (buffered.length === 0) return reenviada;
 
   const combined = buffered.map((m) => m.text).join("\n").trim();
   if (!combined) return false;
@@ -204,7 +209,7 @@ export async function runTurn(env: Env, conversationKey: string): Promise<boolea
   const state = await stateRepo.get(conversationKey);
   if (!state?.conversationId) {
     console.warn(`[runTurn] sin conversation_id para ${conversationKey}`);
-    return false;
+    return reenviada;
   }
   const convId = state.conversationId;
 

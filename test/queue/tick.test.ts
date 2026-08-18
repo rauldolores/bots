@@ -174,6 +174,31 @@ describe("tick — sin trabajo y con fallos", () => {
     expect(await db.all("SELECT conversation_key FROM agent_jobs")).toHaveLength(0);
   });
 
+  it("un mensaje que llega DURANTE el fallo de envío no se queda huérfano", async () => {
+    // El caso que apareció en el primer despliegue real: mientras el envío
+    // estaba caído llegó otro mensaje. La vía de reenvío salía antes de vaciar
+    // el buffer y el tick cerraba el trabajo, así que ese mensaje se quedaba sin
+    // turno programado y sin respuesta para siempre.
+    await ingestMessage(env, { channel: "telegram", channelUserId: "u1", text: "primero" });
+    await vencerTurnos();
+
+    sendReply.mockRejectedValueOnce(new Error("canal caído"));
+    await tick(env);
+
+    // Llega otro mensaje mientras el trabajo está fallido.
+    await ingestMessage(env, { channel: "telegram", channelUserId: "u1", text: "segundo" });
+    await vencerTurnos();
+    await tick(env);
+
+    // Nada queda pendiente, y el segundo mensaje SÍ se respondió.
+    expect(await db.all("SELECT id FROM pending_messages")).toHaveLength(0);
+    expect(await db.all("SELECT conversation_key FROM agent_jobs")).toHaveLength(0);
+    const usuario = await db.all<{ content: string }>(
+      "SELECT content FROM messages WHERE role = 'user' ORDER BY created_at",
+    );
+    expect(usuario.map((m) => m.content)).toEqual(["primero", "segundo"]);
+  });
+
   it("el reenvío no duplica el historial", async () => {
     await ingestMessage(env, { channel: "telegram", channelUserId: "u1", text: "hola" });
     await vencerTurnos();

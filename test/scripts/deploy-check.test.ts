@@ -29,11 +29,24 @@ describe("validateDeployConfig", () => {
     expect(validateDeployConfig({ ...rest, BOT_TIER: "free" }).ok).toBe(true);
   });
 
-  it("fails when ANTHROPIC_API_KEY is missing", () => {
+  it("fails when there is no AI key at all", () => {
     const { ANTHROPIC_API_KEY, ...rest } = full;
     const r = validateDeployConfig(rest);
     expect(r.ok).toBe(false);
-    expect(r.errors.join(" ")).toContain("ANTHROPIC_API_KEY");
+    expect(r.errors.join(" ")).toContain("llave de IA");
+  });
+
+  it("passes with OpenAI instead of Anthropic", () => {
+    // Exigir Anthropic dejaba fuera a quien instala con OpenAI — que además es
+    // el único que cubre de una vez cerebro, embeddings y transcripción fuera
+    // de Cloudflare.
+    const { ANTHROPIC_API_KEY, ...rest } = full;
+    expect(validateDeployConfig({ ...rest, OPENAI_API_KEY: "sk-x" }).ok).toBe(true);
+  });
+
+  it("passes with xAI instead of Anthropic", () => {
+    const { ANTHROPIC_API_KEY, ...rest } = full;
+    expect(validateDeployConfig({ ...rest, XAI_API_KEY: "xai-x" }).ok).toBe(true);
   });
 
   it("fails when no channel is configured", () => {

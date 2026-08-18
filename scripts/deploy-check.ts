@@ -1,10 +1,11 @@
 /**
- * Pre-deploy config check (LOCAL — no network, no Skool/tier API).
+ * Chequeo previo al despliegue. No toca la red salvo para leer, si puede, los
+ * secrets ya subidos a Cloudflare.
  *
- * The Free vs Pro distinction lives in separate repos, so there is nothing to
- * validate against a remote service: we just make sure the secrets and vars
- * this bot needs are present before deploying. Run via
- * `npm run deploy-check` (or wire it as a predeploy step).
+ * Lee las variables del entorno (incluido `.env`) y, como respaldo, las [vars]
+ * de wrangler.toml. Los mensajes NO asumen destino: el bot se despliega igual en
+ * Cloudflare, Vercel o un servidor propio, y cada uno guarda las variables a su
+ * manera. Ver docs/despliegue.md.
  */
 
 export interface DeployConfig {
@@ -36,7 +37,12 @@ export function validateDeployConfig(cfg: DeployConfig): DeployCheckResult {
       "Falta DATABASE_URL (la cadena de conexión de tu Supabase: Project Settings → Database).",
     );
   }
-  if (!cfg.ANTHROPIC_API_KEY) errors.push("Falta ANTHROPIC_API_KEY (Claude API).");
+  // Cualquiera de los tres sirve como cerebro. Exigir Anthropic dejaba fuera a
+  // quien instala con OpenAI, que además es el único que cubre de una vez el
+  // cerebro, los embeddings y la transcripción fuera de Cloudflare.
+  if (!cfg.ANTHROPIC_API_KEY && !cfg.OPENAI_API_KEY && !cfg.XAI_API_KEY) {
+    errors.push("Falta la llave de IA: define ANTHROPIC_API_KEY, OPENAI_API_KEY o XAI_API_KEY.");
+  }
   if (!cfg.BOT_NAME) errors.push("Falta BOT_NAME.");
   if (!cfg.BOT_TIER) errors.push("Falta BOT_TIER ('free' | 'pro').");
 
@@ -90,11 +96,12 @@ if (isMain) {
 
   const errors: string[] = [];
   const warnings: string[] = [];
-  if (!cfg.BOT_NAME) errors.push("Falta BOT_NAME en wrangler.toml.");
-  if (!cfg.BOT_TIER) errors.push("Falta BOT_TIER ('free' | 'pro') en wrangler.toml.");
-  if (!cfg.DASHBOARD_PASSWORD) errors.push("Falta el secret DASHBOARD_PASSWORD (créalo: npx wrangler secret put DASHBOARD_PASSWORD).");
+  if (!cfg.DATABASE_URL) errors.push("Falta DATABASE_URL (la cadena de conexión de tu Supabase).");
+  if (!cfg.BOT_NAME) errors.push("Falta BOT_NAME.");
+  if (!cfg.BOT_TIER) errors.push("Falta BOT_TIER ('free' | 'pro').");
+  if (!cfg.DASHBOARD_PASSWORD) errors.push("Falta DASHBOARD_PASSWORD (la contraseña de /admin).");
   if (!cfg.ANTHROPIC_API_KEY && !cfg.OPENAI_API_KEY && !cfg.XAI_API_KEY) {
-    warnings.push("Aún no hay llave de IA como secret — el bot desplegará pero no contestará. Ponla con `wrangler secret put ANTHROPIC_API_KEY` (o desde el panel: Configuración → Modelo de IA).");
+    warnings.push("Aún no hay llave de IA — el bot desplegará pero no contestará. Ponla como variable de tu destino, o desde el panel: Configuración → Modelo de IA.");
   }
   if (!cfg.TELEGRAM_BOT_TOKEN && !cfg.MANYCHAT_API_KEY && !cfg.TWILIO_ACCOUNT_SID && !cfg.META_PAGE_ACCESS_TOKEN) {
     warnings.push("Aún no hay canales conectados — normal antes de la FASE 3 (se conectan con el panel abierto en /admin/conexiones).");
