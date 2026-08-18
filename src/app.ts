@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import type { Env } from "./env";
 import type { ChannelAdapter } from "./channels/shared";
 import { telegramAdapter } from "./channels/telegram";
@@ -286,6 +287,11 @@ app.notFound((c) => c.text("not found", 404));
 // Sin esto, cualquier error dentro de una ruta sale como un 500 mudo y hay que
 // adivinar. El detalle va al log del servidor, nunca al cliente.
 app.onError((err, c) => {
+  // Hono señala los errores HTTP ESPERADOS lanzando una HTTPException que ya
+  // trae su respuesta — el 401 con WWW-Authenticate del Basic Auth, por
+  // ejemplo. Convertirlos en 500 rompía el desafío de autenticación: el panel
+  // respondía "error del servidor" y el navegador nunca pedía la contraseña.
+  if (err instanceof HTTPException) return err.getResponse();
   console.error(`[${c.req.method} ${new URL(c.req.url).pathname}]`, err);
   return c.text("Internal Server Error", 500);
 });

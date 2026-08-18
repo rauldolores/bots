@@ -19,7 +19,8 @@
     "dev:cf": "wrangler dev",
     "deploy:cf": "wrangler deploy",
     "db:query": "tsx --env-file-if-exists=.env scripts/db-query.ts",
-    "db:check": "tsx --env-file-if-exists=.env scripts/db-check.ts"
+    "db:check": "tsx --env-file-if-exists=.env scripts/db-check.ts",
+    "build": "esbuild src/runtime/vercel.ts --bundle --platform=node --format=esm --target=node20 --outfile=api/index.js --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\""
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.0",
@@ -37,6 +38,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260816.1",
     "@types/node": "^26.2.0",
+    "esbuild": "^0.28.2",
     "miniflare": "^4.20250612.0",
     "tsx": "^4.23.12",
     "typescript": "^5.9.3",

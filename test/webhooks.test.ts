@@ -88,6 +88,17 @@ describe("otras rutas sin ExecutionContext", () => {
     expect(res.status).toBe(200);
   });
 
+  it("/admin sin credenciales devuelve 401 con el desafío, no 500", async () => {
+    // Salió en el despliegue a Vercel: `app.onError` atrapaba la HTTPException
+    // que Hono usa para señalar el 401 del Basic Auth y la convertía en 500. El
+    // panel respondía "error del servidor" y el navegador nunca pedía la
+    // contraseña. Los tests del panel no lo veían porque llaman a `adminApp`
+    // directamente, sin pasar por la app compuesta — este SÍ pasa por ella.
+    const res = await app.fetch(new Request("http://bot.test/admin/overview"), env);
+    expect(res.status).toBe(401);
+    expect(res.headers.get("WWW-Authenticate")).toContain("Basic");
+  });
+
   it("/cron/tick queda cerrado sin TICK_TOKEN configurado", async () => {
     const res = await app.fetch(
       new Request("http://bot.test/cron/tick", { method: "POST" }),
