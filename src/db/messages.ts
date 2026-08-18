@@ -64,13 +64,15 @@ export class MessagesRepo {
   }
 
   async lastN(conversationId: string, n: number): Promise<Message[]> {
+    // El `seq` desempata los mensajes que caen en el mismo milisegundo: sin
+    // él, este ORDER BY es ambiguo y el historial del LLM puede desordenarse.
     const rows = await this.db.all<Message>(
       `SELECT * FROM (
          SELECT * FROM messages
          WHERE conversation_id = ?
-         ORDER BY created_at DESC
+         ORDER BY created_at DESC, seq DESC
          LIMIT ?
-       ) ORDER BY created_at ASC`,
+       ) ORDER BY created_at ASC, seq ASC`,
       [conversationId, n],
     );
     return rows;

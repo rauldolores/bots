@@ -156,7 +156,7 @@ export async function renderInboxList(env: Env, p: InboxParams): Promise<string>
 
   const rows = await db.all<any>(
     `SELECT c.*,
-       (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_msg,
+       (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC, seq DESC LIMIT 1) as last_msg,
        (SELECT COUNT(*) FROM leads l WHERE l.conversation_id = c.id) as lead_count,
        (SELECT status FROM leads l WHERE l.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as lead_status,
        (SELECT COUNT(*) FROM tickets t WHERE t.conversation_id = c.id AND t.status != 'resolved') as open_tickets,
@@ -216,7 +216,7 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
 
   const insight = await new InsightsRepo(db).getByConversation(convId);
   const msgs = await db.all<any>(
-    "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 100",
+    "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at DESC, seq DESC LIMIT 100",
     [convId],
   );
 
