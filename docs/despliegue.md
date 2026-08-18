@@ -9,11 +9,25 @@ Todos los destinos necesitan lo mismo — una Supabase y su cadena de conexión.
 
 1. Crea un proyecto en [supabase.com](https://supabase.com) (el plan gratis alcanza).
 2. Copia la cadena de **Project Settings → Database → Connection string**.
-   - **En serverless (Vercel, Cloudflare) usa el pooler**, el del puerto
-     `6543`. Las funciones efímeras abren y cierran conexiones sin parar y una conexión
-     directa agota el límite del proyecto. El código detecta el `:6543` y desactiva las
+   - **Si el bot tiene su propio esquema** (lo normal cuando la base es compartida
+     con otras apps), usa el **Session pooler** (puerto `5432`). Es el único modo que
+     respeta el `search_path`: el **Transaction pooler** (`6543`) rechaza el parámetro
+     `options`, y aunque no lo hiciera, en modo transacción cada consulta puede caer
+     en una conexión distinta, así que un `SET search_path` tampoco sobreviviría. Con
+     `6543` **todo aterrizaría en `public`**, junto a las tablas de las otras apps.
+   - Si el bot tiene la base para él solo y vive en `public`, el Transaction pooler
+     (`6543`) va bien y escala mejor. El código detecta el `:6543` y desactiva las
      sentencias preparadas, que ese modo no admite.
-   - En un servidor de larga vida (Node, Docker) la conexión directa (`5432`) va bien.
+   - En un servidor de larga vida (Node, Docker) la conexión directa (`5432`) también sirve.
+
+   Para aislar el bot en su propio esquema, añade el `search_path` a la cadena:
+
+   ```
+   ...pooler.supabase.com:5432/postgres?options=-c%20search_path%3Dbots%2Cextensions%2Cpublic
+   ```
+
+   `extensions` va ahí porque es donde Supabase instala pgvector; sin él, `vector(1024)`
+   no resuelve. Comprueba que quedó bien con `npm run db:check`.
 3. Aplica el esquema:
 
 ```bash

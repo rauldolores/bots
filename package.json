@@ -12,13 +12,14 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:apply": "tsx scripts/db-apply.ts",
+    "db:apply": "tsx --env-file-if-exists=.env scripts/db-apply.ts",
     "kb:reindex": "tsx scripts/generate-fixtures.ts",
     "eval": "tsx scripts/eval-bot-live.ts",
     "start": "tsx --env-file-if-exists=.env src/runtime/node.ts",
     "dev:cf": "wrangler dev",
     "deploy:cf": "wrangler deploy",
-    "db:query": "tsx --env-file-if-exists=.env scripts/db-query.ts"
+    "db:query": "tsx --env-file-if-exists=.env scripts/db-query.ts",
+    "db:check": "tsx --env-file-if-exists=.env scripts/db-check.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.0",
