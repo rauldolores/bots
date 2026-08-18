@@ -1,9 +1,12 @@
-// Dashboard shell: a fixed 248px sidebar (grouped navigation) + a live-status
-// topbar, wrapping each tab's server-rendered body. Retro-terminal dark theme
-// ("Nodia Agents admin"): Space Grotesk + JetBrains Mono, brutalist buttons, scan
-// lines. Design tokens are exposed both as CSS custom properties (for inline
-// styles) and mapped to Tailwind color names (for utility classes) — see
-// docs/design-system.md, the contract every view follows.
+// Dashboard shell: a fixed 248px sidebar (grouped navigation) + a topbar,
+// wrapping each tab's server-rendered body.
+//
+// Tema "Kontrolia": el mismo lenguaje visual del resto del ecosistema (sidebar
+// oscura, contenido claro, tarjetas blancas redondeadas con sombra suave) con
+// el acento en AMBAR en lugar del verde de las otras apps. Los token NAMES no
+// cambiaron con el rediseño — solo sus valores — así que las 15 vistas se
+// re-tematizaron sin tocarlas. Ver docs/design-system.md, el contrato que
+// toda vista sigue.
 //
 // The layout() API is unchanged: views keep their own activeTab id; the group,
 // breadcrumb and page title are derived here.
@@ -67,7 +70,7 @@ const NAV: Section[] = [
 const HEAD_ASSETS = `
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -75,24 +78,24 @@ const HEAD_ASSETS = `
       theme: {
         extend: {
           colors: {
-            bg: "#141009",
-            panel: "#1d1710",
-            panel2: "#241c13",
-            raise: "#2b2116",
-            line: "#352a1d",
-            linelit: "#4c3a26",
-            accent: { DEFAULT: "#f07a3f", soft: "rgba(240,122,63,.14)" },
-            accent2: "#f5a623",
-            cream: "#efe7da",
-            muted: "#a1907b",
-            dim: "#726555",
-            ok: "#7fb77e",
-            info: "#7aa2d6",
-            bad: "#d97a6a",
-            violet: "#b99bd6",
+            bg: "#f7f7f5",
+            panel: "#ffffff",
+            panel2: "#f4f4f2",
+            raise: "#fafaf9",
+            line: "#e7e5e4",
+            linelit: "#d6d3d1",
+            accent: { DEFAULT: "#eab308", soft: "rgba(234,179,8,.13)" },
+            accent2: "#a16207",
+            cream: "#1c1917",
+            muted: "#57534e",
+            dim: "#a8a29e",
+            ok: "#16a34a",
+            info: "#2563eb",
+            bad: "#dc2626",
+            violet: "#7c3aed",
           },
           fontFamily: {
-            display: ["'Space Grotesk'", "ui-sans-serif", "system-ui", "sans-serif"],
+            display: ["'Plus Jakarta Sans'", "ui-sans-serif", "system-ui", "sans-serif"],
             mono: ["'JetBrains Mono'", "ui-monospace", "monospace"],
           },
         },
@@ -101,60 +104,86 @@ const HEAD_ASSETS = `
   </script>
   <script src="https://unpkg.com/lucide@latest"></script>`;
 
-// Global stylesheet: design tokens, base type/scroll, the reusable component
-// classes from the mockups (buttons, rows, cards, chips, canvas nodes), the
-// modal/toast/range classes existing views already depend on, and the scanline
-// overlay. All motion collapses under prefers-reduced-motion.
+// Global stylesheet: design tokens (tema claro Kontrolia, acento ámbar), base
+// type/scroll, las clases de componente reutilizables que las vistas ya usan
+// (buttons, rows, cards, chips, canvas nodes, modal/toast/range). El nombre de
+// cada token y de cada clase es parte del contrato: las vistas los referencian
+// inline. All motion collapses under prefers-reduced-motion.
 const GLOBAL_STYLE = `
 <style>
   :root{
-    --bg:#141009; --panel:#1d1710; --panel2:#241c13; --raise:#2b2116;
-    --line:#352a1d; --linelit:#4c3a26;
-    --accent:#f07a3f; --accent-2:#f5a623; --accent-soft:rgba(240,122,63,.14);
-    --cream:#efe7da; --muted:#a1907b; --dim:#726555;
-    --ok:#7fb77e; --info:#7aa2d6; --bad:#d97a6a; --violet:#b99bd6;
+    --bg:#f7f7f5; --panel:#ffffff; --panel2:#f4f4f2; --raise:#fafaf9;
+    --line:#e7e5e4; --linelit:#d6d3d1;
+    --accent:#eab308; --accent-2:#a16207; --accent-soft:rgba(234,179,8,.13);
+    --cream:#1c1917; --muted:#57534e; --dim:#a8a29e;
+    --ok:#16a34a; --info:#2563eb; --bad:#dc2626; --violet:#7c3aed;
+    /* sombras y radios del sistema (Kontrolia): suaves, nunca offset duro */
+    --shadow-sm:0 1px 2px rgba(28,25,23,.05);
+    --shadow-md:0 2px 8px rgba(28,25,23,.06),0 1px 2px rgba(28,25,23,.05);
+    --shadow-lg:0 12px 32px rgba(28,25,23,.14);
+    --radius:14px; --radius-sm:10px;
+    /* la sidebar es oscura aunque el contenido sea claro (firma del ecosistema) */
+    --sb-bg:#161509; --sb-panel:#1e1c0e; --sb-line:rgba(255,255,255,.07);
+    --sb-text:#b6b1a4; --sb-dim:#7d7868;
     /* legacy aliases kept so mockup-derived snippets keep working */
-    --border:#352a1d; --border-lit:#4c3a26; --green:#7fb77e; --blue:#7aa2d6; --red:#d97a6a;
+    --border:#e7e5e4; --border-lit:#d6d3d1; --green:#16a34a; --blue:#2563eb; --red:#dc2626;
   }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;background:var(--bg);color:var(--cream);
-    font-family:'JetBrains Mono',ui-monospace,monospace;-webkit-font-smoothing:antialiased}
-  a{color:var(--accent);text-decoration:none}
-  a:hover{color:var(--accent-2)}
+    font-family:'Plus Jakarta Sans',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent-2);text-decoration:none}
+  a:hover{color:var(--cream)}
   ::-webkit-scrollbar{width:10px;height:10px}
   ::-webkit-scrollbar-track{background:var(--bg)}
-  ::-webkit-scrollbar-thumb{background:var(--linelit);border-radius:0}
-  ::-webkit-scrollbar-thumb:hover{background:var(--accent)}
+  ::-webkit-scrollbar-thumb{background:var(--linelit);border-radius:8px}
+  ::-webkit-scrollbar-thumb:hover{background:var(--dim)}
   input,textarea,select{font-family:inherit}
   input::placeholder,textarea::placeholder{color:var(--dim)}
   input[type="range"]{accent-color:var(--accent);height:4px}
 
+  /* El tema anterior era cuadrado, así que casi ningún estilo inline fija
+     border-radius: estas reglas globales redondean todo el sistema de una vez.
+     Los selectores por atributo cubren las tarjetas que las vistas pintan
+     inline con los pares panel+line del contrato. */
+  button{border-radius:var(--radius-sm)}
+  input,textarea,select{border-radius:var(--radius-sm)}
+  [style*="background:var(--panel)"][style*="border:1px solid var(--line)"],
+  [style*="background:var(--panel)"][style*="border:1px solid var(--linelit)"],
+  [style*="background:var(--panel2)"][style*="border:1px solid var(--line)"],
+  [style*="background:var(--raise)"][style*="border:1px solid var(--line)"],
+  [style*="linear-gradient(160deg,var(--panel2)"],
+  [style*="background:var(--accent-soft)"]{border-radius:var(--radius)}
+  /* ...y las tarjetas que las vistas arman con clases Tailwind en vez de inline */
+  .bg-panel.border,.bg-panel2.border,.bg-raise.border{border-radius:var(--radius)}
+  .card.bg-panel,.tkcard.bg-panel,.cfgcard.bg-panel2{border-radius:var(--radius);box-shadow:var(--shadow-sm)}
+  a.bigbtn,a.ghostbtn,a.chip,span.chip{border-radius:var(--radius-sm)}
+  /* El ámbar vivo no se lee como TEXTO sobre blanco: la clase de texto resuelve
+     al ámbar oscuro. Fondos, bordes y gráficas conservan el vivo. */
+  .text-accent{color:var(--accent-2) !important}
+
   /* keyframes */
   @keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
   @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.82)}}
-  @keyframes ring{0%{box-shadow:0 0 0 0 rgba(127,183,126,.5)}100%{box-shadow:0 0 0 8px rgba(127,183,126,0)}}
+  @keyframes ring{0%{box-shadow:0 0 0 0 rgba(22,163,74,.45)}100%{box-shadow:0 0 0 8px rgba(22,163,74,0)}}
   @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
   @keyframes fadeIn{from{opacity:0}to{opacity:1}}
   @keyframes popIn{from{opacity:0;transform:scale(.94) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
   @keyframes toastIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
   @keyframes toastOut{to{opacity:0;transform:translateY(8px);visibility:hidden}}
 
-  /* scanline overlay (applied to <body>) */
-  .scanlines::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:200;
-    background:repeating-linear-gradient(to bottom,rgba(0,0,0,0) 0,rgba(0,0,0,0) 2px,rgba(0,0,0,.12) 3px,rgba(0,0,0,0) 4px);
-    opacity:.5;mix-blend-mode:multiply}
-
-  /* sidebar nav */
-  .navlink:hover{background:var(--panel2);color:var(--cream)}
+  /* sidebar nav (fondo oscuro: hover claro translúcido) */
+  .navlink{border-radius:var(--radius-sm)}
+  .navlink:hover{background:rgba(255,255,255,.06);color:#fff}
   .navlink:hover [data-lucide]{color:var(--accent)}
 
-  /* entrance + brutalist buttons */
+  /* entrance + botones (estilo Kontrolia: relieve suave, nada brutalista) */
   .card{animation:rise .4s cubic-bezier(.16,1,.3,1) both}
-  .bigbtn{transition:transform .12s ease,box-shadow .12s ease}
-  .bigbtn:hover{transform:translate(-2px,-2px);box-shadow:6px 6px 0 var(--linelit)}
-  .bigbtn:active{transform:translate(0,0);box-shadow:2px 2px 0 var(--linelit)}
+  .bigbtn{border-radius:var(--radius-sm);transition:transform .12s ease,box-shadow .12s ease,filter .12s ease}
+  .bigbtn:hover{transform:translateY(-1px);box-shadow:var(--shadow-md);filter:brightness(1.03)}
+  .bigbtn:active{transform:translateY(0);box-shadow:var(--shadow-sm)}
+  .ghostbtn{border-radius:var(--radius-sm)}
   .ghostbtn:hover{border-color:var(--accent);color:var(--cream);background:var(--accent-soft)}
-  .glow{text-shadow:0 0 22px var(--accent-soft),0 0 40px rgba(240,122,63,.1)}
+  .glow{}
 
   /* list / table rows + interactive bits reused across views */
   .convrow:hover{background:var(--panel2)}
@@ -162,46 +191,49 @@ const GLOBAL_STYLE = `
   .leadrow:hover{background:var(--panel2)}
   .datarow:hover{background:var(--panel2)}
   .kbrow:hover{background:var(--panel2)}
-  .kbrow:hover .kbedit{border-color:var(--accent);color:var(--accent)}
-  .tkcard{transition:transform .12s ease,border-color .12s ease}
-  .tkcard:hover{border-color:var(--linelit);transform:translateY(-1px)}
+  .kbrow:hover .kbedit{border-color:var(--accent);color:var(--accent-2)}
+  .tkcard{transition:transform .12s ease,border-color .12s ease,box-shadow .12s ease}
+  .tkcard:hover{border-color:var(--linelit);transform:translateY(-1px);box-shadow:var(--shadow-md)}
   .subtab{transition:all .12s ease;cursor:pointer}
   .subtab:hover{color:var(--cream)}
-  .chip:hover{border-color:var(--accent);color:var(--accent)}
-  .cfgcard{transition:all .12s ease;cursor:pointer}
-  .cfgcard:hover{border-color:var(--linelit)}
+  .chip{border-radius:999px}
+  .chip:hover{border-color:var(--accent);color:var(--accent-2)}
+  .cfgcard{border-radius:var(--radius);transition:all .12s ease;cursor:pointer}
+  .cfgcard:hover{border-color:var(--linelit);box-shadow:var(--shadow-md)}
   .bar{transition:transform .5s cubic-bezier(.16,1,.3,1)}
   .bargrp:hover .bar{background:var(--accent) !important}
 
   /* flow-canvas node (mockup ".node") + the existing views' ".node-card" */
-  .node{transition:transform .14s ease,border-color .14s ease,box-shadow .14s ease;cursor:pointer}
-  .node:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:4px 4px 0 var(--linelit)}
-  .node-card{transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}
-  .node-card:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:4px 4px 0 var(--linelit)}
+  .node{border-radius:var(--radius);transition:transform .14s ease,border-color .14s ease,box-shadow .14s ease;cursor:pointer}
+  .node:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:var(--shadow-md)}
+  .node-card{border-radius:var(--radius);transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}
+  .node-card:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:var(--shadow-md)}
 
   /* modal + toast (class names kept from prior layout for existing views) */
   .modal-backdrop{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;
-    padding:1rem;background:rgba(10,8,4,.6);animation:fadeIn .15s ease-out}
-  .modal-card{background:var(--panel);border:1px solid var(--linelit);box-shadow:8px 8px 0 rgba(0,0,0,.4);
+    padding:1rem;background:rgba(28,25,23,.45);animation:fadeIn .15s ease-out}
+  .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-lg);
     animation:popIn .18s cubic-bezier(.16,1,.3,1);transform-origin:center}
-  .toast{background:var(--panel);border:1px solid var(--linelit);color:var(--cream);box-shadow:4px 4px 0 var(--linelit);
+  .toast{background:var(--cream);border:1px solid var(--cream);color:#fff;border-radius:var(--radius-sm);box-shadow:var(--shadow-lg);
     animation:toastIn .25s cubic-bezier(.16,1,.3,1),toastOut .3s ease-in 2.4s forwards}
 
   /* app shell */
   .shell{min-height:100vh;display:grid;grid-template-columns:248px 1fr;background:var(--bg)}
-  .sb{border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+  .sb{background:var(--sb-bg);color:var(--sb-text);display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
   .sb-nav{padding:14px 12px;display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto}
-  .sb-sec{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;padding:14px 10px 6px}
-  .live-pill{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);padding:8px 13px}
+  .sb-nav::-webkit-scrollbar-track{background:var(--sb-bg)}
+  .sb-nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14)}
+  .sb-sec{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;padding:16px 12px 6px}
+  .live-pill{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:7px 14px;box-shadow:var(--shadow-sm)}
 
   @media (max-width:767px){
     .shell{grid-template-columns:1fr}
-    .sb{position:sticky;top:0;height:auto;flex-direction:row;align-items:center;border-right:none;border-bottom:1px solid var(--line);overflow-x:auto}
-    .sb-brand{flex:none;border-bottom:none !important;border-right:1px solid var(--line)}
+    .sb{position:sticky;top:0;height:auto;flex-direction:row;align-items:center;overflow-x:auto}
+    .sb-brand{flex:none;border-bottom:none !important;border-right:1px solid var(--sb-line)}
     .sb-nav{flex-direction:row;align-items:center;gap:4px;padding:8px 10px;overflow-y:visible;overflow-x:auto}
     .sb-sec{display:none}
     .sb-foot{display:none}
-    .navlink{border-left:none !important;white-space:nowrap;border-bottom:2px solid transparent}
+    .navlink{white-space:nowrap}
   }
 
   @media (prefers-reduced-motion:reduce){
@@ -232,11 +264,13 @@ const GLOBAL_SCRIPT = `
 
 function navItem(item: Item, active: boolean): string {
   const base =
-    "display:flex;align-items:center;gap:11px;padding:9px 10px;font-size:13px;";
+    "display:flex;align-items:center;gap:11px;padding:9px 12px;font-size:13px;";
+  // Activo = píldora ámbar con texto oscuro, la firma del ecosistema (en las
+  // otras apps es verde). Inactivo = texto tenue sobre la sidebar oscura.
   const style = active
-    ? base + "color:var(--cream);background:var(--accent-soft);border-left:2px solid var(--accent);font-weight:600"
-    : base + "color:var(--muted);border-left:2px solid transparent";
-  const iconColor = active ? "var(--accent)" : "var(--dim)";
+    ? base + "color:#231d05;background:var(--accent);font-weight:700"
+    : base + "color:var(--sb-text);font-weight:500";
+  const iconColor = active ? "#231d05" : "var(--sb-dim)";
   return `<a href="${item.href}" class="navlink" style="${style}">
     <i data-lucide="${item.icon}" width="17" height="17" style="color:${iconColor}"></i> ${item.label}
   </a>`;
@@ -246,10 +280,10 @@ function navItem(item: Item, active: boolean): string {
 // la página de upgrade en vez de a la vista real. Se ven, pero invitan a subir.
 function navItemLocked(item: Item): string {
   const base =
-    "display:flex;align-items:center;gap:11px;padding:9px 10px;font-size:13px;color:var(--dim);border-left:2px solid transparent";
+    "display:flex;align-items:center;gap:11px;padding:9px 12px;font-size:13px;color:var(--sb-dim)";
   return `<a href="${UPGRADE_URL}" class="navlink" style="${base}" title="Disponible en Pro">
-    <i data-lucide="lock" width="15" height="15" style="color:var(--dim)"></i> ${item.label}
-    <span style="margin-left:auto;font-size:8.5px;letter-spacing:.14em;color:var(--accent2);border:1px solid var(--line);padding:1px 5px">PRO</span>
+    <i data-lucide="lock" width="15" height="15" style="color:var(--sb-dim)"></i> ${item.label}
+    <span style="margin-left:auto;font-size:8.5px;letter-spacing:.14em;color:var(--accent);border:1px solid var(--sb-line);border-radius:999px;padding:1px 7px">PRO</span>
   </a>`;
 }
 
@@ -264,7 +298,7 @@ function sidebar(activeTab: string, pro: boolean, niche: NichePack | null): stri
   const locked = (id: string) => !pro && (PRO_ONLY_TABS as readonly string[]).includes(id);
   const sections = NAV.map((sec) => {
     const hasActive = sec.items.some((i) => i.id === activeTab);
-    const labelColor = hasActive ? "var(--accent)" : "var(--dim)";
+    const labelColor = hasActive ? "var(--accent)" : "var(--sb-dim)";
     const items = sec.items
       .map((raw) => {
         const i = applyNiche(raw, niche);
@@ -275,26 +309,26 @@ function sidebar(activeTab: string, pro: boolean, niche: NichePack | null): stri
   }).join("");
 
   return `<aside class="sb">
-    <div class="sb-brand" style="padding:20px 18px 16px;border-bottom:1px solid var(--line)">
-      <div style="display:flex;align-items:center;gap:10px">
-        <div style="width:34px;height:34px;flex:none;border:1.5px solid var(--accent);display:flex;align-items:center;justify-content:center;background:var(--accent-soft);box-shadow:3px 3px 0 var(--linelit)">
-          <i data-lucide="terminal" width="18" height="18" style="color:var(--accent)"></i>
+    <div class="sb-brand" style="padding:20px 18px 16px;border-bottom:1px solid var(--sb-line)">
+      <div style="display:flex;align-items:center;gap:11px">
+        <div style="width:36px;height:36px;flex:none;border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--accent)">
+          <i data-lucide="bot" width="19" height="19" style="color:#231d05"></i>
         </div>
-        <div style="line-height:1.05">
-          <div style="font-family:'Space Grotesk';font-weight:700;font-size:15px;letter-spacing:-.02em">Nodia Agents</div>
-          <div style="font-size:9.5px;letter-spacing:.22em;color:var(--dim);text-transform:uppercase">Panel · ${pro ? "Pro" : "Free"}</div>
+        <div style="line-height:1.1">
+          <div style="font-family:'Plus Jakarta Sans';font-weight:800;font-size:15px;letter-spacing:-.01em;color:#fff">NODIA AGENTS</div>
+          <div style="font-size:9px;letter-spacing:.24em;color:var(--accent);text-transform:uppercase;font-weight:600">by Kontrolia</div>
         </div>
       </div>
     </div>
     <nav class="sb-nav">${sections}</nav>
-    <div class="sb-foot" style="padding:14px;border-top:1px solid var(--line)">
-      <div style="display:flex;align-items:center;gap:10px;padding:8px;border:1px solid var(--line)">
-        <div style="width:30px;height:30px;flex:none;background:var(--raise);border:1px solid var(--linelit);display:flex;align-items:center;justify-content:center;color:var(--accent)">
+    <div class="sb-foot" style="padding:14px;border-top:1px solid var(--sb-line)">
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 10px;border:1px solid var(--sb-line);border-radius:12px;background:var(--sb-panel)">
+        <div style="width:30px;height:30px;flex:none;border-radius:9px;background:rgba(234,179,8,.16);display:flex;align-items:center;justify-content:center;color:var(--accent)">
           <i data-lucide="bot" width="16" height="16"></i>
         </div>
-        <div style="line-height:1.2;overflow:hidden">
-          <div style="font-size:12px;font-weight:600;white-space:nowrap;text-overflow:ellipsis;overflow:hidden">Panel del bot</div>
-          <div style="font-size:10px;color:var(--dim)">sesión activa</div>
+        <div style="line-height:1.25;overflow:hidden">
+          <div style="font-size:12px;font-weight:600;color:#e9e6dd;white-space:nowrap;text-overflow:ellipsis;overflow:hidden">Panel del bot</div>
+          <div style="font-size:10px;color:var(--sb-dim)">Plan ${pro ? "Pro" : "Free"}</div>
         </div>
       </div>
     </div>
@@ -318,22 +352,24 @@ export function layout(opts: { title: string; activeTab: string; body: string; e
   ${HEAD_ASSETS}
   ${GLOBAL_STYLE}
 </head>
-<body class="scanlines">
+<body>
   <div class="shell">
     ${sidebar(opts.activeTab, pro, niche)}
     <div style="display:flex;flex-direction:column;min-width:0">
-      <header style="position:sticky;top:0;z-index:30;background:rgba(20,16,9,.9);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:14px 26px;display:flex;align-items:center;gap:20px">
+      <header style="position:sticky;top:0;z-index:30;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:14px 28px;display:flex;align-items:center;gap:20px">
         <div style="min-width:0">
-          <div style="font-size:10px;letter-spacing:.22em;color:var(--dim);text-transform:uppercase">${section.label} / ${item.label}</div>
-          <h1 style="font-family:'Space Grotesk';font-weight:700;font-size:22px;margin:2px 0 0;letter-spacing:-.02em">${item.label}</h1>
+          <div style="display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.2em;color:var(--accent-2);text-transform:uppercase;font-weight:700">
+            <i data-lucide="activity" width="12" height="12"></i> ${section.label} / ${item.label}
+          </div>
+          <h1 style="font-family:'Plus Jakarta Sans';font-weight:800;font-size:22px;margin:2px 0 0;letter-spacing:-.02em">${item.label}</h1>
         </div>
         <div id="proj-switcher" style="margin-left:auto"></div>
         <div class="live-pill">
           <span style="width:8px;height:8px;border-radius:50%;background:var(--ok);animation:pulse 1.8s ease-in-out infinite,ring 2s infinite"></span>
-          <span style="font-size:11px;font-weight:600;letter-spacing:.04em">BOT EN LÍNEA</span>
+          <span style="font-size:11.5px;font-weight:700">Bot en línea</span>
         </div>
       </header>
-      <main style="padding:22px 26px;min-width:0">${opts.body}</main>
+      <main style="padding:26px 28px;min-width:0">${opts.body}</main>
     </div>
   </div>
   <div id="modal-root"></div>
@@ -349,8 +385,8 @@ export function layout(opts: { title: string; activeTab: string; body: string; e
       opts += '<option value="' + p.url.replace(/"/g,'&quot;') + '">' + p.name.replace(/</g,'&lt;') + '</option>';
     });
     el.innerHTML = '<select onchange="if(this.value.indexOf(\'http\')===0)window.location=this.value" ' +
-      'style="background:rgba(20,16,9,.9);color:var(--fg,#e8e0cf);border:1px solid var(--line);border-radius:8px;' +
-      'padding:6px 10px;font-family:\'JetBrains Mono\',monospace;font-size:11px;letter-spacing:.04em;cursor:pointer" ' +
+      'style="background:var(--panel);color:var(--cream);border:1px solid var(--line);border-radius:10px;' +
+      'padding:6px 10px;font-size:12px;cursor:pointer;box-shadow:var(--shadow-sm)" ' +
       'title="Cambiar de proyecto">' + opts + '</select>';
   }).catch(function(){});
   </script>
@@ -374,7 +410,7 @@ export function renderUpgrade(env: Env, feature?: string): string {
     .map(
       ([icon, title, desc]) => `<div style="display:flex;gap:12px;padding:14px;border:1px solid var(--line);background:var(--panel)">
         <i data-lucide="${icon}" width="20" height="20" style="color:var(--accent);flex:none;margin-top:2px"></i>
-        <div><div style="font-family:'Space Grotesk';font-weight:600;font-size:14px;margin-bottom:3px">${title}</div>
+        <div><div style="font-family:'Plus Jakarta Sans';font-weight:600;font-size:14px;margin-bottom:3px">${title}</div>
         <div style="font-size:12.5px;color:var(--muted);line-height:1.5">${desc}</div></div>
       </div>`,
     )
@@ -382,11 +418,11 @@ export function renderUpgrade(env: Env, feature?: string): string {
 
   const body = `
     <div class="card" style="max-width:720px">
-      <div style="border:1px solid var(--linelit);background:var(--panel);box-shadow:6px 6px 0 var(--linelit);padding:28px">
+      <div style="border:1px solid var(--linelit);background:var(--panel);box-shadow:var(--shadow-md);padding:28px">
         <div style="display:inline-flex;align-items:center;gap:8px;border:1px solid var(--accent);color:var(--accent2);font-size:10px;letter-spacing:.16em;padding:4px 10px;text-transform:uppercase">
           <i data-lucide="lock" width="13" height="13"></i> Función Pro
         </div>
-        <h2 style="font-family:'Space Grotesk';font-weight:700;font-size:24px;letter-spacing:-.02em;margin:14px 0 6px">
+        <h2 style="font-family:'Plus Jakarta Sans';font-weight:700;font-size:24px;letter-spacing:-.02em;margin:14px 0 6px">
           ${feature ? `“${feature}” es parte de Pro` : "Desbloquea el panel Pro"}
         </h2>
         <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0 0 20px;max-width:560px">
@@ -395,7 +431,7 @@ export function renderUpgrade(env: Env, feature?: string): string {
         </p>
         <div style="display:grid;gap:10px;margin-bottom:22px">${perks}</div>
         <a href="https://horizontesia.com" target="_blank" rel="noopener" class="bigbtn"
-          style="display:inline-flex;align-items:center;gap:8px;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:4px 4px 0 var(--linelit);padding:12px 20px;font-family:'Space Grotesk';font-weight:700;font-size:14px">
+          style="display:inline-flex;align-items:center;gap:8px;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:12px 20px;font-family:'Plus Jakarta Sans';font-weight:700;font-size:14px">
           <i data-lucide="arrow-up-right" width="17" height="17"></i> Subir a Pro con la comunidad
         </a>
       </div>
@@ -413,14 +449,14 @@ export function loginPage(error?: string): string {
   ${HEAD_ASSETS}
   ${GLOBAL_STYLE}
 </head>
-<body class="scanlines" style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem">
-  <form method="POST" action="/admin/auth/request" style="background:var(--panel);border:1px solid var(--linelit);box-shadow:8px 8px 0 var(--linelit);padding:32px;max-width:360px;width:100%">
+<body style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem">
+  <form method="POST" action="/admin/auth/request" style="background:var(--panel);border:1px solid var(--linelit);box-shadow:var(--shadow-lg);padding:32px;max-width:360px;width:100%">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
-      <div style="width:34px;height:34px;flex:none;border:1.5px solid var(--accent);display:flex;align-items:center;justify-content:center;background:var(--accent-soft);box-shadow:3px 3px 0 var(--linelit)">
+      <div style="width:34px;height:34px;flex:none;border:1.5px solid var(--accent);display:flex;align-items:center;justify-content:center;background:var(--accent-soft);box-shadow:var(--shadow-sm)">
         <i data-lucide="terminal" width="18" height="18" style="color:var(--accent)"></i>
       </div>
       <div>
-        <h1 style="font-family:'Space Grotesk';font-weight:700;font-size:18px;margin:0;letter-spacing:-.02em">Dashboard del bot</h1>
+        <h1 style="font-family:'Plus Jakarta Sans';font-weight:700;font-size:18px;margin:0;letter-spacing:-.02em">Dashboard del bot</h1>
         <p style="font-size:11px;color:var(--dim);margin:2px 0 0">Te mandamos un link a tu email para entrar.</p>
       </div>
     </div>
@@ -428,7 +464,7 @@ export function loginPage(error?: string): string {
     <input name="email" type="email" required placeholder="tu@email.com"
       style="width:100%;background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:13px;outline:none;margin-bottom:14px">
     <button class="bigbtn" type="submit"
-      style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:4px 4px 0 var(--linelit);padding:11px;font-family:'Space Grotesk';font-weight:700;font-size:13px;cursor:pointer">
+      style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:11px;font-family:'Plus Jakarta Sans';font-weight:700;font-size:13px;cursor:pointer">
       Mandar link
     </button>
   </form>

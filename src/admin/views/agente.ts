@@ -234,7 +234,7 @@ function nodeHtml(n: NodeSpec): string {
       ${n.on ? `<span class="ml-auto text-[8.5px] tracking-[.1em] font-semibold" style="color:var(--ok);border:1px solid var(--ok);padding:0 4px;background:rgba(127,183,126,.12)">● ACTIVO</span>` : ""}
     </div>
     <div class="text-[10.5px] mt-1 leading-snug" style="color:var(--muted)">${n.caption}</div>
-    ${n.count ? `<div class="text-[9.5px] mt-1.5" style="color:var(--accent)">${esc(n.count)}</div>` : ""}
+    ${n.count ? `<div class="text-[9.5px] mt-1.5" style="color:var(--accent-2)">${esc(n.count)}</div>` : ""}
     ${n.live ? `<span class="absolute -top-1.5 -right-1.5 w-[11px] h-[11px] rounded-full" style="background:var(--ok);border:2px solid var(--panel);animation:pulse 1.8s ease-in-out infinite"></span>` : ""}
   </div>`;
 }
@@ -435,7 +435,7 @@ function modalShell(icon: string, title: string, badge: string, inner: string, s
     <div class="modal-card w-full max-w-lg max-h-[85vh] overflow-y-auto">
       <div class="flex items-center gap-2.5 sticky top-0 z-10" style="padding:16px 18px;border-bottom:1px solid var(--line);background:var(--panel)">
         <span class="w-[26px] h-[26px] flex-none flex items-center justify-center" style="border:1px solid var(--accent);background:var(--accent-soft)">
-          <i data-lucide="${icon}" width="15" height="15" style="color:var(--accent)"></i>
+          <i data-lucide="${icon}" width="15" height="15" style="color:var(--accent-2)"></i>
         </span>
         <span class="font-display font-bold text-[15px] text-cream">${title}</span>${badge}
         <button type="button" aria-label="Cerrar"
@@ -465,7 +465,7 @@ function slider(opts: {
   <div class="mb-5">
     <div class="flex items-baseline justify-between mb-1.5">
       <label for="${opts.name}" class="text-[12.5px] text-cream">${esc(opts.label)}</label>
-      <span class="text-[12.5px] font-mono font-semibold" style="color:var(--accent)"><output id="${outId}">${opts.value}</output>${esc(opts.unit)}</span>
+      <span class="text-[12.5px] font-mono font-semibold" style="color:var(--accent-2)"><output id="${outId}">${opts.value}</output>${esc(opts.unit)}</span>
     </div>
     <input type="range" id="${opts.name}" name="${opts.name}" min="${opts.min}" max="${opts.max}" step="${opts.step}" value="${opts.value}"
            class="w-full" oninput="document.getElementById('${outId}').textContent=this.value">
@@ -473,7 +473,7 @@ function slider(opts: {
   </div>`;
 }
 
-const SAVE_BTN = `<button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:3px 3px 0 var(--linelit);padding:8px 16px">Guardar</button>`;
+const SAVE_BTN = `<button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:8px 16px">Guardar</button>`;
 
 function saveForm(nodeId: string, inner: string): string {
   return `
@@ -552,7 +552,7 @@ export async function renderNodeModal(env: Env, nodeId: string, saved = false): 
         <input type="hidden" name="bot_paused" value="${d.cfg.botPaused ? "0" : "1"}">
         <button type="submit" class="${d.cfg.botPaused ? "bigbtn font-display font-bold" : "ghostbtn"} text-[12.5px] cursor-pointer inline-flex items-center gap-2"
                 style="${d.cfg.botPaused
-                  ? "background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:3px 3px 0 var(--linelit);padding:9px 16px"
+                  ? "background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 16px"
                   : "background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:9px 16px"}">
           <i data-lucide="${d.cfg.botPaused ? "play" : "pause"}" width="14" height="14"></i>
           ${d.cfg.botPaused ? "Reactivar el bot" : "Pausar el bot (todas las conversaciones)"}
@@ -571,7 +571,7 @@ export async function renderNodeModal(env: Env, nodeId: string, saved = false): 
                   class="w-full font-mono text-[11px] p-3 outline-none resize-y"
                   style="background:var(--bg);border:1px solid var(--line);color:var(--cream)">${esc(d.cfg.systemPrompt)}</textarea>
         <div class="flex flex-wrap gap-2 mt-3">
-          <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:3px 3px 0 var(--linelit);padding:8px 16px">Guardar prompt manual</button>
+          <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:8px 16px">Guardar prompt manual</button>
           ${hasOverride ? `<button type="submit" name="action" value="reset" formnovalidate class="ghostbtn text-[12.5px] cursor-pointer" style="background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:8px 16px">⚙ Volver al automático</button>` : ""}
         </div>
       </form>`, saved);
@@ -618,7 +618,7 @@ export async function renderNodeModal(env: Env, nodeId: string, saved = false): 
       <form hx-post="/admin/agente/tools/${encodeURIComponent(name)}/toggle" hx-target="#modal-root" hx-swap="innerHTML" class="inline">
         <button class="${off ? "bigbtn font-display font-bold" : "ghostbtn"} text-[12.5px] cursor-pointer"
                 style="${off
-                  ? "background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:3px 3px 0 var(--linelit);padding:9px 16px"
+                  ? "background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 16px"
                   : "background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:9px 16px"}">
           ${off ? "Encender tool" : "Apagar tool"}
         </button>

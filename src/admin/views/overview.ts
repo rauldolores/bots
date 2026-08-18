@@ -186,7 +186,7 @@ export async function renderOverview(env: Env): Promise<string> {
         </div>
       </div>
       <a href="/admin/agente" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer flex items-center justify-center gap-2"
-         style="background:var(--accent);color:#1a1206;border:1px solid var(--accent);box-shadow:4px 4px 0 var(--linelit);padding:13px;margin-top:18px">
+         style="background:var(--accent);color:#1a1206;border:1px solid var(--accent);box-shadow:var(--shadow-sm);padding:13px;margin-top:18px">
         <i data-lucide="settings-2" width="16" height="16"></i> Ajustar mi agente
       </a>
     </div>`;
@@ -202,7 +202,7 @@ export async function renderOverview(env: Env): Promise<string> {
         const chanColor = c.channel === "twilio" || c.channel === "whatsapp" ? "var(--info)" : "var(--accent-2)";
         return `
         <a href="/admin/conversations?c=${encodeURIComponent(c.id)}" class="convrow flex items-center gap-3" style="padding:12px 18px;border-top:1px solid var(--line);cursor:pointer">
-          <div class="flex items-center justify-center flex-none" style="width:36px;height:36px;background:var(--raise);border:1px solid var(--linelit);font-size:12px;font-weight:700;color:var(--accent)">${initials}</div>
+          <div class="flex items-center justify-center flex-none" style="width:36px;height:36px;background:var(--raise);border:1px solid var(--linelit);font-size:12px;font-weight:700;color:var(--accent-2)">${initials}</div>
           <div class="flex-1" style="min-width:0">
             <div class="flex items-center gap-2">
               <span class="text-[13px] font-semibold text-cream">${name}</span>
@@ -211,7 +211,7 @@ export async function renderOverview(env: Env): Promise<string> {
             <div class="text-[12px] text-muted mt-0.5" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${preview}</div>
           </div>
           <div class="text-[10px] text-dim flex-none">${ago(c.last_message_at)}</div>
-          <i data-lucide="chevron-right" width="16" height="16" class="arr flex-none" style="color:var(--accent);opacity:0;transform:translateX(-4px);transition:all .15s ease"></i>
+          <i data-lucide="chevron-right" width="16" height="16" class="arr flex-none" style="color:var(--accent-2);opacity:0;transform:translateX(-4px);transition:all .15s ease"></i>
         </a>`;
       })
       .join("") || `<div class="text-center text-[12.5px] text-dim" style="padding:32px 16px">Aún no hay conversaciones.</div>`;
