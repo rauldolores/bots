@@ -118,6 +118,9 @@ app.post("/webhooks/telegram/:botId", (c) =>
   routeToAgent(c, telegramAdapter, "telegram", c.req.param("botId")),
 );
 app.post("/webhooks/manychat", (c) => routeToAgent(c, manychatAdapter, "manychat"));
+app.post("/webhooks/manychat/:botId", (c) =>
+  routeToAgent(c, manychatAdapter, "manychat", c.req.param("botId")),
+);
 // WhatsApp (Twilio): rutea el mensaje entrante al bot de clientes (Claude). El
 // body se lee UNA vez; ack con TwiML vacío para que Twilio no reenvíe el cuerpo
 // como mensaje.
