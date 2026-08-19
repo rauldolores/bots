@@ -1,5 +1,11 @@
 import { Db } from "./client";
 
+/** Config NO secreta de un canal (SID, número de origen…). Nunca un token. */
+export interface BotChannelConfig {
+  accountSid?: string;
+  waFrom?: string;
+}
+
 export interface BotChannel {
   id: string;
   bot_id: string;
@@ -8,8 +14,36 @@ export interface BotChannel {
   secret_ref: string | null;
   verify_token_ref: string | null;
   app_secret_ref: string | null;
+  config: BotChannelConfig;
   enabled: boolean;
   created_at: number;
+}
+
+interface BotChannelRow {
+  id: string;
+  bot_id: string;
+  channel: string;
+  external_id: string | null;
+  secret_ref: string | null;
+  verify_token_ref: string | null;
+  app_secret_ref: string | null;
+  config: unknown;
+  enabled: boolean;
+  created_at: number;
+}
+
+function toBotChannel(row: BotChannelRow): BotChannel {
+  let config: BotChannelConfig = {};
+  if (row.config && typeof row.config === "object") {
+    config = row.config as BotChannelConfig;
+  } else if (typeof row.config === "string" && row.config.trim()) {
+    try {
+      config = JSON.parse(row.config);
+    } catch {
+      config = {};
+    }
+  }
+  return { ...row, config };
 }
 
 /**
@@ -21,10 +55,11 @@ export class BotChannelsRepo {
   constructor(private readonly db: Db) {}
 
   async getByBotAndChannel(botId: string, channel: string): Promise<BotChannel | null> {
-    return this.db.first<BotChannel>(
+    const row = await this.db.first<BotChannelRow>(
       "SELECT * FROM bot_channels WHERE bot_id = ? AND channel = ? AND enabled = true",
       [botId, channel],
     );
+    return row ? toBotChannel(row) : null;
   }
 
   /**
@@ -32,10 +67,11 @@ export class BotChannelsRepo {
    * saben avisar el id externo (phone_number_id, page_id…), no el bot.
    */
   async getByExternalId(channel: string, externalId: string): Promise<BotChannel | null> {
-    return this.db.first<BotChannel>(
+    const row = await this.db.first<BotChannelRow>(
       "SELECT * FROM bot_channels WHERE channel = ? AND external_id = ? AND enabled = true",
       [channel, externalId],
     );
+    return row ? toBotChannel(row) : null;
   }
 
   async upsert(input: {
@@ -45,15 +81,18 @@ export class BotChannelsRepo {
     secretRef?: string | null;
     verifyTokenRef?: string | null;
     appSecretRef?: string | null;
+    /** Si se omite, conserva la config ya guardada (no la vacía). */
+    config?: BotChannelConfig;
   }): Promise<void> {
     await this.db.run(
-      `INSERT INTO bot_channels (bot_id, channel, external_id, secret_ref, verify_token_ref, app_secret_ref, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO bot_channels (bot_id, channel, external_id, secret_ref, verify_token_ref, app_secret_ref, config, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, COALESCE(?::jsonb, '{}'::jsonb), ?)
        ON CONFLICT (bot_id, channel) DO UPDATE SET
          external_id = excluded.external_id,
          secret_ref = excluded.secret_ref,
          verify_token_ref = excluded.verify_token_ref,
          app_secret_ref = excluded.app_secret_ref,
+         config = COALESCE(?::jsonb, bot_channels.config),
          enabled = true`,
       [
         input.botId,
@@ -62,7 +101,9 @@ export class BotChannelsRepo {
         input.secretRef ?? null,
         input.verifyTokenRef ?? null,
         input.appSecretRef ?? null,
+        input.config ? JSON.stringify(input.config) : null,
         Date.now(),
+        input.config ? JSON.stringify(input.config) : null,
       ],
     );
   }

@@ -59,9 +59,51 @@ describe("resolveChannelEnv", () => {
     expect(effective.TELEGRAM_BOT_TOKEN).toBe("del-entorno");
   });
 
-  it("un canal sin mapeo de secreto (ej. uno futuro) devuelve el env sin tocar", async () => {
+  it("un canal sin mapeo de secreto (whatsapp/messenger: resuelven por evento, no por bot) devuelve el env sin tocar", async () => {
     const env = { DB: db.driver } as any;
-    const effective = await resolveChannelEnv(env, TEST_BOT_ID, "twilio");
+    const effective = await resolveChannelEnv(env, TEST_BOT_ID, "whatsapp");
     expect(effective).toBe(env);
+  });
+
+  describe("twilio (token + SID + número, no solo un secreto)", () => {
+    it("con secret_ref y config, pisa las tres variables", async () => {
+      await new BotChannelsRepo(db).upsert({
+        botId: TEST_BOT_ID,
+        channel: "twilio",
+        secretRef: "11111111-1111-1111-1111-111111111111",
+        config: { accountSid: "ACdelbot", waFrom: "+5215500000001" },
+      });
+      readSecretMock.mockResolvedValue("token-del-bot");
+
+      const env = {
+        DB: db.driver,
+        TWILIO_AUTH_TOKEN: "token-del-entorno",
+        TWILIO_ACCOUNT_SID: "ACdelentorno",
+        TWILIO_WA_FROM: "+5215500000099",
+      } as any;
+      const effective = await resolveChannelEnv(env, TEST_BOT_ID, "twilio");
+      expect(effective.TWILIO_AUTH_TOKEN).toBe("token-del-bot");
+      expect(effective.TWILIO_ACCOUNT_SID).toBe("ACdelbot");
+      expect(effective.TWILIO_WA_FROM).toBe("+5215500000001");
+    });
+
+    it("con config pero sin secret_ref (aún no rotó el token), solo pisa SID/número", async () => {
+      await new BotChannelsRepo(db).upsert({
+        botId: TEST_BOT_ID,
+        channel: "twilio",
+        config: { accountSid: "ACdelbot", waFrom: "+5215500000001" },
+      });
+
+      const env = {
+        DB: db.driver,
+        TWILIO_AUTH_TOKEN: "token-del-entorno",
+        TWILIO_ACCOUNT_SID: "ACdelentorno",
+        TWILIO_WA_FROM: "+5215500000099",
+      } as any;
+      const effective = await resolveChannelEnv(env, TEST_BOT_ID, "twilio");
+      expect(effective.TWILIO_AUTH_TOKEN).toBe("token-del-entorno");
+      expect(effective.TWILIO_ACCOUNT_SID).toBe("ACdelbot");
+      expect(effective.TWILIO_WA_FROM).toBe("+5215500000001");
+    });
   });
 });

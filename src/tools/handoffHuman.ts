@@ -8,6 +8,7 @@ import { ConversationsRepo } from "../db/conversations";
 import { BotsRepo } from "../db/bots";
 import { resolveBotId } from "../tenant";
 import { isProTier } from "../config";
+import { resolveChannelEnv } from "../channels/effectiveEnv";
 
 export function handoffHumanTool(env: Env, getConversationId: () => string | null, botId: string) {
   return tool({
@@ -99,10 +100,19 @@ export function handoffNotifyStatus(
  * reuses the bot token). Optional = Twilio WhatsApp via an approved Content
  * Template. Each channel is independent and never throws into the tool.
  */
-export async function notifyOwner(env: Env, notice: HandoffNotice): Promise<void> {
+export async function notifyOwner(rawEnv: Env, notice: HandoffNotice): Promise<void> {
+  const notifyDb = new Db(rawEnv.DB);
+  const notifyBotId = await resolveBotId(notifyDb);
+  // El aviso al dueño sale por los MISMOS canales que le habla al cliente
+  // (el token de Telegram/Twilio de este bot, si ya lo conectó) — sin esto,
+  // un bot con canal propio le avisaría al dueño con el token de otro bot.
+  const env = await resolveChannelEnv(
+    await resolveChannelEnv(rawEnv, notifyBotId, "telegram"),
+    notifyBotId,
+    "twilio",
+  );
   const ticketUrl = `${env.DASHBOARD_BASE_URL}/admin/tickets`;
-  const notifyDb = new Db(env.DB);
-  const tier = (await new BotsRepo(notifyDb).getById(await resolveBotId(notifyDb)))?.tier;
+  const tier = (await new BotsRepo(notifyDb).getById(notifyBotId))?.tier;
 
   // El SID de la plantilla puede venir del secret O del setting que escribe el
   // setup del panel. Se resuelve ANTES del guard: si vive solo en settings, el

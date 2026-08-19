@@ -30,7 +30,8 @@ import { costOfUsage } from "../pricing";
 import type { ChannelId } from "../channels/shared";
 import { AgentJobsRepo } from "../queue/jobs";
 import { AgentStateRepo } from "./state";
-import { conversationKeyOf, botIdFromKey } from "./key";
+import { conversationKeyOf, botIdFromKey, channelFromKey } from "./key";
+import { resolveChannelEnv } from "../channels/effectiveEnv";
 import { resolveBotId } from "../tenant";
 
 export { conversationKeyOf };
@@ -177,10 +178,15 @@ export async function ingestMessage(
  * Devuelve `false` si no había nada que responder. Quien lo llama debe haberse
  * ganado el lease del trabajo — no se serializa a sí mismo.
  */
-export async function runTurn(env: Env, conversationKey: string): Promise<boolean> {
-  const db = new Db(env.DB);
+export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boolean> {
+  const db = new Db(rawEnv.DB);
   const botId = botIdFromKey(conversationKey);
   const bot = await new BotsRepo(db).getById(botId);
+  // El token de ESTE bot para ESTE canal (Vault), si ya está conectado —
+  // si no, el env del despliegue, igual que siempre. Sin esto, un bot con
+  // canal propio pensaría con su identidad pero respondería con el token
+  // equivocado.
+  const env = await resolveChannelEnv(rawEnv, botId, channelFromKey(conversationKey) as ChannelId);
   const jobs = new AgentJobsRepo(db);
   const stateRepo = new AgentStateRepo(db);
 

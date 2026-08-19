@@ -209,20 +209,33 @@ Cada fase queda **verde y desplegable** antes de la siguiente.
   entorno no aporta nada mientras solo haya un bot — la razón de Vault es
   justo que un SEGUNDO bot no comparta el token del primero.
 
-  Hecho, para Telegram y ManyChat (los dos con un solo secreto y un `botId`
-  por URL — el patrón simple): `src/db/vault.ts` (create/read/update/delete
-  sobre `vault.secrets` / `vault.decrypted_secrets` — probado a mano contra
-  la Supabase de producción: crear, leer, actualizar y borrar un secreto de
-  prueba, los cuatro verificados uno por uno antes de escribir nada
-  permanente); `BotChannelsRepo`; `resolveChannelEnv()` (el token de Vault
-  pisa al del entorno SOLO si el canal ya está conectado — si no, cae al de
-  siempre, cero cambio de comportamiento); `/webhooks/telegram/:botId` y
-  `/webhooks/manychat/:botId` nuevas, con las rutas viejas intactas al lado
+  Hecho, para Telegram, ManyChat y Twilio: `src/db/vault.ts`
+  (create/read/update/delete sobre `vault.secrets` / `vault.decrypted_secrets`
+  — probado a mano contra la Supabase de producción: crear, leer, actualizar
+  y borrar un secreto de prueba, los cuatro verificados uno por uno antes de
+  escribir nada permanente); `BotChannelsRepo` (con `config` jsonb desde
+  este commit — Twilio necesita `TWILIO_ACCOUNT_SID` y `TWILIO_WA_FROM`
+  además del token, y ninguno de los dos es un secreto, así que no van en
+  Vault); `resolveChannelEnv()` (Vault + config pisan al entorno SOLO si el
+  canal ya está conectado — si no, cae al de siempre, cero cambio de
+  comportamiento); `/webhooks/telegram/:botId`, `/webhooks/manychat/:botId`
+  y `/webhooks/twilio/:botId` nuevas, con las rutas viejas intactas al lado
   (decisión M5). `npm run channel:connect -- <canal> <token>` conecta un
-  canal. **Nada de esto se activó en producción**: conectar un canal no
-  cambia a qué URL le pega el proveedor — eso exige el registro externo
-  (`setWebhook` de Telegram, el flujo de ManyChat), fuera de esta fase a
-  propósito.
+  canal (el secreto; SID/número de Twilio se cargan aparte con
+  `BotChannelsRepo.upsert({config})`, todavía sin script propio).
+
+  Bug encontrado al construir Twilio: `runTurn()` armaba la respuesta con el
+  `env` crudo de la corrida del tick, no con el resuelto por bot — un bot
+  con Telegram o Twilio propio hubiera PENSADO con su identidad pero
+  RESPONDIDO con el token de otro. Igual en `notifyOwner` (el aviso al
+  dueño por handoff). Los tres puntos de envío (ingesta, turno, aviso al
+  dueño) ya resuelven su propio env por canal — antes solo lo hacía la
+  ingesta.
+
+  **Nada de esto se activó en producción**: conectar un canal no cambia a
+  qué URL le pega el proveedor — eso exige el registro externo (`setWebhook`
+  de Telegram, el flujo de ManyChat, la consola de Twilio), fuera de esta
+  fase a propósito.
 
   Limitación encontrada: el Postgres de CI (`pgvector/pgvector`, no la
   Supabase completa) no tiene el esquema `vault` — por eso `vault.ts` no
@@ -230,24 +243,17 @@ Cada fase queda **verde y desplegable** antes de la siguiente.
   lo que SÍ corre en CI es la lógica de `resolveChannelEnv` con `readSecret`
   mockeado.
 
-  **Twilio, Meta y WhatsApp quedan fuera — no son "lo mismo con otro
-  nombre", son un problema distinto:**
-  - **Twilio** necesita `TWILIO_ACCOUNT_SID` y `TWILIO_WA_FROM` además del
-    auth token, y ninguno de los dos es realmente un "secreto" (SID es casi
-    un identificador público, WA_FROM es un número) — `bot_channels` solo
-    tiene columnas para secretos en Vault, no para config no-secreta por
-    canal. Necesita agregar esa columna antes de que el patrón funcione de
-    verdad.
-  - **Meta y WhatsApp** son más grandes: Meta te da UN webhook por app, no
-    uno por página — un solo POST puede traer eventos de páginas de VARIOS
-    bots a la vez. `:botId` en la URL no alcanza; hay que resolver el bot
-    **por evento**, con `BotChannelsRepo.getByExternalId()` (ya existe,
-    pensado para esto) usando el `page_id`/`phone_number_id` de cada
-    mensaje. Y falta decidir algo de producto primero: ¿cada bot trae su
-    propia app de Meta (su propio `app_secret`), o todos comparten la app
-    de la plataforma? Eso cambia cómo se verifica la firma.
+  **Meta y WhatsApp quedan fuera — son un problema distinto, no el mismo
+  patrón repetido:** Meta te da UN webhook por app, no uno por página — un
+  solo POST puede traer eventos de páginas de VARIOS bots a la vez. `:botId`
+  en la URL no alcanza; hay que resolver el bot **por evento**, con
+  `BotChannelsRepo.getByExternalId()` (ya existe, pensado para esto) usando
+  el `page_id`/`phone_number_id` de cada mensaje. Y falta decidir algo de
+  producto primero: ¿cada bot trae su propia app de Meta (su propio
+  `app_secret`), o todos comparten la app de la plataforma? Eso cambia cómo
+  se verifica la firma.
 
-  **Riesgo: medio** (Telegram/ManyChat sin fuga; Twilio/Meta/WhatsApp
+  **Riesgo: medio** (Telegram/ManyChat/Twilio sin fuga; Meta/WhatsApp
   siguen exactamente como estaban — env compartido, sin cambio).
 
 - **F5 — Auth y panel multi-bot.** KontrolIA Auth reemplaza el Basic Auth;

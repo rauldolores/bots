@@ -124,21 +124,41 @@ app.post("/webhooks/manychat/:botId", (c) =>
 // WhatsApp (Twilio): rutea el mensaje entrante al bot de clientes (Claude). El
 // body se lee UNA vez; ack con TwiML vacío para que Twilio no reenvíe el cuerpo
 // como mensaje.
-app.post("/webhooks/twilio", async (c) => {
+const TWIML_EMPTY = new Response("<Response></Response>", {
+  status: 200,
+  headers: { "Content-Type": "text/xml" },
+});
+
+async function routeTwilioToAgent(
+  c: { req: { raw: Request }; env: Env; executionCtx?: unknown },
+  botId?: string,
+): Promise<Response> {
+  let env = c.env;
+  if (botId) {
+    const exists = await new BotsRepo(new Db(env.DB)).getById(botId);
+    if (!exists) return new Response("bot not found", { status: 404 });
+    env = await resolveChannelEnv(env, botId, "twilio");
+  }
   let msg;
   try {
-    msg = await twilioAdapter.parseIncoming(c.req.raw, c.env);
+    msg = await twilioAdapter.parseIncoming(c.req.raw, env);
   } catch (e) {
     console.error("twilio parse error:", e);
-    return new Response("<Response></Response>", { status: 200, headers: { "Content-Type": "text/xml" } });
+    return TWIML_EMPTY;
   }
-  await ingestMessage(c.env, msg)
+  await ingestMessage(env, msg, botId)
     .then((r) => {
-      if (r.scheduledInMs !== null) wakeTickAfter(c.env, ctxOpcional(c), r.scheduledInMs);
+      if (r.scheduledInMs !== null) wakeTickAfter(env, ctxOpcional(c), r.scheduledInMs);
     })
     .catch((e) => console.error("ingest:", e));
-  return new Response("<Response></Response>", { status: 200, headers: { "Content-Type": "text/xml" } });
-});
+  return TWIML_EMPTY;
+}
+
+app.post("/webhooks/twilio", (c) => routeTwilioToAgent(c));
+// F4: mismo patrón que Telegram/ManyChat — la ruta vieja de arriba sigue
+// viva (M5) mientras el bot actual no re-registre su URL en la consola de
+// Twilio.
+app.post("/webhooks/twilio/:botId", (c) => routeTwilioToAgent(c, c.req.param("botId")));
 
 // --- Meta oficial (Facebook Messenger + Instagram DMs, sin ManyChat) --------
 // GET = handshake de verificación de Meta: devuelve hub.challenge si el

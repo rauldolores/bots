@@ -43,6 +43,15 @@ function telegramUpdate(botId: string, text: string, userId = 9911) {
   });
 }
 
+function twilioUpdate(botId: string, text: string, from = "+5215512345678") {
+  const form = new URLSearchParams({ From: `whatsapp:${from}`, Body: text, ProfileName: "Ana" });
+  return new Request(`http://bot.test/webhooks/twilio/${botId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  });
+}
+
 describe("webhook por bot: /webhooks/telegram/:botId", () => {
   it("404 si el botId de la URL no existe", async () => {
     const res = await app.fetch(telegramUpdate("00000000-0000-0000-0000-000000000099", "hola"), env);
@@ -68,5 +77,20 @@ describe("webhook por bot: /webhooks/telegram/:botId", () => {
     expect(conv).toHaveLength(1);
     expect(convOther).toHaveLength(1);
     expect(conv[0].id).not.toBe(convOther[0].id);
+  });
+});
+
+describe("webhook por bot: /webhooks/twilio/:botId", () => {
+  it("404 si el botId de la URL no existe (nunca 500, Twilio no debe reintentar mal)", async () => {
+    const res = await app.fetch(twilioUpdate("00000000-0000-0000-0000-000000000099", "hola"), env);
+    expect(res.status).toBe(404);
+  });
+
+  it("200 con TwiML vacío y encola bajo el bot de la URL", async () => {
+    const res = await app.fetch(twilioUpdate(TEST_BOT_ID, "hola"), env);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("<Response></Response>");
+    const trabajos = await db.all<{ conversation_key: string }>("SELECT conversation_key FROM agent_jobs");
+    expect(trabajos).toEqual([{ conversation_key: `${TEST_BOT_ID}:twilio:+5215512345678` }]);
   });
 });

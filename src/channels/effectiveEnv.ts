@@ -1,23 +1,39 @@
 import type { Env } from "../env";
 import type { ChannelId } from "./shared";
 import { Db } from "../db/client";
-import { BotChannelsRepo } from "../db/botChannels";
+import { BotChannelsRepo, type BotChannel } from "../db/botChannels";
 import { readSecret } from "../db/vault";
 
-// F4 de docs/multitenancy.md: qué variable de env reemplaza cada canal
-// cuando el bot YA se conectó vía bot_channels + Vault. Falta a propósito
-// twilio/meta/whatsapp — se suman cuando esos webhooks migren a rutas por
-// bot; hasta entonces siguen leyendo env como siempre.
+// F4 de docs/multitenancy.md: qué variable de env reemplaza el secreto de
+// cada canal cuando el bot YA se conectó vía bot_channels + Vault. Falta a
+// propósito meta/whatsapp — esos necesitan resolver el bot POR EVENTO
+// (varios bots comparten un webhook de Meta), no por bot_id en la URL como
+// el resto; es un problema distinto, no el mismo patrón repetido.
 const SECRET_ENV_KEY: Partial<Record<ChannelId, keyof Env>> = {
   telegram: "TELEGRAM_BOT_TOKEN",
   manychat: "MANYCHAT_API_KEY",
+  twilio: "TWILIO_AUTH_TOKEN",
 };
+
+/** Twilio necesita SID y número de origen además del token — ninguno de los
+ *  dos es secreto, así que viven en bot_channels.config, no en Vault. */
+function applyChannelConfig(env: Env, channel: ChannelId, config: BotChannel["config"]): Env {
+  if (channel === "twilio") {
+    return {
+      ...env,
+      ...(config.accountSid ? { TWILIO_ACCOUNT_SID: config.accountSid } : {}),
+      ...(config.waFrom ? { TWILIO_WA_FROM: config.waFrom } : {}),
+    };
+  }
+  return env;
+}
 
 /**
  * El env efectivo para ESTE bot en ESTE canal: si ya está conectado vía
- * bot_channels, su token (Vault) pisa al del despliegue. Si no, devuelve el
- * env tal cual — el bot sigue funcionando con el token del despliegue hasta
- * que alguien lo conecte de verdad, así que nunca es un cambio disruptivo.
+ * bot_channels, su token (Vault) y su config no-secreta (SID, número) pisan
+ * al del despliegue. Si no, devuelve el env tal cual — el bot sigue
+ * funcionando con lo del despliegue hasta que alguien lo conecte de
+ * verdad, así que nunca es un cambio disruptivo.
  */
 export async function resolveChannelEnv(env: Env, botId: string, channel: ChannelId): Promise<Env> {
   const key = SECRET_ENV_KEY[channel];
@@ -25,10 +41,14 @@ export async function resolveChannelEnv(env: Env, botId: string, channel: Channe
 
   const db = new Db(env.DB);
   const row = await new BotChannelsRepo(db).getByBotAndChannel(botId, channel);
-  if (!row?.secret_ref) return env;
+  if (!row) return env;
 
-  const secret = await readSecret(db, row.secret_ref);
-  if (!secret) return env;
+  let effective = applyChannelConfig(env, channel, row.config);
 
-  return { ...env, [key]: secret };
+  if (row.secret_ref) {
+    const secret = await readSecret(db, row.secret_ref);
+    if (secret) effective = { ...effective, [key]: secret };
+  }
+
+  return effective;
 }

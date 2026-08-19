@@ -15,3 +15,9 @@ export function conversationKeyOf(botId: string, channel: string, channelUserId:
 export function botIdFromKey(conversationKey: string): string {
   return conversationKey.slice(0, conversationKey.indexOf(":"));
 }
+
+/** El canal es el segundo segmento — nunca lleva ":", a diferencia del id de usuario. */
+export function channelFromKey(conversationKey: string): string {
+  const rest = conversationKey.slice(conversationKey.indexOf(":") + 1);
+  return rest.slice(0, rest.indexOf(":"));
+}
