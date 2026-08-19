@@ -11,9 +11,7 @@
 // The layout() API is unchanged: views keep their own activeTab id; the group,
 // breadcrumb and page title are derived here.
 
-import type { Env } from "../../env";
-import { isPro, PRO_ONLY_TABS } from "../../config";
-import { getNiche } from "../../niches";
+import { PRO_ONLY_TABS } from "../../config";
 import type { NichePack } from "../../niches";
 
 const UPGRADE_URL = "/admin/upgrade";
@@ -335,11 +333,16 @@ function sidebar(activeTab: string, pro: boolean, niche: NichePack | null): stri
   </aside>`;
 }
 
-export function layout(opts: { title: string; activeTab: string; body: string; env?: Env }): string {
-  // Tier: si se pasa env, el nav Pro se bloquea para free. Sin env (ej. notFound)
-  // se asume Pro para no ocultar nada por accidente.
-  const pro = opts.env ? isPro(opts.env) : true;
-  const niche = opts.env ? getNiche(opts.env) : null;
+export function layout(opts: {
+  title: string;
+  activeTab: string;
+  body: string;
+  /** bots.tier ya resuelto (F3). Sin dato (ej. notFound) se asume Pro para no ocultar nada por accidente. */
+  pro?: boolean;
+  niche?: NichePack | null;
+}): string {
+  const pro = opts.pro ?? true;
+  const niche = opts.niche ?? null;
   const section = NAV.find((s) => s.items.some((i) => i.id === opts.activeTab)) ?? NAV[0];
   const item = applyNiche(section.items.find((i) => i.id === opts.activeTab) ?? section.items[0], niche);
 
@@ -399,7 +402,7 @@ export function layout(opts: { title: string; activeTab: string; body: string; e
 // Página de upgrade: se muestra cuando un panel free intenta abrir un tab Pro
 // (o al hacer click en un item bloqueado). Vive dentro del layout para conservar
 // el nav. `feature` es el nombre del tab que pidió (para personalizar el copy).
-export function renderUpgrade(env: Env, feature?: string): string {
+export function renderUpgrade(feature?: string): string {
   const perks = [
     ["scan-eye", "Analista IA", "Resúmenes automáticos de cada conversación: qué querían, objeciones y oportunidad de venta."],
     ["bar-chart-3", "Estadísticas", "Métricas de volumen, retención y desempeño de tu bot en el tiempo."],
@@ -436,7 +439,7 @@ export function renderUpgrade(env: Env, feature?: string): string {
         </a>
       </div>
     </div>`;
-  return layout({ title: "Pro", activeTab: "overview", body, env });
+  return layout({ title: "Pro", activeTab: "overview", body, pro: false });
 }
 
 export function loginPage(error?: string): string {

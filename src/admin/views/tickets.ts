@@ -44,5 +44,5 @@ export async function renderTickets(env: Env): Promise<string> {
          </div>`
       : list;
 
-  return layout({ title: "Tickets", activeTab: "tickets", body, env });
+  return layout({ title: "Tickets", activeTab: "tickets", body, pro: true });
 }

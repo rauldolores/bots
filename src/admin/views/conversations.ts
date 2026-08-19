@@ -443,5 +443,5 @@ export async function renderInbox(env: Env, p: InboxParams): Promise<string> {
       </div>
     </div>`;
 
-  return layout({ title: "Conversaciones", activeTab: "conversations", body, env });
+  return layout({ title: "Conversaciones", activeTab: "conversations", body, pro: true });
 }

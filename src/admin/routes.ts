@@ -20,7 +20,7 @@ import type { Env } from "../env";
 import { resolveBotId } from "../tenant";
 import { adminAuth } from "./auth";
 import { layout, renderUpgrade } from "./views/layout";
-import { isPro } from "../config";
+import { isProTier } from "../config";
 import { renderOverview } from "./views/overview";
 import { renderStats } from "./views/stats";
 import { renderCosts } from "./views/costs";
@@ -87,23 +87,27 @@ const PRO_GATE: Array<[string, string]> = [
   ["/admin/campanas", "Campañas"],
 ];
 adminApp.use("*", async (c, next) => {
-  if (isPro(c.env)) return next();
+  const gateDb = new Db(c.env.DB);
+  const gateBot = await new BotsRepo(gateDb).getById(await resolveBotId(gateDb));
+  if (isProTier(gateBot?.tier)) return next();
   const path = c.req.path;
   const hit = PRO_GATE.find(([pre]) => path === pre || path.startsWith(pre + "/"));
-  if (hit) return c.html(renderUpgrade(c.env, hit[1]));
+  if (hit) return c.html(renderUpgrade(hit[1]));
   return next();
 });
 
 // Página de upgrade (item bloqueado del nav apunta aquí).
-adminApp.get("/upgrade", (c) => c.html(renderUpgrade(c.env)));
+adminApp.get("/upgrade", (c) => c.html(renderUpgrade()));
 
 // Root → default tab.
 adminApp.get("/", (c) => c.redirect("/admin/overview"));
 
 // Selector de proyectos (header): instancia actual + hermanas de PEER_BOTS.
-adminApp.get("/projects", (c) =>
-  c.json({ current: c.env.BOT_NAME ?? "Mi bot", peers: parsePeerBots(c.env) }),
-);
+adminApp.get("/projects", async (c) => {
+  const projectsDb = new Db(c.env.DB);
+  const bot = await new BotsRepo(projectsDb).getById(await resolveBotId(projectsDb));
+  return c.json({ current: bot?.name ?? c.env.BOT_NAME ?? "Mi bot", peers: parsePeerBots(c.env) });
+});
 
 // --- Read-only tabs ---------------------------------------------------------
 
@@ -436,7 +440,15 @@ adminApp.get("/config", async (c) => {
   const settings = await new SettingsRepo(configDb, configBotId).all();
   const bot = await new BotsRepo(configDb).getById(configBotId);
   const saved = c.req.query("saved") === "1";
-  return c.html(renderConfig(c.env, settings, bot?.config ?? {}, saved, c.req.query("llmtest")));
+  return c.html(
+    renderConfig(
+      settings,
+      bot?.config ?? {},
+      { name: bot?.name ?? c.env.BOT_NAME, businessName: bot?.business_name ?? c.env.BUSINESS_NAME },
+      saved,
+      c.req.query("llmtest"),
+    ),
+  );
 });
 
 // Prueba de la config BYO-LLM guardada: un generateText mínimo con el modelo
@@ -675,7 +687,15 @@ adminApp.post("/conversations/:id/suggest", async (c) => {
       "Eres asistente del dueño. Sugiere UN solo mensaje corto en español que el dueño podría enviar al cliente para resolver la última consulta. NO incluyas preámbulo, solo la frase a copy/paste.",
   });
   const suggestBot = await new BotsRepo(suggestDb).getById(suggestBotId);
-  const sys = systemPromptFromEnv(c.env, [], renderBusinessContext(suggestBot?.config ?? {}));
+  const sys = systemPromptFromEnv(
+    {
+      name: suggestBot?.name ?? c.env.BOT_NAME,
+      businessName: suggestBot?.business_name ?? c.env.BUSINESS_NAME,
+      language: suggestBot?.language ?? c.env.BOT_LANGUAGE,
+    },
+    [],
+    renderBusinessContext(suggestBot?.config ?? {}),
+  );
   const result = await generateText({
     model,
     system: sys,

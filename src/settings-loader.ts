@@ -97,13 +97,18 @@ export async function resolveAgentConfig(env: Env, toolNames: string[]): Promise
     return v !== undefined && v.trim() !== "" ? v : undefined;
   };
 
-  // Niche pack activo (BOT_NICHE). Aporta el playbook del giro y un tono por
-  // defecto; ambos se pueden sobreescribir desde el panel.
-  const niche = getNiche(env);
+  // Niche pack activo (bots.niche, F3). Aporta el playbook del giro y un tono
+  // por defecto; ambos se pueden sobreescribir desde el panel.
+  const niche = getNiche(bot?.niche);
+  const identity = {
+    name: bot?.name ?? env.BOT_NAME,
+    businessName: bot?.business_name ?? env.BUSINESS_NAME,
+    language: bot?.language ?? env.BOT_LANGUAGE,
+  };
 
   const systemPromptOverride = get(SETTING_KEYS.systemPromptOverride);
   const businessContext = get(SETTING_KEYS.businessContext) ?? renderBusinessContext(botConfig);
-  const botName = get(SETTING_KEYS.botName) ?? env.BOT_NAME;
+  const botName = get(SETTING_KEYS.botName) ?? identity.name;
   // Tono elegido en el panel gana; si no hay, el tono por defecto del nicho.
   const tone = get(SETTING_KEYS.tone) ?? (niche.defaultTone || undefined);
   const escalationKeywords = parseCsvList(get(SETTING_KEYS.escalationKeywords));
@@ -123,7 +128,7 @@ export async function resolveAgentConfig(env: Env, toolNames: string[]): Promise
 
   const systemPrompt =
     systemPromptOverride ??
-    systemPromptFromEnv(env, enabledToolNames, businessContext, niche.playbook || undefined, {
+    systemPromptFromEnv(identity, enabledToolNames, businessContext, niche.playbook || undefined, {
       tone,
       extraEscalationKeywords: escalationKeywords,
       botName,

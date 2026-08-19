@@ -90,7 +90,7 @@ describe("analyzeConversations", () => {
     const call = generateTextMock.mock.calls[0][0] as { prompt: string };
     expect(call.prompt).toContain("Cliente: Ya pagué y no tengo acceso");
     expect(call.prompt).toContain("Bot: Déjame revisar tu pago.");
-    expect(call.prompt).toContain("Negocio Test");
+    expect(call.prompt).toContain("Test Business"); // bots.business_name (F3, pgSetup TEST_BOT_ID)
   });
 
   it("skips conversations that are still active (not idle)", async () => {

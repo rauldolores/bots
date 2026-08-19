@@ -3,7 +3,6 @@
 // setting is a group of 2-3 selectable cards (radio + inline SVG icon + short
 // label + one-line plain-Spanish description). Text settings are plain inputs /
 // textareas with clear labels (no jargon). The form POSTs to /admin/config.
-import type { Env } from "../../env";
 import { SETTING_KEYS } from "../../db/settings";
 import type { BotConfig } from "../../db/bots";
 import { renderBusinessContext } from "../../businessContext";
@@ -174,9 +173,9 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
  * a redirect from POST /admin/config?saved=1.
  */
 export function renderConfig(
-  env: Env,
   settings: Record<string, string>,
   botConfig: BotConfig,
+  identity: { name: string; businessName: string },
   saved = false,
   llmTest?: string,
 ): string {
@@ -191,7 +190,7 @@ export function renderConfig(
       ${savedBanner}
 
       <div style="display:flex;flex-direction:column;gap:2px">
-        <h2 class="font-display font-semibold text-[15px] text-cream">Panel de control de ${esc(env.BUSINESS_NAME)}</h2>
+        <h2 class="font-display font-semibold text-[15px] text-cream">Panel de control de ${esc(identity.businessName)}</h2>
         <p class="text-muted text-[12.5px]">Ajuste cómo se comporta su bot. Los cambios se guardan al presionar el botón de abajo.</p>
       </div>
 
@@ -210,7 +209,7 @@ export function renderConfig(
           label: "Nombre del bot",
           help: "Cómo se presenta su asistente con los clientes.",
           value: settings[SETTING_KEYS.botName] ?? "",
-          placeholder: env.BOT_NAME ?? "Mi asistente",
+          placeholder: identity.name ?? "Mi asistente",
         })}
 
         ${renderTextArea({
@@ -249,5 +248,5 @@ export function renderConfig(
       </button>
     </form>`;
 
-  return layout({ title: "Config", activeTab: "config", body, env });
+  return layout({ title: "Config", activeTab: "config", body, pro: true });
 }

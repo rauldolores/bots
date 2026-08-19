@@ -1,5 +1,5 @@
 import type { Env } from "../env";
-import { isPro } from "../config";
+import { isProTier } from "../config";
 import { searchKbTool } from "./searchKb";
 import { handoffHumanTool } from "./handoffHuman";
 import { pauseBotTool } from "./pauseBot";
@@ -12,6 +12,8 @@ export interface ToolContext {
   env: Env;
   getConversationId: () => string | null;
   botId: string;
+  /** bots.tier ya resuelto por quien llama (F3: ya no es env.BOT_TIER). */
+  tier: string;
 }
 
 export function buildTools(ctx: ToolContext) {
@@ -27,7 +29,7 @@ export function buildTools(ctx: ToolContext) {
   };
 
   // Pro tier additions
-  if (isPro(ctx.env)) {
+  if (isProTier(ctx.tier)) {
     tools.scheduleAppointment = scheduleAppointmentTool(ctx.env, ctx.getConversationId);
     tools.catalogQuery = catalogQueryTool(ctx.env, ctx.botId);
   }

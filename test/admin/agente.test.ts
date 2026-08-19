@@ -83,7 +83,7 @@ describe("Mi Agente — node panels", () => {
     expect(html).toContain("prompt efectivo");
     // The rendered prompt itself is embedded (escaped) — role tag included:
     expect(html).toContain("&lt;role&gt;");
-    expect(html).toContain("TestBot");
+    expect(html).toContain("Test Bot"); // bots.name (F3, pgSetup TEST_BOT_ID)
   });
 
   it("tool panel shows usage and the toggle button", async () => {

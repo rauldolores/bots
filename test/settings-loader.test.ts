@@ -29,7 +29,7 @@ describe("resolveAgentConfig", () => {
     expect(cfg.interChunkDelayMs).toBe(1000);
     expect(cfg.modelOverride).toBe("auto");
     expect(cfg.botPaused).toBe(false);
-    expect(cfg.systemPrompt).toContain("Asistente"); // env BOT_NAME
+    expect(cfg.systemPrompt).toContain("Test Bot"); // bots.name (F3, pgSetup TEST_BOT_ID)
     expect(cfg.systemPrompt).toContain("<role>");
     expect(cfg.systemPrompt).not.toContain("{{");
   });

@@ -214,5 +214,5 @@ export async function renderCosts(env: Env, saved = false): Promise<string> {
       ${note}
     </div>`;
 
-  return layout({ title: "Costos", activeTab: "costs", body, env });
+  return layout({ title: "Costos", activeTab: "costs", body, pro: true });
 }

@@ -5,7 +5,9 @@ import type { Env } from "../env";
 import { Db } from "../db/client";
 import { TicketsRepo } from "../db/tickets";
 import { ConversationsRepo } from "../db/conversations";
-import { isPro } from "../config";
+import { BotsRepo } from "../db/bots";
+import { resolveBotId } from "../tenant";
+import { isProTier } from "../config";
 
 export function handoffHumanTool(env: Env, getConversationId: () => string | null, botId: string) {
   return tool({
@@ -34,9 +36,10 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
       // Send email if Resend configured
       if (env.RESEND_API_KEY && env.OWNER_EMAIL) {
         try {
+          const bot = await new BotsRepo(db).getById(botId);
           const resend = new Resend(env.RESEND_API_KEY);
           await resend.emails.send({
-            from: `${env.BUSINESS_NAME} Bot <onboarding@resend.dev>`,
+            from: `${bot?.business_name ?? env.BUSINESS_NAME} Bot <onboarding@resend.dev>`,
             to: env.OWNER_EMAIL,
             subject: `[Bot] Ticket ${reason}: ${summary.slice(0, 60)}`,
             html: `<p><strong>Categoría:</strong> ${category}</p>
@@ -72,11 +75,14 @@ interface HandoffNotice {
  * (Salud del bot) para hacer VISIBLE cuando un handoff no le avisaría a nadie
  * — antes fallaba en silencio y el ticket se quedaba huérfano.
  */
-export function handoffNotifyStatus(env: Env): { ok: boolean; channels: string[] } {
+export function handoffNotifyStatus(
+  env: Env,
+  tier: string | undefined | null,
+): { ok: boolean; channels: string[] } {
   const channels: string[] = [];
   if (env.TELEGRAM_BOT_TOKEN && env.OWNER_TELEGRAM_CHAT_ID) channels.push("Telegram");
   if (
-    isPro(env) &&
+    isProTier(tier) &&
     env.OWNER_WA_NUMBER &&
     env.TWILIO_ACCOUNT_SID &&
     env.TWILIO_AUTH_TOKEN &&
@@ -95,6 +101,8 @@ export function handoffNotifyStatus(env: Env): { ok: boolean; channels: string[]
  */
 export async function notifyOwner(env: Env, notice: HandoffNotice): Promise<void> {
   const ticketUrl = `${env.DASHBOARD_BASE_URL}/admin/tickets`;
+  const notifyDb = new Db(env.DB);
+  const tier = (await new BotsRepo(notifyDb).getById(await resolveBotId(notifyDb)))?.tier;
 
   // El SID de la plantilla puede venir del secret O del setting que escribe el
   // setup del panel. Se resuelve ANTES del guard: si vive solo en settings, el
@@ -120,7 +128,7 @@ export async function notifyOwner(env: Env, notice: HandoffNotice): Promise<void
   // Fail-LOUD (en logs) cuando no hay ningún canal de aviso configurado: el
   // ticket existe en el dashboard pero nadie se entera. El dashboard también
   // lo muestra en "Salud del bot" (handoffNotifyStatus).
-  if (!handoffNotifyStatus(env).ok && !waViaSetting) {
+  if (!handoffNotifyStatus(env, tier).ok && !waViaSetting) {
     console.error(
       `[notifyOwner] ticket ${notice.ticketId} creado pero SIN canal de aviso configurado ` +
         "(faltan OWNER_TELEGRAM_CHAT_ID, OWNER_WA_NUMBER+template o RESEND_API_KEY+OWNER_EMAIL) — el dueño no será notificado",
@@ -154,7 +162,7 @@ export async function notifyOwner(env: Env, notice: HandoffNotice): Promise<void
   // ContentVariables (the template's {{1}}, {{2}}, {{3}} placeholders), not Body.
   // El SID (secret o setting) ya se resolvió arriba, antes del guard.
   if (
-    isPro(env) &&
+    isProTier(tier) &&
     env.OWNER_WA_NUMBER &&
     env.TWILIO_ACCOUNT_SID &&
     env.TWILIO_AUTH_TOKEN &&

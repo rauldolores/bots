@@ -1,4 +1,3 @@
-import type { Env } from "../env";
 import type { NichePack } from "./types";
 import { generico } from "./generico";
 
@@ -9,8 +8,11 @@ const PACKS: Record<string, NichePack> = {
   generico,
 };
 
-/** Resuelve el pack activo desde BOT_NICHE. Nicho ausente/desconocido → genérico. */
-export function getNiche(env: Env): NichePack {
-  const id = (env.BOT_NICHE ?? "").trim().toLowerCase();
+/**
+ * Resuelve el pack activo desde bots.niche (F3: ya no es env.BOT_NICHE).
+ * Nicho ausente/desconocido → genérico.
+ */
+export function getNiche(niche: string | null | undefined): NichePack {
+  const id = (niche ?? "").trim().toLowerCase();
   return PACKS[id] ?? generico;
 }

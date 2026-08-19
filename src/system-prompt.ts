@@ -1,5 +1,3 @@
-import type { Env } from "./env";
-
 export interface SystemPromptInput {
   botName: string;
   businessName: string;
@@ -141,17 +139,24 @@ export interface SystemPromptOverrides {
   lessons?: string[];
 }
 
+/** F3 de docs/multitenancy.md: identidad ya no es env, es la fila del bot. */
+export interface BotIdentity {
+  name: string;
+  businessName: string;
+  language: string;
+}
+
 export function systemPromptFromEnv(
-  env: Env,
+  identity: BotIdentity,
   toolNames: string[],
   businessContext: string,
   nichoPlaybook?: string,
   overrides?: SystemPromptOverrides,
 ): string {
   return renderSystemPrompt({
-    botName: overrides?.botName ?? env.BOT_NAME,
-    businessName: env.BUSINESS_NAME,
-    language: env.BOT_LANGUAGE,
+    botName: overrides?.botName ?? identity.name,
+    businessName: identity.businessName,
+    language: identity.language,
     businessContext,
     toolList: toolNames,
     nichoPlaybook,

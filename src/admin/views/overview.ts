@@ -11,6 +11,8 @@ import { connectionsSummary } from "./conexiones";
 import { KbDocsRepo, FIXTURE_CHUNKS } from "../../kb/docs";
 import { InsightsRepo } from "../../db/insights";
 import { SuggestionsRepo } from "../../db/suggestions";
+import { BotsRepo } from "../../db/bots";
+import { isProTier } from "../../config";
 import { channelLabel } from "../../channels/labels";
 import { getNiche } from "../../niches";
 
@@ -52,7 +54,9 @@ const DOW_LETTER = ["D", "L", "M", "M", "J", "V", "S"];
 export async function renderOverview(env: Env): Promise<string> {
   const db = new Db(env.DB);
   const botId = await resolveBotId(db);
-  const niche = getNiche(env);
+  const bot = await new BotsRepo(db).getById(botId);
+  const tier = bot?.tier ?? "free";
+  const niche = getNiche(bot?.niche);
   const oneDay = Date.now() - 86_400_000;
   const sevenDays = Date.now() - 7 * 86_400_000;
   const thirtyDays = Date.now() - 30 * 86_400_000;
@@ -108,7 +112,7 @@ export async function renderOverview(env: Env): Promise<string> {
   const activityMax = Math.max(...activityDays.map((d) => d.msgs), 1);
 
   // --- Estado del agente ----------------------------------------------------------
-  const toolNames = Object.keys(buildTools({ env, getConversationId: () => null, botId }));
+  const toolNames = Object.keys(buildTools({ env, getConversationId: () => null, botId, tier }));
   const agentCfg = await resolveAgentConfig(env, toolNames);
   const kbDocs = await new KbDocsRepo(db, botId).list();
   const totalKbDocs = kbDocs.length + FIXTURE_CHUNKS.length;
@@ -317,7 +321,7 @@ export async function renderOverview(env: Env): Promise<string> {
           ${(() => {
             // Cuando el bot escala a humano, ¿alguien se entera? Antes esto
             // fallaba en silencio; ahora se ve aquí en rojo si falta configurar.
-            const notify = handoffNotifyStatus(env);
+            const notify = handoffNotifyStatus(env, tier);
             return notify.ok
               ? `<span style="font-size:9px;color:var(--ok);border:1px solid var(--ok);padding:1px 6px">✓ handoff avisa por ${notify.channels.join(" + ")}</span>`
               : `<span style="font-size:9px;color:var(--bad);border:1px solid var(--bad);padding:1px 6px">⚠ HANDOFF SIN AVISO — el bot crea tickets pero NADIE recibe notificación (configura Telegram, WhatsApp o email del dueño)</span>`;
@@ -341,5 +345,5 @@ export async function renderOverview(env: Env): Promise<string> {
       </section>
     </div>`;
 
-  return layout({ title: "Overview", activeTab: "overview", body, env });
+  return layout({ title: "Overview", activeTab: "overview", body, pro: isProTier(tier) });
 }

@@ -95,4 +95,23 @@ export class BotsRepo {
       id,
     ]);
   }
+
+  async updateIdentity(
+    id: string,
+    identity: { name: string; businessName: string; language: string; tier: "free" | "pro"; niche?: string | null },
+  ): Promise<void> {
+    await this.db.run(
+      `UPDATE bots SET name = ?, business_name = ?, language = ?, tier = ?, niche = ?, updated_at = ?
+       WHERE id = ?`,
+      [
+        identity.name,
+        identity.businessName,
+        identity.language,
+        identity.tier,
+        identity.niche ?? null,
+        Date.now(),
+        id,
+      ],
+    );
+  }
 }

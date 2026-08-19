@@ -22,6 +22,7 @@ import type { Env } from "../env";
 import { Db } from "../db/client";
 import { MessagesRepo } from "../db/messages";
 import { ConversationsRepo } from "../db/conversations";
+import { BotsRepo } from "../db/bots";
 import { resolveAgentConfig, loadLlmOverrides } from "../settings-loader";
 import { createModel } from "../llm/provider";
 import { pickAdapter } from "../replies/sender";
@@ -141,6 +142,7 @@ export async function runFollowups(
 
   const msgs = new MessagesRepo(db, botId);
   const convs = new ConversationsRepo(db, botId);
+  const bot = await new BotsRepo(db).getById(botId);
   const { model, modelId } = createModel(env, "fast", await loadLlmOverrides(env));
 
   let sent = 0;
@@ -168,7 +170,7 @@ export async function runFollowups(
 
       const result = await generateText({
         model,
-        prompt: `Eres ${env.BOT_NAME}, respondiendo chats de ${env.BUSINESS_NAME} en primera persona: humano, breve, español mexicano casual, sin emojis, nunca pushy.
+        prompt: `Eres ${bot?.name ?? env.BOT_NAME}, respondiendo chats de ${bot?.business_name ?? env.BUSINESS_NAME} en primera persona: humano, breve, español mexicano casual, sin emojis, nunca pushy.
 
 Este cliente mostró interés y luego dejó de responder. ${REASON_HINT[cand.reason]}
 ${cand.display_name ? `Se llama ${cand.display_name}.` : ""}

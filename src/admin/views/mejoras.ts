@@ -191,5 +191,5 @@ export async function renderMejoras(
       </div>
     </div>`;
 
-  return layout({ title: "Mejoras", activeTab: "mejoras", body, env });
+  return layout({ title: "Mejoras", activeTab: "mejoras", body, pro: true });
 }

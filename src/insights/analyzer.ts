@@ -18,6 +18,7 @@ import { Db } from "../db/client";
 import { MessagesRepo } from "../db/messages";
 import { InsightsRepo, type UpsertInsightInput } from "../db/insights";
 import { CustomerFactsRepo } from "../db/facts";
+import { BotsRepo } from "../db/bots";
 import { resolveBotId } from "../tenant";
 import { createModel } from "../llm/provider";
 import { loadLlmOverrides } from "../settings-loader";
@@ -112,8 +113,8 @@ function buildTranscript(msgs: { role: string; content: string }[]): string {
     .join("\n");
 }
 
-function gradingPrompt(env: Env, transcript: string, hasOpenTicket: boolean): string {
-  return `Eres un auditor de calidad del chatbot de atención a clientes de ${env.BUSINESS_NAME}.
+function gradingPrompt(businessName: string, transcript: string, hasOpenTicket: boolean): string {
+  return `Eres un auditor de calidad del chatbot de atención a clientes de ${businessName}.
 Analiza la conversación completa y responde SOLO con un objeto JSON válido, sin markdown ni explicación:
 
 {
@@ -171,6 +172,8 @@ export async function analyzeConversations(
   const botId = await resolveBotId(db);
   const msgs = new MessagesRepo(db, botId);
   const insights = new InsightsRepo(db, botId);
+  const bot = await new BotsRepo(db).getById(botId);
+  const businessName = bot?.business_name ?? env.BUSINESS_NAME;
 
   const pending = await pickPending(db, botId, now, limit);
   let analyzed = 0;
@@ -186,7 +189,7 @@ export async function analyzeConversations(
 
       const result = await generateText({
         model,
-        prompt: gradingPrompt(env, transcript, conv.open_tickets > 0),
+        prompt: gradingPrompt(businessName, transcript, conv.open_tickets > 0),
       });
 
       const insight = parseInsightJson(result.text);

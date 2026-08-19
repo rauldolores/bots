@@ -9,6 +9,8 @@
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
+import { BotsRepo } from "../../db/bots";
+import { isProTier } from "../../config";
 import { resolveAgentConfig, type AgentConfig } from "../../settings-loader";
 import { buildTools } from "../../tools";
 import { resolveBotId } from "../../tenant";
@@ -182,7 +184,9 @@ async function loadAgenteData(env: Env): Promise<AgenteData> {
   const usage = new Map(usageRows.filter((r) => r.tool).map((r) => [r.tool, r]));
 
   const botId = await resolveBotId(db);
-  const toolNames = Object.keys(buildTools({ env, getConversationId: () => null, botId }));
+  const bot = await new BotsRepo(db).getById(botId);
+  const tier = bot?.tier ?? "free";
+  const toolNames = Object.keys(buildTools({ env, getConversationId: () => null, botId, tier }));
   const cfg = await resolveAgentConfig(env, toolNames);
   const disabled = toolNames.filter((n) => !cfg.enabledToolNames.includes(n));
   const settings = await new SettingsRepo(db, botId).all();
@@ -404,6 +408,8 @@ export async function renderAgenteCanvas(env: Env): Promise<string> {
 
 export async function renderAgentePage(env: Env): Promise<string> {
   const canvas = await renderAgenteCanvas(env);
+  const pageDb = new Db(env.DB);
+  const pageTier = (await new BotsRepo(pageDb).getById(await resolveBotId(pageDb)))?.tier ?? "free";
   const body = `
     <div class="flex flex-col gap-3.5">
       <div class="flex flex-wrap items-center gap-3.5">
@@ -419,7 +425,7 @@ export async function renderAgentePage(env: Env): Promise<string> {
       </div>
       <p class="text-[10.5px]" style="color:var(--dim)">El flujo es fijo — es una radiografía honesta, no un editor. Los cambios de cada nodo aplican desde el siguiente mensaje.</p>
     </div>`;
-  return layout({ title: "Mi Agente", activeTab: "agente", body, env });
+  return layout({ title: "Mi Agente", activeTab: "agente", body, pro: isProTier(pageTier) });
 }
 
 // --- Node modal (pop-up, editable) ---------------------------------------------
@@ -638,7 +644,8 @@ export async function renderNodeModal(env: Env, nodeId: string, saved = false): 
 export async function toggleTool(env: Env, name: string): Promise<boolean> {
   const db = new Db(env.DB);
   const botId = await resolveBotId(db);
-  const known = Object.keys(buildTools({ env, getConversationId: () => null, botId }));
+  const tier = (await new BotsRepo(db).getById(botId))?.tier ?? "free";
+  const known = Object.keys(buildTools({ env, getConversationId: () => null, botId, tier }));
   if (!known.includes(name)) return false;
 
   const repo = new SettingsRepo(db, botId);

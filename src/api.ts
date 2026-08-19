@@ -6,6 +6,8 @@ import type { Env } from "./env";
 import { Db } from "./db/client";
 import { requireControlPlane } from "./http-auth";
 import { BOT_VERSION } from "./version";
+import { BotsRepo } from "./db/bots";
+import { resolveBotId } from "./tenant";
 
 export const apiApp = new Hono<{ Bindings: Env }>();
 
@@ -18,9 +20,11 @@ apiApp.use("*", async (c, next) => {
 });
 
 // GET /api/health → liveness + identity for the control plane.
-apiApp.get("/health", (c) =>
-  c.json({ ok: true, version: BOT_VERSION, tier: c.env.BOT_TIER }, 200),
-);
+apiApp.get("/health", async (c) => {
+  const db = new Db(c.env.DB);
+  const bot = await new BotsRepo(db).getById(await resolveBotId(db));
+  return c.json({ ok: true, version: BOT_VERSION, tier: bot?.tier ?? c.env.BOT_TIER }, 200);
+});
 
 export type MetricsRange = "7d" | "30d" | "all";
 

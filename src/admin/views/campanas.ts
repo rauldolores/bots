@@ -172,5 +172,5 @@ export async function renderCampanas(
     </div>
   </div>`;
 
-  return layout({ title: "Campañas", activeTab: "campanas", body, env });
+  return layout({ title: "Campañas", activeTab: "campanas", body, pro: true });
 }

@@ -214,5 +214,5 @@ export async function renderInsights(env: Env, analyzedParam?: string): Promise<
       ${recentCard}
     </div>`;
 
-  return layout({ title: "Insights", activeTab: "insights", body, env });
+  return layout({ title: "Insights", activeTab: "insights", body, pro: true });
 }

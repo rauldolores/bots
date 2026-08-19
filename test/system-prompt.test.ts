@@ -65,13 +65,13 @@ describe("renderSystemPrompt", () => {
 });
 
 describe("systemPromptFromEnv", () => {
-  it("pulls botName/businessName/language from env", () => {
-    const env = {
-      BOT_NAME: "Bot",
-      BUSINESS_NAME: "Acme",
-      BOT_LANGUAGE: "en",
-    } as any;
-    const prompt = systemPromptFromEnv(env, ["searchKb"], "ctx here");
+  it("pulls botName/businessName/language from the bot identity", () => {
+    const identity = {
+      name: "Bot",
+      businessName: "Acme",
+      language: "en",
+    };
+    const prompt = systemPromptFromEnv(identity, ["searchKb"], "ctx here");
     expect(prompt).toContain("Bot");
     expect(prompt).toContain("Acme");
     expect(prompt).toContain("en");

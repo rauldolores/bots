@@ -95,7 +95,7 @@ export async function renderKbList(
       </form>
     </div>`;
 
-  return layout({ title: "Conocimiento", activeTab: "kb", body, env });
+  return layout({ title: "Conocimiento", activeTab: "kb", body, pro: true });
 }
 
 export function renderKbEditor(doc: KbDoc | null, env: Env): string {
@@ -141,5 +141,5 @@ export function renderKbEditor(doc: KbDoc | null, env: Env): string {
       </div>
     </form>`;
 
-  return layout({ title: isNew ? "Nuevo documento" : "Editar documento", activeTab: "kb", body, env });
+  return layout({ title: isNew ? "Nuevo documento" : "Editar documento", activeTab: "kb", body, pro: true });
 }

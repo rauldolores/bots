@@ -2,7 +2,9 @@ import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { LeadsRepo, leadMetadata, type Lead } from "../../db/leads";
 import { resolveBotId } from "../../tenant";
+import { BotsRepo } from "../../db/bots";
 import { getNiche } from "../../niches";
+import { isProTier } from "../../config";
 import { layout } from "./layout";
 
 // Escapa texto del LLM/cliente antes de meterlo en HTML (el intent y las notas
@@ -18,9 +20,11 @@ interface Col {
 }
 
 export async function renderLeads(env: Env): Promise<string> {
-  const niche = getNiche(env);
   const db = new Db(env.DB);
-  const leads = new LeadsRepo(db, await resolveBotId(db));
+  const botId = await resolveBotId(db);
+  const bot = await new BotsRepo(db).getById(botId);
+  const niche = getNiche(bot?.niche);
+  const leads = new LeadsRepo(db, botId);
   const list = await leads.list(100);
 
   const statusLabel = (s: Lead["status"]) => niche.statusLabels[s];
@@ -114,7 +118,7 @@ export async function renderLeads(env: Env): Promise<string> {
         ${list.length ? rows : empty}
       </div>
     </div>`;
-  return layout({ title: niche.recordPlural, activeTab: "leads", body, env });
+  return layout({ title: niche.recordPlural, activeTab: "leads", body, pro: isProTier(bot?.tier) });
 }
 
 export async function exportLeadsCsv(env: Env): Promise<string> {

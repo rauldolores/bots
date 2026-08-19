@@ -14,7 +14,8 @@ import type { Env } from "../env";
 import { Db } from "../db/client";
 import { ConversationsRepo } from "../db/conversations";
 import { MessagesRepo } from "../db/messages";
-import { isPro } from "../config";
+import { BotsRepo } from "../db/bots";
+import { isProTier } from "../config";
 import { resolveAgentConfig } from "../settings-loader";
 import { buildTools } from "../tools";
 import { buildMultimodalUserMessage } from "../media/vision";
@@ -64,6 +65,7 @@ export async function ingestMessage(
 ): Promise<IngestResult> {
   const db = new Db(env.DB);
   const botId = await resolveBotId(db);
+  const bot = await new BotsRepo(db).getById(botId);
   const convs = new ConversationsRepo(db, botId);
   const jobs = new AgentJobsRepo(db);
   const state = new AgentStateRepo(db);
@@ -140,7 +142,7 @@ export async function ingestMessage(
 
   if (payload.imageUrl) {
     hasImage = true;
-    if (!isPro(env)) {
+    if (!isProTier(bot?.tier)) {
       processedText =
         (processedText || "") +
         "\n(El cliente mandó una imagen, pero tu plan no soporta análisis de imágenes.)";
@@ -176,6 +178,7 @@ export async function ingestMessage(
 export async function runTurn(env: Env, conversationKey: string): Promise<boolean> {
   const db = new Db(env.DB);
   const botId = botIdFromKey(conversationKey);
+  const bot = await new BotsRepo(db).getById(botId);
   const jobs = new AgentJobsRepo(db);
   const stateRepo = new AgentStateRepo(db);
 
@@ -235,7 +238,7 @@ export async function runTurn(env: Env, conversationKey: string): Promise<boolea
   const lastUserMsg = history[history.length - 1];
   if (lastUserMsg) {
     const imgMatch = lastUserMsg.content.match(/\[IMAGE_URL: (.+?)\]/);
-    if (imgMatch && isPro(env)) {
+    if (imgMatch && isProTier(bot?.tier)) {
       const imageUrl = imgMatch[1];
       const cleanText = lastUserMsg.content.replace(/\n?\[IMAGE_URL: .+?\]/, "").trim();
       aiMessages.push(buildMultimodalUserMessage(cleanText, imageUrl));
@@ -244,7 +247,7 @@ export async function runTurn(env: Env, conversationKey: string): Promise<boolea
     }
   }
 
-  const tools = buildTools({ env, getConversationId: () => convId, botId });
+  const tools = buildTools({ env, getConversationId: () => convId, botId, tier: bot?.tier ?? "free" });
   const toolNames = Object.keys(tools);
   const cfg = await resolveAgentConfig(env, toolNames);
 
@@ -262,7 +265,7 @@ export async function runTurn(env: Env, conversationKey: string): Promise<boolea
         : selectModel({
             toolCallsInLast2Turns: state.toolCallsInLast2Turns,
             lastUserText: combined,
-            lastUserLang: env.BOT_LANGUAGE,
+            lastUserLang: bot?.language ?? env.BOT_LANGUAGE,
             hasImage: false,
             imageRetryCount: state.imageRetryCount,
             lastSearchKbScore: state.lastSearchKbScore,

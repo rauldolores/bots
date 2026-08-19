@@ -42,9 +42,12 @@ export const TEST_BOT_ID = "00000000-0000-0000-0000-000000000001";
 export async function createTestDb(): Promise<Db> {
   if (!shared) shared = await initSchema();
   await truncateAll(shared);
+  // tier 'pro': la mayoría de la suite se escribió asumiendo Pro (es el tier
+  // por default de este Starter — ver skill/configurar-mi-chatbot.md). Los
+  // tests que quieren probar free explícitamente ajustan bots.tier a mano.
   await shared.db.run(
-    `INSERT INTO bots (id, organization_id, slug, name, business_name, created_at, updated_at)
-     VALUES (?, ?, 'test', 'Test Bot', 'Test Business', ?, ?)
+    `INSERT INTO bots (id, organization_id, slug, name, business_name, tier, created_at, updated_at)
+     VALUES (?, ?, 'test', 'Test Bot', 'Test Business', 'pro', ?, ?)
      ON CONFLICT (id) DO NOTHING`,
     [TEST_BOT_ID, TEST_BOT_ID, Date.now(), Date.now()],
   );

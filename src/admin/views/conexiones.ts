@@ -173,7 +173,7 @@ export function renderConexiones(env: Env): string {
       </div>
     </div>`;
 
-  return layout({ title: "Conexiones", activeTab: "conexiones", body, env });
+  return layout({ title: "Conexiones", activeTab: "conexiones", body, pro: true });
 }
 
 /** Resumen corto para el badge de salud del Resumen. */

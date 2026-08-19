@@ -47,12 +47,13 @@ function makeStreamResult(text: string) {
 
 let db: Db;
 
-function makeEnv(opts?: { tier?: "free" | "pro"; aiText?: string }): any {
+async function makeEnv(opts?: { tier?: "free" | "pro"; aiText?: string }): Promise<any> {
+  // F3: el tier ya no lo decide env.BOT_TIER, lo decide bots.tier.
+  await db.run("UPDATE bots SET tier = ? WHERE id = ?", [opts?.tier ?? "free", TEST_BOT_ID]);
   return {
     DB: db.driver,
     AI: { run: vi.fn(async () => ({ text: opts?.aiText ?? "" })) },
     ANTHROPIC_API_KEY: "sk-test",
-    BOT_TIER: opts?.tier ?? "free",
     BOT_LANGUAGE: "es",
     BUFFER_SECONDS: "8",
     BOT_NAME: "TestBot",
@@ -95,7 +96,7 @@ describe("ingestMessage — media", () => {
   });
 
   it("transcribes audio and buffers it as text", async () => {
-    const env = makeEnv({ aiText: "hola desde un audio" });
+    const env = await makeEnv({ aiText: "hola desde un audio" });
 
     await ingestMessage(env, {
       channel: "telegram",
@@ -110,7 +111,7 @@ describe("ingestMessage — media", () => {
   });
 
   it("falls back to a friendly message when transcription throws", async () => {
-    const env = makeEnv();
+    const env = await makeEnv();
     (globalThis.fetch as any).mockRejectedValueOnce(new Error("network down"));
 
     await ingestMessage(env, {
@@ -123,7 +124,7 @@ describe("ingestMessage — media", () => {
   });
 
   it("free tier: strips the image and informs the bot it's unsupported", async () => {
-    await ingestMessage(makeEnv({ tier: "free" }), {
+    await ingestMessage(await makeEnv({ tier: "free" }), {
       channel: "telegram",
       channelUserId: "u1",
       text: "mira esto",
@@ -137,7 +138,7 @@ describe("ingestMessage — media", () => {
   });
 
   it("pro tier: keeps the image as an [IMAGE_URL] marker in the buffer", async () => {
-    await ingestMessage(makeEnv({ tier: "pro" }), {
+    await ingestMessage(await makeEnv({ tier: "pro" }), {
       channel: "telegram",
       channelUserId: "u1",
       text: "describe esta foto",
@@ -169,7 +170,7 @@ describe("runTurn — mensaje multimodal y prompt", () => {
 
   /** Deja el estado y el buffer listos, y corre un turno. */
   async function correrTurno(opts: { tier: "free" | "pro"; lastContent: string }) {
-    const env = makeEnv({ tier: opts.tier });
+    const env = await makeEnv({ tier: opts.tier });
     await ingestMessage(env, {
       channel: "telegram",
       channelUserId: "u1",
@@ -234,7 +235,7 @@ describe("runTurn — mensaje multimodal y prompt", () => {
   });
 
   it("vacía el buffer: un segundo turno seguido no vuelve a responder", async () => {
-    const env = makeEnv({ tier: "free" });
+    const env = await makeEnv({ tier: "free" });
     await ingestMessage(env, { channel: "telegram", channelUserId: "u1", text: "hola" });
 
     streamTextMock.mockReset();
@@ -265,7 +266,7 @@ describe("ingestMessage — bot_paused (settings)", () => {
   it("buffers the client message but does NOT schedule a turn when bot_paused=1", async () => {
     stubSettings({ bot_paused: "1" });
 
-    const r = await ingestMessage(makeEnv({ tier: "free" }), {
+    const r = await ingestMessage(await makeEnv({ tier: "free" }), {
       channel: "telegram",
       channelUserId: "u1",
       text: "hola, estoy pausado?",
@@ -283,7 +284,7 @@ describe("ingestMessage — bot_paused (settings)", () => {
   it("schedules a turn when the bot is not paused", async () => {
     stubSettings();
 
-    const r = await ingestMessage(makeEnv({ tier: "free" }), {
+    const r = await ingestMessage(await makeEnv({ tier: "free" }), {
       channel: "telegram",
       channelUserId: "u1",
       text: "hola",

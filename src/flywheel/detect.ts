@@ -62,7 +62,7 @@ export async function detectKbGaps(env: Env, limit = 3): Promise<FlywheelResult>
     try {
       const result = await generateText({
         model,
-        prompt: `Eres el redactor de la base de conocimiento del negocio "${env.BUSINESS_NAME}".
+        prompt: `Eres el redactor de la base de conocimiento del negocio "${bot?.business_name ?? env.BUSINESS_NAME}".
 Contexto del negocio:
 ${renderBusinessContext(bot?.config ?? {})}
 
