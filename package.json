@@ -21,6 +21,7 @@
     "db:query": "tsx --env-file-if-exists=.env scripts/db-query.ts",
     "db:check": "tsx --env-file-if-exists=.env scripts/db-check.ts",
     "bot:config": "tsx --env-file-if-exists=.env scripts/set-bot-config.ts",
+    "channel:connect": "tsx --env-file-if-exists=.env scripts/connect-channel.ts",
     "build": "esbuild src/runtime/vercel.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/vercel.js --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\""
   },
   "dependencies": {

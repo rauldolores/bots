@@ -1,6 +1,6 @@
 # Multi-tenant, multi-bot y KontrolIA Auth
 
-Estado: **F1 y F2 desplegados. F3 completo salvo Vault, sin desplegar.** · 2026-08-18
+Estado: **F1, F2 y F3 desplegados. F4 parcial (Telegram), sin desplegar.** · 2026-08-18
 
 Hoy Nodia Agents es **un despliegue = un bot**. Este documento define cómo pasa
 a ser **una organización = muchos bots**, con el login centralizado del
@@ -204,8 +204,33 @@ Cada fase queda **verde y desplegable** antes de la siguiente.
   Es la única pieza que le falta a F3. **Riesgo: medio** (solo por Vault;
   identidad/tier/negocio ya no tienen riesgo de fuga entre bots).
 
-- **F4 — Webhooks por bot.** `/webhooks/<canal>/<botId>`, con las rutas viejas
-  respondiendo mientras el bot actual no re-registre su URL. **Riesgo: medio.**
+- **F4 — Webhooks por bot + Vault (parcial, este commit).** Resultó ser el
+  mismo trabajo que Vault (decisión M2): un token en Vault en vez de en el
+  entorno no aporta nada mientras solo haya un bot — la razón de Vault es
+  justo que un SEGUNDO bot no comparta el token del primero.
+
+  Hecho, para Telegram (el único canal con tráfico real): `src/db/vault.ts`
+  (create/read/update/delete sobre `vault.secrets` / `vault.decrypted_secrets`
+  — probado a mano contra la Supabase de producción: crear, leer, actualizar
+  y borrar un secreto de prueba, los cuatro verificados uno por uno antes de
+  escribir nada permanente); `BotChannelsRepo`; `resolveChannelEnv()` (el
+  token de Vault pisa al del entorno SOLO si el canal ya está conectado —
+  si no, cae al de siempre, cero cambio de comportamiento);
+  `/webhooks/telegram/:botId` nueva, con `/webhooks/telegram` intacta al
+  lado (decisión M5). `npm run channel:connect -- telegram <token>` conecta
+  un canal. **Nada de esto se activó en producción**: conectar el canal no
+  cambia a qué URL le pega Telegram — eso exige llamar al `setWebhook` de
+  Telegram, la acción externa que se dejó fuera de esta fase a propósito.
+
+  Limitación encontrada: el Postgres de CI (`pgvector/pgvector`, no la
+  Supabase completa) no tiene el esquema `vault` — por eso `vault.ts` no
+  tiene test automatizado contra CI, solo la verificación manual de arriba;
+  lo que SÍ corre en CI es la lógica de `resolveChannelEnv` con `readSecret`
+  mockeado.
+
+  Pendiente: los otros 4 canales (ManyChat, Twilio, Meta, WhatsApp) —
+  Twilio y Meta además necesitan `verify_token_ref`/`app_secret_ref` para
+  la verificación de firma, no solo `secret_ref`. **Riesgo: medio.**
 
 - **F5 — Auth y panel multi-bot.** KontrolIA Auth reemplaza el Basic Auth;
   selector de organización y de bot; permisos por rol. Aquí se resuelve la

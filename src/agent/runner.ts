@@ -62,9 +62,11 @@ export interface IngestResult {
 export async function ingestMessage(
   env: Env,
   payload: AgentIncomingPayload,
+  /** F4: viene de la URL en /webhooks/<canal>/<botId>. Sin esto, el único bot del despliegue (como hasta ahora). */
+  overrideBotId?: string,
 ): Promise<IngestResult> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
+  const botId = overrideBotId ?? (await resolveBotId(db));
   const bot = await new BotsRepo(db).getById(botId);
   const convs = new ConversationsRepo(db, botId);
   const jobs = new AgentJobsRepo(db);

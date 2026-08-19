@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { Env } from "./env";
-import type { ChannelAdapter } from "./channels/shared";
+import type { ChannelAdapter, ChannelId } from "./channels/shared";
+import { resolveChannelEnv } from "./channels/effectiveEnv";
 import { telegramAdapter } from "./channels/telegram";
 import { manychatAdapter } from "./channels/manychat";
 import { twilioAdapter } from "./channels/twilio";
@@ -12,6 +13,7 @@ import { purgeOldMessages } from "./crons/purgeOldMessages";
 import { reindexKb } from "./kb/reindex";
 import { analyzeConversations } from "./insights/analyzer";
 import { Db } from "./db/client";
+import { BotsRepo } from "./db/bots";
 import { SettingsRepo, SETTING_KEYS } from "./db/settings";
 import { resolveBotId } from "./tenant";
 import { detectKind } from "./learn/fieldPath";
@@ -65,11 +67,29 @@ async function routeToAgent(
     executionCtx?: unknown;
   },
   adapter: ChannelAdapter,
+  channel: ChannelId,
+  /**
+   * F4 de docs/multitenancy.md: viene de la URL en las rutas nuevas
+   * (/webhooks/<canal>/<botId>). Ausente en las rutas viejas, que siguen
+   * resolviendo el único bot del despliegue como hasta ahora.
+   */
+  botId?: string,
 ) {
   try {
-    const env = c.env;
+    let env = c.env;
+    if (botId) {
+      // botId sale de la URL, así que puede ser cualquier cosa que alguien
+      // haya escrito — validar que exista evita crear conversaciones
+      // huérfanas bajo un bot_id que no es de nadie.
+      const exists = await new BotsRepo(new Db(env.DB)).getById(botId);
+      if (!exists) return c.text("bot not found", 404);
+      // El env efectivo trae el token DE ESTE bot (Vault) si ya está
+      // conectado; si no, cae al env del despliegue — mismo comportamiento
+      // que las rutas viejas mientras el canal no se haya migrado.
+      env = await resolveChannelEnv(env, botId, channel);
+    }
     const msg = await adapter.parseIncoming(c.req.raw, env);
-    const r = await ingestMessage(env, msg);
+    const r = await ingestMessage(env, msg, botId);
     if (r.scheduledInMs !== null) {
       wakeTickAfter(env, ctxOpcional(c), r.scheduledInMs);
     }
@@ -90,8 +110,14 @@ async function routeToAgent(
   }
 }
 
-app.post("/webhooks/telegram", (c) => routeToAgent(c, telegramAdapter));
-app.post("/webhooks/manychat", (c) => routeToAgent(c, manychatAdapter));
+app.post("/webhooks/telegram", (c) => routeToAgent(c, telegramAdapter, "telegram"));
+// F4: un webhook por bot. La ruta vieja de arriba sigue viva (M5,
+// docs/multitenancy.md) mientras el bot actual no re-registre su URL en
+// BotFather — nadie tiene que migrar el día que esto se despliega.
+app.post("/webhooks/telegram/:botId", (c) =>
+  routeToAgent(c, telegramAdapter, "telegram", c.req.param("botId")),
+);
+app.post("/webhooks/manychat", (c) => routeToAgent(c, manychatAdapter, "manychat"));
 // WhatsApp (Twilio): rutea el mensaje entrante al bot de clientes (Claude). El
 // body se lee UNA vez; ack con TwiML vacío para que Twilio no reenvíe el cuerpo
 // como mensaje.
