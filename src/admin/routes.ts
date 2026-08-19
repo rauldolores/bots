@@ -51,6 +51,7 @@ import { Db } from "../db/client";
 import { LeadsRepo, type Lead } from "../db/leads";
 import { TicketsRepo } from "../db/tickets";
 import { ConversationsRepo } from "../db/conversations";
+import { BotsRepo } from "../db/bots";
 import { MessagesRepo } from "../db/messages";
 import { SettingsRepo, SETTING_KEYS, type SettingKey } from "../db/settings";
 import { CONTROLS, levelToValue } from "./control-levels";
@@ -430,9 +431,12 @@ adminApp.post("/campanas/send", async (c) => {
 });
 
 adminApp.get("/config", async (c) => {
-  const settings = await (await settingsFor(c.env)).all();
+  const configDb = new Db(c.env.DB);
+  const configBotId = await resolveBotId(configDb);
+  const settings = await new SettingsRepo(configDb, configBotId).all();
+  const bot = await new BotsRepo(configDb).getById(configBotId);
   const saved = c.req.query("saved") === "1";
-  return c.html(renderConfig(c.env, settings, saved, c.req.query("llmtest")));
+  return c.html(renderConfig(c.env, settings, bot?.config ?? {}, saved, c.req.query("llmtest")));
 });
 
 // Prueba de la config BYO-LLM guardada: un generateText mínimo con el modelo
@@ -655,7 +659,8 @@ function escapeHtml(s: string): string {
 // is no per-route auth check here (no magic-link `requireAuth`).
 adminApp.post("/conversations/:id/suggest", async (c) => {
   const suggestDb = new Db(c.env.DB);
-  const msgs = new MessagesRepo(suggestDb, await resolveBotId(suggestDb));
+  const suggestBotId = await resolveBotId(suggestDb);
+  const msgs = new MessagesRepo(suggestDb, suggestBotId);
   const history = await msgs.lastN(c.req.param("id"), 20);
   const { model } = createModel(c.env, "fast", await loadLlmOverrides(c.env));
   const aiMessages = history.map((m) => ({
@@ -669,7 +674,8 @@ adminApp.post("/conversations/:id/suggest", async (c) => {
     content:
       "Eres asistente del dueño. Sugiere UN solo mensaje corto en español que el dueño podría enviar al cliente para resolver la última consulta. NO incluyas preámbulo, solo la frase a copy/paste.",
   });
-  const sys = systemPromptFromEnv(c.env, [], renderBusinessContext());
+  const suggestBot = await new BotsRepo(suggestDb).getById(suggestBotId);
+  const sys = systemPromptFromEnv(c.env, [], renderBusinessContext(suggestBot?.config ?? {}));
   const result = await generateText({
     model,
     system: sys,

@@ -18,6 +18,7 @@ import { Db } from "../db/client";
 import { InsightsRepo } from "../db/insights";
 import { MessagesRepo } from "../db/messages";
 import { SuggestionsRepo } from "../db/suggestions";
+import { BotsRepo } from "../db/bots";
 import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 import { resolveBotId } from "../tenant";
 import { createModel } from "../llm/provider";
@@ -46,6 +47,7 @@ export async function detectKbGaps(env: Env, limit = 3): Promise<FlywheelResult>
   const botId = await resolveBotId(db);
   const insights = new InsightsRepo(db, botId);
   const suggestions = new SuggestionsRepo(db, botId);
+  const bot = await new BotsRepo(db).getById(botId);
   const thirtyDays = Date.now() - 30 * 86_400_000;
 
   const gaps = await insights.missedKb(thirtyDays, 10);
@@ -62,7 +64,7 @@ export async function detectKbGaps(env: Env, limit = 3): Promise<FlywheelResult>
         model,
         prompt: `Eres el redactor de la base de conocimiento del negocio "${env.BUSINESS_NAME}".
 Contexto del negocio:
-${renderBusinessContext()}
+${renderBusinessContext(bot?.config ?? {})}
 
 Los clientes preguntaron esto y el bot NO supo responder:
 "${gap.question}"

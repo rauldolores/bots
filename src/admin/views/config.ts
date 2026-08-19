@@ -5,6 +5,7 @@
 // textareas with clear labels (no jargon). The form POSTs to /admin/config.
 import type { Env } from "../../env";
 import { SETTING_KEYS } from "../../db/settings";
+import type { BotConfig } from "../../db/bots";
 import { renderBusinessContext } from "../../businessContext";
 import { CURATED_MODELS } from "../../llm/provider";
 import {
@@ -175,6 +176,7 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
 export function renderConfig(
   env: Env,
   settings: Record<string, string>,
+  botConfig: BotConfig,
   saved = false,
   llmTest?: string,
 ): string {
@@ -215,10 +217,10 @@ export function renderConfig(
           name: SETTING_KEYS.businessContext,
           label: "Información del negocio",
           help: "Horarios, servicios, precios, ubicación. El bot responde con esto. Editable en vivo — se aplica al guardar, sin re-desplegar.",
-          // Pre-llenado: si el panel aún no tiene override, muestra lo que el
-          // onboarding cargó en member/config.local (renderBusinessContext) para
-          // que el miembro VEA y edite sus horarios aquí desde el día 1.
-          value: settings[SETTING_KEYS.businessContext] || renderBusinessContext(),
+          // Pre-llenado: si el panel aún no tiene override, muestra lo que ya
+          // hay en bots.config (F3) para que el dueño VEA y edite sus
+          // horarios aquí desde el día 1.
+          value: settings[SETTING_KEYS.businessContext] || renderBusinessContext(botConfig),
           placeholder: "Ej. Abrimos lunes a sábado de 9 a 7. Corte $150, barba $100. Estamos en Av. Reforma 123.",
           rows: 6,
         })}

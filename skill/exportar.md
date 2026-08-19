@@ -27,10 +27,10 @@ SIGUE ESTAS REGLAS AL PIE DE LA LETRA.
 ## PASO 0 — Revisión (no toques nada)
 1. Confirma que estás en la carpeta del bot: deben existir `package.json` y `wrangler.toml`.
    Si no, **detente y dilo** — no adivines la carpeta.
-2. Detecta el **nivel** solo para saber qué esperar (NO para bloquear nada): mira `BOT_TIER`
-   en el entorno o el campo `tier:` en `member/config.local.ts` (`'free'` | `'pro'`). En
-   Starter la tabla de leads casi siempre está vacía; en Pro puede tener prospectos. Esto solo
-   ajusta lo que le ofreces, **no impide exportar**.
+2. Detecta el **nivel** solo para saber qué esperar (NO para bloquear nada): corre
+   `npm run db:query -- "SELECT tier FROM bots"` (`'free'` | `'pro'`). En Starter la tabla de
+   leads casi siempre está vacía; en Pro puede tener prospectos. Esto solo ajusta lo que le
+   ofreces, **no impide exportar**.
 3. Descubre **qué tablas existen de verdad** (no asumas). Corre:
    ```
    npm run db:query -- "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()"

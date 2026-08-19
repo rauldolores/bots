@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { renderBusinessContext, type BusinessConfig } from "../src/businessContext";
+import { renderBusinessContext } from "../src/businessContext";
+import type { BotConfig } from "../src/db/bots";
 
-// Fixture propio: el test NO depende de member/config.local.ts (ese archivo
-// cambia por negocio y antes rompía la suite cada vez que se personalizaba).
-const FIXTURE: BusinessConfig = {
+// Fixture propio, no depende de datos reales de ningún bot.
+const FIXTURE: BotConfig = {
   hours: "Lunes a sábado de 10 a 8",
   services: [
     { name: "Corte", price: 250 },
@@ -14,7 +14,7 @@ const FIXTURE: BusinessConfig = {
   paymentMethods: ["efectivo", "transferencia", "tarjeta"],
   contactPhone: "+52 55 1234 5678",
   customFields: { Estacionamiento: "sí, gratis" },
-} as BusinessConfig;
+} as BotConfig;
 
 describe("renderBusinessContext", () => {
   it("renders hours, services with prices, location, payment, phone", () => {

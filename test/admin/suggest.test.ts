@@ -25,9 +25,17 @@ vi.mock("@ai-sdk/anthropic", () => ({
   createAnthropic: () => (modelId: string) => ({ modelId }),
 }));
 
-// Avoid the businessContext -> member/config.local import chain in tests.
+// Avoid the businessContext -> bots.config DB round-trip in tests.
 vi.mock("../../src/businessContext", () => ({
   renderBusinessContext: () => "CONTEXTO DE NEGOCIO DE PRUEBA",
+}));
+vi.mock("../../src/db/bots", () => ({
+  BotsRepo: class {
+    constructor(_db: unknown) {}
+    async getById(_id: string) {
+      return { config: {} };
+    }
+  },
 }));
 
 // Mock the messages repo so we don't need a real D1 binding.

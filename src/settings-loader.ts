@@ -1,6 +1,7 @@
 import type { Env } from "./env";
 import { Db } from "./db/client";
 import { SettingsRepo, SETTING_KEYS } from "./db/settings";
+import { BotsRepo } from "./db/bots";
 import { resolveBotId } from "./tenant";
 import { systemPromptFromEnv } from "./system-prompt";
 import { renderBusinessContext } from "./businessContext";
@@ -81,8 +82,15 @@ function parseCsvList(value: string | undefined): string[] {
  */
 export async function resolveAgentConfig(env: Env, toolNames: string[]): Promise<AgentConfig> {
   const db = new Db(env.DB);
-  const repo = new SettingsRepo(db, await resolveBotId(db));
+  const botId = await resolveBotId(db);
+  const repo = new SettingsRepo(db, botId);
   const settings = await repo.all();
+  // F3 (docs/multitenancy.md): member/config.local.ts se retiró — el negocio
+  // (horarios, servicios, catálogo…) vive en bots.config. Si por lo que sea
+  // la fila no existe (nunca debería, resolveBotId ya la exige), un negocio
+  // vacío deja el prompt sin esa sección en vez de tronar.
+  const bot = await new BotsRepo(db).getById(botId);
+  const botConfig = bot?.config ?? {};
 
   const get = (key: string): string | undefined => {
     const v = settings[key];
@@ -94,7 +102,7 @@ export async function resolveAgentConfig(env: Env, toolNames: string[]): Promise
   const niche = getNiche(env);
 
   const systemPromptOverride = get(SETTING_KEYS.systemPromptOverride);
-  const businessContext = get(SETTING_KEYS.businessContext) ?? renderBusinessContext();
+  const businessContext = get(SETTING_KEYS.businessContext) ?? renderBusinessContext(botConfig);
   const botName = get(SETTING_KEYS.botName) ?? env.BOT_NAME;
   // Tono elegido en el panel gana; si no hay, el tono por defecto del nicho.
   const tone = get(SETTING_KEYS.tone) ?? (niche.defaultTone || undefined);

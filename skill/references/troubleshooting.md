@@ -59,7 +59,7 @@ npm run db:query -- "SELECT conversation_key, run_after, attempts, last_error FR
 | `too many connections` | conexión directa en serverless | usa la cadena del **pooler** (puerto `6543`), no la directa (`5432`) |
 | `relation "conversations" does not exist` | falta aplicar el esquema | corre `npm run db:apply` |
 | `type "vector" does not exist` | pgvector no está habilitado o falta `public` en el search_path | corre `CREATE EXTENSION IF NOT EXISTS vector;` en el SQL Editor de Supabase |
-| `npm run typecheck` marca errores tras editar `member/config.local.ts` | falta un campo o hay una coma/llave mal | revisa que `businessConfig` tenga `hours`, `services`, `location`, `paymentMethods`, `contactPhone` y `customFields`, y que `memberConfig` esté completo |
+| La info del negocio (horarios, servicios) no aparece en el prompt | `bots.config` está vacío o mal formado | revisa con `npm run db:query -- "SELECT config FROM bots"`, o edítala desde el panel (Configuración → Información del negocio) |
 
 **Preparar la base (primera vez):** crea un proyecto en Supabase, copia su cadena de
 conexión y aplica el esquema:
@@ -175,7 +175,7 @@ indexarlos para que el bot use la info nueva.
 | La búsqueda en la base de conocimiento no devuelve nada | falta indexar | corre `npm run kb:reindex` y luego `POST /kb/reindex` con el `KB_REINDEX_TOKEN` |
 | `dimension mismatch` al indexar | el índice se creó con dimensiones distintas | borra y recrea el índice con `--dimensions=1024` (embeddings BGE) |
 | La búsqueda (`searchKb`) devuelve resultados raros o vacíos | poca info o documentos muy largos | divide los `.md` en secciones claras por tema y reindexa |
-| `member/config.local.ts` cambió pero el bot no lo refleja | esa config se lee en runtime, no es KB | no requiere reindex; basta redeploy con `npm run deploy` (no toca tu carpeta `member/`) |
+| Cambié la info del negocio en el panel pero el bot no lo refleja | rarísimo — es en vivo, sin redeploy | confirma que guardaste el formulario; si persiste, revisa `SELECT config FROM bots` |
 
 **Reindexar la KB** (corre esto cada vez que edites `member/kb/*.md`):
 

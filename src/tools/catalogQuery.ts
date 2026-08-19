@@ -1,9 +1,10 @@
 import { tool } from "ai";
 import { z } from "zod";
 import type { Env } from "../env";
-import { catalog } from "../../member/config.local";
+import { Db } from "../db/client";
+import { BotsRepo } from "../db/bots";
 
-export function catalogQueryTool(_env: Env) {
+export function catalogQueryTool(env: Env, botId: string) {
   return tool({
     description:
       "Busca productos en el catálogo del negocio por nombre o keyword. Devuelve hasta 5 matches con precio.",
@@ -11,6 +12,8 @@ export function catalogQueryTool(_env: Env) {
       query: z.string().min(1),
     }),
     execute: async ({ query }) => {
+      const bot = await new BotsRepo(new Db(env.DB)).getById(botId);
+      const catalog = bot?.config.catalog ?? [];
       const q = query.toLowerCase().trim();
       const matches = catalog
         .filter(

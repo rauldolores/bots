@@ -276,13 +276,12 @@ Ahora sí, le damos identidad al bot: su negocio, sus tareas, su idioma y su con
 
 ### Paso 2.1 — Negocio
 
-**ANTES de preguntar nada, LEE `member/config.local.ts`.** Si el bot se instaló con
-`nodia-agents init`, el instalador ya pudo recoger: nombre del negocio, a qué se dedica,
-qué ofrece, horario, ubicación, teléfono, sitio web/redes, métodos de pago, preguntas
-frecuentes, reglas/escalación, tono y correo de avisos (en `businessConfig`, sus
-`customFields` y `memberConfig`). **Lo que ya esté ahí NO se vuelve a preguntar**:
-resúmeselo al miembro ("esto me dijiste al instalar, ¿está bien?") y pregunta SOLO
-los huecos.
+**ANTES de preguntar nada, revisa qué ya hay:** `npm run db:query -- "SELECT config FROM bots"`.
+Si el bot se instaló con `nodia-agents init`, el instalador ya pudo recoger: nombre del
+negocio, a qué se dedica, qué ofrece, horario, ubicación, teléfono, sitio web/redes,
+métodos de pago, preguntas frecuentes, reglas/escalación, tono y correo de avisos.
+**Lo que ya esté ahí NO se vuelve a preguntar**: resúmeselo al miembro ("esto me dijiste
+al instalar, ¿está bien?") y pregunta SOLO los huecos.
 
 Para lo que falte, pregunta **una por una** (no todas juntas):
 
@@ -292,13 +291,16 @@ Para lo que falte, pregunta **una por una** (no todas juntas):
 4. ¿Tienes sitio web? (si no, dejamos vacío)
 5. ¿Cuál es tu correo? (lo vamos a usar para que entres al panel de administración y, si quieres, para avisarte cuando alguien necesite atención humana)
 
-Con esas respuestas:
-- Escribe `name`, `description`, `city`, `website` dentro de `businessConfig` en **`member/config.local.ts`**.
-- Actualiza las variables `BOT_NAME` y `BUSINESS_NAME` (ver «Cómo se guardan las variables»).
+Con esas respuestas, guarda en `bots.config` (aplica AL INSTANTE, sin redeploy):
+```bash
+npm run bot:config -- '{"customFields":{"Descripción":"...", "Ciudad":"...", "Sitio web":"..."}}'
+```
+Y actualiza `BOT_NAME`/`BUSINESS_NAME` en el entorno (ver «Cómo se guardan las variables») —
+esas siguen siendo variables, no bots.config, hasta que F3 termine de moverlas.
 
 Confirma con el miembro lo que vas a escribir antes de guardar.
 
-👀 Después: "Cuando despleguemos, entra a tu panel → **Configuración** y vas a ver los datos de tu negocio ahí."
+👀 Después: "Ya quedó — entra a tu panel → **Configuración** y ya ves los datos de tu negocio ahí, sin que yo tenga que redesplegar nada."
 
 ### Paso 2.2 — Tareas
 
@@ -320,7 +322,9 @@ Como este repo es **Pro**, todas estas tareas están disponibles. Las herramient
 
 Además, en Pro el bot también entiende **notas de voz** (las transcribe con Whisper) y **fotos** (las describe con un modelo de visión). No tienes que activar nada extra para eso.
 
-Guarda las tareas elegidas en `memberConfig` dentro de `member/config.local.ts`.
+No hay nada que guardar aquí: todas las tools de la lista ya están activas por default
+(Pro las trae todas). Si el miembro quiere apagar alguna después, lo hace desde el panel
+→ **Configuración → Agente** (toggle por tool) — eso sí es en vivo, sin redeploy.
 
 **Secrets según las tareas elegidas** (guárdalos ahora si aplican):
 ```bash
@@ -346,24 +350,31 @@ Guarda `BOT_LANGUAGE` con el código correspondiente.
 
 Aquí cargamos lo que el bot va a saber de tu negocio. Esto es lo que le da respuestas correctas.
 
-**2.4.1 — Datos estructurados.** Revisa primero qué ya trae `businessConfig` (el init
-pudo llenar horario, pagos, teléfono y `customFields` como `ofrecemos`,
-`preguntasFrecuentes`, `reglasYEscalacion`, `sitioWebYRedes`); confirma eso y pregunta
-solo lo que falte. Guarda en `businessConfig` dentro de `member/config.local.ts`:
+**2.4.1 — Datos estructurados.** Revisa primero qué ya trae `bots.config`
+(`npm run db:query -- "SELECT config FROM bots"` — el init pudo llenar horario, pagos,
+teléfono y `customFields` como `ofrecemos`, `preguntasFrecuentes`, `reglasYEscalacion`,
+`sitioWebYRedes`); confirma eso y pregunta solo lo que falte. Guarda con:
 
-- Horarios (`hours`)
-- Servicios y precios (`services` — si `customFields.ofrecemos` trae precios en texto, estructúralos aquí)
-- Ubicación / dirección (`location`)
-- Métodos de pago (`paymentMethods`)
-- Teléfono de contacto (`contactPhone`)
-- Cualquier dato extra (`customFields`)
+```bash
+npm run bot:config -- '{
+  "hours": "...",
+  "services": [{"name": "...", "price": 0}],
+  "location": "...",
+  "paymentMethods": ["efectivo", "..."],
+  "contactPhone": "...",
+  "customFields": {"...": "..."}
+}'
+```
 
-Esto es el **seed inicial** (semilla). Una vez desplegado, el miembro ve y edita todo
+(Es un merge — solo pisa las llaves que mandas, el resto de `bots.config` queda igual.)
+
+Esto es el **seed inicial** (semilla). Una vez guardado, el miembro ve y edita todo
 esto desde su panel en **Configuración → "Información del negocio"**: el campo llega
-**pre-llenado** con lo del onboarding y **el cambio aplica al instante, sin redeploy**
-(el bot lo lee en cada mensaje). Díselo tal cual: "tus horarios y precios los cambias
-tú desde el panel cuando quieras, y el bot los usa al toque". Estos datos estructurados
-viven en el **system prompt**, NO en la base vectorial.
+**pre-llenado** con lo que acabas de guardar y **el cambio aplica al instante, sin
+redeploy** (el bot lo lee en cada mensaje) — igual que lo que tú acabas de guardar con
+`bot:config`, que TAMBIÉN aplicó al instante. Díselo tal cual: "tus horarios y precios
+los cambias tú desde el panel cuando quieras, y el bot los usa al toque". Estos datos
+estructurados viven en el **system prompt**, NO en la base vectorial.
 
 Para usuarios no técnicos, entrevístalo y pre-llena las respuestas con lo que te vaya diciendo; luego confirma/ajusta con él. (Las plantillas por giro —barbería, restaurante, clínica…— con tono y columnas de panel a la medida vienen en **Nodia Agents+**, con la comunidad de Horizontes IA.)
 
@@ -385,15 +396,17 @@ o lo guías a agregarlo).
 
 👀 Después: "En tu panel → **Conocimiento** vas a ver los documentos que el bot ya sabe, y en **Configuración → Información del negocio** editas horarios/precios cuando quieras — se aplica al instante."
 
-### Paso 2.5 — Cierre de fase: redeploy
+### Paso 2.5 — Cierre de fase: redeploy (solo si tocaste variables)
 
-Si hubo cambios en `member/config.local.ts`, `member/kb/` o en las variables (los hubo), despliega:
+`bot:config` (negocio) y el panel → Conocimiento (documentos) ya aplicaron al instante,
+sin redeploy. Solo hace falta redesplegar si cambiaste `BOT_NAME`, `BUSINESS_NAME` o
+`BOT_LANGUAGE` (siguen siendo variables de entorno):
 
 ```bash
 npm run deploy:cf   # o el comando de TU destino (Paso 1.6)
 ```
 
-Y remata: "Recarga tu panel — **Configuración** ya muestra tu negocio, tareas e idioma, y **Conocimiento** muestra lo que el bot sabe. Tu chatbot ya tiene identidad; ahora vamos a conectarlo al mundo."
+Y remata: "Recarga tu panel — **Configuración** ya muestra tu negocio e idioma, y **Conocimiento** muestra lo que el bot sabe. Tu chatbot ya tiene identidad; ahora vamos a conectarlo al mundo."
 
 ✅ Checkpoint: `{ "fase": 2, "paso": "done", "completed": ["plataforma", "chatbot"] }`
 

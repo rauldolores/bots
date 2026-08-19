@@ -22,8 +22,8 @@ SIGUE ESTAS REGLAS AL PIE DE LA LETRA.
 ## PASO 0 — Revisión (no toques nada)
 1. Confirma que estás en la carpeta del bot: debe existir `package.json` y `wrangler.toml`.
    Si no, detente y dilo.
-2. Detecta el **tier** para saber qué reportar. Mira `member/config.local.ts` (campo `tier:`)
-   o la variable `BOT_TIER` en `wrangler.toml` (`'free'` | `'pro'`). Esto decide si el
+2. Detecta el **tier** para saber qué reportar. Corre
+   `npm run db:query -- "SELECT tier FROM bots"` (`'free'` | `'pro'`). Esto decide si el
    informe incluye leads y citas (Pro) o solo conversaciones + escalaciones (Starter/free).
 3. Detecta **qué tablas existen de verdad** (no asumas). Corre:
    ```
@@ -90,7 +90,7 @@ dilo explícito ("~$X USD ≈ $Y MXN a 18/USD").
 Arma un markdown limpio, escaneable, que el cliente entienda sin saber nada de tecnología.
 Estructura sugerida:
 
-- **Encabezado**: nombre del negocio (de `member/config.local.ts`, campo `businessName`),
+- **Encabezado**: nombre del negocio (`npm run db:query -- "SELECT business_name FROM bots"`),
   "Informe del asistente — <mes>", fecha de generación.
 - **Resumen en una línea**: ej. *"En mayo tu asistente atendió 312 conversaciones y solo 18
   necesitaron a una persona — el 94% se resolvió solo."*

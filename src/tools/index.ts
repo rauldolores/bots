@@ -29,7 +29,7 @@ export function buildTools(ctx: ToolContext) {
   // Pro tier additions
   if (isPro(ctx.env)) {
     tools.scheduleAppointment = scheduleAppointmentTool(ctx.env, ctx.getConversationId);
-    tools.catalogQuery = catalogQueryTool(ctx.env);
+    tools.catalogQuery = catalogQueryTool(ctx.env, ctx.botId);
   }
 
   return tools;

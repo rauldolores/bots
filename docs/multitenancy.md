@@ -1,6 +1,6 @@
 # Multi-tenant, multi-bot y KontrolIA Auth
 
-Estado: **F1 y F2.1 desplegados. F2.2 y F2.3 completos. Sin desplegar.** · 2026-08-18
+Estado: **F1 y F2 desplegados. F3 parcial (negocio en la base), sin desplegar.** · 2026-08-18
 
 Hoy Nodia Agents es **un despliegue = un bot**. Este documento define cómo pasa
 a ser **una organización = muchos bots**, con el login centralizado del
@@ -175,9 +175,24 @@ Cada fase queda **verde y desplegable** antes de la siguiente.
   Los tests de aislamiento explícito (uno por tabla, como el de F2.1)
   acompañan cada sub-fase, no se dejan para el final.
 
-- **F3 — Configuración desde la base.** `resolveAgentConfig` deja de leer env y
-  lee la fila del bot; `member/config.local.ts` se convierte en datos. Las
-  credenciales de canal salen de Vault. **Riesgo: medio.**
+- **F3 — Configuración desde la base (parcial, este commit).**
+  Hecho: `member/config.local.ts` se retiró — `businessConfig` (horarios,
+  servicios, ubicación, pagos, teléfono, campos libres) y `catalog` ahora
+  viven en `bots.config` (jsonb, ya existía desde F1). `renderBusinessContext`,
+  `catalogQueryTool` y `resolveAgentConfig` leen de ahí. `scripts/bot:config`
+  (`npm run bot:config -- '{...}'`) reemplaza "editar el archivo y
+  redesplegar" — el cambio aplica al instante, igual que ya aplicaba el
+  override del panel (`settings.business_context`) por encima. El skill
+  `/configurar-mi-chatbot` (Fase 2) y las referencias sueltas en
+  `/exportar`, `/reporte` y troubleshooting quedaron actualizadas.
+
+  Pendiente, explícitamente fuera de esta fase: identidad y tier
+  (`BOT_NAME`, `BUSINESS_NAME`, `BOT_LANGUAGE`, `BOT_TIER`, `BOT_NICHE`)
+  siguen siendo variables de entorno, no las columnas de `bots` que F1 ya
+  creó para eso — `isPro()` se llama de forma síncrona en muchos lugares
+  (gate de tools, prompt) y migrarlo es un cambio más grande, con su propio
+  riesgo. Las credenciales de canal (Vault) tampoco se tocaron — siguen
+  siendo secrets del entorno, no `bot_channels.secret_ref`. **Riesgo: medio.**
 
 - **F4 — Webhooks por bot.** `/webhooks/<canal>/<botId>`, con las rutas viejas
   respondiendo mientras el bot actual no re-registre su URL. **Riesgo: medio.**

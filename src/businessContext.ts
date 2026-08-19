@@ -1,10 +1,8 @@
-import { businessConfig } from "../member/config.local";
+import type { BotConfig } from "./db/bots";
 
-export type BusinessConfig = typeof businessConfig;
-
-export function renderBusinessContext(cfg: BusinessConfig = businessConfig): string {
-  // Cada línea es opcional: si el miembro saltó ese dato en el onboarding, no la
-  // metemos (evita "Servicios y precios:" o "Métodos de pago:" vacíos en el prompt).
+export function renderBusinessContext(cfg: BotConfig): string {
+  // Cada línea es opcional: si el negocio no cargó ese dato, no la metemos
+  // (evita "Servicios y precios:" o "Métodos de pago:" vacíos en el prompt).
   const lines: string[] = [];
   if (cfg.hours) lines.push(`Horarios: ${cfg.hours}`);
   if (cfg.services?.length) {
