@@ -13,6 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPostgresDriver } from "../src/db/drivers/postgresJs";
 import { Db } from "../src/db/client";
+import { splitStatements } from "../src/db/statements";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.resolve(HERE, "..", "supabase", "migrations");
@@ -50,7 +51,7 @@ try {
 
   for (const file of pending) {
     const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), "utf-8");
-    for (const stmt of statementsOf(sql)) {
+    for (const stmt of splitStatements(sql)) {
       await db.run(stmt);
     }
     // El claim va DESPUÉS de aplicar: si algo revienta a mitad, la migración no
@@ -66,19 +67,4 @@ try {
   process.exit(1);
 } finally {
   await driver.close();
-}
-
-/**
- * Parte el archivo en sentencias. Quita las líneas de comentario ANTES de
- * cortar por `;`, para que un punto y coma dentro de un comentario no rompa
- * nada.
- */
-function statementsOf(sql: string): string[] {
-  return sql
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("--"))
-    .join("\n")
-    .split(";")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
 }

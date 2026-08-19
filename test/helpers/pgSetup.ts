@@ -14,6 +14,7 @@
 import { Db } from "../../src/db/client";
 import { createPostgresDriver } from "../../src/db/drivers/postgresJs";
 import type { SqlDriver } from "../../src/db/driver";
+import { splitStatements } from "../../src/db/statements";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -69,7 +70,7 @@ async function initSchema() {
     .filter((f) => f.endsWith(".sql"))
     .sort();
   for (const archivo of archivos) {
-    for (const stmt of statementsOf(fs.readFileSync(path.join(MIGRATIONS_DIR, archivo), "utf-8"))) {
+    for (const stmt of splitStatements(fs.readFileSync(path.join(MIGRATIONS_DIR, archivo), "utf-8"))) {
       await db.run(stmt);
     }
   }
@@ -89,19 +90,4 @@ async function truncateAll(s: { db: Db; tables: string[] }): Promise<void> {
   if (s.tables.length === 0) return;
   const list = s.tables.map((t) => `${SCHEMA}.${t}`).join(", ");
   await s.db.run(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`);
-}
-
-/**
- * Parte el archivo en sentencias. Quita las líneas de comentario ANTES de
- * cortar por `;`, así un punto y coma dentro de un comentario deja de ser un
- * peligro — el esquema viejo tenía que advertirlo a mano.
- */
-function statementsOf(sql: string): string[] {
-  return sql
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("--"))
-    .join("\n")
-    .split(";")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
 }
