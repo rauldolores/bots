@@ -29,6 +29,10 @@ import { costOfUsage } from "../pricing";
 import type { ChannelId } from "../channels/shared";
 import { AgentJobsRepo } from "../queue/jobs";
 import { AgentStateRepo } from "./state";
+import { conversationKeyOf, botIdFromKey } from "./key";
+import { resolveBotId } from "../tenant";
+
+export { conversationKeyOf };
 
 export interface AgentIncomingPayload {
   channel: string;
@@ -50,11 +54,6 @@ export interface IngestResult {
   scheduledInMs: number | null;
 }
 
-/** La misma llave que antes se le daba a idFromName(): "<canal>:<usuario>". */
-export function conversationKeyOf(channel: string, channelUserId: string): string {
-  return `${channel}:${channelUserId}`;
-}
-
 /**
  * Llega un webhook: se aplican las guardas, el mensaje se guarda en el buffer y
  * se (re)programa el turno. NO responde — de eso se encarga el tick.
@@ -64,10 +63,11 @@ export async function ingestMessage(
   payload: AgentIncomingPayload,
 ): Promise<IngestResult> {
   const db = new Db(env.DB);
-  const convs = new ConversationsRepo(db);
+  const botId = await resolveBotId(db);
+  const convs = new ConversationsRepo(db, botId);
   const jobs = new AgentJobsRepo(db);
   const state = new AgentStateRepo(db);
-  const key = conversationKeyOf(payload.channel, payload.channelUserId);
+  const key = conversationKeyOf(botId, payload.channel, payload.channelUserId);
 
   const conv = await convs.getOrCreate(
     payload.channel,
@@ -108,7 +108,7 @@ export async function ingestMessage(
       // isPaused antes de llegar aquí).
       if (await isOverDailyCap(db, conv.id)) {
         await convs.setPausedUntil(conv.id, Date.now() + DAILY_CAP_SNOOZE_MS);
-        await new MessagesRepo(db).append(conv.id, "assistant", DAILY_CAP_MESSAGE);
+        await new MessagesRepo(db, botId).append(conv.id, "assistant", DAILY_CAP_MESSAGE);
         const channel = payload.channel as ChannelId;
         await pickAdapter(channel).sendReply(
           { channel, channelUserId: payload.channelUserId, chunks: [DAILY_CAP_MESSAGE] },
@@ -175,6 +175,7 @@ export async function ingestMessage(
  */
 export async function runTurn(env: Env, conversationKey: string): Promise<boolean> {
   const db = new Db(env.DB);
+  const botId = botIdFromKey(conversationKey);
   const jobs = new AgentJobsRepo(db);
   const stateRepo = new AgentStateRepo(db);
 
@@ -213,8 +214,8 @@ export async function runTurn(env: Env, conversationKey: string): Promise<boolea
   }
   const convId = state.conversationId;
 
-  const msgs = new MessagesRepo(db);
-  const convs = new ConversationsRepo(db);
+  const msgs = new MessagesRepo(db, botId);
+  const convs = new ConversationsRepo(db, botId);
 
   await msgs.append(convId, "user", combined);
   await convs.touchLastMessage(convId);
@@ -243,7 +244,7 @@ export async function runTurn(env: Env, conversationKey: string): Promise<boolea
     }
   }
 
-  const tools = buildTools({ env, getConversationId: () => convId });
+  const tools = buildTools({ env, getConversationId: () => convId, botId });
   const toolNames = Object.keys(tools);
   const cfg = await resolveAgentConfig(env, toolNames);
 
@@ -270,7 +271,7 @@ export async function runTurn(env: Env, conversationKey: string): Promise<boolea
   // Guardia de presupuesto: llegado al tope mensual el bot sigue respondiendo,
   // pero en el modelo barato (nunca se queda mudo por dinero).
   if (cfg.monthlyBudgetUsd !== undefined && tier !== "fast") {
-    const spent = await monthIaCostUsd(db);
+    const spent = await monthIaCostUsd(db, botId);
     const guard = applyBudgetGuard(tier, spent, cfg.monthlyBudgetUsd);
     if (guard.downgraded) {
       console.warn(
@@ -300,7 +301,7 @@ export async function runTurn(env: Env, conversationKey: string): Promise<boolea
   // vuelve lo reciba un bot que se acuerda de él. Es un extra, nunca la ruta
   // crítica: si la consulta falla, la respuesta igual sale.
   try {
-    const facts = await new CustomerFactsRepo(db).forConversation(convId, 8);
+    const facts = await new CustomerFactsRepo(db, botId).forConversation(convId, 8);
     if (facts.length > 0) {
       system.push({
         role: "system",

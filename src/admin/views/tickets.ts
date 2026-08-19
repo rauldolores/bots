@@ -1,6 +1,7 @@
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { TicketsRepo } from "../../db/tickets";
+import { resolveBotId } from "../../tenant";
 import { layout } from "./layout";
 
 const STATUS_PILL: Record<string, string> = {
@@ -9,7 +10,8 @@ const STATUS_PILL: Record<string, string> = {
 };
 
 export async function renderTickets(env: Env): Promise<string> {
-  const repo = new TicketsRepo(new Db(env.DB));
+  const db = new Db(env.DB);
+  const repo = new TicketsRepo(db, await resolveBotId(db));
   const open = await repo.listOpen();
 
   const list = open

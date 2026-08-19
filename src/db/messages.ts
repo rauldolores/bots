@@ -29,7 +29,10 @@ export interface AppendOptions {
 }
 
 export class MessagesRepo {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly botId: string,
+  ) {}
 
   async append(
     conversationId: string,
@@ -41,13 +44,14 @@ export class MessagesRepo {
     const createdAt = opts.createdAt ?? Date.now();
     await this.db.run(
       `INSERT INTO messages (
-        id, conversation_id, role, content, tool_calls, model_used,
+        id, conversation_id, bot_id, role, content, tool_calls, model_used,
         input_tokens, output_tokens, cached_input_tokens,
         audio_seconds, image_count, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         conversationId,
+        this.botId,
         role,
         content,
         opts.toolCalls ? JSON.stringify(opts.toolCalls) : null,
@@ -66,18 +70,21 @@ export class MessagesRepo {
   async lastN(conversationId: string, n: number): Promise<Message[]> {
     // El `seq` desempata los mensajes que caen en el mismo milisegundo: sin
     // él, este ORDER BY es ambiguo y el historial del LLM puede desordenarse.
+    // conversation_id ya es exclusivo del bot (F2.1); bot_id aquí es defensa
+    // en profundidad, no lo que evita la fuga.
     const rows = await this.db.all<Message>(
       `SELECT * FROM (
          SELECT * FROM messages
-         WHERE conversation_id = ?
+         WHERE conversation_id = ? AND bot_id = ?
          ORDER BY created_at DESC, seq DESC
          LIMIT ?
        ) ORDER BY created_at ASC, seq ASC`,
-      [conversationId, n],
+      [conversationId, this.botId, n],
     );
     return rows;
   }
 
+  /** Retención global: borra por antigüedad sin importar el bot. */
   async purgeOlderThan(cutoffMs: number): Promise<number> {
     const res = await this.db.run(
       "DELETE FROM messages WHERE created_at < ?",

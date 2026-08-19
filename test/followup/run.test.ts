@@ -26,7 +26,7 @@ vi.mock("../../src/replies/sender", () => ({
   pickAdapter: () => ({ sendReply: (...a: unknown[]) => sendReplyMock(...a) }),
 }));
 
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { MessagesRepo } from "../../src/db/messages";
@@ -92,9 +92,9 @@ beforeEach(async () => {
     MANYCHAT_API_KEY: "mc-test",
   } as unknown as Env;
   db = d1;
-  convs = new ConversationsRepo(db);
-  msgs = new MessagesRepo(db);
-  insights = new InsightsRepo(db);
+  convs = new ConversationsRepo(db, TEST_BOT_ID);
+  msgs = new MessagesRepo(db, TEST_BOT_ID);
+  insights = new InsightsRepo(db, TEST_BOT_ID);
   generateTextMock.mockReset().mockResolvedValue({ text: "¿Quedaste con alguna duda? Aquí ando." });
   sendReplyMock.mockReset().mockResolvedValue(undefined);
 });
@@ -103,14 +103,14 @@ describe("pickFollowupCandidates — selección", () => {
   it("elige calientes (sale_opportunity) y activos (4+ msgs); ignora al resto", async () => {
     const hot = await seed("hot");
     await markHot(hot);
-    await seed("active", { userMsgs: 4 });
-    await seed("quiet"); // 1 mensaje, sin señales → NO
+    const active = await seed("active", { userMsgs: 4 });
+    const quiet = await seed("quiet"); // 1 mensaje, sin señales → NO
 
     const c = await pickFollowupCandidates(env, NOW, 10);
     const byId = Object.fromEntries(c.map((x) => [x.id, x.reason]));
     expect(byId[hot]).toBe("hot");
-    expect(byId["manychat:active"]).toBe("active");
-    expect(byId["manychat:quiet"]).toBeUndefined();
+    expect(byId[active]).toBe("active");
+    expect(byId[quiet]).toBeUndefined();
     expect(c).toHaveLength(2);
   });
 
@@ -185,7 +185,7 @@ describe("runFollowups — envío y garantías", () => {
 
   it("no hace nada con el bot pausado globalmente", async () => {
     const { SettingsRepo, SETTING_KEYS } = await import("../../src/db/settings");
-    await new SettingsRepo(db).set(SETTING_KEYS.botPaused, "1");
+    await new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.botPaused, "1");
     const hot = await seed("h4");
     await markHot(hot);
     const r = await runFollowups(env, { now: NOW });

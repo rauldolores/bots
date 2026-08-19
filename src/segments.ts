@@ -77,41 +77,43 @@ const MEMBER_SELECT = `
   FROM conversations c
   JOIN messages m ON m.conversation_id = c.id AND m.role = 'user'`;
 
-function whereFor(segmentId: string): { joins: string; where: string } {
+// El AND de bot_id va SIEMPRE, aparte de lo que agregue cada segmento — así
+// nadie puede olvidarlo al sumar un segmento nuevo.
+function whereFor(segmentId: string): { joins: string; extra: string } {
   switch (segmentId) {
     case "quiero_sin_click":
       return {
         joins: "",
-        where: `WHERE c.id IN (SELECT conversation_id FROM keyword_hits WHERE keyword = 'QUIERO')
+        extra: `AND c.id IN (SELECT conversation_id FROM keyword_hits WHERE keyword = 'QUIERO')
           AND c.id NOT IN (SELECT conversation_id FROM tracked_links WHERE target = 'oferta' AND clicks > 0)`,
       };
     case "click_oferta":
       return {
         joins: "",
-        where: `WHERE c.id IN (SELECT conversation_id FROM tracked_links WHERE target = 'oferta' AND clicks > 0)`,
+        extra: `AND c.id IN (SELECT conversation_id FROM tracked_links WHERE target = 'oferta' AND clicks > 0)`,
       };
     case "calientes":
       return {
         joins: "JOIN conv_labels l ON l.conversation_id = c.id",
-        where: "WHERE l.interest = 'caliente'",
+        extra: "AND l.interest = 'caliente'",
       };
     case "tibios":
       return {
         joins: "JOIN conv_labels l ON l.conversation_id = c.id",
-        where: "WHERE l.interest = 'tibio'",
+        extra: "AND l.interest = 'tibio'",
       };
     case "objecion_precio":
       return {
         joins: "JOIN conv_labels l ON l.conversation_id = c.id",
-        where: "WHERE l.objection = 'precio'",
+        extra: "AND l.objection = 'precio'",
       };
     case "objecion_tiempo":
       return {
         joins: "JOIN conv_labels l ON l.conversation_id = c.id",
-        where: "WHERE l.objection = 'tiempo'",
+        extra: "AND l.objection = 'tiempo'",
       };
     case "todos":
-      return { joins: "", where: "" };
+      return { joins: "", extra: "" };
     default:
       throw new Error(`segmento desconocido: ${segmentId}`);
   }
@@ -120,16 +122,18 @@ function whereFor(segmentId: string): { joins: string; where: string } {
 /** Miembros de un segmento, cada uno con su estado de ventana de 24h. */
 export async function segmentMembers(
   db: Db,
+  botId: string,
   segmentId: string,
   now = Date.now(),
 ): Promise<SegmentMember[]> {
-  const { joins, where } = whereFor(segmentId);
+  const { joins, extra } = whereFor(segmentId);
   const rows = await db.all<Omit<SegmentMember, "inWindow">>(
     `${MEMBER_SELECT}
      ${joins}
-     ${where}
+     WHERE c.bot_id = ? ${extra}
      GROUP BY c.id
      ORDER BY "lastUserAt" DESC`,
+    [botId],
   );
   return rows.map((r) => ({
     ...r,
@@ -147,10 +151,10 @@ export interface SegmentCount {
 }
 
 /** Conteos de todos los segmentos (para pintar la página de campañas). */
-export async function segmentCounts(db: Db, now = Date.now()): Promise<SegmentCount[]> {
+export async function segmentCounts(db: Db, botId: string, now = Date.now()): Promise<SegmentCount[]> {
   const out: SegmentCount[] = [];
   for (const seg of SEGMENTS) {
-    const members = await segmentMembers(db, seg.id, now);
+    const members = await segmentMembers(db, botId, seg.id, now);
     const inW = members.filter((m) => m.inWindow).length;
     out.push({
       id: seg.id,

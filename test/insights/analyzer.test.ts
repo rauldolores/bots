@@ -22,7 +22,7 @@ vi.mock("../../src/llm/provider", () => ({
   }),
 }));
 
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { MessagesRepo } from "../../src/db/messages";
@@ -65,9 +65,9 @@ beforeEach(async () => {
   const d1 = (await createTestDb()) as any;
   env = { DB: d1.driver, ANTHROPIC_API_KEY: "sk-test", BUSINESS_NAME: "Negocio Test" } as unknown as Env;
   db = d1;
-  convs = new ConversationsRepo(db);
-  msgs = new MessagesRepo(db);
-  insights = new InsightsRepo(db);
+  convs = new ConversationsRepo(db, TEST_BOT_ID);
+  msgs = new MessagesRepo(db, TEST_BOT_ID);
+  insights = new InsightsRepo(db, TEST_BOT_ID);
   generateTextMock.mockReset();
   generateTextMock.mockResolvedValue({ text: JSON.stringify(GRADE) });
 });
@@ -205,12 +205,12 @@ describe("customer facts (flywheel memory)", () => {
     await analyzeConversations(env);
 
     const { CustomerFactsRepo } = await import("../../src/db/facts");
-    const facts = await new CustomerFactsRepo(db).forConversation(convId);
+    const facts = await new CustomerFactsRepo(db, TEST_BOT_ID).forConversation(convId);
     expect(facts.map((f) => f.fact).sort()).toEqual(["Prefiere pagar en USD", "Se llama María"]);
 
     // Re-analysis doesn't duplicate facts (PK conv+fact).
     await db.run("UPDATE conversation_insights SET analyzed_at = 0 WHERE conversation_id = ?", [convId]);
     await analyzeConversations(env);
-    expect(await new CustomerFactsRepo(db).forConversation(convId)).toHaveLength(2);
+    expect(await new CustomerFactsRepo(db, TEST_BOT_ID).forConversation(convId)).toHaveLength(2);
   });
 });

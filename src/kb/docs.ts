@@ -13,6 +13,7 @@
 import type { Env } from "../env";
 import { Db } from "../db/client";
 import { PgVectorStore } from "../vector/pgvector";
+import { resolveBotId } from "../tenant";
 import { reindexKb, type KbChunk } from "./reindex";
 import kbFixtures from "../../scripts/kb-fixtures.json";
 
@@ -31,27 +32,32 @@ export const MAX_CHUNKS = 24;
 export const FIXTURE_CHUNKS = kbFixtures as KbChunk[];
 
 export class KbDocsRepo {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly botId: string,
+  ) {}
 
   async list(): Promise<KbDoc[]> {
-    return this.db.all<KbDoc>("SELECT * FROM kb_docs ORDER BY updated_at DESC");
+    return this.db.all<KbDoc>("SELECT * FROM kb_docs WHERE bot_id = ? ORDER BY updated_at DESC", [
+      this.botId,
+    ]);
   }
 
   async getById(id: string): Promise<KbDoc | null> {
-    return this.db.first<KbDoc>("SELECT * FROM kb_docs WHERE id = ?", [id]);
+    return this.db.first<KbDoc>("SELECT * FROM kb_docs WHERE id = ? AND bot_id = ?", [id, this.botId]);
   }
 
   async upsert(doc: { id: string; title: string; content: string }): Promise<void> {
     await this.db.run(
-      `INSERT INTO kb_docs (id, title, content, updated_at) VALUES (?, ?, ?, ?)
+      `INSERT INTO kb_docs (id, bot_id, title, content, updated_at) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title, content = excluded.content, updated_at = excluded.updated_at`,
-      [doc.id, doc.title, doc.content, Date.now()],
+      [doc.id, this.botId, doc.title, doc.content, Date.now()],
     );
   }
 
   async delete(id: string): Promise<void> {
-    await this.db.run("DELETE FROM kb_docs WHERE id = ?", [id]);
+    await this.db.run("DELETE FROM kb_docs WHERE id = ? AND bot_id = ?", [id, this.botId]);
   }
 }
 
@@ -93,18 +99,22 @@ export function docChunks(doc: KbDoc): KbChunk[] {
 
 /** Re-embed one doc: blanket-delete its old vectors, then upsert fresh ones. */
 export async function indexDoc(env: Env, doc: KbDoc): Promise<{ indexed: number }> {
-  await new PgVectorStore(new Db(env.DB)).deleteByIds(vectorIds(doc.id));
+  const db = new Db(env.DB);
+  const botId = await resolveBotId(db);
+  await new PgVectorStore(db, botId).deleteByIds(vectorIds(doc.id));
   return reindexKb(env, docChunks(doc));
 }
 
 /** Remove a deleted doc's vectors from the index. */
 export async function removeDocVectors(env: Env, docId: string): Promise<void> {
-  await new PgVectorStore(new Db(env.DB)).deleteByIds(vectorIds(docId));
+  const db = new Db(env.DB);
+  await new PgVectorStore(db, await resolveBotId(db)).deleteByIds(vectorIds(docId));
 }
 
 /** All dashboard docs as chunks (for the global reindex). */
 export async function dashboardChunks(env: Env): Promise<KbChunk[]> {
-  const docs = await new KbDocsRepo(new Db(env.DB)).list();
+  const db = new Db(env.DB);
+  const docs = await new KbDocsRepo(db, await resolveBotId(db)).list();
   return docs.flatMap(docChunks);
 }
 

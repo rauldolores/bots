@@ -13,6 +13,7 @@
 import type { Env } from "./env";
 import { Db } from "./db/client";
 import { MessagesRepo } from "./db/messages";
+import { resolveBotId } from "./tenant";
 import { segmentMembers } from "./segments";
 import { pickAdapter } from "./replies/sender";
 import type { ChannelId } from "./channels/shared";
@@ -55,11 +56,14 @@ export function dailyTemplateCap(env: Env): number {
   return Number.isFinite(n) && n > 0 ? n : 250;
 }
 
-/** Plantillas mandadas en las últimas 24h (rolling) — el gasto del tope diario. */
-export async function templatesSentLast24h(db: Db, now = Date.now()): Promise<number> {
+/**
+ * Plantillas mandadas en las últimas 24h (rolling) — el gasto del tope diario.
+ * F2.3 (decisión M9): el tope pasa de ser del despliegue a ser del bot.
+ */
+export async function templatesSentLast24h(db: Db, botId: string, now = Date.now()): Promise<number> {
   const row = await db.first<{ n: number }>(
-    "SELECT COUNT(*) AS n FROM template_sends WHERE kind = 'template' AND sent_at > ?",
-    [now - 24 * 3600_000],
+    "SELECT COUNT(*) AS n FROM template_sends WHERE bot_id = ? AND kind = 'template' AND sent_at > ?",
+    [botId, now - 24 * 3600_000],
   );
   return row?.n ?? 0;
 }
@@ -94,11 +98,12 @@ export async function sendCampaign(
 ): Promise<CampaignResult> {
   const now = opts.now ?? Date.now();
   const db = new Db(env.DB);
-  const msgs = new MessagesRepo(db);
-  const members = await segmentMembers(db, opts.segmentId, now);
+  const botId = await resolveBotId(db);
+  const msgs = new MessagesRepo(db, botId);
+  const members = await segmentMembers(db, botId, opts.segmentId, now);
 
   const cap = dailyTemplateCap(env);
-  let spent = await templatesSentLast24h(db, now);
+  let spent = await templatesSentLast24h(db, botId, now);
 
   const result: CampaignResult = {
     segment: opts.segmentId,
@@ -123,10 +128,11 @@ export async function sendCampaign(
     // Claim ANTES de mandar — si ya existe (campaña reintentada), saltar.
     try {
       await db.run(
-        `INSERT INTO template_sends (campaign_key, conversation_id, kind, template_sid, sent_at)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO template_sends (campaign_key, bot_id, conversation_id, kind, template_sid, sent_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
         [
           opts.campaignKey,
+          botId,
           m.conversationId,
           useFreeform ? "freeform" : "template",
           useTemplate ? opts.template!.sid : null,
@@ -221,8 +227,13 @@ async function sendTwilioTemplate(
   }
 }
 
-/** Historial de campañas (agrupado) para la página de campañas. */
-export async function campaignHistory(db: Db, limit = 15) {
+/**
+ * Historial de campañas (agrupado) para la página de campañas.
+ * F2.3: sin bot_id, dos bots con el mismo campaign_key (nombre elegido a
+ * mano por el dueño, p.ej. "black_friday") mezclaban sus estadísticas en
+ * una sola fila.
+ */
+export async function campaignHistory(db: Db, botId: string, limit = 15) {
   return db.all<{
     campaign_key: string;
     freeform: number;
@@ -233,8 +244,8 @@ export async function campaignHistory(db: Db, limit = 15) {
             SUM(CASE WHEN kind = 'freeform' THEN 1 ELSE 0 END) AS freeform,
             SUM(CASE WHEN kind = 'template' THEN 1 ELSE 0 END) AS template,
             MAX(sent_at) AS last_at
-     FROM template_sends GROUP BY campaign_key ORDER BY last_at DESC LIMIT ?`,
-    [limit],
+     FROM template_sends WHERE bot_id = ? GROUP BY campaign_key ORDER BY last_at DESC LIMIT ?`,
+    [botId, limit],
   );
 }
 

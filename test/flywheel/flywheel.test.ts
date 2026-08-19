@@ -24,7 +24,7 @@ vi.mock("../../src/businessContext", () => ({
   renderBusinessContext: () => "CONTEXTO DE NEGOCIO DE PRUEBA",
 }));
 
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
@@ -92,10 +92,10 @@ beforeEach(async () => {
     DASHBOARD_PASSWORD: PASSWORD,
   } as unknown as Env;
   db = d1;
-  convs = new ConversationsRepo(db);
-  msgs = new MessagesRepo(db);
-  insights = new InsightsRepo(db);
-  suggestions = new SuggestionsRepo(db);
+  convs = new ConversationsRepo(db, TEST_BOT_ID);
+  msgs = new MessagesRepo(db, TEST_BOT_ID);
+  insights = new InsightsRepo(db, TEST_BOT_ID);
+  suggestions = new SuggestionsRepo(db, TEST_BOT_ID);
   generateTextMock.mockReset();
 });
 
@@ -172,7 +172,7 @@ describe("apply / dismiss", () => {
 
     expect(await applySuggestion(env, id)).toBe(true);
 
-    const docs = await new KbDocsRepo(db).list();
+    const docs = await new KbDocsRepo(db, TEST_BOT_ID).list();
     expect(docs).toHaveLength(1);
     expect(docs[0].title).toBe("Envíos");
     // Antes esto espiaba el mock de Vectorize. Ahora se puede verificar el

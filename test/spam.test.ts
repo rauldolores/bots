@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb } from "./helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "./helpers/pgSetup";
 import { Db } from "../src/db/client";
 import { ConversationsRepo } from "../src/db/conversations";
 import { normalizeForSpam, isRepeatSpam, isOverDailyCap, DAILY_TURN_CAP, DAILY_CAP_MESSAGE } from "../src/spam";
@@ -9,15 +9,15 @@ let convId: string;
 
 async function addUserMsg(content: string, createdAt: number) {
   await db.run(
-    `INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, 'user', ?, ?)`,
-    [crypto.randomUUID(), convId, content, createdAt],
+    `INSERT INTO messages (id, conversation_id, bot_id, role, content, created_at) VALUES (?, ?, ?, 'user', ?, ?)`,
+    [crypto.randomUUID(), convId, TEST_BOT_ID, content, createdAt],
   );
 }
 
 beforeEach(async () => {
   const d1 = await createTestDb();
   db = d1;
-  const conv = await new ConversationsRepo(db).getOrCreate("telegram", "spam-test");
+  const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "spam-test");
   convId = conv.id;
 });
 
@@ -79,8 +79,8 @@ describe("isOverDailyCap (backstop ChatGPT gratis)", () => {
     // Mensajes del bot no cuentan para el tope.
     for (let i = 0; i < DAILY_TURN_CAP; i++) {
       await db.run(
-        `INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, 'assistant', ?, ?)`,
-        [crypto.randomUUID(), convId, `respuesta ${i}`, NOW - i * 1000],
+        `INSERT INTO messages (id, conversation_id, bot_id, role, content, created_at) VALUES (?, ?, ?, 'assistant', ?, ?)`,
+        [crypto.randomUUID(), convId, TEST_BOT_ID, `respuesta ${i}`, NOW - i * 1000],
       );
     }
     expect(await isOverDailyCap(db, convId, NOW)).toBe(false);

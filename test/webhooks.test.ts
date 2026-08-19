@@ -10,7 +10,7 @@
  * caso que fallaba.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createTestDb } from "./helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "./helpers/pgSetup";
 import app from "../src/app";
 import { SettingsRepo } from "../src/db/settings";
 import type { Db } from "../src/db/client";
@@ -61,7 +61,7 @@ describe("webhook de Telegram sin ExecutionContext (servidor Node)", () => {
     const pendientes = await db.all("SELECT text FROM pending_messages");
     const trabajos = await db.all("SELECT conversation_key FROM agent_jobs");
     expect(pendientes).toHaveLength(1);
-    expect(trabajos).toEqual([{ conversation_key: "telegram:9911" }]);
+    expect(trabajos).toEqual([{ conversation_key: `${TEST_BOT_ID}:telegram:9911` }]);
   });
 
   it("tres mensajes seguidos dejan UN solo turno programado", async () => {

@@ -18,6 +18,7 @@ import { Db } from "../db/client";
 import { MessagesRepo } from "../db/messages";
 import { InsightsRepo, type UpsertInsightInput } from "../db/insights";
 import { CustomerFactsRepo } from "../db/facts";
+import { resolveBotId } from "../tenant";
 import { createModel } from "../llm/provider";
 import { loadLlmOverrides } from "../settings-loader";
 
@@ -58,33 +59,36 @@ interface PendingConv {
 }
 
 /** Conversations that are idle, have a real exchange, and lack a fresh insight. */
-async function pickPending(db: Db, now: number, limit: number): Promise<PendingConv[]> {
+async function pickPending(db: Db, botId: string, now: number, limit: number): Promise<PendingConv[]> {
   return db.all<PendingConv>(
     `SELECT c.id,
        (SELECT COUNT(*) FROM tickets t
          WHERE t.conversation_id = c.id AND t.status != 'resolved') as open_tickets
      FROM conversations c
      LEFT JOIN conversation_insights i ON i.conversation_id = c.id
-     WHERE c.last_message_at < ?
+     WHERE c.bot_id = ?
+       AND c.last_message_at < ?
        AND (i.conversation_id IS NULL OR i.analyzed_at < c.last_message_at)
        AND (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) >= 2
      ORDER BY c.last_message_at DESC
      LIMIT ?`,
-    [now - IDLE_MS, limit],
+    [botId, now - IDLE_MS, limit],
   );
 }
 
 /** How many idle conversations are still waiting for analysis (for the UI). */
 export async function countPending(env: Env, now = Date.now()): Promise<number> {
   const db = new Db(env.DB);
+  const botId = await resolveBotId(db);
   const row = await db.first<{ n: number }>(
     `SELECT COUNT(*) as n
      FROM conversations c
      LEFT JOIN conversation_insights i ON i.conversation_id = c.id
-     WHERE c.last_message_at < ?
+     WHERE c.bot_id = ?
+       AND c.last_message_at < ?
        AND (i.conversation_id IS NULL OR i.analyzed_at < c.last_message_at)
        AND (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) >= 2`,
-    [now - IDLE_MS],
+    [botId, now - IDLE_MS],
   );
   return row?.n ?? 0;
 }
@@ -164,10 +168,11 @@ export async function analyzeConversations(
   const now = opts.now ?? Date.now();
   const limit = opts.limit ?? 10;
   const db = new Db(env.DB);
-  const msgs = new MessagesRepo(db);
-  const insights = new InsightsRepo(db);
+  const botId = await resolveBotId(db);
+  const msgs = new MessagesRepo(db, botId);
+  const insights = new InsightsRepo(db, botId);
 
-  const pending = await pickPending(db, now, limit);
+  const pending = await pickPending(db, botId, now, limit);
   let analyzed = 0;
   let errors = 0;
 
@@ -204,7 +209,7 @@ export async function analyzeConversations(
       };
       await insights.upsert(input);
       if (insight.customer_facts.length > 0) {
-        await new CustomerFactsRepo(db).addMany(conv.id, insight.customer_facts);
+        await new CustomerFactsRepo(db, botId).addMany(conv.id, insight.customer_facts);
       }
       analyzed++;
     } catch (e) {

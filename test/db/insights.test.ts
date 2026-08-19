@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { InsightsRepo, type UpsertInsightInput } from "../../src/db/insights";
@@ -24,8 +24,8 @@ function makeInput(conversationId: string, overrides: Partial<UpsertInsightInput
 
 beforeEach(async () => {
   db = await createTestDb();
-  convs = new ConversationsRepo(db);
-  repo = new InsightsRepo(db);
+  convs = new ConversationsRepo(db, TEST_BOT_ID);
+  repo = new InsightsRepo(db, TEST_BOT_ID);
 });
 
 describe("InsightsRepo", () => {

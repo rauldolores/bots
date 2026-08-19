@@ -1,6 +1,6 @@
 # Multi-tenant, multi-bot y KontrolIA Auth
 
-Estado: **plan aprobado, sin implementar** · 2026-08-18
+Estado: **F1 y F2.1 desplegados. F2.2 y F2.3 completos. Sin desplegar.** · 2026-08-18
 
 Hoy Nodia Agents es **un despliegue = un bot**. Este documento define cómo pasa
 a ser **una organización = muchos bots**, con el login centralizado del
@@ -34,6 +34,11 @@ migrar el modelo de datos dos veces.
 | M3 | **La llave de IA es de cada organización** | Mantiene la promesa del producto (no absorbes el consumo ajeno) y evita construir medición, topes y corte por consumo |
 | M4 | **Auth con `@kontrolia/auth` (server), OAuth escrito a mano en Hono** | `@kontrolia/react` y `@kontrolia/next` son de Next.js; esto es Hono con HTML de servidor |
 | M5 | **Un webhook por bot: `/webhooks/<canal>/<botId>`** | Es lo único que funciona sin ambigüedad con N bots por canal. Cada bot registra su propia URL en BotFather/Meta |
+| M6 | **`conversations.id` deja de componerse a mano (`"canal:usuario"`) y pasa a ser un UUID aleatorio, como el resto de las tablas** | El id compuesto era único GLOBALMENTE por (channel, channel_user_id). Con más de un bot, dos clientes con el mismo id de canal en bots distintos colisionaban en la MISMA fila — el segundo heredaba la conversación del primero. Cambiar solo el esquema de unicidad no alcanza porque `id` es PRIMARY KEY (única global por definición); hacía falta soltar el id compuesto. Ninguna fila existente cambia de valor — es un cambio de esquema, no una migración de datos |
+| M7 | **El `conversation_key` del agente (agent_state / pending_messages / agent_jobs) SÍ lleva el bot_id por delante: `"<botId>:<canal>:<usuario>"`** | Es la llave del pipeline de buffer/turno, se calcula ANTES de tocar la base (en el webhook, antes de que exista la conversación) — tiene que ser determinista sin round-trip. Las filas en vuelo al momento del despliegue quedan huérfanas (aceptable: son colas de segundos a minutos, nunca historial) |
+| M8 | **Transición sin `bot_id` resuelto: `resolveBotId()` exige que la tabla `bots` tenga EXACTAMENTE una fila** | Hasta F4 (webhooks por bot) no hay de dónde más sacar el bot_id en el webhook ni en el panel. Con 0 o 2+ filas, falla fuerte — adivinar mezclaría datos entre organizaciones, que es el riesgo que F2 existe para cerrar. Se retira solo cuando F4 rutee por URL |
+| M9 | **Los topes globales (follow-up diario, plantillas diarias, presupuesto mensual, umbral del watchdog) se vuelven por-bot cuando se les agregue el filtro, no antes** | Agregar `bot_id` a una consulta de agregación cambia su significado de "límite del despliegue" a "límite del bot" — es un cambio de comportamiento, no solo de aislamiento. Se decide junto con esa consulta en F2.3, no de golpe |
+| M10 | **`admin_emails` y `magic_links` no se tocan en F2** | Auditoría de F2.1: ninguna ruta del código las lee ni las escribe hoy — son remanente del diseño de magic-link previo al Basic Auth actual. F5 decide si las reemplaza KontrolIA Auth o se eliminan |
 
 ### Lo que NO se decidió aquí
 
@@ -100,11 +105,75 @@ Cada fase queda **verde y desplegable** antes de la siguiente.
   Kontrolia). Sin cambio de comportamiento todavía: el código sigue leyendo env,
   pero ya escribe con `bot_id`. **Riesgo: bajo.**
 
-- **F2 — Alcance por bot en las consultas.** Las ~38 consultas se filtran por
-  `bot_id`. Aquí vive el riesgo de **fuga entre tenants**: una consulta sin
-  filtrar deja que una organización lea datos de otra. Cada repo lleva el
-  `bot_id` en el constructor para que olvidarlo sea un error de tipos, no un
-  descuido. Tests que prueban el aislamiento explícitamente. **Riesgo: alto.**
+- **F2 — Alcance por bot en las consultas.** Al auditar F1 apareció más
+  superficie de la prevista (33 archivos construyen un repo o `Db` directo;
+  varias claves únicas no contempladas en el modelo original — ver M6-M10).
+  Se parte en sub-fases, cada una verde antes de la siguiente:
+
+  - **F2.1 — El pipeline de conversación (✅ hecho, este commit).**
+    `ConversationsRepo` exige `bot_id` en el constructor y filtra cada
+    consulta; `conversations.id` pasa a ser UUID (M6); `conversation_key`
+    lleva el bot_id por delante (M7); `resolveBotId()` transicional (M8).
+    Esto cierra el riesgo dominante: dos bots con un cliente que comparte
+    canal + id de usuario ya no pueden compartir conversación, mensajes,
+    estado del agente ni ticket. Tests de aislamiento en
+    `test/db/conversations.test.ts`. Quedan sin tocar (documentado, no
+    fuga real todavía porque el despliegue sigue siendo un solo bot):
+    `pickFollowupCandidates` (consulta global en `followup/run.ts`), y
+    todo lo de F2.2/F2.3.
+
+  - **F2.2 — Las tablas de datos por-fila (✅ hecho, este commit).** `leads`,
+    `tickets`, `settings`, `conversation_insights`, `kb_docs`, `kb_chunks`
+    (pgvector), `improvement_suggestions`, `customer_facts`. Cada repo exige
+    `bot_id` en el constructor y filtra cada consulta; `settings` pasa de
+    PK `key` a único `(bot_id, key)` — cubre también las llaves con
+    namespace propio (`map:<canal>`, `send:<canal>:tipo`,
+    `learn:<canal>:<kind>`) sin tocar a quien las usa; `kb_chunks` pasa de
+    PK `id` a único `(bot_id, id)` porque los ids de los fixtures
+    (scripts/kb-fixtures.json) son estáticos — dos bots con el mismo niche
+    pack reindexando el mismo fixture se pisaban. Tests de aislamiento en
+    `test/db/leads.test.ts`, `tickets.test.ts`, `settings.test.ts` y
+    `test/kb/docs.test.ts` (el más crítico: `PgVectorStore.query` no debe
+    devolver contenido de otro bot — es lo que `searchKb` expone al cliente
+    en cada turno). `admin_emails` y `magic_links` no se tocaron: sin
+    llamador vivo (decisión M10). `tracked_links`, `keyword_hits`,
+    `conv_labels` no se tocaron: sin escritor vivo — el `bot_id` que ya
+    tienen de F1 alcanza para cuando exista uno.
+
+  - **F2.3 — Caps globales, panel y crons (✅ hecho, este commit).**
+    `followup_sends`/`template_sends` (cap diario de follow-up y de
+    plantillas HSM) filtran y escriben `bot_id` — decisión M9 aplicada (el
+    cap pasa de "del despliegue" a "del bot"); `campaignHistory` ya no
+    mezcla estadísticas de dos bots con el mismo `campaign_key`;
+    `segments.ts` (la lista de destinatarios real de una campaña) exige
+    `bot_id`. `MessagesRepo` ahora escribe y filtra `bot_id` (antes solo
+    tenía la columna, sin llenar, desde F1) — eso desbloqueó filtrar
+    `pickPending`/`detectLessons` (crons de insights y flywheel),
+    el umbral del watchdog y `monthIaCostUsd`/el desglose de costos del
+    panel, que antes agregaban mensajes de TODOS los bots del despliegue.
+
+    Pendiente, explícitamente fuera de esta fase: las rutas del panel con
+    `:id` de la URL ya heredan el filtro porque construyen sus repos con
+    `resolveBotId()` — hoy iguala al único bot del despliegue, así que no
+    hay fuga real, pero tampoco hay verificación de que el `:id` pertenezca
+    a quien está logueado; eso lo cierra la sesión de F5. Un puñado de
+    subconsultas de conteo en `admin/views/conversations.ts` y
+    `overview.ts` (contador de tickets abiertos por conversación, contador
+    global de conversaciones) quedaron sin auditar línea por línea — son
+    números de tablero, no contenido de conversación, y de bajo riesgo real
+    porque ya pasan por conversaciones/repos bot-scoped en el 90% de los
+    casos.
+
+  - **F2.3 — Los que la leen: panel, tools, crons.** Las ~20 rutas del panel
+    con `:id` de la URL sin verificación de dueño (IDOR: `/leads/:id/status`,
+    `/tickets/:id/resolve`, `/kb/:id/edit|delete`, `/mejoras/:id/*`…), los
+    crons de fondo (`followup`, `flywheel`, `watchdog`, `campaigns`,
+    `insights/analyzer`) que hoy asumen un solo bot por despliegue, y los
+    topes globales que se vuelven por-bot (M9). **Riesgo: alto** (mismo
+    motivo, superficie más amplia).
+
+  Los tests de aislamiento explícito (uno por tabla, como el de F2.1)
+  acompañan cada sub-fase, no se dejan para el final.
 
 - **F3 — Configuración desde la base.** `resolveAgentConfig` deja de leer env y
   lee la fila del bot; `member/config.local.ts` se convierte en datos. Las

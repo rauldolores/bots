@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { searchKbTool } from "../../src/tools/searchKb";
 import { PgVectorStore } from "../../src/vector/pgvector";
 import { EMBEDDING_DIMENSIONS } from "../../src/ai/embeddings";
@@ -19,7 +19,7 @@ let db: Db;
 
 beforeEach(async () => {
   db = await createTestDb();
-  await new PgVectorStore(db).upsert([
+  await new PgVectorStore(db, TEST_BOT_ID).upsert([
     {
       id: "c1",
       values: base(0),
@@ -43,7 +43,7 @@ function envQueEmbebeComo(pos: number): Env {
 
 describe("searchKbTool", () => {
   it("returns top-k chunks with scores", async () => {
-    const tool = searchKbTool(envQueEmbebeComo(0));
+    const tool = searchKbTool(envQueEmbebeComo(0), TEST_BOT_ID);
     const execute = tool.execute as (input: { query: string }) => Promise<any>;
     const result = await execute({ query: "como embebo wall" });
 
@@ -57,7 +57,7 @@ describe("searchKbTool", () => {
   });
 
   it("orders by similarity, not by insertion", async () => {
-    const tool = searchKbTool(envQueEmbebeComo(1));
+    const tool = searchKbTool(envQueEmbebeComo(1), TEST_BOT_ID);
     const execute = tool.execute as (input: { query: string }) => Promise<any>;
     const result = await execute({ query: "carrusel" });
 
@@ -74,14 +74,14 @@ describe("searchKbTool", () => {
       },
     } as unknown as Env;
 
-    const tool = searchKbTool(env);
+    const tool = searchKbTool(env, TEST_BOT_ID);
     const execute = tool.execute as (input: { query: string }) => Promise<any>;
     const result = await execute({ query: "x" });
     expect(result.error).toBe("transient");
   });
 
   it("returns a transient error when there is no embedding provider", async () => {
-    const tool = searchKbTool({ DB: db.driver } as unknown as Env);
+    const tool = searchKbTool({ DB: db.driver } as unknown as Env, TEST_BOT_ID);
     const execute = tool.execute as (input: { query: string }) => Promise<any>;
     const result = await execute({ query: "x" });
     expect(result.error).toBe("transient");

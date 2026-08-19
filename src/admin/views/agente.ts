@@ -11,6 +11,7 @@ import { Db } from "../../db/client";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
 import { resolveAgentConfig, type AgentConfig } from "../../settings-loader";
 import { buildTools } from "../../tools";
+import { resolveBotId } from "../../tenant";
 import { resolveProvider, modelIdFor } from "../../llm/provider";
 import { channelLabel, configuredChannels } from "../../channels/labels";
 import { layout } from "./layout";
@@ -180,10 +181,11 @@ async function loadAgenteData(env: Env): Promise<AgenteData> {
     .catch(() => [] as ToolUsageRow[]);
   const usage = new Map(usageRows.filter((r) => r.tool).map((r) => [r.tool, r]));
 
-  const toolNames = Object.keys(buildTools({ env, getConversationId: () => null }));
+  const botId = await resolveBotId(db);
+  const toolNames = Object.keys(buildTools({ env, getConversationId: () => null, botId }));
   const cfg = await resolveAgentConfig(env, toolNames);
   const disabled = toolNames.filter((n) => !cfg.enabledToolNames.includes(n));
-  const settings = await new SettingsRepo(db).all();
+  const settings = await new SettingsRepo(db, botId).all();
 
   return { channels, turns30d, lastAssistantAt, toolNames, usage, cfg, disabled, settings };
 }
@@ -634,10 +636,12 @@ export async function renderNodeModal(env: Env, nodeId: string, saved = false): 
  * (returns false) so the route can't write garbage into settings.
  */
 export async function toggleTool(env: Env, name: string): Promise<boolean> {
-  const known = Object.keys(buildTools({ env, getConversationId: () => null }));
+  const db = new Db(env.DB);
+  const botId = await resolveBotId(db);
+  const known = Object.keys(buildTools({ env, getConversationId: () => null, botId }));
   if (!known.includes(name)) return false;
 
-  const repo = new SettingsRepo(new Db(env.DB));
+  const repo = new SettingsRepo(db, botId);
   const raw = (await repo.get(SETTING_KEYS.disabledTools)) ?? "";
   const disabled = new Set(
     raw.split(",").map((s) => s.trim()).filter(Boolean),

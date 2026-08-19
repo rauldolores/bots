@@ -14,6 +14,7 @@
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { InsightsRepo } from "../../db/insights";
+import { resolveBotId } from "../../tenant";
 import { SENTIMENT_BADGE } from "./insights";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
@@ -214,7 +215,7 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
   const conv = await db.first<any>("SELECT * FROM conversations WHERE id = ?", [convId]);
   if (!conv) return `<div style="padding:24px;font-size:12.5px;color:var(--dim)">Conversación no encontrada.</div>`;
 
-  const insight = await new InsightsRepo(db).getByConversation(convId);
+  const insight = await new InsightsRepo(db, await resolveBotId(db)).getByConversation(convId);
   const msgs = await db.all<any>(
     "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at DESC, seq DESC LIMIT 100",
     [convId],

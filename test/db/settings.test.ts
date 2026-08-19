@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { Db } from "../../src/db/client";
+import { createTestDb, TEST_BOT_ID, createSecondTestBot } from "../helpers/pgSetup";
 import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
 
+let db: Db;
 let repo: SettingsRepo;
 
 beforeEach(async () => {
-  const d1 = await createTestDb();
-  repo = new SettingsRepo(d1);
+  db = await createTestDb();
+  repo = new SettingsRepo(db, TEST_BOT_ID);
 });
 
 describe("SettingsRepo", () => {
@@ -42,5 +44,16 @@ describe("SettingsRepo", () => {
 
   it("all returns an empty object when nothing is set", async () => {
     expect(await repo.all()).toEqual({});
+  });
+
+  it("dos bots pueden tener la MISMA llave con valores distintos, sin pisarse", async () => {
+    const otherBotId = await createSecondTestBot(db);
+    const otherRepo = new SettingsRepo(db, otherBotId);
+
+    await repo.set(SETTING_KEYS.botName, "Mío");
+    await otherRepo.set(SETTING_KEYS.botName, "Ajeno");
+
+    expect(await repo.get(SETTING_KEYS.botName)).toBe("Mío");
+    expect(await otherRepo.get(SETTING_KEYS.botName)).toBe("Ajeno");
   });
 });

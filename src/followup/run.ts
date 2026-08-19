@@ -26,6 +26,7 @@ import { resolveAgentConfig, loadLlmOverrides } from "../settings-loader";
 import { createModel } from "../llm/provider";
 import { pickAdapter } from "../replies/sender";
 import type { ChannelId } from "../channels/shared";
+import { resolveBotId } from "../tenant";
 
 /** Ventana de elegibilidad medida desde el último mensaje del cliente. */
 export const MIN_IDLE_MS = 3 * 60 * 60 * 1000; // 3 h
@@ -57,6 +58,7 @@ export async function pickFollowupCandidates(
   limit: number,
 ): Promise<FollowupCandidate[]> {
   const db = new Db(env.DB);
+  const botId = await resolveBotId(db);
   const rows = await db.all<CandidateRow>(
     `SELECT * FROM (
        SELECT c.id, c.channel, c.channel_user_id, c.display_name,
@@ -67,7 +69,8 @@ export async function pickFollowupCandidates(
        FROM conversations c
        LEFT JOIN conversation_insights i ON i.conversation_id = c.id
        LEFT JOIN followup_sends f ON f.conversation_id = c.id
-       WHERE f.conversation_id IS NULL
+       WHERE c.bot_id = ?
+         AND f.conversation_id IS NULL
          AND c.channel != 'instagram'
          AND (c.paused_until IS NULL OR c.paused_until < ?)
      )
@@ -77,7 +80,7 @@ export async function pickFollowupCandidates(
        AND (COALESCE(sale_opportunity, 0) = 1 OR user_msgs >= 4)
      ORDER BY COALESCE(sale_opportunity, 0) DESC, user_msgs DESC
      LIMIT ?`,
-    [now, now - MIN_IDLE_MS, now - MAX_IDLE_MS, limit],
+    [botId, now, now - MIN_IDLE_MS, now - MAX_IDLE_MS, limit],
   );
   return rows.map((r) => ({
     id: r.id,
@@ -107,17 +110,24 @@ export async function runFollowups(
   const limit = opts.limit ?? 6;
   const dailyCap = opts.dailyCap ?? 30;
   const db = new Db(env.DB);
+  // Transicional (F2.1/F2.3): un despliegue sigue siendo un solo bot hasta
+  // F4, así que se resuelve una vez para toda la corrida. Cuando este cron
+  // sirva a más de un bot por despliegue tiene que iterar por cada uno, no
+  // asumir el único.
+  const botId = await resolveBotId(db);
 
   // Respeta la pausa global del bot (el dueño lo apagó a propósito).
   const cfg = await resolveAgentConfig(env, []);
   if (cfg.botPaused) return { sent: 0, skipped: 0, errors: 0 };
 
-  // Cap diario global — el follow-up es un toque fino, no una campaña.
+  // Cap diario — F2.3 (decisión M9): antes era del despliegue, ahora es del
+  // bot, porque agregar el filtro de bot_id sin más habría dejado que el
+  // consumo de un bot le robara cupo a otro en el mismo despliegue.
   const sentToday =
     (
       await db.first<{ n: number }>(
-        "SELECT COUNT(*) as n FROM followup_sends WHERE sent_at > ?",
-        [now - 24 * 60 * 60 * 1000],
+        "SELECT COUNT(*) as n FROM followup_sends WHERE bot_id = ? AND sent_at > ?",
+        [botId, now - 24 * 60 * 60 * 1000],
       )
     )?.n ?? 0;
   if (sentToday >= dailyCap) return { sent: 0, skipped: 0, errors: 0 };
@@ -129,8 +139,8 @@ export async function runFollowups(
   );
   if (candidates.length === 0) return { sent: 0, skipped: 0, errors: 0 };
 
-  const msgs = new MessagesRepo(db);
-  const convs = new ConversationsRepo(db);
+  const msgs = new MessagesRepo(db, botId);
+  const convs = new ConversationsRepo(db, botId);
   const { model, modelId } = createModel(env, "fast", await loadLlmOverrides(env));
 
   let sent = 0;
@@ -141,9 +151,9 @@ export async function runFollowups(
     // Claim ANTES de enviar: si otra corrida (o un tick concurrente) ya lo
     // tomó, el ON CONFLICT no escribe y saltamos — imposible duplicar.
     const claim = await db.run(
-      `INSERT INTO followup_sends (conversation_id, reason, sent_at)
-       VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
-      [cand.id, cand.reason, now],
+      `INSERT INTO followup_sends (conversation_id, bot_id, reason, sent_at)
+       VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+      [cand.id, botId, cand.reason, now],
     );
     if (claim.rowsAffected === 0) {
       skipped++;

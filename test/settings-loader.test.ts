@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb } from "./helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "./helpers/pgSetup";
 import { SettingsRepo, SETTING_KEYS } from "../src/db/settings";
 import { resolveAgentConfig } from "../src/settings-loader";
 
@@ -18,7 +18,7 @@ beforeEach(async () => {
     BOT_TIER: "pro",
     BUFFER_SECONDS: "12",
   };
-  repo = new SettingsRepo(d1);
+  repo = new SettingsRepo(d1, TEST_BOT_ID);
 });
 
 describe("resolveAgentConfig", () => {

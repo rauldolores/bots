@@ -3,7 +3,7 @@
  * the pure downgrade decision the agent applies.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb } from "./helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "./helpers/pgSetup";
 import { Db } from "../src/db/client";
 import { ConversationsRepo } from "../src/db/conversations";
 import { MessagesRepo } from "../src/db/messages";
@@ -35,8 +35,8 @@ describe("monthIaCostUsd", () => {
 
   beforeEach(async () => {
     db = await createTestDb();
-    convs = new ConversationsRepo(db);
-    msgs = new MessagesRepo(db);
+    convs = new ConversationsRepo(db, TEST_BOT_ID);
+    msgs = new MessagesRepo(db, TEST_BOT_ID);
   });
 
   it("sums only messages from the current month", async () => {
@@ -48,7 +48,7 @@ describe("monthIaCostUsd", () => {
       cachedInputTokens: 0,
     };
     await msgs.append(conv.id, "assistant", "in-month", opts);
-    const inMonth = await monthIaCostUsd(db);
+    const inMonth = await monthIaCostUsd(db, TEST_BOT_ID);
     expect(inMonth).toBeGreaterThan(0);
 
     // A message before the month start must not change the total.
@@ -56,10 +56,10 @@ describe("monthIaCostUsd", () => {
       ...opts,
       createdAt: monthStartMs() - 1000,
     });
-    expect(await monthIaCostUsd(db)).toBeCloseTo(inMonth, 10);
+    expect(await monthIaCostUsd(db, TEST_BOT_ID)).toBeCloseTo(inMonth, 10);
   });
 
   it("returns 0 with no usage", async () => {
-    expect(await monthIaCostUsd(db)).toBe(0);
+    expect(await monthIaCostUsd(db, TEST_BOT_ID)).toBe(0);
   });
 });

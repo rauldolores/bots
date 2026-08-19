@@ -5,14 +5,14 @@
 // `storage.setAlarm`) ahora se comprueba donde de verdad vive: las tablas
 // pending_messages y agent_jobs. El LLM y la red siguen simulados.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTestDb } from "./helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "./helpers/pgSetup";
 import { ingestMessage, runTurn, conversationKeyOf } from "../src/agent/runner";
 import { MessagesRepo } from "../src/db/messages";
 import { SettingsRepo } from "../src/db/settings";
 import * as senderMod from "../src/replies/sender";
 import type { Db } from "../src/db/client";
 
-const KEY = conversationKeyOf("telegram", "u1");
+const KEY = conversationKeyOf(TEST_BOT_ID, "telegram", "u1");
 
 const streamTextMock = vi.fn();
 

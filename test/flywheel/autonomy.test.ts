@@ -15,7 +15,7 @@ vi.mock("../../src/tools/handoffHuman", () => ({
   handoffHumanTool: () => ({}),
 }));
 
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
@@ -57,8 +57,8 @@ beforeEach(async () => {
     DASHBOARD_PASSWORD: PASSWORD,
   } as unknown as Env;
   db = d1;
-  suggestions = new SuggestionsRepo(db);
-  settings = new SettingsRepo(db);
+  suggestions = new SuggestionsRepo(db, TEST_BOT_ID);
+  settings = new SettingsRepo(db, TEST_BOT_ID);
   notifyOwnerMock.mockClear();
 });
 
@@ -94,7 +94,7 @@ describe("autoApplyPending (copiloto)", () => {
     const clean = (await suggestions.getById(cleanId))!;
     expect(clean.status).toBe("applied");
     expect(clean.evidence).toContain("aplicada en automático (copiloto)");
-    const docs = await new KbDocsRepo(db).list();
+    const docs = await new KbDocsRepo(db, TEST_BOT_ID).list();
     expect(docs.some((d) => d.title === "Envíos a Guadalajara")).toBe(true);
 
     // La lección entró al prompt.
@@ -115,8 +115,8 @@ describe("autoApplyPending (copiloto)", () => {
 
 describe("watchdog (checkBotHealth)", () => {
   async function seedFailures(n: number, at: number) {
-    const convs = new ConversationsRepo(db);
-    const msgs = new MessagesRepo(db);
+    const convs = new ConversationsRepo(db, TEST_BOT_ID);
+    const msgs = new MessagesRepo(db, TEST_BOT_ID);
     const conv = await convs.getOrCreate("twilio", "wd-user");
     for (let i = 0; i < n; i++) {
       await msgs.append(conv.id, "assistant", "Algo falló de mi lado, ¿me repites tu mensaje?");

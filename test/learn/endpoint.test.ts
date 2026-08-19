@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { SettingsRepo } from "../../src/db/settings";
 import { startLearnMode, loadCapture } from "../../src/learn/mapping";
 import { detectKind } from "../../src/learn/fieldPath";
@@ -59,7 +59,7 @@ describe("POST /webhooks/learn/:channel", () => {
 
   beforeEach(async () => {
     const d1 = await createTestDb();
-    repo = new SettingsRepo(d1);
+    repo = new SettingsRepo(d1, TEST_BOT_ID);
     env = {
       BOT_NAME: "Testi",
       BUSINESS_NAME: "Test",

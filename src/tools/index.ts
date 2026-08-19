@@ -11,6 +11,7 @@ import { catalogQueryTool } from "./catalogQuery";
 export interface ToolContext {
   env: Env;
   getConversationId: () => string | null;
+  botId: string;
 }
 
 export function buildTools(ctx: ToolContext) {
@@ -18,11 +19,11 @@ export function buildTools(ctx: ToolContext) {
   // captura prospectos — es el valor central de un bot de ventas. Lo Pro son las
   // tools más avanzadas por nicho (agendar citas, consultar catálogo/inventario).
   const tools: Record<string, any> = {
-    searchKb: searchKbTool(ctx.env),
-    handoffHuman: handoffHumanTool(ctx.env, ctx.getConversationId),
-    pauseBot: pauseBotTool(ctx.env, ctx.getConversationId),
-    snoozeUser: snoozeUserTool(ctx.env, ctx.getConversationId),
-    captureLead: captureLeadTool(ctx.env, ctx.getConversationId),
+    searchKb: searchKbTool(ctx.env, ctx.botId),
+    handoffHuman: handoffHumanTool(ctx.env, ctx.getConversationId, ctx.botId),
+    pauseBot: pauseBotTool(ctx.env, ctx.getConversationId, ctx.botId),
+    snoozeUser: snoozeUserTool(ctx.env, ctx.getConversationId, ctx.botId),
+    captureLead: captureLeadTool(ctx.env, ctx.getConversationId, ctx.botId),
   };
 
   // Pro tier additions

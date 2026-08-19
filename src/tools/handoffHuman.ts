@@ -7,7 +7,7 @@ import { TicketsRepo } from "../db/tickets";
 import { ConversationsRepo } from "../db/conversations";
 import { isPro } from "../config";
 
-export function handoffHumanTool(env: Env, getConversationId: () => string | null) {
+export function handoffHumanTool(env: Env, getConversationId: () => string | null, botId: string) {
   return tool({
     description:
       "Crea un ticket para el dueño + le manda email. Usalo cuando el bot no puede resolver o el cliente pide humano explícitamente.",
@@ -19,7 +19,7 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
     execute: async ({ reason, summary, category }) => {
       const convId = getConversationId();
       const db = new Db(env.DB);
-      const tickets = new TicketsRepo(db);
+      const tickets = new TicketsRepo(db, botId);
       const ticketId = await tickets.create({
         conversationId: convId,
         category,
@@ -27,7 +27,7 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
         transcript: "", // populated by agent if it has access; left blank otherwise
       });
       if (convId) {
-        const convs = new ConversationsRepo(db);
+        const convs = new ConversationsRepo(db, botId);
         await convs.setOpenTicket(convId, ticketId);
       }
 
@@ -103,8 +103,12 @@ export async function notifyOwner(env: Env, notice: HandoffNotice): Promise<void
   if (!handoffContentSid) {
     try {
       const { SettingsRepo, SETTING_KEYS } = await import("../db/settings");
+      const { resolveBotId } = await import("../tenant");
+      const settingsDb = new Db(env.DB);
       handoffContentSid =
-        (await new SettingsRepo(new Db(env.DB)).get(SETTING_KEYS.twilioHandoffContentSid)) ?? "";
+        (await new SettingsRepo(settingsDb, await resolveBotId(settingsDb)).get(
+          SETTING_KEYS.twilioHandoffContentSid,
+        )) ?? "";
     } catch {
       // settings no disponible — se comporta como no configurado
     }

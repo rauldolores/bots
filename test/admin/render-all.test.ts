@@ -11,7 +11,7 @@
  * específicos). Solo que su SQL corre en el motor real.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { MessagesRepo } from "../../src/db/messages";
@@ -74,9 +74,9 @@ describe("el panel renderiza con datos", () => {
   beforeEach(async () => {
     // Datos suficientes para que las agregaciones por día, el heatmap, el
     // funnel y los costos tengan filas de verdad que agrupar.
-    const convs = new ConversationsRepo(db);
-    const msgs = new MessagesRepo(db);
-    const leads = new LeadsRepo(db);
+    const convs = new ConversationsRepo(db, TEST_BOT_ID);
+    const msgs = new MessagesRepo(db, TEST_BOT_ID);
+    const leads = new LeadsRepo(db, TEST_BOT_ID);
 
     for (const u of ["u1", "u2"]) {
       const conv = await convs.getOrCreate("telegram", u, `Cliente ${u}`);

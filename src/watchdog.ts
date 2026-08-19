@@ -10,6 +10,7 @@
 import type { Env } from "./env";
 import { Db } from "./db/client";
 import { SettingsRepo } from "./db/settings";
+import { resolveBotId } from "./tenant";
 import { notifyOwner } from "./tools/handoffHuman";
 
 const WINDOW_MS = 30 * 60 * 1000;
@@ -24,17 +25,18 @@ export interface WatchdogResult {
 
 export async function checkBotHealth(env: Env, now = Date.now()): Promise<WatchdogResult> {
   const db = new Db(env.DB);
+  const botId = await resolveBotId(db);
   const failures =
     (
       await db.first<{ n: number }>(
-        "SELECT COUNT(*) as n FROM messages WHERE role = 'assistant' AND content LIKE 'Algo falló%' AND created_at > ?",
-        [now - WINDOW_MS],
+        "SELECT COUNT(*) as n FROM messages WHERE bot_id = ? AND role = 'assistant' AND content LIKE 'Algo falló%' AND created_at > ?",
+        [botId, now - WINDOW_MS],
       )
     )?.n ?? 0;
 
   if (failures < ALERT_THRESHOLD) return { failures, alerted: false };
 
-  const settings = new SettingsRepo(db);
+  const settings = new SettingsRepo(db, botId);
   const lastRaw = await settings.get(LAST_ALERT_KEY);
   const last = lastRaw ? Number.parseInt(lastRaw, 10) : 0;
   if (Number.isFinite(last) && now - last < THROTTLE_MS) {

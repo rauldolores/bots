@@ -5,6 +5,7 @@
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { InsightsRepo } from "../../db/insights";
+import { resolveBotId } from "../../tenant";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
 import { layout } from "./layout";
@@ -99,6 +100,7 @@ function funnel(stages: { label: string; value: number }[]): string {
 
 export async function renderStats(env: Env): Promise<string> {
   const db = new Db(env.DB);
+  const botId = await resolveBotId(db);
   const thirtyDays = Date.now() - 30 * 86_400_000;
 
   const [byDay, convs30, leadStatuses, heatRows, tokenRows, assistantMsgs, channels, tools, insightStats] =
@@ -160,7 +162,7 @@ export async function renderStats(env: Env): Promise<string> {
           [thirtyDays],
         )
         .catch(() => [] as { tool: string; n: number }[]),
-      new InsightsRepo(db).stats(thirtyDays),
+      new InsightsRepo(db, botId).stats(thirtyDays),
     ]);
 
   // --- Derived business numbers ---

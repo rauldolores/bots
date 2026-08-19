@@ -2,6 +2,7 @@ import { Db } from "./client";
 
 export interface Ticket {
   id: string;
+  bot_id: string;
   conversation_id: string | null;
   category: string;
   summary: string;
@@ -20,32 +21,36 @@ export interface CreateTicketInput {
 }
 
 export class TicketsRepo {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly botId: string,
+  ) {}
 
   async create(input: CreateTicketInput): Promise<string> {
     const id = crypto.randomUUID();
     await this.db.run(
-      `INSERT INTO tickets (id, conversation_id, category, summary, transcript, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, input.conversationId, input.category, input.summary, input.transcript, Date.now()],
+      `INSERT INTO tickets (id, bot_id, conversation_id, category, summary, transcript, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [id, this.botId, input.conversationId, input.category, input.summary, input.transcript, Date.now()],
     );
     return id;
   }
 
   async getById(id: string): Promise<Ticket | null> {
-    return this.db.first<Ticket>("SELECT * FROM tickets WHERE id = ?", [id]);
+    return this.db.first<Ticket>("SELECT * FROM tickets WHERE id = ? AND bot_id = ?", [id, this.botId]);
   }
 
   async listOpen(): Promise<Ticket[]> {
     return this.db.all<Ticket>(
-      "SELECT * FROM tickets WHERE status != 'resolved' ORDER BY created_at DESC",
+      "SELECT * FROM tickets WHERE bot_id = ? AND status != 'resolved' ORDER BY created_at DESC",
+      [this.botId],
     );
   }
 
   async resolve(id: string, resolvedBy: string): Promise<void> {
     await this.db.run(
-      "UPDATE tickets SET status = 'resolved', resolved_at = ?, resolved_by = ? WHERE id = ?",
-      [Date.now(), resolvedBy, id],
+      "UPDATE tickets SET status = 'resolved', resolved_at = ?, resolved_by = ? WHERE id = ? AND bot_id = ?",
+      [Date.now(), resolvedBy, id, this.botId],
     );
   }
 }

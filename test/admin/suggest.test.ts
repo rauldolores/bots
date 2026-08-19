@@ -34,11 +34,17 @@ vi.mock("../../src/businessContext", () => ({
 const lastNMock = vi.fn();
 vi.mock("../../src/db/messages", () => ({
   MessagesRepo: class {
-    constructor(_db: unknown) {}
+    constructor(_db: unknown, _botId: unknown) {}
     lastN(id: string, n: number) {
       return lastNMock(id, n);
     }
   },
+}));
+
+// resolveBotId (F2.1+) hace una consulta real — la ruta bajo prueba no
+// necesita el bot de verdad, solo pasarlo a MessagesRepo (mockeado arriba).
+vi.mock("../../src/tenant", () => ({
+  resolveBotId: async () => "00000000-0000-0000-0000-000000000001",
 }));
 
 import { adminApp } from "../../src/admin/routes";

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { createTestDb } from "./helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "./helpers/pgSetup";
 import { Db } from "../src/db/client";
 import { ConversationsRepo } from "../src/db/conversations";
 
@@ -26,10 +26,10 @@ const H = 3600_000;
 const templateCalls: string[] = [];
 
 async function seedConv(userId: string, lastMsgAt: number) {
-  const conv = await new ConversationsRepo(db).getOrCreate("twilio", userId);
+  const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("twilio", userId);
   await db.run(
-    `INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, 'user', 'hola', ?)`,
-    [crypto.randomUUID(), conv.id, lastMsgAt],
+    `INSERT INTO messages (id, conversation_id, bot_id, role, content, created_at) VALUES (?, ?, ?, 'user', 'hola', ?)`,
+    [crypto.randomUUID(), conv.id, TEST_BOT_ID, lastMsgAt],
   );
   return conv;
 }
@@ -67,14 +67,14 @@ describe("segments", () => {
       [b.id, NOW],
     );
 
-    const sinClick = await segmentMembers(db, "quiero_sin_click", NOW);
+    const sinClick = await segmentMembers(db, TEST_BOT_ID, "quiero_sin_click", NOW);
     expect(sinClick.map((m) => m.channelUserId)).toEqual(["+521111"]);
     expect(sinClick[0].inWindow).toBe(true);
 
-    const conClick = await segmentMembers(db, "click_oferta", NOW);
+    const conClick = await segmentMembers(db, TEST_BOT_ID, "click_oferta", NOW);
     expect(conClick.map((m) => m.channelUserId)).toEqual(["+522222"]);
 
-    const todos = await segmentCounts(db, NOW);
+    const todos = await segmentCounts(db, TEST_BOT_ID, NOW);
     const t = todos.find((s) => s.id === "todos")!;
     expect(t.total).toBe(3);
     expect(t.inWindow).toBe(2);
@@ -87,9 +87,9 @@ describe("segments", () => {
       "INSERT INTO conv_labels (conversation_id, variant, interest, objection, summary, labeled_at) VALUES (?, 'directo', 'caliente', 'precio', 'quiere entrar', ?)",
       [a.id, NOW],
     );
-    expect((await segmentMembers(db, "calientes", NOW)).length).toBe(1);
-    expect((await segmentMembers(db, "objecion_precio", NOW)).length).toBe(1);
-    expect((await segmentMembers(db, "tibios", NOW)).length).toBe(0);
+    expect((await segmentMembers(db, TEST_BOT_ID, "calientes", NOW)).length).toBe(1);
+    expect((await segmentMembers(db, TEST_BOT_ID, "objecion_precio", NOW)).length).toBe(1);
+    expect((await segmentMembers(db, TEST_BOT_ID, "tibios", NOW)).length).toBe(0);
   });
 });
 
@@ -109,7 +109,7 @@ describe("sendCampaign", () => {
     expect(r1.sentTemplate).toBe(1);
     expect(freeformSends[0]).toEqual({ userId: "+521111", text: "hola en ventana" });
     expect(templateCalls.some((u) => u.includes("api.twilio.com"))).toBe(true);
-    expect(await templatesSentLast24h(db, NOW)).toBe(1);
+    expect(await templatesSentLast24h(db, TEST_BOT_ID, NOW)).toBe(1);
 
     // El historial guarda el TEXTO de la plantilla (con variables) — el agente
     // necesita ese contexto cuando el cliente responda "SÍ".

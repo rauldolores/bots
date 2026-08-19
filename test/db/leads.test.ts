@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { Db } from "../../src/db/client";
+import { createTestDb, TEST_BOT_ID, createSecondTestBot } from "../helpers/pgSetup";
 import { LeadsRepo } from "../../src/db/leads";
 
+let db: Db;
 let repo: LeadsRepo;
 
 beforeEach(async () => {
-  const d1 = await createTestDb();
-  repo = new LeadsRepo(d1);
+  db = await createTestDb();
+  repo = new LeadsRepo(db, TEST_BOT_ID);
 });
 
 describe("LeadsRepo", () => {
@@ -36,5 +38,22 @@ describe("LeadsRepo", () => {
     await repo.setStatus(id, "sold");
     const list = await repo.list(10);
     expect(list[0].status).toBe("sold");
+  });
+
+  it("un bot no ve ni puede tocar los leads de otro", async () => {
+    const otherBotId = await createSecondTestBot(db);
+    const otherRepo = new LeadsRepo(db, otherBotId);
+    const theirId = await otherRepo.create({
+      name: "Cliente ajeno",
+      contact: "otro@x.com",
+      intent: "otro negocio",
+      conversationId: null,
+      channelUserId: null,
+    });
+
+    expect(await repo.list(10)).toHaveLength(0);
+    await repo.setStatus(theirId, "sold");
+    const theirs = await otherRepo.list(10);
+    expect(theirs[0].status).toBe("new"); // el setStatus del otro bot no pegó
   });
 });

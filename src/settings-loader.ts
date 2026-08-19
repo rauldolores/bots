@@ -1,6 +1,7 @@
 import type { Env } from "./env";
 import { Db } from "./db/client";
 import { SettingsRepo, SETTING_KEYS } from "./db/settings";
+import { resolveBotId } from "./tenant";
 import { systemPromptFromEnv } from "./system-prompt";
 import { renderBusinessContext } from "./businessContext";
 import { getBufferMs } from "./config";
@@ -43,7 +44,8 @@ export function llmOverridesFrom(settings: Record<string, string>): LlmOverrides
  *  Nunca truena: si settings no está disponible, se usan los defaults del env. */
 export async function loadLlmOverrides(env: Env): Promise<LlmOverrides> {
   try {
-    const settings = await new SettingsRepo(new Db(env.DB)).all();
+    const db = new Db(env.DB);
+    const settings = await new SettingsRepo(db, await resolveBotId(db)).all();
     return llmOverridesFrom(settings);
   } catch {
     return {};
@@ -78,7 +80,8 @@ function parseCsvList(value: string | undefined): string[] {
  * defaults. Anything empty/absent in settings falls back to the env/default.
  */
 export async function resolveAgentConfig(env: Env, toolNames: string[]): Promise<AgentConfig> {
-  const repo = new SettingsRepo(new Db(env.DB));
+  const db = new Db(env.DB);
+  const repo = new SettingsRepo(db, await resolveBotId(db));
   const settings = await repo.all();
 
   const get = (key: string): string | undefined => {

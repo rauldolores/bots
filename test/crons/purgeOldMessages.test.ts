@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { MessagesRepo } from "../../src/db/messages";
@@ -15,15 +15,15 @@ beforeEach(async () => {
   const d1 = await createTestDb();
   env = { DB: d1.driver };
   db = d1;
-  const conv = await new ConversationsRepo(db).getOrCreate("telegram", "purge-test");
+  const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "purge-test");
   convId = conv.id;
 });
 
 /** Insert a message with an explicit created_at so we can simulate age. */
 async function insertAged(content: string, createdAt: number) {
   await db.run(
-    `INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, 'user', ?, ?)`,
-    [crypto.randomUUID(), convId, content, createdAt],
+    `INSERT INTO messages (id, conversation_id, bot_id, role, content, created_at) VALUES (?, ?, ?, 'user', ?, ?)`,
+    [crypto.randomUUID(), convId, TEST_BOT_ID, content, createdAt],
   );
 }
 
@@ -37,7 +37,7 @@ describe("purgeOldMessages cron", () => {
     const deleted = await purgeOldMessages(env, now);
     expect(deleted).toBe(2);
 
-    const remaining = await new MessagesRepo(db).lastN(convId, 50);
+    const remaining = await new MessagesRepo(db, TEST_BOT_ID).lastN(convId, 50);
     expect(remaining).toHaveLength(1);
     expect(remaining[0].content).toBe("recent");
   });

@@ -5,6 +5,7 @@
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { InsightsRepo, type InsightWithConversation } from "../../db/insights";
+import { resolveBotId } from "../../tenant";
 import { countPending } from "../../insights/analyzer";
 import { channelLabel } from "../../channels/labels";
 import { layout } from "./layout";
@@ -72,7 +73,7 @@ function channelChip(channel: string | null): string {
 
 export async function renderInsights(env: Env, analyzedParam?: string): Promise<string> {
   const db = new Db(env.DB);
-  const repo = new InsightsRepo(db);
+  const repo = new InsightsRepo(db, await resolveBotId(db));
   const sevenDays = Date.now() - 7 * 86_400_000;
   const thirtyDays = Date.now() - 30 * 86_400_000;
 

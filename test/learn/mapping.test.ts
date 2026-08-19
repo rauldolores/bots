@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { SettingsRepo } from "../../src/db/settings";
 import {
   type LearnedMapping,
@@ -16,7 +16,7 @@ let repo: SettingsRepo;
 
 beforeEach(async () => {
   const d1 = await createTestDb();
-  repo = new SettingsRepo(d1);
+  repo = new SettingsRepo(d1, TEST_BOT_ID);
 });
 
 describe("learned mapping persistence", () => {

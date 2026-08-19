@@ -19,6 +19,7 @@ import { InsightsRepo } from "../db/insights";
 import { MessagesRepo } from "../db/messages";
 import { SuggestionsRepo } from "../db/suggestions";
 import { SettingsRepo, SETTING_KEYS } from "../db/settings";
+import { resolveBotId } from "../tenant";
 import { createModel } from "../llm/provider";
 import { loadLlmOverrides } from "../settings-loader";
 import { renderBusinessContext } from "../businessContext";
@@ -42,8 +43,9 @@ function extractJson<T>(raw: string): T | null {
 /** KB gaps → drafted kb_entry suggestions. */
 export async function detectKbGaps(env: Env, limit = 3): Promise<FlywheelResult> {
   const db = new Db(env.DB);
-  const insights = new InsightsRepo(db);
-  const suggestions = new SuggestionsRepo(db);
+  const botId = await resolveBotId(db);
+  const insights = new InsightsRepo(db, botId);
+  const suggestions = new SuggestionsRepo(db, botId);
   const thirtyDays = Date.now() - 30 * 86_400_000;
 
   const gaps = await insights.missedKb(thirtyDays, 10);
@@ -92,8 +94,9 @@ Responde SOLO con JSON: {"title": "...", "content": "..."} (content: 2-6 frases 
 /** Owner takeovers → leccion suggestions (one per conversation). */
 export async function detectLessons(env: Env, limit = 3): Promise<FlywheelResult> {
   const db = new Db(env.DB);
-  const msgs = new MessagesRepo(db);
-  const suggestions = new SuggestionsRepo(db);
+  const botId = await resolveBotId(db);
+  const msgs = new MessagesRepo(db, botId);
+  const suggestions = new SuggestionsRepo(db, botId);
   const sevenDays = Date.now() - 7 * 86_400_000;
 
   const convs = await db.all<{ conversation_id: string; display_name: string | null }>(
@@ -103,10 +106,10 @@ export async function detectLessons(env: Env, limit = 3): Promise<FlywheelResult
     // en el orden quedaba al azar. Ahora es explícito: el más reciente.
     `SELECT m.conversation_id, c.display_name
      FROM messages m LEFT JOIN conversations c ON c.id = m.conversation_id
-     WHERE m.role = 'owner' AND m.created_at > ?
+     WHERE m.bot_id = ? AND m.role = 'owner' AND m.created_at > ?
      GROUP BY m.conversation_id, c.display_name
      ORDER BY MAX(m.created_at) DESC LIMIT 10`,
-    [sevenDays],
+    [botId, sevenDays],
   );
 
   const { model } = createModel(env, "fast", await loadLlmOverrides(env));
@@ -174,7 +177,9 @@ export const MAX_LESSONS = 15;
 
 export async function getLessons(env: Env): Promise<string[]> {
   try {
-    const raw = (await new SettingsRepo(new Db(env.DB)).get(SETTING_KEYS.learnedLessons)) ?? "[]";
+    const db = new Db(env.DB);
+    const raw =
+      (await new SettingsRepo(db, await resolveBotId(db)).get(SETTING_KEYS.learnedLessons)) ?? "[]";
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((l) => typeof l === "string") : [];
   } catch {
@@ -183,7 +188,8 @@ export async function getLessons(env: Env): Promise<string[]> {
 }
 
 export async function saveLessons(env: Env, lessons: string[]): Promise<void> {
-  await new SettingsRepo(new Db(env.DB)).set(
+  const db = new Db(env.DB);
+  await new SettingsRepo(db, await resolveBotId(db)).set(
     SETTING_KEYS.learnedLessons,
     JSON.stringify(lessons.slice(-MAX_LESSONS)),
   );

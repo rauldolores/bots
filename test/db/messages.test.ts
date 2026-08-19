@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { MessagesRepo } from "../../src/db/messages";
 
@@ -10,8 +10,8 @@ let convId: string;
 beforeEach(async () => {
   const d1 = await createTestDb();
   const db = d1;
-  convRepo = new ConversationsRepo(db);
-  msgRepo = new MessagesRepo(db);
+  convRepo = new ConversationsRepo(db, TEST_BOT_ID);
+  msgRepo = new MessagesRepo(db, TEST_BOT_ID);
   const conv = await convRepo.getOrCreate("telegram", "user_999");
   convId = conv.id;
 });

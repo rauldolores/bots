@@ -5,6 +5,7 @@ export type Resolution = "resolved" | "unresolved" | "escalated" | "abandoned";
 
 export interface ConversationInsight {
   conversation_id: string;
+  bot_id: string;
   analyzed_at: number;
   sentiment: Sentiment | null;
   resolution: Resolution | null;
@@ -44,14 +45,17 @@ export interface InsightWithConversation extends ConversationInsight {
 }
 
 export class InsightsRepo {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly botId: string,
+  ) {}
 
   async upsert(input: UpsertInsightInput): Promise<void> {
     await this.db.run(
       `INSERT INTO conversation_insights
-         (conversation_id, analyzed_at, sentiment, resolution, bot_score,
+         (conversation_id, bot_id, analyzed_at, sentiment, resolution, bot_score,
           topics, summary, missed_kb, sale_opportunity)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(conversation_id) DO UPDATE SET
          analyzed_at = excluded.analyzed_at,
          sentiment = excluded.sentiment,
@@ -63,6 +67,7 @@ export class InsightsRepo {
          sale_opportunity = excluded.sale_opportunity`,
       [
         input.conversationId,
+        this.botId,
         input.analyzedAt ?? Date.now(),
         input.sentiment,
         input.resolution,
@@ -77,8 +82,8 @@ export class InsightsRepo {
 
   async getByConversation(id: string): Promise<ConversationInsight | null> {
     return this.db.first<ConversationInsight>(
-      "SELECT * FROM conversation_insights WHERE conversation_id = ?",
-      [id],
+      "SELECT * FROM conversation_insights WHERE conversation_id = ? AND bot_id = ?",
+      [id, this.botId],
     );
   }
 
@@ -87,8 +92,9 @@ export class InsightsRepo {
       `SELECT i.*, c.display_name, c.channel_user_id, c.channel, c.last_message_at
        FROM conversation_insights i
        LEFT JOIN conversations c ON c.id = i.conversation_id
+       WHERE i.bot_id = ?
        ORDER BY i.analyzed_at DESC LIMIT ?`,
-      [limit],
+      [this.botId, limit],
     );
   }
 
@@ -107,8 +113,8 @@ export class InsightsRepo {
               -- el tipo de arriba.
               AVG(bot_score)::float8 as avg_score,
               SUM(CASE WHEN sentiment IN ('frustrated', 'angry') THEN 1 ELSE 0 END) as negative
-       FROM conversation_insights WHERE analyzed_at > ?`,
-      [sinceMs],
+       FROM conversation_insights WHERE bot_id = ? AND analyzed_at > ?`,
+      [this.botId, sinceMs],
     );
     return {
       analyzed: row?.analyzed ?? 0,
@@ -123,9 +129,9 @@ export class InsightsRepo {
     return this.db.all<{ question: string; n: number }>(
       `SELECT missed_kb as question, COUNT(*) as n
        FROM conversation_insights
-       WHERE missed_kb IS NOT NULL AND missed_kb != '' AND analyzed_at > ?
+       WHERE bot_id = ? AND missed_kb IS NOT NULL AND missed_kb != '' AND analyzed_at > ?
        GROUP BY missed_kb ORDER BY n DESC, MAX(analyzed_at) DESC LIMIT ?`,
-      [sinceMs, limit],
+      [this.botId, sinceMs, limit],
     );
   }
 
@@ -135,9 +141,9 @@ export class InsightsRepo {
       `SELECT i.*, c.display_name, c.channel_user_id, c.channel, c.last_message_at
        FROM conversation_insights i
        LEFT JOIN conversations c ON c.id = i.conversation_id
-       WHERE i.sale_opportunity = 1 AND i.analyzed_at > ?
+       WHERE i.bot_id = ? AND i.sale_opportunity = 1 AND i.analyzed_at > ?
        ORDER BY i.analyzed_at DESC LIMIT ?`,
-      [sinceMs, limit],
+      [this.botId, sinceMs, limit],
     );
   }
 }

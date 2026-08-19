@@ -10,6 +10,7 @@ import { costOfUsage, type ModelId } from "../../pricing";
 import { fetchTwilioUsage } from "../twilioUsage";
 import { monthIaCostUsd } from "../../budget";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
+import { resolveBotId } from "../../tenant";
 
 const money = (n: number) => `$${n.toFixed(2)}`;
 const money4 = (n: number) => `$${n.toFixed(n < 0.1 ? 4 : 2)}`;
@@ -23,6 +24,7 @@ function esc(s: string): string {
 
 export async function renderCosts(env: Env, saved = false): Promise<string> {
   const db = new Db(env.DB);
+  const botId = await resolveBotId(db);
   const thirtyDays = Date.now() - 30 * 86_400_000;
   const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
 
@@ -41,10 +43,10 @@ export async function renderCosts(env: Env, saved = false): Promise<string> {
             SUM(COALESCE(cached_input_tokens, 0)) as cached,
             COUNT(*) as msgs
      FROM messages
-     WHERE created_at > ? AND model_used IS NOT NULL
+     WHERE bot_id = ? AND created_at > ? AND model_used IS NOT NULL
      GROUP BY day, model_used
      ORDER BY day DESC`,
-    [thirtyDays],
+    [botId, thirtyDays],
   );
 
   let iaMonth = 0;
@@ -62,10 +64,10 @@ export async function renderCosts(env: Env, saved = false): Promise<string> {
   }
 
   // --- Presupuesto mensual de IA ---------------------------------------------
-  const budgetRaw = await new SettingsRepo(db).get(SETTING_KEYS.monthlyBudget);
+  const budgetRaw = await new SettingsRepo(db, botId).get(SETTING_KEYS.monthlyBudget);
   const budget = budgetRaw ? Number.parseFloat(budgetRaw) : NaN;
   const hasBudget = Number.isFinite(budget) && budget > 0;
-  const monthToDate = await monthIaCostUsd(db);
+  const monthToDate = await monthIaCostUsd(db, botId);
   const now = new Date();
   const dayOfMonth = now.getUTCDate();
   const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();

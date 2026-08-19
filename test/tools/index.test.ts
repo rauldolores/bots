@@ -11,7 +11,7 @@ function makeCtx(tier: "free" | "pro", niche?: string): ToolContext {
     OWNER_EMAIL: "owner@test.com",
     DASHBOARD_BASE_URL: "https://example.com",
   } as any;
-  return { env, getConversationId: () => "conv-1" };
+  return { env, getConversationId: () => "conv-1", botId: "00000000-0000-0000-0000-000000000001" };
 }
 
 describe("buildTools", () => {

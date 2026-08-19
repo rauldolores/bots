@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { SettingsRepo } from "../../src/db/settings";
 import { saveLearnedMapping, type LearnedMapping } from "../../src/learn/mapping";
 import { makeLearnedAdapter } from "../../src/channels/learned";
@@ -11,7 +11,7 @@ let env: Env;
 
 beforeEach(async () => {
   d1 = await createTestDb();
-  repo = new SettingsRepo(d1);
+  repo = new SettingsRepo(d1, TEST_BOT_ID);
   env = { DB: d1.driver, MANYCHAT_API_KEY: "key" } as unknown as Env;
 });
 

@@ -4,7 +4,7 @@ import type { Env } from "../env";
 import { Db } from "../db/client";
 import { LeadsRepo } from "../db/leads";
 
-export function captureLeadTool(env: Env, getConversationId: () => string | null) {
+export function captureLeadTool(env: Env, getConversationId: () => string | null, botId: string) {
   return tool({
     description:
       "Captura un lead (cliente interesado) para que el dueño venda después. Guarda en D1 + opcionalmente exporta a Google Sheets / Notion / Airtable.",
@@ -16,7 +16,7 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
     }),
     execute: async ({ name, contact, intent, notes }) => {
       const convId = getConversationId();
-      const leads = new LeadsRepo(new Db(env.DB));
+      const leads = new LeadsRepo(new Db(env.DB), botId);
       const leadId = await leads.create({
         conversationId: convId,
         name,

@@ -4,7 +4,7 @@
  */
 import { EMBEDDING_DIMENSIONS } from "../../src/ai/embeddings";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { Db } from "../../src/db/client";
 import { KbDocsRepo } from "../../src/kb/docs";
@@ -45,7 +45,7 @@ beforeEach(async () => {
     BUFFER_SECONDS: "8",
     DASHBOARD_PASSWORD: PASSWORD,
   } as unknown as Env;
-  repo = new KbDocsRepo(db);
+  repo = new KbDocsRepo(db, TEST_BOT_ID);
 });
 
 /** Lo que quedó indexado de verdad, en vez de espiar un mock de Vectorize. */
@@ -149,7 +149,7 @@ describe("KB tab", () => {
 
 describe("budget save route", () => {
   it("stores a valid budget and clears it when empty", async () => {
-    const settings = new SettingsRepo(new Db(env.DB));
+    const settings = new SettingsRepo(new Db(env.DB), TEST_BOT_ID);
 
     let res = await adminApp.request(
       "/costs/budget",
@@ -168,7 +168,7 @@ describe("budget save route", () => {
   });
 
   it("ignores garbage values (clears the cap)", async () => {
-    const settings = new SettingsRepo(new Db(env.DB));
+    const settings = new SettingsRepo(new Db(env.DB), TEST_BOT_ID);
     await adminApp.request(
       "/costs/budget",
       { method: "POST", headers: FORM, body: new URLSearchParams({ monthly_budget: "mucho" }) },

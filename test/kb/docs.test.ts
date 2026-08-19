@@ -4,7 +4,7 @@
  * reindex global). Workers AI va simulado; la base y pgvector son reales.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID, createSecondTestBot } from "../helpers/pgSetup";
 import {
   KbDocsRepo,
   chunkContent,
@@ -35,7 +35,7 @@ beforeEach(async () => {
       })),
     },
   } as unknown as Env;
-  repo = new KbDocsRepo(db);
+  repo = new KbDocsRepo(db, TEST_BOT_ID);
 });
 
 /** Los ids realmente indexados, que es lo que antes se espiaba por mock. */
@@ -111,7 +111,7 @@ describe("KbDocsRepo + vector lifecycle", () => {
   });
 
   it("removeDocVectors deletes the doc's id range", async () => {
-    await new PgVectorStore(db).upsert(
+    await new PgVectorStore(db, TEST_BOT_ID).upsert(
       Array.from({ length: 3 }, (_, i) => ({
         id: `dash:gone#${i}`,
         values: Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1),
@@ -133,5 +133,38 @@ describe("KbDocsRepo + vector lifecycle", () => {
     await repo.upsert({ id: "d4", title: "T", content: "C" });
     const doc = (await repo.getById("d4"))!;
     expect(docChunks(doc)[0]).toMatchObject({ id: "dash:d4#0", title: "T", content: "C" });
+  });
+
+  // F2.2: el mayor riesgo del vector store — dos bots reindexando el MISMO
+  // fixture (mismo id, mismo niche pack) no deben pisarse ni verse mutuamente
+  // en la búsqueda. searchKb correría sobre contenido ajeno si esto fallara.
+  describe("aislamiento entre bots", () => {
+    it("dos bots con el mismo id de chunk no se pisan", async () => {
+      const otherBotId = await createSecondTestBot(db);
+      const vec = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
+
+      await new PgVectorStore(db, TEST_BOT_ID).upsert([
+        { id: "compartido#0", values: vec, metadata: { title: "Mío", content: "Contenido propio" } },
+      ]);
+      await new PgVectorStore(db, otherBotId).upsert([
+        { id: "compartido#0", values: vec, metadata: { title: "Ajeno", content: "Contenido de otro bot" } },
+      ]);
+
+      const mine = await new PgVectorStore(db, TEST_BOT_ID).query(vec, 5);
+      const theirs = await new PgVectorStore(db, otherBotId).query(vec, 5);
+      expect(mine.map((m) => m.metadata.title)).toEqual(["Mío"]);
+      expect(theirs.map((m) => m.metadata.title)).toEqual(["Ajeno"]);
+    });
+
+    it("query nunca devuelve chunks de otro bot", async () => {
+      const otherBotId = await createSecondTestBot(db);
+      const vec = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
+      await new PgVectorStore(db, otherBotId).upsert([
+        { id: "solo-del-otro", values: vec, metadata: { title: "Secreto", content: "No debería verse" } },
+      ]);
+
+      const mine = await new PgVectorStore(db, TEST_BOT_ID).query(vec, 5);
+      expect(mine).toHaveLength(0);
+    });
   });
 });

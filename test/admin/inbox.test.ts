@@ -12,7 +12,7 @@ vi.mock("../../src/replies/sender", () => ({
   pickAdapter: (channel: unknown) => pickAdapterMock(channel),
 }));
 
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
@@ -50,8 +50,8 @@ beforeEach(async () => {
     DASHBOARD_PASSWORD: PASSWORD,
   } as unknown as Env;
   db = d1;
-  convs = new ConversationsRepo(db);
-  msgs = new MessagesRepo(db);
+  convs = new ConversationsRepo(db, TEST_BOT_ID);
+  msgs = new MessagesRepo(db, TEST_BOT_ID);
   sendReplyMock.mockReset().mockResolvedValue(undefined);
   pickAdapterMock.mockClear();
   pickAdapterMock.mockImplementation(() => ({ sendReply: sendReplyMock }));
@@ -207,7 +207,7 @@ describe("inbox — pause / resume", () => {
 describe("inbox — filtros por sentimiento del Analista", () => {
   it("filtra molestos y contentos según conversation_insights", async () => {
     const { InsightsRepo } = await import("../../src/db/insights");
-    const insights = new InsightsRepo(db);
+    const insights = new InsightsRepo(db, TEST_BOT_ID);
     const enojado = await convs.getOrCreate("manychat", "angry1", "Enojado");
     await msgs.append(enojado.id, "user", "pésimo servicio");
     const feliz = await convs.getOrCreate("manychat", "happy1", "Feliz");

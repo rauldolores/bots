@@ -13,6 +13,7 @@ import { reindexKb } from "./kb/reindex";
 import { analyzeConversations } from "./insights/analyzer";
 import { Db } from "./db/client";
 import { SettingsRepo, SETTING_KEYS } from "./db/settings";
+import { resolveBotId } from "./tenant";
 import { detectKind } from "./learn/fieldPath";
 import { saveCapture, isLearnMode } from "./learn/mapping";
 import { tokensMatch } from "./http-auth";
@@ -221,7 +222,8 @@ app.post("/webhooks/learn/:channel", async (c) => {
     return c.json({ ok: false, error: "invalid json" }, 400);
   }
 
-  const repo = new SettingsRepo(new Db(c.env.DB));
+  const learnDb = new Db(c.env.DB);
+  const repo = new SettingsRepo(learnDb, await resolveBotId(learnDb));
   const kind = detectKind(payload);
 
   if (!(await isLearnMode(repo, channel))) {
@@ -335,7 +337,10 @@ export async function runScheduledJobs(env: Env, cron?: string): Promise<void> {
   // Modo COPILOTO (autonomy_level="copilot"): auto-aplica las mejoras seguras
   // detectadas (lecciones + KB sin huecos). Lo delicado espera al dueño.
   try {
-    const level = await new SettingsRepo(new Db(env.DB)).get(SETTING_KEYS.autonomyLevel);
+    const copilotoDb = new Db(env.DB);
+    const level = await new SettingsRepo(copilotoDb, await resolveBotId(copilotoDb)).get(
+      SETTING_KEYS.autonomyLevel,
+    );
     if (level === "copilot") {
       const { autoApplyPending } = await import("./flywheel/apply");
       await autoApplyPending(env);

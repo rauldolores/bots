@@ -9,11 +9,14 @@
 import type { Env } from "../env";
 import { Db } from "../db/client";
 import { SuggestionsRepo } from "../db/suggestions";
+import { resolveBotId } from "../tenant";
 import { KbDocsRepo, indexDoc } from "../kb/docs";
 import { getLessons, saveLessons, MAX_LESSONS } from "./detect";
 
 export async function applySuggestion(env: Env, id: string): Promise<boolean> {
-  const repo = new SuggestionsRepo(new Db(env.DB));
+  const db = new Db(env.DB);
+  const botId = await resolveBotId(db);
+  const repo = new SuggestionsRepo(db, botId);
   const s = await repo.getById(id);
   if (!s || s.status !== "proposed") return false;
 
@@ -28,7 +31,7 @@ export async function applySuggestion(env: Env, id: string): Promise<boolean> {
     const title = String(payload.title ?? s.title).slice(0, 200);
     const content = String(payload.content ?? "").trim();
     if (!content) return false;
-    const docs = new KbDocsRepo(new Db(env.DB));
+    const docs = new KbDocsRepo(db, botId);
     const docId = crypto.randomUUID();
     await docs.upsert({ id: docId, title, content });
     const doc = (await docs.getById(docId))!;
@@ -50,7 +53,8 @@ export async function applySuggestion(env: Env, id: string): Promise<boolean> {
 }
 
 export async function dismissSuggestion(env: Env, id: string): Promise<boolean> {
-  const repo = new SuggestionsRepo(new Db(env.DB));
+  const db = new Db(env.DB);
+  const repo = new SuggestionsRepo(db, await resolveBotId(db));
   const s = await repo.getById(id);
   if (!s || s.status !== "proposed") return false;
   await repo.setStatus(id, "dismissed");
@@ -68,7 +72,8 @@ export async function dismissSuggestion(env: Env, id: string): Promise<boolean> 
  */
 export async function autoApplyPending(env: Env): Promise<{ applied: number; left: number }> {
   const db = new Db(env.DB);
-  const repo = new SuggestionsRepo(db);
+  const botId = await resolveBotId(db);
+  const repo = new SuggestionsRepo(db, botId);
   const proposed = await repo.listProposed();
   let applied = 0;
 
@@ -90,8 +95,8 @@ export async function autoApplyPending(env: Env): Promise<{ applied: number; lef
     if (ok) {
       applied++;
       await db.run(
-        "UPDATE improvement_suggestions SET evidence = COALESCE(evidence, '') || ' · aplicada en automático (copiloto)' WHERE id = ?",
-        [s.id],
+        "UPDATE improvement_suggestions SET evidence = COALESCE(evidence, '') || ' · aplicada en automático (copiloto)' WHERE id = ? AND bot_id = ?",
+        [s.id, botId],
       );
     }
   }

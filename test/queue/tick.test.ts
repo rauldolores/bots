@@ -5,7 +5,7 @@
 // del debounce de agent_jobs más el lease, así que hay que probarlo de verdad,
 // de webhook a respuesta.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 
 const streamTextMock = vi.fn();
 
@@ -24,7 +24,7 @@ import { SettingsRepo } from "../../src/db/settings";
 import * as senderMod from "../../src/replies/sender";
 import type { Db } from "../../src/db/client";
 
-const KEY = conversationKeyOf("telegram", "u1");
+const KEY = conversationKeyOf(TEST_BOT_ID, "telegram", "u1");
 
 function makeStreamResult(text: string) {
   async function* gen() {

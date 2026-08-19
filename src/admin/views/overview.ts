@@ -4,6 +4,7 @@ import { layout } from "./layout";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { resolveAgentConfig, type AgentConfig } from "../../settings-loader";
 import { buildTools } from "../../tools";
+import { resolveBotId } from "../../tenant";
 import { resolveProvider, modelIdFor } from "../../llm/provider";
 import { handoffNotifyStatus } from "../../tools/handoffHuman";
 import { connectionsSummary } from "./conexiones";
@@ -50,6 +51,7 @@ const DOW_LETTER = ["D", "L", "M", "M", "J", "V", "S"];
 
 export async function renderOverview(env: Env): Promise<string> {
   const db = new Db(env.DB);
+  const botId = await resolveBotId(db);
   const niche = getNiche(env);
   const oneDay = Date.now() - 86_400_000;
   const sevenDays = Date.now() - 7 * 86_400_000;
@@ -106,11 +108,11 @@ export async function renderOverview(env: Env): Promise<string> {
   const activityMax = Math.max(...activityDays.map((d) => d.msgs), 1);
 
   // --- Estado del agente ----------------------------------------------------------
-  const toolNames = Object.keys(buildTools({ env, getConversationId: () => null }));
+  const toolNames = Object.keys(buildTools({ env, getConversationId: () => null, botId }));
   const agentCfg = await resolveAgentConfig(env, toolNames);
-  const kbDocs = await new KbDocsRepo(db).list();
+  const kbDocs = await new KbDocsRepo(db, botId).list();
   const totalKbDocs = kbDocs.length + FIXTURE_CHUNKS.length;
-  const insight7d = await new InsightsRepo(db).stats(sevenDays);
+  const insight7d = await new InsightsRepo(db, botId).stats(sevenDays);
   const resolvedPct7d =
     insight7d.analyzed > 0 ? Math.round((insight7d.resolvedNoHuman / insight7d.analyzed) * 100) : null;
 
@@ -129,7 +131,7 @@ export async function renderOverview(env: Env): Promise<string> {
   );
 
   // --- Mejoras sugeridas -------------------------------------------------------------
-  const proposedSuggestions = await new SuggestionsRepo(db).listProposed();
+  const proposedSuggestions = await new SuggestionsRepo(db, botId).listProposed();
 
   // --- Markup: actividad + estado del agente -----------------------------------------
   const activityChart = `

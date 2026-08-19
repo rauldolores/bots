@@ -2,6 +2,7 @@ import { Db } from "./client";
 
 export interface Lead {
   id: string;
+  bot_id: string;
   conversation_id: string | null;
   name: string | null;
   contact: string | null;
@@ -45,7 +46,10 @@ export function leadMetadata(lead: Pick<Lead, "metadata">): Record<string, strin
 }
 
 export class LeadsRepo {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly botId: string,
+  ) {}
 
   async create(input: CreateLeadInput): Promise<string> {
     const id = crypto.randomUUID();
@@ -55,10 +59,11 @@ export class LeadsRepo {
         ? JSON.stringify(input.metadata)
         : null;
     await this.db.run(
-      `INSERT INTO leads (id, conversation_id, name, contact, channel_user_id, intent, notes, metadata, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO leads (id, bot_id, conversation_id, name, contact, channel_user_id, intent, notes, metadata, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
+        this.botId,
         input.conversationId,
         input.name ?? null,
         input.contact ?? null,
@@ -76,27 +81,27 @@ export class LeadsRepo {
   async list(limit: number, status?: string): Promise<Lead[]> {
     if (status) {
       return this.db.all<Lead>(
-        "SELECT * FROM leads WHERE status = ? ORDER BY created_at DESC LIMIT ?",
-        [status, limit],
+        "SELECT * FROM leads WHERE bot_id = ? AND status = ? ORDER BY created_at DESC LIMIT ?",
+        [this.botId, status, limit],
       );
     }
     return this.db.all<Lead>(
-      "SELECT * FROM leads ORDER BY created_at DESC LIMIT ?",
-      [limit],
+      "SELECT * FROM leads WHERE bot_id = ? ORDER BY created_at DESC LIMIT ?",
+      [this.botId, limit],
     );
   }
 
   async setStatus(id: string, status: Lead["status"]): Promise<void> {
     await this.db.run(
-      "UPDATE leads SET status = ?, updated_at = ? WHERE id = ?",
-      [status, Date.now(), id],
+      "UPDATE leads SET status = ?, updated_at = ? WHERE id = ? AND bot_id = ?",
+      [status, Date.now(), id, this.botId],
     );
   }
 
   async setExported(id: string, target: string, externalId: string): Promise<void> {
     await this.db.run(
-      "UPDATE leads SET exported_to = ?, external_id = ?, updated_at = ? WHERE id = ?",
-      [target, externalId, Date.now(), id],
+      "UPDATE leads SET exported_to = ?, external_id = ?, updated_at = ? WHERE id = ? AND bot_id = ?",
+      [target, externalId, Date.now(), id, this.botId],
     );
   }
 }

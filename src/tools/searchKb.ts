@@ -11,7 +11,7 @@ export interface SearchKbResult {
   score: number;
 }
 
-export function searchKbTool(env: Env) {
+export function searchKbTool(env: Env, botId: string) {
   return tool({
     description:
       "Busca en el knowledge base del negocio. Devuelve top-5 chunks con score 0-1. Si top-1 score < 0.7 no hay match útil — escala.",
@@ -24,7 +24,7 @@ export function searchKbTool(env: Env) {
         if (!Array.isArray(vec)) {
           return { error: "transient" as const, message: "embedding shape unexpected" };
         }
-        const matches = await new PgVectorStore(new Db(env.DB)).query(vec, 5);
+        const matches = await new PgVectorStore(new Db(env.DB), botId).query(vec, 5);
         const results: SearchKbResult[] = matches.map((m) => ({
           title: m.metadata.title,
           content: m.metadata.content,

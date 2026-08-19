@@ -31,10 +31,36 @@ const SCHEMA = `test_bots_${process.pid}`;
 
 let shared: { db: Db; driver: SqlDriver; tables: string[] } | null = null;
 
+/**
+ * El bot que ya existe en cada esquema de prueba (F2.1): resolveBotId() y los
+ * repos que exigen bot_id necesitan que exista SIEMPRE al menos uno, o los
+ * tests que ejercitan el pipeline real (ingestMessage, runTurn, las rutas del
+ * panel) fallarían con "no hay ningún bot" en vez de probar lo que prueban.
+ */
+export const TEST_BOT_ID = "00000000-0000-0000-0000-000000000001";
+
 export async function createTestDb(): Promise<Db> {
   if (!shared) shared = await initSchema();
   await truncateAll(shared);
+  await shared.db.run(
+    `INSERT INTO bots (id, organization_id, slug, name, business_name, created_at, updated_at)
+     VALUES (?, ?, 'test', 'Test Bot', 'Test Business', ?, ?)
+     ON CONFLICT (id) DO NOTHING`,
+    [TEST_BOT_ID, TEST_BOT_ID, Date.now(), Date.now()],
+  );
   return shared.db;
+}
+
+/** Un SEGUNDO bot, para los tests que prueban que uno no ve datos del otro. */
+export async function createSecondTestBot(db: Db): Promise<string> {
+  const id = "00000000-0000-0000-0000-000000000002";
+  await db.run(
+    `INSERT INTO bots (id, organization_id, slug, name, business_name, created_at, updated_at)
+     VALUES (?, ?, 'test-2', 'Test Bot 2', 'Test Business 2', ?, ?)
+     ON CONFLICT (id) DO NOTHING`,
+    [id, id, Date.now(), Date.now()],
+  );
+  return id;
 }
 
 /** Cierra el pool y borra el esquema. Lo llama test/setup.ts al terminar. */

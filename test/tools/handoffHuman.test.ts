@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { TicketsRepo } from "../../src/db/tickets";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { handoffHumanTool } from "../../src/tools/handoffHuman";
@@ -11,10 +11,10 @@ let convId: string;
 beforeEach(async () => {
   const d1 = await createTestDb();
   const db = d1;
-  tickets = new TicketsRepo(db);
+  tickets = new TicketsRepo(db, TEST_BOT_ID);
   // The tickets table FKs conversation_id -> conversations(id), so we need a
   // real conversation row before the tool can attach a ticket to it.
-  const conv = await new ConversationsRepo(db).getOrCreate("telegram", "u1");
+  const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "u1");
   convId = conv.id;
   env = {
     DB: d1.driver,
@@ -29,7 +29,7 @@ beforeEach(async () => {
 describe("handoffHumanTool", () => {
   it("creates a ticket row in D1 even without Resend key", async () => {
     const envNoResend = { ...env, RESEND_API_KEY: undefined };
-    const tool = handoffHumanTool(envNoResend, () => convId);
+    const tool = handoffHumanTool(envNoResend, () => convId, TEST_BOT_ID);
     const result = await tool.execute!(
       {
         reason: "complejo",

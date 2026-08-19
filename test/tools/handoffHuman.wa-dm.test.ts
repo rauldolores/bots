@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { handoffHumanTool } from "../../src/tools/handoffHuman";
 
@@ -20,7 +20,7 @@ let fetchSpy: any;
 beforeEach(async () => {
   const d1 = await createTestDb();
   const db = d1;
-  const conv = await new ConversationsRepo(db).getOrCreate("telegram", "owner-test");
+  const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "owner-test");
   convId = conv.id;
   env = {
     DB: d1.driver,
@@ -45,7 +45,7 @@ describe("handoffHumanTool — owner WhatsApp notification (Pro)", () => {
     fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ sid: "SMxxx" }), { status: 201 }),
     );
-    const tool = handoffHumanTool(env, () => convId);
+    const tool = handoffHumanTool(env, () => convId, TEST_BOT_ID);
     await tool.execute!(
       { reason: "complejo", summary: "cliente quiere reembolso", category: "billing" },
       {} as any,
@@ -65,7 +65,7 @@ describe("handoffHumanTool — owner WhatsApp notification (Pro)", () => {
       new Response("{}", { status: 200 }),
     );
     const { TWILIO_HANDOFF_CONTENT_SID, ...noTemplate } = env;
-    const tool = handoffHumanTool(noTemplate, () => convId);
+    const tool = handoffHumanTool(noTemplate, () => convId, TEST_BOT_ID);
     const result = await tool.execute!(
       { reason: "x", summary: "y", category: "other" },
       {} as any,
@@ -79,7 +79,7 @@ describe("handoffHumanTool — owner WhatsApp notification (Pro)", () => {
 
   it("still returns ticketId and swallows notification errors (no throw)", async () => {
     fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("twilio down"));
-    const tool = handoffHumanTool(env, () => convId);
+    const tool = handoffHumanTool(env, () => convId, TEST_BOT_ID);
     const result = await tool.execute!(
       { reason: "x", summary: "y", category: "other" },
       {} as any,

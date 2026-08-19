@@ -17,6 +17,7 @@ import { generateText } from "ai";
 import { createModel } from "../llm/provider";
 import { loadLlmOverrides } from "../settings-loader";
 import type { Env } from "../env";
+import { resolveBotId } from "../tenant";
 import { adminAuth } from "./auth";
 import { layout, renderUpgrade } from "./views/layout";
 import { isPro } from "../config";
@@ -68,6 +69,12 @@ adminApp.use("*", (c, next) => {
   return adminAuth(c.env)(c, next);
 });
 
+/** Settings del bot resuelto (transicional F2.1/F2.2 hasta la sesión de F5). */
+async function settingsFor(env: Env): Promise<SettingsRepo> {
+  const db = new Db(env.DB);
+  return new SettingsRepo(db, await resolveBotId(db));
+}
+
 // Gate de tier: el panel free ve el nav Pro bloqueado; si aun así navega a una
 // ruta Pro (URL directa, bookmark, click al item bloqueado), servimos la página
 // de upgrade en vez de la vista real. Los datos Pro nunca se exponen en free.
@@ -111,7 +118,7 @@ adminApp.post("/costs/budget", async (c) => {
   const raw = String(form.get("monthly_budget") ?? "").trim();
   const n = Number.parseFloat(raw);
   const value = raw !== "" && Number.isFinite(n) && n > 0 ? String(n) : "";
-  await new SettingsRepo(new Db(c.env.DB)).set(SETTING_KEYS.monthlyBudget, value);
+  await (await settingsFor(c.env)).set(SETTING_KEYS.monthlyBudget, value);
   return c.redirect("/admin/costs?saved=1");
 });
 
@@ -130,7 +137,8 @@ adminApp.get("/kb", async (c) =>
 adminApp.get("/kb/new", (c) => c.html(renderKbEditor(null, c.env)));
 
 adminApp.get("/kb/:id/edit", async (c) => {
-  const doc = await new KbDocsRepo(new Db(c.env.DB)).getById(c.req.param("id"));
+  const db = new Db(c.env.DB);
+  const doc = await new KbDocsRepo(db, await resolveBotId(db)).getById(c.req.param("id"));
   if (!doc) return c.redirect("/admin/kb");
   return c.html(renderKbEditor(doc, c.env));
 });
@@ -144,7 +152,8 @@ adminApp.post("/kb/save", async (c) => {
   if (!title || !content) return c.redirect("/admin/kb");
 
   const id = String(form.get("id") ?? "").trim() || crypto.randomUUID();
-  const repo = new KbDocsRepo(new Db(c.env.DB));
+  const db = new Db(c.env.DB);
+  const repo = new KbDocsRepo(db, await resolveBotId(db));
   await repo.upsert({ id, title, content });
   const doc = (await repo.getById(id))!;
   await indexDoc(c.env, doc);
@@ -153,7 +162,8 @@ adminApp.post("/kb/save", async (c) => {
 
 adminApp.post("/kb/:id/delete", async (c) => {
   const id = c.req.param("id");
-  await new KbDocsRepo(new Db(c.env.DB)).delete(id);
+  const db = new Db(c.env.DB);
+  await new KbDocsRepo(db, await resolveBotId(db)).delete(id);
   await removeDocVectors(c.env, id);
   return c.redirect("/admin/kb?deleted=1");
 });
@@ -172,7 +182,7 @@ adminApp.post("/kb/reindex", async (c) => {
 adminApp.post("/handoff/template/setup", async (c) => {
   const r = await createHandoffTemplate(c.env);
   if ("error" in r) return c.json(r, 502);
-  await new SettingsRepo(new Db(c.env.DB)).set(SETTING_KEYS.twilioHandoffContentSid, r.sid);
+  await (await settingsFor(c.env)).set(SETTING_KEYS.twilioHandoffContentSid, r.sid);
   return c.json(r);
 });
 
@@ -180,7 +190,7 @@ adminApp.post("/handoff/template/setup", async (c) => {
 adminApp.get("/handoff/template/status", async (c) => {
   const sid =
     c.env.TWILIO_HANDOFF_CONTENT_SID ||
-    (await new SettingsRepo(new Db(c.env.DB)).get(SETTING_KEYS.twilioHandoffContentSid));
+    (await (await settingsFor(c.env)).get(SETTING_KEYS.twilioHandoffContentSid));
   if (!sid) return c.json({ error: "sin plantilla — corre el setup primero" }, 404);
   const r = await contentApprovalStatus(c.env, sid);
   return c.json({ sid, ...r });
@@ -219,7 +229,7 @@ adminApp.post("/mejoras/:id/dismiss", async (c) => {
 adminApp.post("/mejoras/autonomy", async (c) => {
   const form = await c.req.formData();
   const level = String(form.get("level") ?? "manual") === "copilot" ? "copilot" : "manual";
-  await new SettingsRepo(new Db(c.env.DB)).set(SETTING_KEYS.autonomyLevel, level);
+  await (await settingsFor(c.env)).set(SETTING_KEYS.autonomyLevel, level);
   return c.redirect("/admin/mejoras");
 });
 
@@ -304,7 +314,7 @@ adminApp.get("/agente/node/:id", async (c) =>
 adminApp.post("/agente/node/:id/save", async (c) => {
   const id = c.req.param("id");
   const form = await c.req.formData();
-  const repo = new SettingsRepo(new Db(c.env.DB));
+  const repo = await settingsFor(c.env);
 
   const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
   const num = (key: string): number | null => {
@@ -420,7 +430,7 @@ adminApp.post("/campanas/send", async (c) => {
 });
 
 adminApp.get("/config", async (c) => {
-  const settings = await new SettingsRepo(new Db(c.env.DB)).all();
+  const settings = await (await settingsFor(c.env)).all();
   const saved = c.req.query("saved") === "1";
   return c.html(renderConfig(c.env, settings, saved, c.req.query("llmtest")));
 });
@@ -451,7 +461,7 @@ adminApp.get("/config/llm-test", async (c) => {
 // fields are stored verbatim (trimmed). Empty/absent => default at load time.
 adminApp.post("/config", async (c) => {
   const form = await c.req.formData();
-  const repo = new SettingsRepo(new Db(c.env.DB));
+  const repo = await settingsFor(c.env);
 
   // Card-based controls: tone, buffer_seconds, max_chunks, model_override, bot_paused.
   for (const key of Object.keys(CONTROLS)) {
@@ -524,7 +534,8 @@ adminApp.post("/leads/:id/status", async (c) => {
   const status: Lead["status"] = (LEAD_STATUSES as readonly string[]).includes(raw)
     ? (raw as Lead["status"])
     : "new";
-  const leads = new LeadsRepo(new Db(c.env.DB));
+  const db = new Db(c.env.DB);
+  const leads = new LeadsRepo(db, await resolveBotId(db));
   await leads.setStatus(c.req.param("id"), status);
   return c.redirect("/admin/leads");
 });
@@ -533,7 +544,8 @@ adminApp.post("/leads/:id/status", async (c) => {
 adminApp.post("/tickets/:id/resolve", async (c) => {
   const form = await c.req.formData();
   const resolvedBy = String(form.get("resolved_by") ?? c.env.OWNER_EMAIL ?? "admin").trim() || "admin";
-  const tickets = new TicketsRepo(new Db(c.env.DB));
+  const db = new Db(c.env.DB);
+  const tickets = new TicketsRepo(db, await resolveBotId(db));
   await tickets.resolve(c.req.param("id"), resolvedBy);
   return c.redirect("/admin/tickets");
 });
@@ -555,7 +567,11 @@ adminApp.post("/conversations/:id/reply", async (c) => {
   if (!text) return c.html(`<span class="text-stone-400">Escribe un mensaje primero.</span>`);
 
   const db = new Db(c.env.DB);
-  const convs = new ConversationsRepo(db);
+  // Transicional (F2.1): el panel todavía no tiene sesión de KontrolIA Auth
+  // con bot resuelto (eso llega en F5) — hasta entonces sigue siendo un solo
+  // bot por despliegue.
+  const botId = await resolveBotId(db);
+  const convs = new ConversationsRepo(db, botId);
   const conv = await convs.getById(id);
   if (!conv) return c.html(`<span class="text-red-600">✗ Conversación no encontrada.</span>`);
 
@@ -576,7 +592,7 @@ adminApp.post("/conversations/:id/reply", async (c) => {
     return c.html(`<span class="text-red-600">✗ No se pudo enviar: ${escapeHtml(msg)}</span>`);
   }
 
-  const msgs = new MessagesRepo(db);
+  const msgs = new MessagesRepo(db, botId);
   await msgs.append(id, "owner", text);
   await convs.touchLastMessage(id);
   await convs.setPausedUntil(id, Date.now() + TAKEOVER_MS);
@@ -592,7 +608,8 @@ adminApp.post("/conversations/:id/reply", async (c) => {
 // customer for themselves). Returns the refreshed thread fragment.
 adminApp.post("/conversations/:id/pause", async (c) => {
   const id = c.req.param("id");
-  const convs = new ConversationsRepo(new Db(c.env.DB));
+  const db = new Db(c.env.DB);
+  const convs = new ConversationsRepo(db, await resolveBotId(db));
   await convs.setPausedUntil(id, Date.now() + TAKEOVER_MS);
   return c.html(await renderThreadLive(c.env, id));
 });
@@ -602,7 +619,9 @@ adminApp.post("/conversations/:id/pause", async (c) => {
 // bot resumes with context about what the owner already resolved.
 adminApp.post("/conversations/:id/resume", async (c) => {
   const id = c.req.param("id");
-  const convs = new ConversationsRepo(new Db(c.env.DB));
+  const db = new Db(c.env.DB);
+  const botId = await resolveBotId(db);
+  const convs = new ConversationsRepo(db, botId);
   await convs.setPausedUntil(id, null);
   // Insert a system-style owner note summarizing the human handoff so the bot
   // has context when it picks the conversation back up. The summary field is
@@ -612,7 +631,7 @@ adminApp.post("/conversations/:id/resume", async (c) => {
   const summary =
     String(form?.get("summary") ?? "").trim() ||
     "(El dueño habló con el cliente y resolvió la consulta.)";
-  const msgs = new MessagesRepo(new Db(c.env.DB));
+  const msgs = new MessagesRepo(db, botId);
   await msgs.append(id, "owner", summary);
   return c.redirect(`/admin/conversations?c=${encodeURIComponent(id)}`);
 });
@@ -635,7 +654,8 @@ function escapeHtml(s: string): string {
 // Auth: already enforced by the wildcard Basic Auth middleware above, so there
 // is no per-route auth check here (no magic-link `requireAuth`).
 adminApp.post("/conversations/:id/suggest", async (c) => {
-  const msgs = new MessagesRepo(new Db(c.env.DB));
+  const suggestDb = new Db(c.env.DB);
+  const msgs = new MessagesRepo(suggestDb, await resolveBotId(suggestDb));
   const history = await msgs.lastN(c.req.param("id"), 20);
   const { model } = createModel(c.env, "fast", await loadLlmOverrides(c.env));
   const aiMessages = history.map((m) => ({

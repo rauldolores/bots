@@ -17,16 +17,16 @@ export function monthStartMs(now = Date.now()): number {
 }
 
 /** Exact month-to-date AI cost, computed from per-message token usage. */
-export async function monthIaCostUsd(db: Db, now = Date.now()): Promise<number> {
+export async function monthIaCostUsd(db: Db, botId: string, now = Date.now()): Promise<number> {
   const rows = await db.all<{ model_used: string; input: number; output: number; cached: number }>(
     `SELECT model_used,
             SUM(COALESCE(input_tokens, 0)) as input,
             SUM(COALESCE(output_tokens, 0)) as output,
             SUM(COALESCE(cached_input_tokens, 0)) as cached
      FROM messages
-     WHERE created_at >= ? AND model_used IS NOT NULL
+     WHERE bot_id = ? AND created_at >= ? AND model_used IS NOT NULL
      GROUP BY model_used`,
-    [monthStartMs(now)],
+    [botId, monthStartMs(now)],
   );
   let total = 0;
   for (const r of rows) {

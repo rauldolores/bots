@@ -4,7 +4,7 @@
  * el endpoint de status lo consulta. D1 real via miniflare.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
 import type { Env } from "../../src/env";
@@ -32,7 +32,7 @@ beforeEach(async () => {
     BUFFER_SECONDS: "8",
     DASHBOARD_PASSWORD: PASSWORD,
   } as unknown as Env;
-  settings = new SettingsRepo(d1);
+  settings = new SettingsRepo(d1, TEST_BOT_ID);
   fetchMock = vi.fn();
   globalThis.fetch = fetchMock as any;
 });

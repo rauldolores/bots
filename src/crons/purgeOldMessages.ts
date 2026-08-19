@@ -1,6 +1,7 @@
 import type { Env } from "../env";
 import { Db } from "../db/client";
 import { MessagesRepo } from "../db/messages";
+import { resolveBotId } from "../tenant";
 
 /** Messages older than this are purged by the daily cron. Leads + tickets are kept forever. */
 export const MESSAGE_RETENTION_DAYS = 90;
@@ -14,7 +15,8 @@ export const MESSAGE_RETENTION_DAYS = 90;
  */
 export async function purgeOldMessages(env: Env, now: number = Date.now()): Promise<number> {
   const cutoff = now - MESSAGE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-  const msgs = new MessagesRepo(new Db(env.DB));
+  const db = new Db(env.DB);
+  const msgs = new MessagesRepo(db, await resolveBotId(db));
   const deleted = await msgs.purgeOlderThan(cutoff);
   console.log(`[cron purgeOldMessages] deleted ${deleted} messages older than ${MESSAGE_RETENTION_DAYS}d`);
   return deleted;

@@ -5,6 +5,7 @@
 // dueño planee — la cuota es oro el día del evento.
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
+import { resolveBotId } from "../../tenant";
 import { layout } from "./layout";
 import { SEGMENTS, segmentCounts } from "../../segments";
 import {
@@ -34,11 +35,12 @@ export async function renderCampanas(
   q: Record<string, string | undefined> = {},
 ): Promise<string> {
   const db = new Db(env.DB);
+  const botId = await resolveBotId(db);
   const [counts, templates, spent, history] = await Promise.all([
-    segmentCounts(db),
+    segmentCounts(db, botId),
     listContentTemplates(env).catch(() => []),
-    templatesSentLast24h(db),
-    campaignHistory(db),
+    templatesSentLast24h(db, botId),
+    campaignHistory(db, botId),
   ]);
   const cap = dailyTemplateCap(env);
   const pct = Math.min(100, Math.round((spent / cap) * 100));

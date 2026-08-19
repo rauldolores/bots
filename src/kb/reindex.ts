@@ -2,6 +2,7 @@ import type { Env } from "../env";
 import { Db } from "../db/client";
 import { getEmbeddingProvider } from "../ai/embeddings";
 import { PgVectorStore } from "../vector/pgvector";
+import { resolveBotId } from "../tenant";
 import kbChunks from "../../scripts/kb-fixtures.json";
 
 /**
@@ -38,7 +39,8 @@ export async function reindexKb(
   }
 
   const embeddings = getEmbeddingProvider(env);
-  const store = new PgVectorStore(new Db(env.DB));
+  const db = new Db(env.DB);
+  const store = new PgVectorStore(db, await resolveBotId(db));
   let indexed = 0;
 
   for (let start = 0; start < chunks.length; start += BATCH_SIZE) {

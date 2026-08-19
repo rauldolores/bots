@@ -4,7 +4,7 @@
  * happen in these routes (tool construction is side-effect free).
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { Db } from "../../src/db/client";
 import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
@@ -39,7 +39,7 @@ beforeEach(async () => {
     BUFFER_SECONDS: "8",
     DASHBOARD_PASSWORD: PASSWORD,
   } as unknown as Env;
-  settings = new SettingsRepo(d1);
+  settings = new SettingsRepo(d1, TEST_BOT_ID);
 });
 
 describe("Mi Agente — page and canvas", () => {
@@ -61,7 +61,7 @@ describe("Mi Agente — page and canvas", () => {
   });
 
   it("shows real channels from the conversations table", async () => {
-    const convs = new ConversationsRepo(new Db(env.DB));
+    const convs = new ConversationsRepo(new Db(env.DB), TEST_BOT_ID);
     await convs.getOrCreate("telegram", "u1");
     const res = await adminApp.request("/agente/canvas", { headers: AUTH }, env);
     const html = await res.text();

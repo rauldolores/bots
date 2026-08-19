@@ -1,6 +1,7 @@
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { LeadsRepo, leadMetadata, type Lead } from "../../db/leads";
+import { resolveBotId } from "../../tenant";
 import { getNiche } from "../../niches";
 import { layout } from "./layout";
 
@@ -18,7 +19,8 @@ interface Col {
 
 export async function renderLeads(env: Env): Promise<string> {
   const niche = getNiche(env);
-  const leads = new LeadsRepo(new Db(env.DB));
+  const db = new Db(env.DB);
+  const leads = new LeadsRepo(db, await resolveBotId(db));
   const list = await leads.list(100);
 
   const statusLabel = (s: Lead["status"]) => niche.statusLabels[s];
@@ -116,7 +118,8 @@ export async function renderLeads(env: Env): Promise<string> {
 }
 
 export async function exportLeadsCsv(env: Env): Promise<string> {
-  const leads = new LeadsRepo(new Db(env.DB));
+  const db = new Db(env.DB);
+  const leads = new LeadsRepo(db, await resolveBotId(db));
   const list = await leads.list(10_000);
   const header = "fecha,nombre,contacto,intent,status,notas,metadata\n";
   const rows = list.map((l) => {

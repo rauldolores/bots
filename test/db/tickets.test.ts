@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { Db } from "../../src/db/client";
+import { createTestDb, TEST_BOT_ID, createSecondTestBot } from "../helpers/pgSetup";
 import { TicketsRepo } from "../../src/db/tickets";
 
+let db: Db;
 let repo: TicketsRepo;
 
 beforeEach(async () => {
-  const d1 = await createTestDb();
-  repo = new TicketsRepo(d1);
+  db = await createTestDb();
+  repo = new TicketsRepo(db, TEST_BOT_ID);
 });
 
 describe("TicketsRepo", () => {
@@ -43,5 +45,22 @@ describe("TicketsRepo", () => {
     const list = await repo.listOpen();
     expect(list).toHaveLength(1);
     expect(list[0].summary).toBe("a");
+  });
+
+  it("un bot no ve ni puede resolver los tickets de otro", async () => {
+    const otherBotId = await createSecondTestBot(db);
+    const otherRepo = new TicketsRepo(db, otherBotId);
+    const theirId = await otherRepo.create({
+      conversationId: null,
+      category: "x",
+      summary: "ajeno",
+      transcript: "",
+    });
+
+    expect(await repo.getById(theirId)).toBeNull();
+    expect(await repo.listOpen()).toHaveLength(0);
+    await repo.resolve(theirId, "intruso@x.com");
+    const theirs = await otherRepo.getById(theirId);
+    expect(theirs?.status).toBe("open"); // el resolve del otro bot no pegó
   });
 });

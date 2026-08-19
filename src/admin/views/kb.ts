@@ -6,6 +6,7 @@
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { KbDocsRepo, FIXTURE_CHUNKS, MAX_DOC_CHARS, chunkContent, type KbDoc } from "../../kb/docs";
+import { resolveBotId } from "../../tenant";
 import { layout } from "./layout";
 
 function esc(s: string): string {
@@ -35,7 +36,8 @@ export async function renderKbList(
   env: Env,
   flash?: { saved?: boolean; deleted?: boolean; reindexed?: string },
 ): Promise<string> {
-  const docs = await new KbDocsRepo(new Db(env.DB)).list();
+  const db = new Db(env.DB);
+  const docs = await new KbDocsRepo(db, await resolveBotId(db)).list();
 
   const bannerHtml = flash?.saved
     ? banner("ok", "✓ Guardado e indexado — el bot ya puede usarlo.")

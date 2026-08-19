@@ -5,7 +5,7 @@
  * (apiApp.request), the same way the admin tests hit adminApp.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { apiApp, type MetricsResponse } from "../../src/api";
 import { Db } from "../../src/db/client";
 import { BOT_VERSION } from "../../src/version";
@@ -48,25 +48,25 @@ beforeEach(async () => {
 /** Seed: 2 conversations (one escalated via a ticket), 3 messages, 2 leads. */
 async function seedActivity() {
   await db.run(
-    `INSERT INTO conversations (id, channel, channel_user_id, display_name, started_at, last_message_at)
-     VALUES ('cA','twilio','uA','A',?,?), ('cB','twilio','uB','B',?,?)`,
-    [IN_WINDOW, IN_WINDOW, IN_WINDOW, IN_WINDOW],
+    `INSERT INTO conversations (id, bot_id, channel, channel_user_id, display_name, started_at, last_message_at)
+     VALUES ('cA',?,'twilio','uA','A',?,?), ('cB',?,'twilio','uB','B',?,?)`,
+    [TEST_BOT_ID, IN_WINDOW, IN_WINDOW, TEST_BOT_ID, IN_WINDOW, IN_WINDOW],
   );
   await db.run(
-    `INSERT INTO messages (id, conversation_id, role, content, created_at)
-     VALUES ('m1','cA','user','hola',?), ('m2','cA','assistant','buenas',?), ('m3','cB','user','info',?)`,
-    [IN_WINDOW, IN_WINDOW, IN_WINDOW],
+    `INSERT INTO messages (id, conversation_id, bot_id, role, content, created_at)
+     VALUES ('m1','cA',?,'user','hola',?), ('m2','cA',?,'assistant','buenas',?), ('m3','cB',?,'user','info',?)`,
+    [TEST_BOT_ID, IN_WINDOW, TEST_BOT_ID, IN_WINDOW, TEST_BOT_ID, IN_WINDOW],
   );
   await db.run(
-    `INSERT INTO leads (id, conversation_id, intent, created_at, updated_at)
-     VALUES ('l1','cA','compra',?,?), ('l2','cB','duda',?,?)`,
-    [IN_WINDOW, IN_WINDOW, IN_WINDOW, IN_WINDOW],
+    `INSERT INTO leads (id, bot_id, conversation_id, intent, created_at, updated_at)
+     VALUES ('l1',?,'cA','compra',?,?), ('l2',?,'cB','duda',?,?)`,
+    [TEST_BOT_ID, IN_WINDOW, IN_WINDOW, TEST_BOT_ID, IN_WINDOW, IN_WINDOW],
   );
   // conv A escalated to a human → one handoff ticket.
   await db.run(
-    `INSERT INTO tickets (id, conversation_id, summary, transcript, created_at)
-     VALUES ('t1','cA','handoff','...',?)`,
-    [IN_WINDOW],
+    `INSERT INTO tickets (id, bot_id, conversation_id, summary, transcript, created_at)
+     VALUES ('t1',?,'cA','handoff','...',?)`,
+    [TEST_BOT_ID, IN_WINDOW],
   );
 }
 

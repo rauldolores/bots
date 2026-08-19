@@ -2,6 +2,7 @@ import type { ChannelAdapter, IncomingMessage, OutgoingReply } from "./shared";
 import type { Env } from "../env";
 import { Db } from "../db/client";
 import { SettingsRepo } from "../db/settings";
+import { resolveBotId } from "../tenant";
 import { getByPath } from "../learn/fieldPath";
 import { loadLearnedMapping, type LearnedMapping } from "../learn/mapping";
 
@@ -48,8 +49,9 @@ interface ManychatFallbackPayload {
   last_growth_tool?: { channel?: string };
 }
 
-function repoFrom(env: Env): SettingsRepo {
-  return new SettingsRepo(new Db(env.DB));
+async function repoFrom(env: Env): Promise<SettingsRepo> {
+  const db = new Db(env.DB);
+  return new SettingsRepo(db, await resolveBotId(db));
 }
 
 /** Extract a path value as a trimmed non-empty string, or undefined. */
@@ -144,7 +146,7 @@ export function makeLearnedAdapter(channel: string): ChannelAdapter {
   return {
     async parseIncoming(request: Request, env: Env): Promise<IncomingMessage> {
       const payload = await request.json();
-      const repo = repoFrom(env);
+      const repo = await repoFrom(env);
       const mapping = await loadLearnedMapping(repo, channel);
       // Fallback chain seed: static env content type -> the channel name ->
       // "instagram". The per-message detected channel (auto-channel) overrides
@@ -169,7 +171,7 @@ export function makeLearnedAdapter(channel: string): ChannelAdapter {
       // content.type: the per-message auto-channel persisted by parseIncoming,
       // else the learned mapping.sendType, else env.MANYCHAT_CONTENT_TYPE, else
       // the channel name, else "instagram".
-      const repo = repoFrom(env);
+      const repo = await repoFrom(env);
       const [persisted, mapping] = await Promise.all([
         repo.get(sendTypeKey(channel)),
         loadLearnedMapping(repo, channel),

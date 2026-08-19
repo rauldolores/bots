@@ -25,6 +25,13 @@ function makeStubDriver(
     for (const m of matchers) {
       if (sql.includes(m.frag)) return m;
     }
+    // resolveBotId() consulta `bots` en cada ruta que toca una conversación
+    // (F2.1). Estos tests son de ruteo, no de multi-bot: sin un matcher
+    // explícito, siempre hay exactamente un bot, como en cualquier
+    // despliegue de hoy.
+    if (sql.includes("FROM bots")) {
+      return { first: { id: TEST_BOT_ID }, all: [{ id: TEST_BOT_ID }] };
+    }
     return { first: undefined, all: [] as Row[] };
   };
   return {
@@ -41,6 +48,7 @@ function makeStubDriver(
 }
 
 const PASSWORD = "secret123";
+const TEST_BOT_ID = "00000000-0000-0000-0000-000000000001";
 
 function makeEnv(driver: SqlDriver = makeStubDriver()): Env {
   return {
@@ -225,7 +233,8 @@ describe("admin routes — config save (POST /config)", () => {
     const out: Record<string, string> = {};
     for (const r of runLog) {
       if (r.sql.includes("INSERT INTO settings")) {
-        const [key, value] = r.params as [string, string];
+        // params: (bot_id, key, value, updated_at) — F2.2.
+        const [, key, value] = r.params as [string, string, string];
         out[key] = value;
       }
     }
