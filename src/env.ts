@@ -103,6 +103,18 @@ export interface Env {
   // explícitamente (var en wrangler.toml); sin la var, el guard queda activo.
   DASHBOARD_PUBLIC?: string;
 
+  // F5 de docs/multitenancy.md: login con KontrolIA Auth (OAuth 2.1 + PKCE
+  // contra el GoTrue del proyecto de Supabase compartido — auth-server ES
+  // Supabase Auth, no un servidor aparte). Las tres son opcionales A PROPÓSITO:
+  // sin ellas, /admin/login no aparece y el panel sigue funcionando con Basic
+  // Auth exactamente como hoy — no es un cambio disruptivo, es una opción que
+  // se prende al configurarla.
+  SUPABASE_URL?: string;
+  SUPABASE_ANON_KEY?: string;
+  // client_id que devolvió panel.kontrolia.io → Clientes OAuth al registrar
+  // esta app. No es secreto (cliente público, PKCE, sin client_secret).
+  OAUTH_CLIENT_ID?: string;
+
   // Token guarding POST /kb/reindex (header: X-Reindex-Token). Secret.
   KB_REINDEX_TOKEN: string;
 

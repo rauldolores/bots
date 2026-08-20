@@ -12,7 +12,7 @@
  * middleware that has access to `c.env` rather than at module-init time.
  */
 import { parsePeerBots } from "./projects";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { generateText } from "ai";
 import { createModel } from "../llm/provider";
 import { loadLlmOverrides } from "../settings-loader";
@@ -57,17 +57,152 @@ import { SettingsRepo, SETTING_KEYS, type SettingKey } from "../db/settings";
 import { CONTROLS, levelToValue } from "./control-levels";
 import { systemPromptFromEnv } from "../system-prompt";
 import { renderBusinessContext } from "../businessContext";
+import { getCookie, setCookie, deleteCookie } from "hono/cookie";
+import {
+  kontroliaConfig,
+  buildAuthorizeUrl,
+  exchangeCode,
+  refreshSession,
+  verifyAccessToken,
+  SESSION_COOKIE,
+  VERIFIER_COOKIE,
+  type KontroliaSession,
+} from "./kontroliaAuth";
 
 export const adminApp = new Hono<{ Bindings: Env }>();
 
-// Guard every admin route with Basic Auth. The middleware factory needs the
-// request-scoped Env to read DASHBOARD_PASSWORD, so build it per request here.
-// DASHBOARD_PUBLIC="1" (wrangler.toml de esta instancia) apaga el guard —
-// el panel es público a propósito (decisión de diseño de la instancia).
-// Para volver a protegerlo: quitar esa var y redeploy.
-adminApp.use("*", (c, next) => {
-  if (c.env.DASHBOARD_PUBLIC === "1") return next();
+// Rutas del propio login: NUNCA detrás del guard (si lo estuvieran, entrar a
+// /admin/login exigiría ya estar logueado — un candado cerrado con la llave
+// adentro).
+// Comparación por sufijo, no por igualdad exacta: c.req.path trae el prefijo
+// /admin cuando adminApp corre montada bajo la app principal (producción),
+// pero NO cuando se prueba adminApp.fetch() directo (así corren los tests de
+// este archivo) — el sufijo es correcto en los dos casos.
+const AUTH_EXEMPT_SUFFIXES = ["/login", "/oauth/callback", "/logout"];
+function isAuthExempt(path: string): boolean {
+  return AUTH_EXEMPT_SUFFIXES.some((s) => path.endsWith(s));
+}
+
+function redirectUri(env: Env): string {
+  return `${(env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "")}/admin/oauth/callback`;
+}
+
+/**
+ * Guard combinado del panel (F5, docs/multitenancy.md):
+ *   1. Sesión de KontrolIA Auth válida (cookie) → pasa.
+ *   2. Si no, pero llegó un header Basic Auth → se valida como siempre
+ *      (compatibilidad: navegadores con la contraseña ya guardada, curl,
+ *      scripts). Es la salida de emergencia si KontrolIA Auth falla.
+ *   3. Si no hay nada de lo anterior:
+ *      - con KontrolIA configurado → redirige a /admin/login (login nuevo).
+ *      - sin configurar → cae al Basic Auth de siempre (challenge del navegador),
+ *        cero cambio de comportamiento para quien no activó esto.
+ */
+type HonoContext = Context<{ Bindings: Env }>;
+
+type GuardResult =
+  | { kind: "pass" } // ya autenticado (KontrolIA o DASHBOARD_PUBLIC) — seguir sin más checks
+  | { kind: "check-basic" } // sin sesión de KontrolIA — que decida el Basic Auth clásico
+  | { kind: "redirect"; to: string };
+
+async function guardAdmin(c: HonoContext): Promise<GuardResult> {
+  const env = c.env;
+  if (env.DASHBOARD_PUBLIC === "1") return { kind: "pass" };
+
+  // Salida de emergencia: ?basic=1 fuerza el prompt clásico del navegador
+  // aunque KontrolIA Auth esté configurado — por si el login nuevo falla o
+  // el dueño simplemente prefiere la contraseña de siempre.
+  if (c.req.query("basic") === "1") return { kind: "check-basic" };
+
+  const cfg = kontroliaConfig(env);
+  if (cfg) {
+    const raw = getCookie(c, SESSION_COOKIE);
+    if (raw) {
+      const session = JSON.parse(raw) as KontroliaSession;
+      let accessToken = session.accessToken;
+      if (session.expiresAt < Date.now()) {
+        const refreshed = await refreshSession(cfg, session.refreshToken);
+        accessToken = refreshed?.accessToken ?? "";
+        if (refreshed) {
+          setCookie(c, SESSION_COOKIE, JSON.stringify(refreshed), {
+            httpOnly: true,
+            secure: true,
+            sameSite: "Lax",
+            maxAge: 60 * 60 * 24 * 30,
+          });
+        }
+      }
+      if (accessToken && (await verifyAccessToken(cfg, accessToken))) return { kind: "pass" };
+    }
+  }
+
+  const authHeader = c.req.header("authorization");
+  if (authHeader?.startsWith("Basic ")) return { kind: "check-basic" };
+
+  if (cfg) {
+    const url = new URL(c.req.url);
+    return { kind: "redirect", to: `/admin/login?next=${encodeURIComponent(url.pathname)}` };
+  }
+  return { kind: "check-basic" }; // sin KontrolIA configurado: Basic Auth clásico, cero cambio
+}
+
+adminApp.use("*", async (c, next) => {
+  if (isAuthExempt(c.req.path)) return next();
+  const result = await guardAdmin(c);
+  if (result.kind === "pass") return next();
+  if (result.kind === "redirect") return c.redirect(result.to, 302);
   return adminAuth(c.env)(c, next);
+});
+
+// --- Login con KontrolIA Auth (F5) ------------------------------------------
+//
+// auth-server ES el GoTrue del proyecto de Supabase compartido — no hay
+// redirect a un servidor "genérico", es directo al /authorize de ese
+// proyecto. Sin JS de navegador: todo el intercambio ocurre en el servidor.
+
+adminApp.get("/login", async (c) => {
+  const cfg = kontroliaConfig(c.env);
+  if (!cfg) return c.text("KontrolIA Auth no está configurado en este despliegue.", 501);
+  const next = c.req.query("next") ?? "/admin/overview";
+  const { url, codeVerifier } = await buildAuthorizeUrl(cfg, redirectUri(c.env), next);
+  setCookie(c, VERIFIER_COOKIE, codeVerifier, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    maxAge: 600, // 10 min — el tiempo que dura el ida y vuelta a auth-server
+  });
+  return c.redirect(url, 302);
+});
+
+adminApp.get("/oauth/callback", async (c) => {
+  const cfg = kontroliaConfig(c.env);
+  if (!cfg) return c.text("KontrolIA Auth no está configurado en este despliegue.", 501);
+  const code = c.req.query("code");
+  const codeVerifier = getCookie(c, VERIFIER_COOKIE);
+  if (!code || !codeVerifier) {
+    return c.text("Falta el código de autorización o expiró el intento de login — vuelve a intentar.", 400);
+  }
+  let session;
+  try {
+    session = await exchangeCode(cfg, code, codeVerifier, redirectUri(c.env));
+  } catch (e) {
+    console.error("[oauth callback]", e);
+    return c.text("No se pudo completar el login con KontrolIA Auth.", 502);
+  }
+  deleteCookie(c, VERIFIER_COOKIE);
+  setCookie(c, SESSION_COOKIE, JSON.stringify(session), {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    maxAge: 60 * 60 * 24 * 30, // 30 días — el refresh_token es lo que en realidad manda
+  });
+  const next = c.req.query("state") || "/admin/overview";
+  return c.redirect(next, 302);
+});
+
+adminApp.post("/logout", (c) => {
+  deleteCookie(c, SESSION_COOKIE);
+  return c.redirect("/admin/login", 302);
 });
 
 /** Settings del bot resuelto (transicional F2.1/F2.2 hasta la sesión de F5). */

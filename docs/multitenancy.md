@@ -256,10 +256,33 @@ Cada fase queda **verde y desplegable** antes de la siguiente.
   **Riesgo: medio** (Telegram/ManyChat/Twilio sin fuga; Meta/WhatsApp
   siguen exactamente como estaban — env compartido, sin cambio).
 
-- **F5 — Auth y panel multi-bot.** KontrolIA Auth reemplaza el Basic Auth;
-  selector de organización y de bot; permisos por rol. Aquí se resuelve la
-  pregunta de producto (¿el Starter open source conserva un modo mono-tenant?).
-  **Riesgo: medio.**
+- **F5 — Auth y panel multi-bot (parcial, este commit: el login).**
+  KontrolIA Auth reemplaza el Basic Auth; selector de organización y de bot;
+  permisos por rol. Aquí se resuelve la pregunta de producto (¿el Starter
+  open source conserva un modo mono-tenant?).
+
+  Hecho: `/admin/login` redirige a `auth-server` (que ES el GoTrue del
+  proyecto de Supabase compartido — no hay un servidor OAuth aparte) con
+  Authorization Code + PKCE; `/admin/oauth/callback` intercambia el código y
+  deja una sesión en cookie (`nodia_kontrolia_session`, httpOnly); el guard
+  del panel verifica el `access_token` contra el JWKS del proyecto
+  (`@kontrolia/auth/server`) y refresca solo cuando expira. Basic Auth NO
+  desapareció: sigue viva como salida de emergencia (header
+  `Authorization: Basic` o `?basic=1`), y si `SUPABASE_URL` /
+  `SUPABASE_ANON_KEY` / `OAUTH_CLIENT_ID` no están las tres configuradas, el
+  panel se comporta exactamente como antes — es opt-in, no disruptivo.
+  Verificado con un login real contra `auth.kontrolia.io` en local.
+
+  Encontrado al registrar el cliente OAuth: si `redirect_uris` se guarda con
+  las URIs separadas por espacio (como quedó al registrarlo "a mano" la
+  primera vez), GoTrue las rechaza con `invalid_redirect_uri` — hay que
+  guardarlas una por línea desde panel.kontrolia.io → Clientes OAuth.
+
+  Pendiente, explícitamente fuera de este commit: el selector de
+  organización/bot en el panel (hoy `resolveBotId()` sigue fallando duro con
+  2+ bots — este login es el prerequisito, no el selector en sí) y permisos
+  por rol. **Riesgo: medio** (login sin fuga verificado; selector y roles
+  siguen sin construir).
 
 - **F6 — Instalación.** El skill de configuración, el CLI y la documentación
   pasan de "configura tu despliegue" a "crea un bot en tu organización".
