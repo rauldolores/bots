@@ -5,7 +5,6 @@
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { InsightsRepo } from "../../db/insights";
-import { resolveBotId } from "../../tenant";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
 import { layout } from "./layout";
@@ -98,25 +97,24 @@ function funnel(stages: { label: string; value: number }[]): string {
 
 // --- Page -------------------------------------------------------------------------
 
-export async function renderStats(env: Env): Promise<string> {
+export async function renderStats(env: Env, botId: string): Promise<string> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
   const thirtyDays = Date.now() - 30 * 86_400_000;
 
   const [byDay, convs30, leadStatuses, heatRows, tokenRows, assistantMsgs, channels, tools, insightStats] =
     await Promise.all([
       db.all<{ day: string; msgs: number }>(
         `SELECT to_char(to_timestamp(created_at / 1000.0) AT TIME ZONE 'UTC', 'YYYY-MM-DD') as day, COUNT(*) as msgs
-         FROM messages WHERE created_at > ? GROUP BY day ORDER BY day ASC`,
-        [thirtyDays],
+         FROM messages WHERE bot_id = ? AND created_at > ? GROUP BY day ORDER BY day ASC`,
+        [botId, thirtyDays],
       ),
       db.first<{ n: number }>(
-        "SELECT COUNT(DISTINCT conversation_id) as n FROM messages WHERE created_at > ?",
-        [thirtyDays],
+        "SELECT COUNT(DISTINCT conversation_id) as n FROM messages WHERE bot_id = ? AND created_at > ?",
+        [botId, thirtyDays],
       ),
       db.all<{ status: string; n: number }>(
-        "SELECT status, COUNT(*) as n FROM leads WHERE created_at > ? GROUP BY status",
-        [thirtyDays],
+        "SELECT status, COUNT(*) as n FROM leads WHERE bot_id = ? AND created_at > ? GROUP BY status",
+        [botId, thirtyDays],
       ),
       db.all<{ dow: number; hour: number; n: number }>(
         // El AT TIME ZONE 'UTC' no es adorno: `to_timestamp` devuelve timestamptz
@@ -126,28 +124,28 @@ export async function renderStats(env: Env): Promise<string> {
         `SELECT EXTRACT(DOW FROM to_timestamp(created_at / 1000.0) AT TIME ZONE 'UTC')::int as dow,
                 EXTRACT(HOUR FROM to_timestamp(created_at / 1000.0) AT TIME ZONE 'UTC')::int as hour,
                 COUNT(*) as n
-         FROM messages WHERE role = 'user' AND created_at > ?
+         FROM messages WHERE bot_id = ? AND role = 'user' AND created_at > ?
          GROUP BY dow, hour`,
-        [thirtyDays],
+        [botId, thirtyDays],
       ),
       db.all<{ model_used: string; input: number; output: number; cached: number }>(
         `SELECT model_used,
                 SUM(COALESCE(input_tokens, 0)) as input,
                 SUM(COALESCE(output_tokens, 0)) as output,
                 SUM(COALESCE(cached_input_tokens, 0)) as cached
-         FROM messages WHERE created_at > ? AND model_used IS NOT NULL
+         FROM messages WHERE bot_id = ? AND created_at > ? AND model_used IS NOT NULL
          GROUP BY model_used`,
-        [thirtyDays],
+        [botId, thirtyDays],
       ),
       db.first<{ n: number }>(
-        "SELECT COUNT(*) as n FROM messages WHERE role = 'assistant' AND created_at > ?",
-        [thirtyDays],
+        "SELECT COUNT(*) as n FROM messages WHERE bot_id = ? AND role = 'assistant' AND created_at > ?",
+        [botId, thirtyDays],
       ),
       db.all<{ channel: string; n: number }>(
         `SELECT c.channel, COUNT(m.id) as n
          FROM messages m JOIN conversations c ON m.conversation_id = c.id
-         WHERE m.created_at > ? GROUP BY c.channel ORDER BY n DESC`,
-        [thirtyDays],
+         WHERE m.bot_id = ? AND m.created_at > ? GROUP BY c.channel ORDER BY n DESC`,
+        [botId, thirtyDays],
       ),
       db
         .all<{ tool: string; n: number }>(
@@ -156,10 +154,11 @@ export async function renderStats(env: Env): Promise<string> {
           // castear a jsonb (el .catch de abajo es la red final).
           `SELECT elem->>'toolName' as tool, COUNT(*) as n
            FROM messages, LATERAL jsonb_array_elements(messages.tool_calls::jsonb) as elem
-           WHERE messages.tool_calls IS NOT NULL AND messages.tool_calls <> ''
+           WHERE messages.bot_id = ?
+             AND messages.tool_calls IS NOT NULL AND messages.tool_calls <> ''
              AND messages.created_at > ?
            GROUP BY tool ORDER BY n DESC`,
-          [thirtyDays],
+          [botId, thirtyDays],
         )
         .catch(() => [] as { tool: string; n: number }[]),
       new InsightsRepo(db, botId).stats(thirtyDays),

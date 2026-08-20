@@ -16,7 +16,8 @@
 //
 // La verificación del token SÍ usa el SDK (@kontrolia/auth/server,
 // verifyRequest) — ahí no hay atajo: es JWT contra el JWKS del proyecto.
-import { verifyRequest } from "@kontrolia/auth/server";
+import { verifyRequest, listMemberships as sdkListMemberships } from "@kontrolia/auth/server";
+import type { KontroliaMembershipWithOrganization } from "@kontrolia/shared";
 import type { Env } from "../env";
 
 export const SESSION_COOKIE = "nodia_kontrolia_session";
@@ -116,27 +117,93 @@ export async function exchangeCode(
   return toSession((await res.json()) as TokenResponse);
 }
 
+/**
+ * La sesión nació del flujo OAuth (exchangeCode, arriba) — GoTrue exige
+ * refrescarla por el MISMO endpoint OAuth con client_id, no por el genérico
+ * /auth/v1/token?grant_type=refresh_token (ese responde 400 invalid_client:
+ * "Client authentication required for OAuth session" — confirmado a mano
+ * contra el proyecto real antes de escribir esto).
+ */
 export async function refreshSession(
   cfg: KontroliaAuthConfig,
   refreshToken: string,
 ): Promise<KontroliaSession | null> {
-  const res = await fetch(`${cfg.supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
+  const res = await fetch(`${cfg.supabaseUrl}/auth/v1/oauth/token`, {
     method: "POST",
-    headers: { apikey: cfg.supabaseAnonKey, "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: refreshToken }),
+    headers: { apikey: cfg.supabaseAnonKey, "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: cfg.clientId,
+    }),
   });
   if (!res.ok) return null;
   return toSession((await res.json()) as TokenResponse);
 }
 
+function bearerRequest(accessToken: string): Request {
+  return new Request("https://admin.local/verify", {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+}
+
 /** Verifica el access_token contra el JWKS del proyecto (@kontrolia/auth/server). null si no es válido. */
 export async function verifyAccessToken(cfg: KontroliaAuthConfig, accessToken: string) {
   try {
-    const fakeRequest = new Request("https://admin.local/verify", {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
-    return await verifyRequest(fakeRequest, { supabaseUrl: cfg.supabaseUrl });
+    return await verifyRequest(bearerRequest(accessToken), { supabaseUrl: cfg.supabaseUrl });
   } catch {
     return null;
   }
+}
+
+/**
+ * Todas las organizaciones a las que pertenece quien manda este access_token
+ * — lo que el selector del panel necesita para dibujarse. Vía RLS con el
+ * propio token del usuario (@kontrolia/auth/server), sin service_role.
+ */
+export async function listMemberships(
+  cfg: KontroliaAuthConfig,
+  accessToken: string,
+): Promise<KontroliaMembershipWithOrganization[]> {
+  try {
+    return await sdkListMemberships(bearerRequest(accessToken), {
+      supabaseUrl: cfg.supabaseUrl,
+      supabaseAnonKey: cfg.supabaseAnonKey,
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Cambia la organización activa de la sesión. Reimplementa el mismo PATCH que
+ * hace KontroliaClient.switchOrganization() (dist/client.js: un upsert a
+ * kontrolia_auth.sessions_context vía PostgREST, con el propio access_token
+ * del usuario — RLS scopea el upsert a su propia fila) porque ese método
+ * vive en KontroliaClient, que es browser-only. El organization_id nuevo NO
+ * aparece en el JWT hasta refrescar — por eso el caller debe llamar
+ * refreshSession() después con el resultado de este upsert.
+ */
+export async function switchActiveOrganization(
+  cfg: KontroliaAuthConfig,
+  accessToken: string,
+  userId: string,
+  organizationId: string,
+): Promise<boolean> {
+  const res = await fetch(`${cfg.supabaseUrl}/rest/v1/sessions_context`, {
+    method: "POST",
+    headers: {
+      apikey: cfg.supabaseAnonKey,
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json",
+      "content-profile": "kontrolia_auth",
+      prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify({
+      user_id: userId,
+      active_organization_id: organizationId,
+      updated_at: new Date().toISOString(),
+    }),
+  });
+  return res.ok;
 }

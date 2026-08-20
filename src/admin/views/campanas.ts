@@ -5,7 +5,6 @@
 // dueño planee — la cuota es oro el día del evento.
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
-import { resolveBotId } from "../../tenant";
 import { layout } from "./layout";
 import { SEGMENTS, segmentCounts } from "../../segments";
 import {
@@ -32,10 +31,10 @@ function fmtAgo(ms: number): string {
 
 export async function renderCampanas(
   env: Env,
+  botId: string,
   q: Record<string, string | undefined> = {},
 ): Promise<string> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
   const [counts, templates, spent, history] = await Promise.all([
     segmentCounts(db, botId),
     listContentTemplates(env).catch(() => []),

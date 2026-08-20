@@ -80,12 +80,55 @@ function toBot(row: BotRow): Bot {
   return { ...row, config };
 }
 
+/** "Taquería El Buen Sazón" → "taqueria-el-buen-sazon". Nunca vacío. */
+function slugify(s: string): string {
+  const base = s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return base || "bot";
+}
+
 export class BotsRepo {
   constructor(private readonly db: Db) {}
 
-  async getById(id: string): Promise<Bot | null> {
+  /** id ausente → null sin consultar (no un id "que no existe" — un id que nunca se resolvió). */
+  async getById(id: string | undefined | null): Promise<Bot | null> {
+    if (!id) return null;
     const row = await this.db.first<BotRow>("SELECT * FROM bots WHERE id = ?", [id]);
     return row ? toBot(row) : null;
+  }
+
+  /**
+   * Alta de un bot nuevo para una organización (F5: "crear tu primer bot"
+   * desde el panel). Tier 'free' y config vacío por default — el dueño lo
+   * ajusta después desde Configuración, igual que cualquier bot existente.
+   */
+  async create(organizationId: string, input: { name: string; businessName: string }): Promise<Bot> {
+    const slug = await this.uniqueSlug(organizationId, input.name);
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    await this.db.run(
+      `INSERT INTO bots (id, organization_id, slug, name, business_name, language, tier, buffer_seconds, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'es', 'free', 15, ?, ?)`,
+      [id, organizationId, slug, input.name, input.businessName, now, now],
+    );
+    return (await this.getById(id))!;
+  }
+
+  /** idx_bots_org_slug es único por (organization_id, slug) — desambigua con -2, -3… */
+  private async uniqueSlug(organizationId: string, name: string): Promise<string> {
+    const base = slugify(name);
+    let slug = base;
+    let n = 2;
+    while (
+      await this.db.first("SELECT 1 FROM bots WHERE organization_id = ? AND slug = ?", [organizationId, slug])
+    ) {
+      slug = `${base}-${n++}`;
+    }
+    return slug;
   }
 
   async updateConfig(id: string, config: BotConfig): Promise<void> {
@@ -94,6 +137,15 @@ export class BotsRepo {
       Date.now(),
       id,
     ]);
+  }
+
+  /** Los bots de una organización, para el selector del panel (F5). Más viejo primero. */
+  async listByOrganization(organizationId: string): Promise<Bot[]> {
+    const rows = await this.db.all<BotRow>(
+      "SELECT * FROM bots WHERE organization_id = ? ORDER BY created_at ASC",
+      [organizationId],
+    );
+    return rows.map(toBot);
   }
 
   async updateIdentity(

@@ -17,7 +17,6 @@ import { generateText } from "ai";
 import { createModel } from "../llm/provider";
 import { loadLlmOverrides } from "../settings-loader";
 import type { Env } from "../env";
-import { resolveBotId } from "../tenant";
 import { adminAuth } from "./auth";
 import { layout, renderUpgrade } from "./views/layout";
 import { isProTier } from "../config";
@@ -44,7 +43,13 @@ import { applySuggestion, dismissSuggestion } from "../flywheel/apply";
 import { renderLeads, exportLeadsCsv } from "./views/leads";
 import { renderTickets } from "./views/tickets";
 import { renderConfig } from "./views/config";
-import { renderConexiones } from "./views/conexiones";
+import {
+  renderConexiones,
+  renderConnectModal,
+  renderConexionesGrid,
+  connectChannel,
+  disconnectChannel,
+} from "./views/conexiones";
 import { renderCampanas } from "./views/campanas";
 import { sendCampaign, createHandoffTemplate, contentApprovalStatus } from "../campaigns";
 import { Db } from "../db/client";
@@ -64,12 +69,17 @@ import {
   exchangeCode,
   refreshSession,
   verifyAccessToken,
+  listMemberships,
+  switchActiveOrganization,
   SESSION_COOKIE,
   VERIFIER_COOKIE,
   type KontroliaSession,
 } from "./kontroliaAuth";
+import { resolveAdminTenant, BOT_COOKIE, NoBotsInOrganizationError, type AdminBindings } from "./tenantContext";
+import type { KontroliaTokenClaims } from "@kontrolia/shared";
+import { renderCreateBotPage } from "./views/onboarding";
 
-export const adminApp = new Hono<{ Bindings: Env }>();
+export const adminApp = new Hono<AdminBindings>();
 
 // Rutas del propio login: NUNCA detrás del guard (si lo estuvieran, entrar a
 // /admin/login exigiría ya estar logueado — un candado cerrado con la llave
@@ -81,6 +91,21 @@ export const adminApp = new Hono<{ Bindings: Env }>();
 const AUTH_EXEMPT_SUFFIXES = ["/login", "/oauth/callback", "/logout"];
 function isAuthExempt(path: string): boolean {
   return AUTH_EXEMPT_SUFFIXES.some((s) => path.endsWith(s));
+}
+
+// Necesitan sesión de KontrolIA (por eso NO están en AUTH_EXEMPT) pero NO
+// necesitan que ya exista un bot resuelto — son justo la salida de una
+// organización sin bots. Si no se eximen aquí, una organización sin bots
+// nunca puede cambiarse a otra: setTenantContext() lanzaría antes de llegar
+// siquiera a la ruta que resuelve el problema.
+//
+// /projects NO va aquí a propósito: si la organización SÍ tiene bots, /projects
+// necesita el botId resuelto normal (para "current"); solo cuando la
+// organización está vacía se salta el redirect (ver el catch de abajo) — si no,
+// /projects también tenía botId=undefined SIEMPRE, rompiendo el caso normal.
+const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots"];
+function isTenantExempt(path: string): boolean {
+  return TENANT_EXEMPT_SUFFIXES.some((s) => path.endsWith(s));
 }
 
 function redirectUri(env: Env): string {
@@ -98,16 +123,18 @@ function redirectUri(env: Env): string {
  *      - sin configurar → cae al Basic Auth de siempre (challenge del navegador),
  *        cero cambio de comportamiento para quien no activó esto.
  */
-type HonoContext = Context<{ Bindings: Env }>;
+type HonoContext = Context<AdminBindings>;
 
 type GuardResult =
-  | { kind: "pass" } // ya autenticado (KontrolIA o DASHBOARD_PUBLIC) — seguir sin más checks
+  // ya autenticado con KontrolIA — claims.organization_id manda cuál bot ve
+  | { kind: "pass"; claims: KontroliaTokenClaims }
+  | { kind: "pass-public" } // DASHBOARD_PUBLIC=1 — sin sesión, sin organización
   | { kind: "check-basic" } // sin sesión de KontrolIA — que decida el Basic Auth clásico
   | { kind: "redirect"; to: string };
 
 async function guardAdmin(c: HonoContext): Promise<GuardResult> {
   const env = c.env;
-  if (env.DASHBOARD_PUBLIC === "1") return { kind: "pass" };
+  if (env.DASHBOARD_PUBLIC === "1") return { kind: "pass-public" };
 
   // Salida de emergencia: ?basic=1 fuerza el prompt clásico del navegador
   // aunque KontrolIA Auth esté configurado — por si el login nuevo falla o
@@ -132,7 +159,10 @@ async function guardAdmin(c: HonoContext): Promise<GuardResult> {
           });
         }
       }
-      if (accessToken && (await verifyAccessToken(cfg, accessToken))) return { kind: "pass" };
+      if (accessToken) {
+        const verified = await verifyAccessToken(cfg, accessToken);
+        if (verified) return { kind: "pass", claims: verified.claims };
+      }
     }
   }
 
@@ -146,12 +176,56 @@ async function guardAdmin(c: HonoContext): Promise<GuardResult> {
   return { kind: "check-basic" }; // sin KontrolIA configurado: Basic Auth clásico, cero cambio
 }
 
+/** Resuelve y guarda en el contexto el bot/organización de este request — una sola vez, aquí. */
+async function setTenantContext(c: HonoContext, organizationId: string | null): Promise<void> {
+  const db = new Db(c.env.DB);
+  const tenant = await resolveAdminTenant(c, db, organizationId);
+  c.set("botId", tenant.botId);
+  c.set("kontroliaOrgId", tenant.organizationId);
+}
+
 adminApp.use("*", async (c, next) => {
   if (isAuthExempt(c.req.path)) return next();
   const result = await guardAdmin(c);
-  if (result.kind === "pass") return next();
   if (result.kind === "redirect") return c.redirect(result.to, 302);
-  return adminAuth(c.env)(c, next);
+  if (result.kind === "check-basic") {
+    return adminAuth(c.env)(c, async () => {
+      await setTenantContext(c, null);
+      await next();
+    });
+  }
+  if (result.kind === "pass") {
+    c.set("kontroliaClaims", result.claims);
+    if (isTenantExempt(c.req.path)) {
+      // switch-org/switch-bot: no necesitan botId resuelto (de eso se trata
+      // la ruta), pero switch-bot SÍ necesita saber la organización activa
+      // para validar que el bot elegido le pertenece.
+      c.set("kontroliaOrgId", result.claims.organization_id);
+      return next();
+    }
+    try {
+      await setTenantContext(c, result.claims.organization_id);
+    } catch (e) {
+      if (e instanceof NoBotsInOrganizationError) {
+        // /projects es lo que el header hace fetch() para armar el selector —
+        // si esto rebotara a /bots/new (HTML, no JSON), el script fallaría en
+        // silencio y el selector desaparecería justo cuando más se necesita:
+        // una organización vacía atrapada sin forma de cambiarse a otra (bug
+        // real, encontrado en vivo). botId queda sin resolver — BotsRepo lo
+        // tolera (ver getById) y el bot activo simplemente no existe todavía.
+        if (c.req.path.endsWith("/projects")) {
+          c.set("kontroliaOrgId", result.claims.organization_id);
+          return next();
+        }
+        return c.redirect("/admin/bots/new", 302);
+      }
+      throw e;
+    }
+    return next();
+  }
+  // pass-public (DASHBOARD_PUBLIC=1): sin sesión, mismo fallback que Basic Auth.
+  await setTenantContext(c, null);
+  return next();
 });
 
 // --- Login con KontrolIA Auth (F5) ------------------------------------------
@@ -205,10 +279,9 @@ adminApp.post("/logout", (c) => {
   return c.redirect("/admin/login", 302);
 });
 
-/** Settings del bot resuelto (transicional F2.1/F2.2 hasta la sesión de F5). */
-async function settingsFor(env: Env): Promise<SettingsRepo> {
-  const db = new Db(env.DB);
-  return new SettingsRepo(db, await resolveBotId(db));
+/** Settings del bot de este request (ver setTenantContext). */
+async function settingsFor(c: HonoContext): Promise<SettingsRepo> {
+  return new SettingsRepo(new Db(c.env.DB), c.get("botId"));
 }
 
 // Gate de tier: el panel free ve el nav Pro bloqueado; si aun así navega a una
@@ -222,8 +295,11 @@ const PRO_GATE: Array<[string, string]> = [
   ["/admin/campanas", "Campañas"],
 ];
 adminApp.use("*", async (c, next) => {
+  // botId no existe todavía en /login, /oauth/callback, ni en switch-org/switch-bot
+  // (que corren precisamente ANTES de que haya un bot resuelto — ver arriba).
+  if (isAuthExempt(c.req.path) || isTenantExempt(c.req.path)) return next();
   const gateDb = new Db(c.env.DB);
-  const gateBot = await new BotsRepo(gateDb).getById(await resolveBotId(gateDb));
+  const gateBot = await new BotsRepo(gateDb).getById(c.get("botId"));
   if (isProTier(gateBot?.tier)) return next();
   const path = c.req.path;
   const hit = PRO_GATE.find(([pre]) => path === pre || path.startsWith(pre + "/"));
@@ -237,20 +313,200 @@ adminApp.get("/upgrade", (c) => c.html(renderUpgrade()));
 // Root → default tab.
 adminApp.get("/", (c) => c.redirect("/admin/overview"));
 
-// Selector de proyectos (header): instancia actual + hermanas de PEER_BOTS.
+/** "María Contreras" → "MC"; sin nombre, primeras 2 letras del correo. */
+function initialsFor(claims: KontroliaTokenClaims): string {
+  const name = claims.user_metadata?.full_name?.trim();
+  if (name) {
+    const parts = name.split(/\s+/).filter(Boolean);
+    return parts.slice(0, 2).map((p) => p[0]!.toUpperCase()).join("") || "?";
+  }
+  return (claims.email ?? "??").slice(0, 2).toUpperCase();
+}
+
+/** "Grupo Ferma" → "GF"; una sola palabra → sus dos primeras letras. */
+function orgInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0]! + parts[1][0]!).toUpperCase();
+  return name.trim().slice(0, 2).toUpperCase() || "?";
+}
+
+// Selector del header (F5): organización + bot activos, y a qué puede
+// cambiarse quien entró — solo con sesión de KontrolIA (con Basic Auth no
+// hay "quién" del que colgar memberships). Incluye PEER_BOTS por compatibilidad
+// con instalaciones que aún usan el switcher viejo entre despliegues.
+//
+// Trae los bots de TODAS las organizaciones del usuario (no solo la activa):
+// el panel de dos columnas del selector cambia de columna derecha al elegir
+// una organización SIN otro viaje al servidor — son pocas organizaciones por
+// usuario, así que el costo de traerlas todas de una vez es bajo.
 adminApp.get("/projects", async (c) => {
-  const projectsDb = new Db(c.env.DB);
-  const bot = await new BotsRepo(projectsDb).getById(await resolveBotId(projectsDb));
-  return c.json({ current: bot?.name ?? c.env.BOT_NAME ?? "Mi bot", peers: parsePeerBots(c.env) });
+  const db = new Db(c.env.DB);
+  const botId = c.get("botId");
+  const bot = await new BotsRepo(db).getById(botId);
+  const base = { current: bot?.name ?? c.env.BOT_NAME ?? "Mi bot", peers: parsePeerBots(c.env) };
+
+  const cfg = kontroliaConfig(c.env);
+  const claims = c.get("kontroliaClaims");
+  const raw = getCookie(c, SESSION_COOKIE);
+  if (!cfg || !claims || !raw) return c.json(base);
+
+  const session = JSON.parse(raw) as KontroliaSession;
+  const memberships = await listMemberships(cfg, session.accessToken);
+  const orgId = c.get("kontroliaOrgId");
+  const botsRepo = new BotsRepo(db);
+
+  // De-dup: KontrolIA a veces trae más de una fila de membership a la misma
+  // organización (visto en producción) — sin esto el selector la repetía.
+  const orgsById = new Map(memberships.map((m) => [m.organizationId, m]));
+  const withBots = await Promise.all(
+    Array.from(orgsById.values()).map(async (m) => ({
+      m,
+      bots: await botsRepo.listByOrganization(m.organizationId),
+    })),
+  );
+
+  return c.json({
+    ...base,
+    tenant: {
+      user: { initials: initialsFor(claims), label: claims.email ?? claims.user_metadata?.full_name ?? "" },
+      organizations: withBots.map(({ m, bots }) => ({
+        id: m.organizationId,
+        name: m.organization.name,
+        initials: orgInitials(m.organization.name),
+        current: m.organizationId === orgId,
+        bots: bots.map((b) => ({
+          id: b.id,
+          name: b.name,
+          paused: b.paused,
+          tier: b.tier,
+          current: b.id === botId,
+        })),
+      })),
+      loggedIn: true,
+    },
+  });
+});
+
+// Cambia la organización activa (kontrolia_auth.sessions_context) y refresca
+// la sesión para que el JWT traiga el organization_id nuevo — el bot que se
+// vea después lo decide setTenantContext() en el próximo request con ese JWT.
+adminApp.post("/switch-org", async (c) => {
+  const cfg = kontroliaConfig(c.env);
+  const claims = c.get("kontroliaClaims");
+  const raw = getCookie(c, SESSION_COOKIE);
+  if (!cfg || !claims || !raw) return c.text("Sin sesión de KontrolIA Auth.", 400);
+  const form = await c.req.formData();
+  const organizationId = String(form.get("organization_id") ?? "").trim();
+  if (!organizationId) return c.text("Falta organization_id.", 400);
+
+  const session = JSON.parse(raw) as KontroliaSession;
+  const ok = await switchActiveOrganization(cfg, session.accessToken, claims.sub, organizationId);
+  if (!ok) return c.text("No se pudo cambiar de organización.", 502);
+
+  const refreshed = await refreshSession(cfg, session.refreshToken);
+  if (refreshed) {
+    setCookie(c, SESSION_COOKIE, JSON.stringify(refreshed), {
+      httpOnly: true,
+      secure: true,
+      sameSite: "Lax",
+      maxAge: 60 * 60 * 24 * 30,
+    });
+  }
+  // El bot elegido pertenecía a la organización anterior — no tiene sentido
+  // en la nueva. setTenantContext() cae al primer bot de la organización nueva
+  // (o al alta si no tiene ninguno — ver NoBotsInOrganizationError arriba).
+  deleteCookie(c, BOT_COOKIE);
+  // "next" es opcional (el botón "+ Nuevo bot" del selector lo usa para
+  // aterrizar directo en /admin/bots/new tras cambiar de organización, en vez
+  // de volver a la página de donde vino) — solo se acepta una ruta interna
+  // del panel, nunca una URL externa (nada de open-redirect).
+  const next = form.get("next");
+  const target = typeof next === "string" && next.startsWith("/admin/") ? next : c.req.header("referer");
+  return c.redirect(target ?? "/admin/overview", 302);
+});
+
+// Cambia el bot activo (cookie nodia_current_bot). Si el selector combinado
+// del header también eligió una organización distinta a la activa (el flujo
+// "cambié de org Y elegí su bot" en un solo click), primero resuelve ESE
+// cambio con el mismo mecanismo que /switch-org — así el selector no tiene
+// que mandar dos POSTs ni el usuario ver una recarga intermedia.
+adminApp.post("/switch-bot", async (c) => {
+  const form = await c.req.formData();
+  const botId = String(form.get("bot_id") ?? "").trim();
+  const requestedOrgId = String(form.get("organization_id") ?? "").trim();
+  let orgId = c.get("kontroliaOrgId");
+
+  if (requestedOrgId && requestedOrgId !== orgId) {
+    const cfg = kontroliaConfig(c.env);
+    const claims = c.get("kontroliaClaims");
+    const raw = getCookie(c, SESSION_COOKIE);
+    if (!cfg || !claims || !raw) return c.text("Sin sesión de KontrolIA Auth.", 400);
+    const session = JSON.parse(raw) as KontroliaSession;
+    const ok = await switchActiveOrganization(cfg, session.accessToken, claims.sub, requestedOrgId);
+    if (!ok) return c.text("No se pudo cambiar de organización.", 502);
+    const refreshed = await refreshSession(cfg, session.refreshToken);
+    if (refreshed) {
+      setCookie(c, SESSION_COOKIE, JSON.stringify(refreshed), {
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+        maxAge: 60 * 60 * 24 * 30,
+      });
+    }
+    orgId = requestedOrgId;
+  }
+
+  if (!orgId) return c.text("Sin organización activa.", 400);
+  const db = new Db(c.env.DB);
+  const belongs = await new BotsRepo(db).listByOrganization(orgId);
+  if (!belongs.some((b) => b.id === botId)) {
+    return c.text("Ese bot no pertenece a la organización elegida.", 400);
+  }
+  setCookie(c, BOT_COOKIE, botId, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    maxAge: 60 * 60 * 24 * 365,
+  });
+  return c.redirect(c.req.header("referer") ?? "/admin/overview", 302);
+});
+
+// Alta del primer bot de una organización (F5): a dónde redirige el guard
+// cuando la organización activa no tiene ningún bot. También sirve para
+// crear un bot ADICIONAL — el selector del header enlaza aquí con "+ nuevo".
+adminApp.get("/bots/new", async (c) => {
+  const claims = c.get("kontroliaClaims");
+  if (!claims?.organization_id) return c.redirect("/admin/overview", 302);
+  return c.html(renderCreateBotPage({ error: c.req.query("err") || undefined }));
+});
+
+adminApp.post("/bots", async (c) => {
+  const orgId = c.get("kontroliaOrgId") ?? c.get("kontroliaClaims")?.organization_id;
+  if (!orgId) return c.text("Sin organización activa.", 400);
+  const form = await c.req.formData();
+  const name = String(form.get("name") ?? "").trim().slice(0, 100);
+  const businessName = String(form.get("business_name") ?? "").trim().slice(0, 100);
+  if (!name || !businessName) {
+    return c.redirect(`/admin/bots/new?err=${encodeURIComponent("Faltan el nombre del bot y del negocio.")}`, 302);
+  }
+  const db = new Db(c.env.DB);
+  const bot = await new BotsRepo(db).create(orgId, { name, businessName });
+  setCookie(c, BOT_COOKIE, bot.id, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    maxAge: 60 * 60 * 24 * 365,
+  });
+  return c.redirect("/admin/overview", 302);
 });
 
 // --- Read-only tabs ---------------------------------------------------------
 
-adminApp.get("/overview", async (c) => c.html(await renderOverview(c.env)));
+adminApp.get("/overview", async (c) => c.html(await renderOverview(c.env, c.get("botId"))));
 
-adminApp.get("/stats", async (c) => c.html(await renderStats(c.env)));
+adminApp.get("/stats", async (c) => c.html(await renderStats(c.env, c.get("botId"))));
 
-adminApp.get("/costs", async (c) => c.html(await renderCosts(c.env, c.req.query("saved") === "1")));
+adminApp.get("/costs", async (c) => c.html(await renderCosts(c.env, c.get("botId"), c.req.query("saved") === "1")));
 
 // Monthly AI budget (Costos tab). Empty value clears the cap.
 adminApp.post("/costs/budget", async (c) => {
@@ -258,7 +514,7 @@ adminApp.post("/costs/budget", async (c) => {
   const raw = String(form.get("monthly_budget") ?? "").trim();
   const n = Number.parseFloat(raw);
   const value = raw !== "" && Number.isFinite(n) && n > 0 ? String(n) : "";
-  await (await settingsFor(c.env)).set(SETTING_KEYS.monthlyBudget, value);
+  await (await settingsFor(c)).set(SETTING_KEYS.monthlyBudget, value);
   return c.redirect("/admin/costs?saved=1");
 });
 
@@ -266,7 +522,7 @@ adminApp.post("/costs/budget", async (c) => {
 
 adminApp.get("/kb", async (c) =>
   c.html(
-    await renderKbList(c.env, {
+    await renderKbList(c.env, c.get("botId"), {
       saved: c.req.query("saved") === "1",
       deleted: c.req.query("deleted") === "1",
       reindexed: c.req.query("reindexed") ?? undefined,
@@ -278,7 +534,7 @@ adminApp.get("/kb/new", (c) => c.html(renderKbEditor(null, c.env)));
 
 adminApp.get("/kb/:id/edit", async (c) => {
   const db = new Db(c.env.DB);
-  const doc = await new KbDocsRepo(db, await resolveBotId(db)).getById(c.req.param("id"));
+  const doc = await new KbDocsRepo(db, c.get("botId")).getById(c.req.param("id"));
   if (!doc) return c.redirect("/admin/kb");
   return c.html(renderKbEditor(doc, c.env));
 });
@@ -293,7 +549,7 @@ adminApp.post("/kb/save", async (c) => {
 
   const id = String(form.get("id") ?? "").trim() || crypto.randomUUID();
   const db = new Db(c.env.DB);
-  const repo = new KbDocsRepo(db, await resolveBotId(db));
+  const repo = new KbDocsRepo(db, c.get("botId"));
   await repo.upsert({ id, title, content });
   const doc = (await repo.getById(id))!;
   await indexDoc(c.env, doc);
@@ -303,7 +559,7 @@ adminApp.post("/kb/save", async (c) => {
 adminApp.post("/kb/:id/delete", async (c) => {
   const id = c.req.param("id");
   const db = new Db(c.env.DB);
-  await new KbDocsRepo(db, await resolveBotId(db)).delete(id);
+  await new KbDocsRepo(db, c.get("botId")).delete(id);
   await removeDocVectors(c.env, id);
   return c.redirect("/admin/kb?deleted=1");
 });
@@ -322,7 +578,7 @@ adminApp.post("/kb/reindex", async (c) => {
 adminApp.post("/handoff/template/setup", async (c) => {
   const r = await createHandoffTemplate(c.env);
   if ("error" in r) return c.json(r, 502);
-  await (await settingsFor(c.env)).set(SETTING_KEYS.twilioHandoffContentSid, r.sid);
+  await (await settingsFor(c)).set(SETTING_KEYS.twilioHandoffContentSid, r.sid);
   return c.json(r);
 });
 
@@ -330,7 +586,7 @@ adminApp.post("/handoff/template/setup", async (c) => {
 adminApp.get("/handoff/template/status", async (c) => {
   const sid =
     c.env.TWILIO_HANDOFF_CONTENT_SID ||
-    (await (await settingsFor(c.env)).get(SETTING_KEYS.twilioHandoffContentSid));
+    (await (await settingsFor(c)).get(SETTING_KEYS.twilioHandoffContentSid));
   if (!sid) return c.json({ error: "sin plantilla — corre el setup primero" }, 404);
   const r = await contentApprovalStatus(c.env, sid);
   return c.json({ sid, ...r });
@@ -340,7 +596,7 @@ adminApp.get("/handoff/template/status", async (c) => {
 
 adminApp.get("/mejoras", async (c) =>
   c.html(
-    await renderMejoras(c.env, {
+    await renderMejoras(c.env, c.get("botId"), {
       found: c.req.query("found") ?? undefined,
       applied: c.req.query("applied") === "1",
       dismissed: c.req.query("dismissed") === "1",
@@ -369,7 +625,7 @@ adminApp.post("/mejoras/:id/dismiss", async (c) => {
 adminApp.post("/mejoras/autonomy", async (c) => {
   const form = await c.req.formData();
   const level = String(form.get("level") ?? "manual") === "copilot" ? "copilot" : "manual";
-  await (await settingsFor(c.env)).set(SETTING_KEYS.autonomyLevel, level);
+  await (await settingsFor(c)).set(SETTING_KEYS.autonomyLevel, level);
   return c.redirect("/admin/mejoras");
 });
 
@@ -385,7 +641,7 @@ adminApp.post("/mejoras/lessons/remove", async (c) => {
 // Inbox (F1): two-pane view. ?c=<id> selects the thread; ?f/?q filter the list.
 adminApp.get("/conversations", async (c) =>
   c.html(
-    await renderInbox(c.env, {
+    await renderInbox(c.env, c.get("botId"), {
       search: c.req.query("q"),
       filter: c.req.query("f"),
       selectedId: c.req.query("c"),
@@ -397,7 +653,7 @@ adminApp.get("/conversations", async (c) =>
 // before /conversations/:id so the static segments win the match.
 adminApp.get("/conversations/list-fragment", async (c) =>
   c.html(
-    await renderInboxList(c.env, {
+    await renderInboxList(c.env, c.get("botId"), {
       search: c.req.query("q"),
       filter: c.req.query("f"),
       selectedId: c.req.query("c"),
@@ -406,7 +662,7 @@ adminApp.get("/conversations/list-fragment", async (c) =>
 );
 
 adminApp.get("/conversations/thread/:id", async (c) =>
-  c.html(await renderThreadLive(c.env, c.req.param("id"))),
+  c.html(await renderThreadLive(c.env, c.get("botId"), c.req.param("id"))),
 );
 
 // Old detail URLs (linked from Insights, notifications, etc.) → inbox selection.
@@ -428,7 +684,7 @@ adminApp.get("/insights", async (c) => {
   } catch {
     // no executionCtx (tests) — render without background catch-up
   }
-  return c.html(await renderInsights(c.env, c.req.query("analyzed") ?? undefined));
+  return c.html(await renderInsights(c.env, c.get("botId"), c.req.query("analyzed") ?? undefined));
 });
 
 // "Analizar ahora": grade up to 10 pending conversations inline, then redirect
@@ -440,12 +696,12 @@ adminApp.post("/insights/analyze", async (c) => {
 
 // "Mi Agente": n8n-style canvas of how the bot works. The canvas fragment is
 // polled by HTMX every 15s (live activity pulse); node panels load on click.
-adminApp.get("/agente", async (c) => c.html(await renderAgentePage(c.env)));
+adminApp.get("/agente", async (c) => c.html(await renderAgentePage(c.env, c.get("botId"))));
 
-adminApp.get("/agente/canvas", async (c) => c.html(await renderAgenteCanvas(c.env)));
+adminApp.get("/agente/canvas", async (c) => c.html(await renderAgenteCanvas(c.env, c.get("botId"))));
 
 adminApp.get("/agente/node/:id", async (c) =>
-  c.html(await renderNodeModal(c.env, c.req.param("id"))),
+  c.html(await renderNodeModal(c.env, c.get("botId"), c.req.param("id"))),
 );
 
 // Save a node's config from its modal. Writes the relevant settings (with
@@ -454,7 +710,7 @@ adminApp.get("/agente/node/:id", async (c) =>
 adminApp.post("/agente/node/:id/save", async (c) => {
   const id = c.req.param("id");
   const form = await c.req.formData();
-  const repo = await settingsFor(c.env);
+  const repo = await settingsFor(c);
 
   const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
   const num = (key: string): number | null => {
@@ -493,25 +749,57 @@ adminApp.post("/agente/node/:id/save", async (c) => {
   }
 
   c.header("HX-Trigger", "canvas-refresh");
-  return c.html((await renderNodeModal(c.env, id, true)) + toastOob("✓ Guardado"));
+  return c.html((await renderNodeModal(c.env, c.get("botId"), id, true)) + toastOob("✓ Guardado"));
 });
 
 // Toggle a tool on/off (settings.disabled_tools). Returns the refreshed modal;
 // the canvas badge updates via the canvas-refresh event.
 adminApp.post("/agente/tools/:name/toggle", async (c) => {
   const name = c.req.param("name");
-  const ok = await toggleTool(c.env, name);
+  const ok = await toggleTool(c.env, c.get("botId"), name);
   if (!ok) return c.text("Tool no encontrada", 404);
   c.header("HX-Trigger", "canvas-refresh");
-  return c.html((await renderNodeModal(c.env, `tool:${name}`, true)) + toastOob("✓ Guardado"));
+  return c.html((await renderNodeModal(c.env, c.get("botId"), `tool:${name}`, true)) + toastOob("✓ Guardado"));
 });
 
-adminApp.get("/leads", async (c) => c.html(await renderLeads(c.env)));
+adminApp.get("/leads", async (c) => c.html(await renderLeads(c.env, c.get("botId"))));
 
-adminApp.get("/tickets", async (c) => c.html(await renderTickets(c.env)));
+adminApp.get("/tickets", async (c) => c.html(await renderTickets(c.env, c.get("botId"))));
 
 // Conexiones: mapa de canales con estado verde/gris (paso 4 del onboarding).
-adminApp.get("/conexiones", (c) => c.html(renderConexiones(c.env)));
+adminApp.get("/conexiones", async (c) => c.html(await renderConexiones(c.env, c.get("botId"))));
+
+// Diálogo de conexión: instrucciones + formulario para pegar el token, sin
+// terminal (F5/F4: cada bot conecta sus propios canales desde el panel).
+adminApp.get("/conexiones/:channel/connect", (c) => {
+  const channel = c.req.param("channel");
+  if (channel !== "telegram" && channel !== "twilio" && channel !== "manychat") {
+    return c.text("Canal desconocido", 404);
+  }
+  return c.html(renderConnectModal(channel));
+});
+
+adminApp.post("/conexiones/:channel/connect", async (c) => {
+  const channel = c.req.param("channel");
+  if (channel !== "telegram" && channel !== "twilio" && channel !== "manychat") {
+    return c.text("Canal desconocido", 404);
+  }
+  const form = await c.req.formData();
+  const modalHtml = await connectChannel(c.env, c.get("botId"), channel, form);
+  // El modal de éxito viaja junto con un refresh OOB de la grilla de tarjetas
+  // de atrás — así se ve verde de inmediato, sin recargar la página.
+  const gridHtml = await renderConexionesGrid(c.env, c.get("botId"));
+  return c.html(modalHtml + gridHtml);
+});
+
+adminApp.post("/conexiones/:channel/disconnect", async (c) => {
+  const channel = c.req.param("channel");
+  if (channel !== "telegram" && channel !== "twilio" && channel !== "manychat") {
+    return c.text("Canal desconocido", 404);
+  }
+  await disconnectChannel(c.env, c.get("botId"), channel);
+  return c.redirect("/admin/conexiones", 302);
+});
 
 adminApp.get("/campanas", async (c) => {
   const q: Record<string, string | undefined> = {
@@ -523,7 +811,7 @@ adminApp.get("/campanas", async (c) => {
     quota: c.req.query("quota"),
     fail: c.req.query("fail"),
   };
-  return c.html(await renderCampanas(c.env, q));
+  return c.html(await renderCampanas(c.env, c.get("botId"), q));
 });
 
 adminApp.post("/campanas/send", async (c) => {
@@ -571,7 +859,7 @@ adminApp.post("/campanas/send", async (c) => {
 
 adminApp.get("/config", async (c) => {
   const configDb = new Db(c.env.DB);
-  const configBotId = await resolveBotId(configDb);
+  const configBotId = c.get("botId");
   const settings = await new SettingsRepo(configDb, configBotId).all();
   const bot = await new BotsRepo(configDb).getById(configBotId);
   const saved = c.req.query("saved") === "1";
@@ -590,7 +878,7 @@ adminApp.get("/config", async (c) => {
 // resuelto (settings > env). Redirige de vuelta con el resultado en la query.
 adminApp.get("/config/llm-test", async (c) => {
   try {
-    const ov = await loadLlmOverrides(c.env);
+    const ov = await loadLlmOverrides(c.env, c.get("botId"));
     const { model, modelId, provider } = createModel(c.env, "fast", ov);
     const r = await generateText({
       model,
@@ -612,7 +900,7 @@ adminApp.get("/config/llm-test", async (c) => {
 // fields are stored verbatim (trimmed). Empty/absent => default at load time.
 adminApp.post("/config", async (c) => {
   const form = await c.req.formData();
-  const repo = await settingsFor(c.env);
+  const repo = await settingsFor(c);
 
   // Card-based controls: tone, buffer_seconds, max_chunks, model_override, bot_paused.
   for (const key of Object.keys(CONTROLS)) {
@@ -665,7 +953,7 @@ adminApp.post("/config", async (c) => {
 // --- CSV export -------------------------------------------------------------
 
 adminApp.get("/leads/export.csv", async (c) => {
-  const csv = await exportLeadsCsv(c.env);
+  const csv = await exportLeadsCsv(c.env, c.get("botId"));
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
@@ -686,7 +974,7 @@ adminApp.post("/leads/:id/status", async (c) => {
     ? (raw as Lead["status"])
     : "new";
   const db = new Db(c.env.DB);
-  const leads = new LeadsRepo(db, await resolveBotId(db));
+  const leads = new LeadsRepo(db, c.get("botId"));
   await leads.setStatus(c.req.param("id"), status);
   return c.redirect("/admin/leads");
 });
@@ -696,7 +984,7 @@ adminApp.post("/tickets/:id/resolve", async (c) => {
   const form = await c.req.formData();
   const resolvedBy = String(form.get("resolved_by") ?? c.env.OWNER_EMAIL ?? "admin").trim() || "admin";
   const db = new Db(c.env.DB);
-  const tickets = new TicketsRepo(db, await resolveBotId(db));
+  const tickets = new TicketsRepo(db, c.get("botId"));
   await tickets.resolve(c.req.param("id"), resolvedBy);
   return c.redirect("/admin/tickets");
 });
@@ -721,7 +1009,7 @@ adminApp.post("/conversations/:id/reply", async (c) => {
   // Transicional (F2.1): el panel todavía no tiene sesión de KontrolIA Auth
   // con bot resuelto (eso llega en F5) — hasta entonces sigue siendo un solo
   // bot por despliegue.
-  const botId = await resolveBotId(db);
+  const botId = c.get("botId");
   const convs = new ConversationsRepo(db, botId);
   const conv = await convs.getById(id);
   if (!conv) return c.html(`<span class="text-red-600">✗ Conversación no encontrada.</span>`);
@@ -751,7 +1039,7 @@ adminApp.post("/conversations/:id/reply", async (c) => {
   c.header("X-Sent", "1");
   return c.html(
     `<span class="text-emerald-600">✓ Enviado por ${escapeHtml(channelLabel(conv.channel))}</span>` +
-      `<div id="thread-live" hx-swap-oob="innerHTML">${await renderThreadLive(c.env, id)}</div>`,
+      `<div id="thread-live" hx-swap-oob="innerHTML">${await renderThreadLive(c.env, c.get("botId"), id)}</div>`,
   );
 });
 
@@ -760,9 +1048,9 @@ adminApp.post("/conversations/:id/reply", async (c) => {
 adminApp.post("/conversations/:id/pause", async (c) => {
   const id = c.req.param("id");
   const db = new Db(c.env.DB);
-  const convs = new ConversationsRepo(db, await resolveBotId(db));
+  const convs = new ConversationsRepo(db, c.get("botId"));
   await convs.setPausedUntil(id, Date.now() + TAKEOVER_MS);
-  return c.html(await renderThreadLive(c.env, id));
+  return c.html(await renderThreadLive(c.env, c.get("botId"), id));
 });
 
 // Return a paused conversation back to the bot. Clears paused_until AND appends
@@ -771,7 +1059,7 @@ adminApp.post("/conversations/:id/pause", async (c) => {
 adminApp.post("/conversations/:id/resume", async (c) => {
   const id = c.req.param("id");
   const db = new Db(c.env.DB);
-  const botId = await resolveBotId(db);
+  const botId = c.get("botId");
   const convs = new ConversationsRepo(db, botId);
   await convs.setPausedUntil(id, null);
   // Insert a system-style owner note summarizing the human handoff so the bot
@@ -806,10 +1094,10 @@ function escapeHtml(s: string): string {
 // is no per-route auth check here (no magic-link `requireAuth`).
 adminApp.post("/conversations/:id/suggest", async (c) => {
   const suggestDb = new Db(c.env.DB);
-  const suggestBotId = await resolveBotId(suggestDb);
+  const suggestBotId = c.get("botId");
   const msgs = new MessagesRepo(suggestDb, suggestBotId);
   const history = await msgs.lastN(c.req.param("id"), 20);
-  const { model } = createModel(c.env, "fast", await loadLlmOverrides(c.env));
+  const { model } = createModel(c.env, "fast", await loadLlmOverrides(c.env, suggestBotId));
   const aiMessages = history.map((m) => ({
     role: (m.role === "tool" ? "user" : m.role === "owner" ? "assistant" : m.role) as
       | "user"

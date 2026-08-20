@@ -17,6 +17,28 @@ interface TgUpdate {
   };
 }
 
+/**
+ * Registra el webhook de este bot en Telegram — así conectar un canal desde
+ * el panel es solo "pega el token": no hace falta que el dueño llame a la
+ * API de Telegram a mano. Idempotente: volver a llamarla con la misma URL
+ * no hace daño (Telegram simplemente la vuelve a guardar).
+ */
+export async function setTelegramWebhook(
+  token: string,
+  url: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`${TG_API}${token}/setWebhook`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  const json: any = await res.json().catch(() => null);
+  if (!res.ok || !json?.ok) {
+    return { ok: false, error: json?.description ?? `HTTP ${res.status}` };
+  }
+  return { ok: true };
+}
+
 export async function resolveTelegramFileUrl(
   fileId: string,
   token: string,

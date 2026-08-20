@@ -366,7 +366,12 @@ export function layout(opts: {
           </div>
           <h1 style="font-family:'Plus Jakarta Sans';font-weight:800;font-size:22px;margin:2px 0 0;letter-spacing:-.02em">${item.label}</h1>
         </div>
-        <div id="proj-switcher" style="margin-left:auto"></div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
+          <div id="ctx-switcher" style="position:relative"></div>
+          <div id="proj-switcher"></div>
+          <div id="account-divider" style="display:none;width:1px;height:28px;background:var(--line)"></div>
+          <div id="account-switcher" style="position:relative"></div>
+        </div>
         <div class="live-pill">
           <span style="width:8px;height:8px;border-radius:50%;background:var(--ok);animation:pulse 1.8s ease-in-out infinite,ring 2s infinite"></span>
           <span style="font-size:11.5px;font-weight:700">Bot en línea</span>
@@ -377,21 +382,210 @@ export function layout(opts: {
   </div>
   <div id="modal-root"></div>
   <script>
-  // Selector de proyectos: si esta instancia declara PEER_BOTS, el header
-  // muestra un dropdown para brincar entre bots (cada uno con su panel).
-  fetch('/admin/projects').then(function(r){ return r.ok ? r.json() : null }).then(function(d){
-    if (!d || !d.peers || d.peers.length === 0) return;
-    var el = document.getElementById('proj-switcher');
-    if (!el) return;
-    var opts = '<option selected>' + d.current.replace(/</g,'&lt;') + '</option>';
-    d.peers.forEach(function(p){
-      opts += '<option value="' + p.url.replace(/"/g,'&quot;') + '">' + p.name.replace(/</g,'&lt;') + '</option>';
-    });
-    el.innerHTML = '<select onchange="if(this.value.indexOf(\'http\')===0)window.location=this.value" ' +
-      'style="background:var(--panel);color:var(--cream);border:1px solid var(--line);border-radius:10px;' +
-      'padding:6px 10px;font-size:12px;cursor:pointer;box-shadow:var(--shadow-sm)" ' +
-      'title="Cambiar de proyecto">' + opts + '</select>';
-  }).catch(function(){});
+  // Selector de organización/bot (F5) — patrón "un solo botón": un trigger
+  // combinado abre un panel de dos columnas (organizaciones | bots de la
+  // seleccionada). Cambiar de columna izquierda es solo estado local (todas
+  // las organizaciones ya llegaron con sus bots en el mismo fetch); el
+  // cambio real solo se manda al servidor al elegir un bot — un solo POST
+  // que resuelve organización y bot juntos si hace falta (ver /switch-bot).
+  //
+  // PEER_BOTS (saltar entre DESPLIEGUES distintos) sigue aparte — es un
+  // concepto distinto, para instalaciones sin KontrolIA Auth todavía.
+  (function () {
+    var esc = function (s) { return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    }); };
+
+    function dot(paused, ring) {
+      return 'width:7px;height:7px;border-radius:50%;flex:none;display:inline-block;background:' +
+        (paused ? 'var(--dim)' : 'var(--ok)') + (ring ? ';box-shadow:0 0 0 3px var(--accent-soft)' : '');
+    }
+    function rowStyle(active) {
+      return 'display:flex;align-items:center;gap:10px;width:100%;padding:7px 8px;border:0;border-radius:9px;' +
+        'cursor:pointer;font-family:inherit;text-align:left;background:' + (active ? 'var(--accent-soft)' : 'transparent');
+    }
+
+    fetch('/admin/projects').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      if (!d) return;
+
+      if (d.tenant && d.tenant.organizations.length) {
+        var t = d.tenant;
+        var wrap = document.getElementById('ctx-switcher');
+        if (wrap) {
+          var activeOrg = t.organizations.filter(function (o) { return o.current; })[0] || t.organizations[0];
+          var activeBot = activeOrg.bots.filter(function (b) { return b.current; })[0] || activeOrg.bots[0] || null;
+          var state = { open: false, previewOrgId: activeOrg.id, q: '' };
+
+          function orgById(id) { return t.organizations.filter(function (o) { return o.id === id; })[0]; }
+
+          function panelHtml() {
+            var previewOrg = orgById(state.previewOrgId) || activeOrg;
+            var q = state.q.toLowerCase();
+            var orgRows = t.organizations
+              .filter(function (o) { return o.name.toLowerCase().indexOf(q) !== -1; })
+              .map(function (o) {
+                return '<button type="button" class="ctx-org-row" data-org="' + o.id + '" style="' + rowStyle(o.id === state.previewOrgId) + '">' +
+                  '<span style="width:24px;height:24px;border-radius:7px;background:var(--panel2);color:var(--muted);font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none">' + esc(o.initials) + '</span>' +
+                  '<span style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.25;flex:1;min-width:0">' +
+                    '<span style="font-size:13px;font-weight:500;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:136px">' + esc(o.name) + '</span>' +
+                    '<span style="font-size:10.5px;color:var(--dim);font-family:\\'JetBrains Mono\\'">' + o.bots.length + (o.bots.length === 1 ? ' bot' : ' bots') + '</span>' +
+                  '</span>' +
+                  (o.current ? '<span style="font-size:11px;color:var(--accent-2)">●</span>' : '') +
+                '</button>';
+              }).join('') || '<div style="padding:14px 8px;font-size:12px;color:var(--dim)">Sin resultados.</div>';
+
+            var botRows = previewOrg.bots.map(function (b) {
+              var isCurrent = previewOrg.id === activeOrg.id && activeBot && b.id === activeBot.id;
+              var tag = isCurrent ? 'activo' : (b.paused ? 'pausado' : 'en línea');
+              return '<button type="button" class="ctx-bot-row" data-bot="' + b.id + '" data-org="' + previewOrg.id + '" style="' + rowStyle(isCurrent) + '">' +
+                '<span style="' + dot(b.paused, isCurrent) + '"></span>' +
+                '<span style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.25;flex:1">' +
+                  '<span style="font-size:13px;font-weight:500;color:var(--cream)">' + esc(b.name) + '</span>' +
+                '</span>' +
+                '<span style="font-family:\\'JetBrains Mono\\';font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:' + (isCurrent ? 'var(--accent-2)' : 'var(--dim)') + '">' + tag + '</span>' +
+              '</button>';
+            }).join('') || '<div style="padding:14px 8px;font-size:12px;color:var(--dim)">Sin bots todavía.</div>';
+
+            return '<div style="position:absolute;top:calc(100% + 8px);right:0;width:520px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-lg);overflow:hidden;z-index:40">' +
+              '<div style="display:grid;grid-template-columns:1fr 1.2fr">' +
+                '<div style="border-right:1px solid var(--line);display:flex;flex-direction:column">' +
+                  '<div style="padding:12px 12px 9px">' +
+                    '<div style="font-family:\\'JetBrains Mono\\';font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);padding-bottom:8px">Organización</div>' +
+                    '<input id="ctx-search" value="' + esc(state.q) + '" placeholder="Buscar organización…" style="width:100%;background:var(--bg);border:1px solid var(--line);color:var(--cream);border-radius:9px;padding:7px 10px;font-size:12.5px;font-family:inherit;outline:none" />' +
+                  '</div>' +
+                  '<div style="padding:0 8px 8px;display:flex;flex-direction:column;gap:2px;max-height:250px;overflow:auto">' + orgRows + '</div>' +
+                '</div>' +
+                '<div style="display:flex;flex-direction:column">' +
+                  '<div style="padding:12px 12px 9px;font-family:\\'JetBrains Mono\\';font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)">Bots de ' + esc(previewOrg.name) + '</div>' +
+                  '<div style="padding:0 8px;display:flex;flex-direction:column;gap:2px;flex:1;max-height:250px;overflow:auto">' + botRows + '</div>' +
+                  '<div style="border-top:1px solid var(--line);padding:9px">' +
+                    '<button type="button" class="ctx-new-bot" data-org="' + previewOrg.id + '" style="width:100%;text-align:center;background:var(--cream);color:var(--accent);border:0;border-radius:9px;padding:8px 11px;font-size:12px;font-weight:600;font-family:inherit;cursor:pointer">+ Nuevo bot' + (previewOrg.id === activeOrg.id ? '' : (' en ' + esc(previewOrg.name))) + '</button>' +
+                  '</div>' +
+                '</div>' +
+              '</div>' +
+            '</div>';
+          }
+
+          function renderTrigger() {
+            return '<button type="button" id="ctx-trigger" style="display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:6px 10px 6px 6px;cursor:pointer;font-family:inherit;box-shadow:var(--shadow-sm)">' +
+              '<span style="width:30px;height:30px;border-radius:8px;background:var(--sb-bg);color:var(--accent);font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none">' + esc(activeOrg.initials) + '</span>' +
+              '<span style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2">' +
+                '<span style="font-family:\\'JetBrains Mono\\';font-size:9.5px;letter-spacing:.13em;color:var(--dim);text-transform:uppercase">' + esc(activeOrg.name) + '</span>' +
+                '<span style="font-size:13.5px;font-weight:600;color:var(--cream);display:flex;align-items:center;gap:6px">' +
+                  '<span style="' + dot(activeBot ? activeBot.paused : false, false) + '"></span>' + esc(activeBot ? activeBot.name : 'sin bot') +
+                '</span>' +
+              '</span>' +
+              '<span style="font-size:11px;color:var(--muted);padding-left:2px">▾</span>' +
+            '</button>' +
+            '<div id="ctx-panel"></div>';
+          }
+
+          function rerenderPanel() {
+            var panelEl = document.getElementById('ctx-panel');
+            if (panelEl) panelEl.innerHTML = state.open ? panelHtml() : '';
+            if (state.open) {
+              var search = document.getElementById('ctx-search');
+              if (search) { search.focus(); search.setSelectionRange(state.q.length, state.q.length); }
+              wrap.querySelectorAll('.ctx-org-row').forEach(function (btn) {
+                btn.addEventListener('click', function () { state.previewOrgId = btn.getAttribute('data-org'); rerenderPanel(); });
+              });
+              wrap.querySelectorAll('.ctx-bot-row').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                  submitForm('/admin/switch-bot', { organization_id: btn.getAttribute('data-org'), bot_id: btn.getAttribute('data-bot') });
+                });
+              });
+              var newBotBtn = wrap.querySelector('.ctx-new-bot');
+              if (newBotBtn) newBotBtn.addEventListener('click', function () {
+                var targetOrg = newBotBtn.getAttribute('data-org');
+                if (targetOrg === activeOrg.id) { window.location.href = '/admin/bots/new'; return; }
+                // La organización previsualizada no es la activa — primero hay que
+                // cambiarse a ella (mismo mecanismo que elegir un bot), y de ahí
+                // aterrizar en el alta en vez de donde estuviéramos antes.
+                submitForm('/admin/switch-org', { organization_id: targetOrg, next: '/admin/bots/new' });
+              });
+              search.addEventListener('input', function (e) { state.q = e.target.value; rerenderPanel(); });
+            }
+          }
+
+          function submitForm(action, fields) {
+            var form = document.createElement('form');
+            form.method = 'POST';
+            form.action = action;
+            Object.keys(fields).forEach(function (name) {
+              var input = document.createElement('input');
+              input.name = name;
+              input.value = fields[name];
+              form.appendChild(input);
+            });
+            document.body.appendChild(form);
+            form.submit();
+          }
+
+          wrap.innerHTML = renderTrigger();
+          wrap.querySelector('#ctx-trigger').addEventListener('click', function (e) {
+            e.stopPropagation();
+            state.open = !state.open;
+            if (state.open) { state.previewOrgId = activeOrg.id; state.q = ''; }
+            rerenderPanel();
+          });
+          // composedPath(), no e.target.closest(): un click en una fila de
+          // organización reconstruye el panel (innerHTML) MIENTRAS el evento
+          // todavía sube hacia document — closest() en ese momento ya no
+          // encuentra nada porque el nodo original quedó desconectado del
+          // árbol a media subida. composedPath() captura la ruta al
+          // DESPACHAR el evento, así que no le afecta.
+          document.addEventListener('click', function (e) {
+            var path = e.composedPath ? e.composedPath() : [];
+            if (state.open && path.indexOf(wrap) === -1) { state.open = false; rerenderPanel(); }
+          });
+        }
+
+        // Menú de cuenta: separado del switcher — ahí vive "Cerrar sesión",
+        // que antes competía visualmente con el selector de organización.
+        if (t.loggedIn && t.user) {
+          var accWrap = document.getElementById('account-switcher');
+          if (accWrap) {
+            var accDivider = document.getElementById('account-divider');
+            if (accDivider) accDivider.style.display = 'block';
+            var accOpen = false;
+            function accHtml() {
+              return '<button type="button" id="account-trigger" style="display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:6px 8px;cursor:pointer;font-family:inherit">' +
+                '<span style="width:24px;height:24px;border-radius:50%;background:var(--panel2);color:var(--muted);font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">' + esc(t.user.initials) + '</span>' +
+                '<span style="font-size:11px;color:var(--muted)">▾</span>' +
+              '</button><div id="account-panel"></div>';
+            }
+            function accPanelHtml() {
+              if (!accOpen) return '';
+              return '<div style="position:absolute;top:calc(100% + 8px);right:0;min-width:180px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);box-shadow:var(--shadow-lg);padding:6px;z-index:40">' +
+                (t.user.label ? '<div style="padding:6px 10px 8px;font-size:11px;color:var(--dim);border-bottom:1px solid var(--line);margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px">' + esc(t.user.label) + '</div>' : '') +
+                '<form method="POST" action="/admin/logout"><button type="submit" style="width:100%;text-align:left;background:none;border:0;padding:7px 10px;font-size:12.5px;color:var(--cream);cursor:pointer;border-radius:7px;font-family:inherit">Cerrar sesión</button></form>' +
+              '</div>';
+            }
+            accWrap.innerHTML = accHtml();
+            accWrap.querySelector('#account-trigger').addEventListener('click', function (e) {
+              e.stopPropagation();
+              accOpen = !accOpen;
+              document.getElementById('account-panel').innerHTML = accPanelHtml();
+            });
+            document.addEventListener('click', function (e) {
+              var path = e.composedPath ? e.composedPath() : [];
+              if (accOpen && path.indexOf(accWrap) === -1) { accOpen = false; document.getElementById('account-panel').innerHTML = ''; }
+            });
+          }
+        }
+      }
+
+      if (!d.peers || d.peers.length === 0) return;
+      var el = document.getElementById('proj-switcher');
+      if (!el) return;
+      var opts = '<option selected>' + esc(d.current) + '</option>';
+      d.peers.forEach(function (p) {
+        opts += '<option value="' + p.url.replace(/"/g, '&quot;') + '">' + esc(p.name) + '</option>';
+      });
+      el.innerHTML = '<select onchange="if(this.value.indexOf(\\'http\\')===0)window.location=this.value" ' +
+        'style="background:var(--panel);color:var(--cream);border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:12px;cursor:pointer;box-shadow:var(--shadow-sm)" title="Cambiar de proyecto">' + opts + '</select>';
+    }).catch(function () {});
+  })();
   </script>
   <div id="toast-root" style="position:fixed;bottom:1rem;right:1rem;z-index:60"></div>
   ${GLOBAL_SCRIPT}

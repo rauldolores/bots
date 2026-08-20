@@ -10,7 +10,6 @@ import { costOfUsage, type ModelId } from "../../pricing";
 import { fetchTwilioUsage } from "../twilioUsage";
 import { monthIaCostUsd } from "../../budget";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
-import { resolveBotId } from "../../tenant";
 
 const money = (n: number) => `$${n.toFixed(2)}`;
 const money4 = (n: number) => `$${n.toFixed(n < 0.1 ? 4 : 2)}`;
@@ -22,9 +21,8 @@ function esc(s: string): string {
   );
 }
 
-export async function renderCosts(env: Env, saved = false): Promise<string> {
+export async function renderCosts(env: Env, botId: string, saved = false): Promise<string> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
   const thirtyDays = Date.now() - 30 * 86_400_000;
   const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
 

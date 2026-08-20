@@ -41,12 +41,20 @@ export function llmOverridesFrom(settings: Record<string, string>): LlmOverrides
   };
 }
 
-/** Load just the BYO-LLM overrides (para analyzer/flywheel/admin, fuera del agente).
- *  Nunca truena: si settings no está disponible, se usan los defaults del env. */
-export async function loadLlmOverrides(env: Env): Promise<LlmOverrides> {
+/**
+ * Load just the BYO-LLM overrides (para analyzer/flywheel/admin, fuera del agente).
+ * Nunca truena: si settings no está disponible, se usan los defaults del env.
+ *
+ * botId: opcional. Los crons/el turno del agente siguen sin pasarlo (todavía
+ * asumen un solo bot por despliegue — fuera de alcance de F5, documentado en
+ * docs/multitenancy.md). El panel SÍ lo pasa (su bot ya está resuelto por
+ * request, ver setTenantContext en admin/routes.ts) — sin esto, con 2+ bots
+ * en la organización activa esto tronaría exactamente como resolveBotId().
+ */
+export async function loadLlmOverrides(env: Env, botId?: string): Promise<LlmOverrides> {
   try {
     const db = new Db(env.DB);
-    const settings = await new SettingsRepo(db, await resolveBotId(db)).all();
+    const settings = await new SettingsRepo(db, botId ?? (await resolveBotId(db))).all();
     return llmOverridesFrom(settings);
   } catch {
     return {};
@@ -79,10 +87,17 @@ function parseCsvList(value: string | undefined): string[] {
 /**
  * Resolve the effective agent config by overlaying D1 `settings` on top of env
  * defaults. Anything empty/absent in settings falls back to the env/default.
+ *
+ * botIdOverride: igual que en loadLlmOverrides — el panel pasa el bot ya
+ * resuelto por request; los crons/el agente siguen sin pasarlo.
  */
-export async function resolveAgentConfig(env: Env, toolNames: string[]): Promise<AgentConfig> {
+export async function resolveAgentConfig(
+  env: Env,
+  toolNames: string[],
+  botIdOverride?: string,
+): Promise<AgentConfig> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
+  const botId = botIdOverride ?? (await resolveBotId(db));
   const repo = new SettingsRepo(db, botId);
   const settings = await repo.all();
   // F3 (docs/multitenancy.md): member/config.local.ts se retiró — el negocio

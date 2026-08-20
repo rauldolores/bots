@@ -4,7 +4,6 @@ import { layout } from "./layout";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { resolveAgentConfig, type AgentConfig } from "../../settings-loader";
 import { buildTools } from "../../tools";
-import { resolveBotId } from "../../tenant";
 import { resolveProvider, modelIdFor } from "../../llm/provider";
 import { handoffNotifyStatus } from "../../tools/handoffHuman";
 import { connectionsSummary } from "./conexiones";
@@ -51,28 +50,28 @@ function agentModelLabel(env: Env, cfg: AgentConfig): string {
 // Single-letter Spanish day-of-week labels, indexed like Date#getUTCDay() (0 = Dom).
 const DOW_LETTER = ["D", "L", "M", "M", "J", "V", "S"];
 
-export async function renderOverview(env: Env): Promise<string> {
+export async function renderOverview(env: Env, botId: string): Promise<string> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
   const bot = await new BotsRepo(db).getById(botId);
   const tier = bot?.tier ?? "free";
   const niche = getNiche(bot?.niche);
+  const conn = await connectionsSummary(env, botId);
   const oneDay = Date.now() - 86_400_000;
   const sevenDays = Date.now() - 7 * 86_400_000;
   const thirtyDays = Date.now() - 30 * 86_400_000;
 
   const todayMsgs = (await db.first<{ n: number }>(
-    "SELECT COUNT(*) as n FROM messages WHERE created_at > ?", [oneDay],
+    "SELECT COUNT(*) as n FROM messages WHERE bot_id = ? AND created_at > ?", [botId, oneDay],
   ))?.n ?? 0;
   const todayConvs = (await db.first<{ n: number }>(
-    "SELECT COUNT(DISTINCT conversation_id) as n FROM messages WHERE created_at > ?", [oneDay],
+    "SELECT COUNT(DISTINCT conversation_id) as n FROM messages WHERE bot_id = ? AND created_at > ?", [botId, oneDay],
   ))?.n ?? 0;
   const todayLeads = (await db.first<{ n: number }>(
-    "SELECT COUNT(*) as n FROM leads WHERE created_at > ?", [oneDay],
+    "SELECT COUNT(*) as n FROM leads WHERE bot_id = ? AND created_at > ?", [botId, oneDay],
   ))?.n ?? 0;
 
   const monthMsgs = (await db.first<{ n: number }>(
-    "SELECT COUNT(*) as n FROM messages WHERE created_at > ?", [thirtyDays],
+    "SELECT COUNT(*) as n FROM messages WHERE bot_id = ? AND created_at > ?", [botId, thirtyDays],
   ))?.n ?? 0;
 
   const tokenUsage = await db.all<{ model_used: string; input: number; output: number; cached: number }>(
@@ -80,8 +79,8 @@ export async function renderOverview(env: Env): Promise<string> {
             SUM(COALESCE(input_tokens, 0)) as input,
             SUM(COALESCE(output_tokens, 0)) as output,
             SUM(COALESCE(cached_input_tokens, 0)) as cached
-     FROM messages WHERE created_at > ? GROUP BY model_used`,
-    [thirtyDays],
+     FROM messages WHERE bot_id = ? AND created_at > ? GROUP BY model_used`,
+    [botId, thirtyDays],
   );
   let totalCost = 0;
   for (const row of tokenUsage) {
@@ -94,14 +93,14 @@ export async function renderOverview(env: Env): Promise<string> {
   }
 
   const openTickets = (await db.first<{ n: number }>(
-    "SELECT COUNT(*) as n FROM tickets WHERE status != 'resolved'",
+    "SELECT COUNT(*) as n FROM tickets WHERE bot_id = ? AND status != 'resolved'", [botId],
   ))?.n ?? 0;
 
   // --- Actividad 7 días ---------------------------------------------------------
   const activityRows = await db.all<{ day: string; msgs: number }>(
     `SELECT to_char(to_timestamp(created_at / 1000.0) AT TIME ZONE 'UTC', 'YYYY-MM-DD') as day, COUNT(*) as msgs
-     FROM messages WHERE created_at > ? GROUP BY day ORDER BY day ASC`,
-    [sevenDays],
+     FROM messages WHERE bot_id = ? AND created_at > ? GROUP BY day ORDER BY day ASC`,
+    [botId, sevenDays],
   );
   const activityByDay = new Map(activityRows.map((r) => [r.day, r.msgs]));
   const activityDays = Array.from({ length: 7 }, (_, i) => {
@@ -113,7 +112,7 @@ export async function renderOverview(env: Env): Promise<string> {
 
   // --- Estado del agente ----------------------------------------------------------
   const toolNames = Object.keys(buildTools({ env, getConversationId: () => null, botId, tier }));
-  const agentCfg = await resolveAgentConfig(env, toolNames);
+  const agentCfg = await resolveAgentConfig(env, toolNames, botId);
   const kbDocs = await new KbDocsRepo(db, botId).list();
   const totalKbDocs = kbDocs.length + FIXTURE_CHUNKS.length;
   const insight7d = await new InsightsRepo(db, botId).stats(sevenDays);
@@ -131,7 +130,8 @@ export async function renderOverview(env: Env): Promise<string> {
   }>(
     `SELECT c.id, c.display_name, c.channel_user_id, c.channel, c.last_message_at,
        (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_msg
-     FROM conversations c ORDER BY c.last_message_at DESC LIMIT 5`,
+     FROM conversations c WHERE c.bot_id = ? ORDER BY c.last_message_at DESC LIMIT 5`,
+    [botId],
   );
 
   // --- Mejoras sugeridas -------------------------------------------------------------
@@ -327,7 +327,6 @@ export async function renderOverview(env: Env): Promise<string> {
               : `<span style="font-size:9px;color:var(--bad);border:1px solid var(--bad);padding:1px 6px">⚠ HANDOFF SIN AVISO — el bot crea tickets pero NADIE recibe notificación (configura Telegram, WhatsApp o email del dueño)</span>`;
           })()}
           ${(() => {
-            const conn = connectionsSummary(env);
             const ok = conn.connected > 0;
             return `<a href="/admin/conexiones" style="font-size:9px;color:${ok ? "var(--ok)" : "var(--bad)"};border:1px solid ${ok ? "var(--ok)" : "var(--bad)"};padding:1px 6px;text-decoration:none">${ok ? "✓" : "⚠"} ${conn.connected}/${conn.total} canales conectados</a>`;
           })()}

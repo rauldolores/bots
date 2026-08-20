@@ -7,7 +7,6 @@ import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { SuggestionsRepo, type Suggestion } from "../../db/suggestions";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
-import { resolveBotId } from "../../tenant";
 import { getLessons, MAX_LESSONS } from "../../flywheel/detect";
 import { layout } from "./layout";
 
@@ -80,10 +79,10 @@ function suggestionCard(s: Suggestion): string {
 
 export async function renderMejoras(
   env: Env,
+  botId: string,
   flash?: { found?: string; applied?: boolean; dismissed?: boolean },
 ): Promise<string> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
   const repo = new SuggestionsRepo(db, botId);
   const [proposed, handled, lessons, autonomyRaw] = await Promise.all([
     repo.listProposed(),

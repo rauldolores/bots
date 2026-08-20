@@ -256,12 +256,12 @@ Cada fase queda **verde y desplegable** antes de la siguiente.
   **Riesgo: medio** (Telegram/ManyChat/Twilio sin fuga; Meta/WhatsApp
   siguen exactamente como estaban — env compartido, sin cambio).
 
-- **F5 — Auth y panel multi-bot (parcial, este commit: el login).**
+- **F5 — Auth y panel multi-bot (parcial, este commit: login + selector).**
   KontrolIA Auth reemplaza el Basic Auth; selector de organización y de bot;
   permisos por rol. Aquí se resuelve la pregunta de producto (¿el Starter
   open source conserva un modo mono-tenant?).
 
-  Hecho: `/admin/login` redirige a `auth-server` (que ES el GoTrue del
+  **Login.** `/admin/login` redirige a `auth-server` (que ES el GoTrue del
   proyecto de Supabase compartido — no hay un servidor OAuth aparte) con
   Authorization Code + PKCE; `/admin/oauth/callback` intercambia el código y
   deja una sesión en cookie (`nodia_kontrolia_session`, httpOnly); el guard
@@ -271,17 +271,130 @@ Cada fase queda **verde y desplegable** antes de la siguiente.
   `Authorization: Basic` o `?basic=1`), y si `SUPABASE_URL` /
   `SUPABASE_ANON_KEY` / `OAUTH_CLIENT_ID` no están las tres configuradas, el
   panel se comporta exactamente como antes — es opt-in, no disruptivo.
-  Verificado con un login real contra `auth.kontrolia.io` en local.
 
-  Encontrado al registrar el cliente OAuth: si `redirect_uris` se guarda con
-  las URIs separadas por espacio (como quedó al registrarlo "a mano" la
-  primera vez), GoTrue las rechaza con `invalid_redirect_uri` — hay que
-  guardarlas una por línea desde panel.kontrolia.io → Clientes OAuth.
+  **Selector de organización/bot.** `resolveAdminTenant()`
+  (`src/admin/tenantContext.ts`) reemplaza a `resolveBotId()` dentro del
+  panel: con sesión de KontrolIA, el bot activo tiene que pertenecer a la
+  organización activa (`claims.organization_id`), y cuál de los bots de esa
+  organización es "el actual" se recuerda en la cookie `nodia_current_bot`
+  (por antigüedad si no hay cookie válida). Sin sesión de KontrolIA (Basic
+  Auth, o KontrolIA sin configurar), cero cambio de comportamiento: sigue
+  siendo `resolveBotId()` de siempre. Sí se tocó (y se cubrió con tests de
+  aislamiento) un hueco real que apareció al hacer esto:
+  `renderInboxList`/`renderThreadLive`/`renderInbox`/`loadAgenteData`
+  (bandeja y "Mi Agente") tenían consultas SQL crudas sin `bot_id` — F2 las
+  había dejado fuera de su auditoría. Ya filtran.
 
-  Pendiente, explícitamente fuera de este commit: el selector de
-  organización/bot en el panel (hoy `resolveBotId()` sigue fallando duro con
-  2+ bots — este login es el prerequisito, no el selector en sí) y permisos
-  por rol. **Riesgo: medio** (login sin fuga verificado; selector y roles
+  El header dejó de ser dos `<select>` sueltos: `GET /admin/projects` trae
+  TODAS las organizaciones del usuario con SUS bots ya incluidos (una sola
+  llamada, no una por organización al abrir el panel), y un único botón
+  trigger (avatar + organización + bot activo, con punto de estado) abre un
+  panel de dos columnas — organizaciones a la izquierda con buscador, bots
+  de la seleccionada a la derecha — siguiendo un diseño (`docs/` no
+  versiona el handoff; vino como archivo `.dc.html` de Claude Design)
+  recreado con los tokens y clases que el panel ya tenía (`var(--accent)`,
+  `var(--panel)`, JetBrains Mono para las etiquetas), no copiado tal cual.
+  Elegir una organización en la columna izquierda es solo estado local (ya
+  llegaron sus bots en el mismo fetch) — el POST real solo se manda al
+  elegir un bot, y `POST /admin/switch-bot` ahora acepta un
+  `organization_id` opcional para resolver "cambié de organización Y elegí
+  su bot" en un único viaje al servidor en vez de dos. El menú de cuenta
+  (con "Cerrar sesión") se separó a su propio botón — antes competía
+  visualmente con el selector de contexto.
+
+  **Tres bugs reales encontrados construyendo esto** (los tres verificados
+  contra la infraestructura real antes de escribir el fix, no adivinados):
+  1. `redirect_uris` guardado con las URIs separadas por espacio (como quedó
+     al registrar el cliente OAuth "a mano" la primera vez) — GoTrue lo
+     rechaza con `invalid_redirect_uri`; hay que guardarlas una por línea
+     desde panel.kontrolia.io → Clientes OAuth.
+  2. El script del selector en el header tenía un error de sintaxis JS
+     preexistente (un `\'` mal escapado en una plantilla anidada) que tumbaba
+     TODO el bloque `<script>` — dormido porque `PEER_BOTS` nunca estaba
+     configurado, hasta que el selector nuevo cayó en el mismo bloque.
+  3. El más importante: **refrescar una sesión que nació del login OAuth
+     exige pasar por `/auth/v1/oauth/token` con `client_id`, no por el
+     `/auth/v1/token?grant_type=refresh_token` genérico** — ese devuelve
+     `400 invalid_client: "Client authentication required for OAuth
+     session"`. Sin esto, cambiar de organización se guardaba bien en
+     `kontrolia_auth.sessions_context` pero el token del navegador nunca se
+     enteraba — parecía que el selector "no hacía nada". `refreshSession()`
+     ya usa el endpoint correcto.
+
+  **Alta del primer bot.** `GET /admin/bots/new` + `POST /admin/bots`
+  (`src/admin/views/onboarding.ts`, `BotsRepo.create()`) — cuando la
+  organización activa no tiene ningún bot, el guard redirige aquí en vez de
+  mostrar una página suelta: el formulario vive DENTRO del layout normal
+  (sidebar + selector de organización, que sigue funcionando ahí mismo para
+  cambiarse a otra organización sin quedar atrapado). Tier `free` y config
+  vacío por default; el slug se deriva del nombre y se desambigua por
+  organización (`idx_bots_org_slug`). El selector del header también ofrece
+  "+ bot" para crear uno adicional en cualquier momento, no solo cuando la
+  organización está vacía.
+
+  **Dos bugs más, encontrados creando el primer bot real de una organización
+  vacía (no se pueden ver sin datos reales — nadie los había disparado):**
+  4. `GET /admin/projects` (lo que el header hace `fetch()` para armar el
+     selector) pasaba por el MISMO guard que cualquier ruta — con la
+     organización activa sin bots, ese fetch también rebotaba a
+     `/admin/bots/new`, pero como responde HTML y no JSON, el script fallaba
+     en silencio y el selector desaparecía del header justo cuando más se
+     necesitaba (atrapado sin forma de cambiar de organización). `/projects`
+     ahora es un caso especial: sigue respondiendo JSON aunque la
+     organización no tenga bots (el bot activo simplemente no existe
+     todavía).
+  5. `BotsRepo.getById(undefined)` — con `bot_id` sin resolver (justo el caso
+     de arriba), el driver de Postgres truena al recibir `undefined` como
+     parámetro en vez de `null`. `getById()` ahora trata "sin id" como "no
+     hay bot", sin consultar — no es un bug aislado, cualquier código que
+     reciba un `botId` opcional se beneficia del mismo guard.
+
+  **Dos bugs más del rediseño del selector, encontrados probándolo en vivo:**
+  6. El botón "+ Nuevo bot" del panel apuntaba siempre a
+     `/admin/bots/new` sin importar qué organización estuviera
+     PREVISUALIZADA en la columna derecha — si esa organización no tenía
+     bots, no había ninguna fila que clickear para cambiarse a ella, y el
+     botón te mandaba a crear un bot en la organización ACTIVA, no en la
+     que se estaba viendo. Ahora manda primero un `POST /admin/switch-org`
+     con un `next` (validado a rutas internas `/admin/...`, nunca una URL
+     externa) cuando la organización previsualizada no es la activa.
+  7. Elegir una organización en la columna izquierda cerraba el panel en
+     vez de solo actualizar la columna derecha. Causa: el handler de esa
+     fila reconstruye el panel (`innerHTML`) mientras el click TODAVÍA
+     está subiendo hacia `document` — el nodo clickeado queda desconectado
+     del árbol a media subida, así que el detector de "click afuera"
+     (`e.target.closest(...)`) ya no lo encontraba y se disparaba solo.
+     Arreglado con `e.composedPath()`, que captura la ruta al momento de
+     despachar el evento — no le afecta que el DOM cambie después.
+
+  Segundo bug real de la sesión, no relacionado al login: `renderOverview`,
+  `renderStats`, `renderInboxList`/`renderThreadLive`/`renderInbox`
+  (bandeja) y `loadAgenteData` ("Mi Agente") tenían ~15 consultas SQL crudas
+  sin `bot_id` entre todas — F2 las había dejado fuera de su auditoría
+  ("números de tablero, bajo riesgo real" mientras solo existiera un bot).
+  Con un segundo bot real ya no es teórico: ya filtran, y quedan cubiertas
+  por tests de aislamiento (`test/admin/overviewIsolation.test.ts`,
+  `test/admin/inbox.test.ts`).
+
+  **"Conexiones" también era del despliegue, no del bot.** F4 ya tenía la
+  infraestructura (`bot_channels` + Vault, webhooks `/webhooks/<canal>/:botId`)
+  pero la única forma de usarla era un script de terminal
+  (`npm run channel:connect`) que además **fallaba directo con 2+ bots** — el
+  panel seguía leyendo `env.TELEGRAM_BOT_TOKEN` etc. del despliegue completo,
+  no del bot activo. Ahora Telegram/WhatsApp(Twilio)/ManyChat se conectan
+  desde el panel con un diálogo guiado (instrucciones paso a paso + el
+  formulario para pegar el token, nada de terminal); Telegram además registra
+  su webhook solo (`setTelegramWebhook`) — conectar un canal es "pega el
+  token", sin ningún paso manual extra. Meta y WhatsApp Cloud API siguen
+  siendo del despliegue (la tarjeta lo dice explícitamente) — esa es la
+  decisión de producto pendiente de F4 (resolver el bot por evento), no algo
+  que se resolvió aquí.
+
+  **Pendiente, explícitamente fuera de este commit:** permisos por rol — el
+  JWT ya trae `claims.roles`/`claims.permissions` de la organización activa,
+  pero nada en el panel los usa todavía; cualquiera que entre ve y hace
+  todo. **Riesgo: medio** (login + selector + alta de bots, sin fuga,
+  verificados con un usuario real de dos organizaciones y varios bots; roles
   siguen sin construir).
 
 - **F6 — Instalación.** El skill de configuración, el CLI y la documentación

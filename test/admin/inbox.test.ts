@@ -12,8 +12,9 @@ vi.mock("../../src/replies/sender", () => ({
   pickAdapter: (channel: unknown) => pickAdapterMock(channel),
 }));
 
-import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
+import { createTestDb, createSecondTestBot, TEST_BOT_ID } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
+import { renderInboxList, renderThreadLive, renderInbox } from "../../src/admin/views/conversations";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { MessagesRepo } from "../../src/db/messages";
@@ -201,6 +202,52 @@ describe("inbox — pause / resume", () => {
     const history = await msgs.lastN(conv.id, 5);
     expect(history[history.length - 1].role).toBe("owner");
     expect(history[history.length - 1].content).toContain("teléfono");
+  });
+});
+
+describe("inbox — aislamiento por bot (F5: el selector solo importa si esto filtra de verdad)", () => {
+  it("renderInboxList no muestra conversaciones de otro bot", async () => {
+    const conv = await convs.getOrCreate("telegram", "propia", "Del bot 1");
+    await msgs.append(conv.id, "user", "hola");
+
+    const otherBotId = await createSecondTestBot(db);
+    const otherConvs = new ConversationsRepo(db, otherBotId);
+    const otherMsgs = new MessagesRepo(db, otherBotId);
+    const otherConv = await otherConvs.getOrCreate("telegram", "ajena", "Del bot 2");
+    await otherMsgs.append(otherConv.id, "user", "hola desde el otro bot");
+
+    const html = await renderInboxList(env, TEST_BOT_ID, {});
+    expect(html).toContain("Del bot 1");
+    expect(html).not.toContain("Del bot 2");
+  });
+
+  it("renderThreadLive no abre una conversación de otro bot por id adivinado/copiado", async () => {
+    const otherBotId = await createSecondTestBot(db);
+    const otherConvs = new ConversationsRepo(db, otherBotId);
+    const otherMsgs = new MessagesRepo(db, otherBotId);
+    const otherConv = await otherConvs.getOrCreate("telegram", "ajena2", "Secreto del bot 2");
+    await otherMsgs.append(otherConv.id, "user", "información privada del otro bot");
+
+    const html = await renderThreadLive(env, TEST_BOT_ID, otherConv.id);
+    expect(html).toContain("no encontrada");
+    expect(html).not.toContain("información privada");
+  });
+
+  it("renderInbox: los contadores del header no mezclan bots", async () => {
+    const conv = await convs.getOrCreate("telegram", "propia2", "Mío");
+    await msgs.append(conv.id, "user", "hola");
+
+    const otherBotId = await createSecondTestBot(db);
+    const otherConvs = new ConversationsRepo(db, otherBotId);
+    for (let i = 0; i < 3; i++) await otherConvs.getOrCreate("telegram", `otro${i}`, `Otro ${i}`);
+
+    const html = await renderInbox(env, TEST_BOT_ID, {});
+    // El total de conversaciones del bot propio (2, contando la de otro test
+    // en este describe si corriera antes) debe seguir siendo mucho menor que
+    // 3 + lo propio — la prueba real es que "Otro 0/1/2" no aparecen.
+    expect(html).not.toContain("Otro 0");
+    expect(html).not.toContain("Otro 1");
+    expect(html).toContain("Mío");
   });
 });
 

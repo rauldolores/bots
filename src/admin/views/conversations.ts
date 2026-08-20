@@ -14,7 +14,6 @@
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { InsightsRepo } from "../../db/insights";
-import { resolveBotId } from "../../tenant";
 import { SENTIMENT_BADGE } from "./insights";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
@@ -126,12 +125,12 @@ function inboxUrl(p: InboxParams, convId?: string): string {
 
 // --- Left pane: conversation list --------------------------------------------
 
-export async function renderInboxList(env: Env, p: InboxParams): Promise<string> {
+export async function renderInboxList(env: Env, botId: string, p: InboxParams): Promise<string> {
   const db = new Db(env.DB);
   const now = Date.now();
 
-  const conds: string[] = [];
-  const params: (string | number)[] = [];
+  const conds: string[] = ["c.bot_id = ?"];
+  const params: (string | number)[] = [botId];
   if (p.search) {
     conds.push("(c.display_name LIKE ? OR c.channel_user_id LIKE ?)");
     params.push(`%${p.search}%`, `%${p.search}%`);
@@ -210,12 +209,12 @@ export async function renderInboxList(env: Env, p: InboxParams): Promise<string>
 
 // --- Right pane: live thread (header + messages, polled) ----------------------
 
-export async function renderThreadLive(env: Env, convId: string): Promise<string> {
+export async function renderThreadLive(env: Env, botId: string, convId: string): Promise<string> {
   const db = new Db(env.DB);
-  const conv = await db.first<any>("SELECT * FROM conversations WHERE id = ?", [convId]);
+  const conv = await db.first<any>("SELECT * FROM conversations WHERE id = ? AND bot_id = ?", [convId, botId]);
   if (!conv) return `<div style="padding:24px;font-size:12.5px;color:var(--dim)">Conversación no encontrada.</div>`;
 
-  const insight = await new InsightsRepo(db, await resolveBotId(db)).getByConversation(convId);
+  const insight = await new InsightsRepo(db, botId).getByConversation(convId);
   const msgs = await db.all<any>(
     "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at DESC, seq DESC LIMIT 100",
     [convId],
@@ -363,26 +362,31 @@ export function renderSuggestionBox(text: string): string {
 
 // --- Full page -----------------------------------------------------------------
 
-export async function renderInbox(env: Env, p: InboxParams): Promise<string> {
+export async function renderInbox(env: Env, botId: string, p: InboxParams): Promise<string> {
   const db = new Db(env.DB);
   const now = Date.now();
 
-  const totalConvs = (await db.first<{ n: number }>("SELECT COUNT(*) as n FROM conversations"))?.n ?? 0;
-  const totalLeads = (await db.first<{ n: number }>("SELECT COUNT(*) as n FROM leads"))?.n ?? 0;
+  const totalConvs =
+    (await db.first<{ n: number }>("SELECT COUNT(*) as n FROM conversations WHERE bot_id = ?", [botId]))?.n ?? 0;
+  const totalLeads =
+    (await db.first<{ n: number }>("SELECT COUNT(*) as n FROM leads WHERE bot_id = ?", [botId]))?.n ?? 0;
   const nMolestos =
     (await db.first<{ n: number }>(
-      "SELECT COUNT(*) as n FROM conversation_insights WHERE sentiment IN ('frustrated','angry')",
+      "SELECT COUNT(*) as n FROM conversation_insights WHERE bot_id = ? AND sentiment IN ('frustrated','angry')",
+      [botId],
     ))?.n ?? 0;
   const nContentos =
     (await db.first<{ n: number }>(
-      "SELECT COUNT(*) as n FROM conversation_insights WHERE sentiment = 'positive'",
+      "SELECT COUNT(*) as n FROM conversation_insights WHERE bot_id = ? AND sentiment = 'positive'",
+      [botId],
     ))?.n ?? 0;
   const needAttention =
     (await db.first<{ n: number }>(
       `SELECT COUNT(*) as n FROM conversations c
-       WHERE (c.paused_until IS NOT NULL AND c.paused_until > ?)
-          OR EXISTS (SELECT 1 FROM tickets t WHERE t.conversation_id = c.id AND t.status != 'resolved')`,
-      [now],
+       WHERE c.bot_id = ?
+         AND ((c.paused_until IS NOT NULL AND c.paused_until > ?)
+          OR EXISTS (SELECT 1 FROM tickets t WHERE t.conversation_id = c.id AND t.status != 'resolved'))`,
+      [botId, now],
     ))?.n ?? 0;
 
   const filterPill = (href: string, label: string, active: boolean, color: string) =>
@@ -390,7 +394,7 @@ export async function renderInbox(env: Env, p: InboxParams): Promise<string> {
       active ? `background:${color};color:#1a1206;font-weight:700` : `color:${color}`
     }">${label}</a>`;
 
-  const list = await renderInboxList(env, p);
+  const list = await renderInboxList(env, botId, p);
 
   const listPollUrl = `/admin/conversations/list-fragment?${new URLSearchParams({
     ...(p.filter ? { f: p.filter } : {}),
@@ -400,7 +404,7 @@ export async function renderInbox(env: Env, p: InboxParams): Promise<string> {
 
   let rightPane: string;
   if (p.selectedId) {
-    const thread = await renderThreadLive(env, p.selectedId);
+    const thread = await renderThreadLive(env, botId, p.selectedId);
     rightPane = `
       <div id="thread-live" class="flex flex-col flex-1 min-h-0"
            hx-get="/admin/conversations/thread/${encodeURIComponent(p.selectedId)}"

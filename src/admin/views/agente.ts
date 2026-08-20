@@ -13,7 +13,6 @@ import { BotsRepo } from "../../db/bots";
 import { isProTier } from "../../config";
 import { resolveAgentConfig, type AgentConfig } from "../../settings-loader";
 import { buildTools } from "../../tools";
-import { resolveBotId } from "../../tenant";
 import { resolveProvider, modelIdFor } from "../../llm/provider";
 import { channelLabel, configuredChannels } from "../../channels/labels";
 import { layout } from "./layout";
@@ -134,13 +133,14 @@ interface AgenteData {
   settings: Record<string, string>;
 }
 
-async function loadAgenteData(env: Env): Promise<AgenteData> {
+async function loadAgenteData(env: Env, botId: string): Promise<AgenteData> {
   const db = new Db(env.DB);
   const thirtyDays = Date.now() - 30 * 86_400_000;
 
   const channels = await db.all<ChannelRow>(
     `SELECT channel, COUNT(*) as convs, MAX(last_message_at) as last
-     FROM conversations GROUP BY channel ORDER BY convs DESC`,
+     FROM conversations WHERE bot_id = ? GROUP BY channel ORDER BY convs DESC`,
+    [botId],
   );
   // Every channel with credentials configured appears in the canvas, even at
   // zero traffic — the owner must SEE what their bot is connected to.
@@ -156,15 +156,16 @@ async function loadAgenteData(env: Env): Promise<AgenteData> {
   const turns30d =
     (
       await db.first<{ n: number }>(
-        "SELECT COUNT(*) as n FROM messages WHERE role = 'assistant' AND created_at > ?",
-        [thirtyDays],
+        "SELECT COUNT(*) as n FROM messages WHERE bot_id = ? AND role = 'assistant' AND created_at > ?",
+        [botId, thirtyDays],
       )
     )?.n ?? 0;
 
   const lastAssistantAt =
     (
       await db.first<{ t: number | null }>(
-        "SELECT MAX(created_at) as t FROM messages WHERE role = 'assistant'",
+        "SELECT MAX(created_at) as t FROM messages WHERE bot_id = ? AND role = 'assistant'",
+        [botId],
       )
     )?.t ?? null;
 
@@ -175,19 +176,19 @@ async function loadAgenteData(env: Env): Promise<AgenteData> {
               COUNT(*) as n,
               MAX(messages.created_at) as last
        FROM messages, LATERAL jsonb_array_elements(messages.tool_calls::jsonb) as elem
-       WHERE messages.tool_calls IS NOT NULL AND messages.tool_calls <> ''
+       WHERE messages.bot_id = ?
+         AND messages.tool_calls IS NOT NULL AND messages.tool_calls <> ''
          AND messages.created_at > ?
        GROUP BY tool`,
-      [thirtyDays],
+      [botId, thirtyDays],
     )
     .catch(() => [] as ToolUsageRow[]);
   const usage = new Map(usageRows.filter((r) => r.tool).map((r) => [r.tool, r]));
 
-  const botId = await resolveBotId(db);
   const bot = await new BotsRepo(db).getById(botId);
   const tier = bot?.tier ?? "free";
   const toolNames = Object.keys(buildTools({ env, getConversationId: () => null, botId, tier }));
-  const cfg = await resolveAgentConfig(env, toolNames);
+  const cfg = await resolveAgentConfig(env, toolNames, botId);
   const disabled = toolNames.filter((n) => !cfg.enabledToolNames.includes(n));
   const settings = await new SettingsRepo(db, botId).all();
 
@@ -255,8 +256,8 @@ function bezierDown(x1: number, y1: number, x2: number, y2: number): string {
   return `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`;
 }
 
-export async function renderAgenteCanvas(env: Env): Promise<string> {
-  const d = await loadAgenteData(env);
+export async function renderAgenteCanvas(env: Env, botId: string): Promise<string> {
+  const d = await loadAgenteData(env, botId);
   const now = Date.now();
 
   // --- geometry ---
@@ -406,10 +407,10 @@ export async function renderAgenteCanvas(env: Env): Promise<string> {
 
 // --- Page ---------------------------------------------------------------------
 
-export async function renderAgentePage(env: Env): Promise<string> {
-  const canvas = await renderAgenteCanvas(env);
+export async function renderAgentePage(env: Env, botId: string): Promise<string> {
+  const canvas = await renderAgenteCanvas(env, botId);
   const pageDb = new Db(env.DB);
-  const pageTier = (await new BotsRepo(pageDb).getById(await resolveBotId(pageDb)))?.tier ?? "free";
+  const pageTier = (await new BotsRepo(pageDb).getById(botId))?.tier ?? "free";
   const body = `
     <div class="flex flex-col gap-3.5">
       <div class="flex flex-wrap items-center gap-3.5">
@@ -491,8 +492,8 @@ function saveForm(nodeId: string, inner: string): string {
   </form>`;
 }
 
-export async function renderNodeModal(env: Env, nodeId: string, saved = false): Promise<string> {
-  const d = await loadAgenteData(env);
+export async function renderNodeModal(env: Env, botId: string, nodeId: string, saved = false): Promise<string> {
+  const d = await loadAgenteData(env, botId);
 
   if (nodeId === "buffer") {
     return modalShell("layers", "Buffer de mensajes", "", saveForm("buffer", `
@@ -641,9 +642,8 @@ export async function renderNodeModal(env: Env, nodeId: string, saved = false): 
  * Flip a tool in/out of the disabled_tools setting. Unknown names are rejected
  * (returns false) so the route can't write garbage into settings.
  */
-export async function toggleTool(env: Env, name: string): Promise<boolean> {
+export async function toggleTool(env: Env, botId: string, name: string): Promise<boolean> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
   const tier = (await new BotsRepo(db).getById(botId))?.tier ?? "free";
   const known = Object.keys(buildTools({ env, getConversationId: () => null, botId, tier }));
   if (!known.includes(name)) return false;

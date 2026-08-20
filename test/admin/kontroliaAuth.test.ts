@@ -5,6 +5,8 @@ import {
   buildAuthorizeUrl,
   exchangeCode,
   refreshSession,
+  listMemberships,
+  switchActiveOrganization,
 } from "../../src/admin/kontroliaAuth";
 import type { Env } from "../../src/env";
 
@@ -106,5 +108,50 @@ describe("exchangeCode / refreshSession", () => {
     );
     const session = await refreshSession(CFG, "old-refresh-token");
     expect(session?.accessToken).toBe("at2");
+  });
+
+  it("refreshSession: pasa por /oauth/token con client_id — el /token genérico devuelve invalid_client para sesiones OAuth", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ access_token: "at2", refresh_token: "rt2", expires_in: 3600 }), { status: 200 }),
+    );
+    await refreshSession(CFG, "old-refresh-token");
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://proj.supabase.co/auth/v1/oauth/token");
+    const body = new URLSearchParams(opts.body as string);
+    expect(body.get("grant_type")).toBe("refresh_token");
+    expect(body.get("refresh_token")).toBe("old-refresh-token");
+    expect(body.get("client_id")).toBe("client-123");
+  });
+
+  it("switchActiveOrganization: upsert a sessions_context con el propio access_token (RLS, sin service_role)", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 201 }));
+    const ok = await switchActiveOrganization(CFG, "user-access-token", "user-123", "org-456");
+    expect(ok).toBe(true);
+
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://proj.supabase.co/rest/v1/sessions_context");
+    const headers = opts.headers as Record<string, string>;
+    expect(headers.authorization).toBe("Bearer user-access-token");
+    expect(headers.apikey).toBe("anon-key");
+    expect(headers["content-profile"]).toBe("kontrolia_auth");
+    expect(headers.prefer).toContain("resolution=merge-duplicates");
+    const body = JSON.parse(opts.body as string);
+    expect(body.user_id).toBe("user-123");
+    expect(body.active_organization_id).toBe("org-456");
+  });
+
+  it("switchActiveOrganization: false si PostgREST rechaza el upsert (no lanza)", async () => {
+    fetchMock.mockResolvedValue(new Response("forbidden", { status: 403 }));
+    const ok = await switchActiveOrganization(CFG, "at", "u", "org");
+    expect(ok).toBe(false);
+  });
+
+  it("listMemberships: [] en vez de lanzar cuando el access_token no es válido", async () => {
+    // Sin un JWT real firmado por GoTrue no se puede probar el camino feliz
+    // aquí (verifyRequest necesita JWKS real) — eso lo cubre oauthRoutes.test.ts
+    // mockeando kontroliaAuth entero. Esto prueba la degradación: un token
+    // roto no debe tumbar el selector del panel, solo dejarlo vacío.
+    const memberships = await listMemberships(CFG, "not-a-real-jwt");
+    expect(memberships).toEqual([]);
   });
 });

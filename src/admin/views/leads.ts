@@ -1,7 +1,6 @@
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { LeadsRepo, leadMetadata, type Lead } from "../../db/leads";
-import { resolveBotId } from "../../tenant";
 import { BotsRepo } from "../../db/bots";
 import { getNiche } from "../../niches";
 import { isProTier } from "../../config";
@@ -19,9 +18,8 @@ interface Col {
   cell: (l: Lead, meta: Record<string, string>) => string;
 }
 
-export async function renderLeads(env: Env): Promise<string> {
+export async function renderLeads(env: Env, botId: string): Promise<string> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
   const bot = await new BotsRepo(db).getById(botId);
   const niche = getNiche(bot?.niche);
   const leads = new LeadsRepo(db, botId);
@@ -121,9 +119,9 @@ export async function renderLeads(env: Env): Promise<string> {
   return layout({ title: niche.recordPlural, activeTab: "leads", body, pro: isProTier(bot?.tier) });
 }
 
-export async function exportLeadsCsv(env: Env): Promise<string> {
+export async function exportLeadsCsv(env: Env, botId: string): Promise<string> {
   const db = new Db(env.DB);
-  const leads = new LeadsRepo(db, await resolveBotId(db));
+  const leads = new LeadsRepo(db, botId);
   const list = await leads.list(10_000);
   const header = "fecha,nombre,contacto,intent,status,notas,metadata\n";
   const rows = list.map((l) => {
