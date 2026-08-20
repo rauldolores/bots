@@ -42,16 +42,16 @@ function extractJson<T>(raw: string): T | null {
 }
 
 /** KB gaps → drafted kb_entry suggestions. */
-export async function detectKbGaps(env: Env, limit = 3): Promise<FlywheelResult> {
+export async function detectKbGaps(env: Env, limit = 3, botIdOverride?: string): Promise<FlywheelResult> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
+  const botId = botIdOverride ?? (await resolveBotId(db));
   const insights = new InsightsRepo(db, botId);
   const suggestions = new SuggestionsRepo(db, botId);
   const bot = await new BotsRepo(db).getById(botId);
   const thirtyDays = Date.now() - 30 * 86_400_000;
 
   const gaps = await insights.missedKb(thirtyDays, 10);
-  const { model } = createModel(env, "fast", await loadLlmOverrides(env));
+  const { model } = createModel(env, "fast", await loadLlmOverrides(env, botId));
   let created = 0;
   let errors = 0;
 
@@ -94,9 +94,9 @@ Responde SOLO con JSON: {"title": "...", "content": "..."} (content: 2-6 frases 
 }
 
 /** Owner takeovers → leccion suggestions (one per conversation). */
-export async function detectLessons(env: Env, limit = 3): Promise<FlywheelResult> {
+export async function detectLessons(env: Env, limit = 3, botIdOverride?: string): Promise<FlywheelResult> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
+  const botId = botIdOverride ?? (await resolveBotId(db));
   const msgs = new MessagesRepo(db, botId);
   const suggestions = new SuggestionsRepo(db, botId);
   const sevenDays = Date.now() - 7 * 86_400_000;
@@ -114,7 +114,7 @@ export async function detectLessons(env: Env, limit = 3): Promise<FlywheelResult
     [botId, sevenDays],
   );
 
-  const { model } = createModel(env, "fast", await loadLlmOverrides(env));
+  const { model } = createModel(env, "fast", await loadLlmOverrides(env, botId));
   let created = 0;
   let errors = 0;
 
@@ -161,12 +161,12 @@ Responde SOLO con JSON: {"lesson": "..." | null}`,
 }
 
 /** Run all detectors. Safe to call repeatedly (dedupe) and from cron. */
-export async function runFlywheel(env: Env): Promise<FlywheelResult> {
-  const kb = await detectKbGaps(env).catch((e): FlywheelResult => {
+export async function runFlywheel(env: Env, botIdOverride?: string): Promise<FlywheelResult> {
+  const kb = await detectKbGaps(env, 3, botIdOverride).catch((e): FlywheelResult => {
     console.error("[flywheel] detectKbGaps crashed:", e);
     return { created: 0, errors: 1 };
   });
-  const lessons = await detectLessons(env).catch((e): FlywheelResult => {
+  const lessons = await detectLessons(env, 3, botIdOverride).catch((e): FlywheelResult => {
     console.error("[flywheel] detectLessons crashed:", e);
     return { created: 0, errors: 1 };
   });
@@ -177,11 +177,12 @@ export async function runFlywheel(env: Env): Promise<FlywheelResult> {
 
 export const MAX_LESSONS = 15;
 
-export async function getLessons(env: Env): Promise<string[]> {
+export async function getLessons(env: Env, botIdOverride?: string): Promise<string[]> {
   try {
     const db = new Db(env.DB);
     const raw =
-      (await new SettingsRepo(db, await resolveBotId(db)).get(SETTING_KEYS.learnedLessons)) ?? "[]";
+      (await new SettingsRepo(db, botIdOverride ?? (await resolveBotId(db))).get(SETTING_KEYS.learnedLessons)) ??
+      "[]";
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((l) => typeof l === "string") : [];
   } catch {
@@ -189,9 +190,9 @@ export async function getLessons(env: Env): Promise<string[]> {
   }
 }
 
-export async function saveLessons(env: Env, lessons: string[]): Promise<void> {
+export async function saveLessons(env: Env, lessons: string[], botIdOverride?: string): Promise<void> {
   const db = new Db(env.DB);
-  await new SettingsRepo(db, await resolveBotId(db)).set(
+  await new SettingsRepo(db, botIdOverride ?? (await resolveBotId(db))).set(
     SETTING_KEYS.learnedLessons,
     JSON.stringify(lessons.slice(-MAX_LESSONS)),
   );

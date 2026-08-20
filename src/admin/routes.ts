@@ -552,7 +552,7 @@ adminApp.post("/kb/save", async (c) => {
   const repo = new KbDocsRepo(db, c.get("botId"));
   await repo.upsert({ id, title, content });
   const doc = (await repo.getById(id))!;
-  await indexDoc(c.env, doc);
+  await indexDoc(c.env, doc, c.get("botId"));
   return c.redirect("/admin/kb?saved=1");
 });
 
@@ -560,13 +560,13 @@ adminApp.post("/kb/:id/delete", async (c) => {
   const id = c.req.param("id");
   const db = new Db(c.env.DB);
   await new KbDocsRepo(db, c.get("botId")).delete(id);
-  await removeDocVectors(c.env, id);
+  await removeDocVectors(c.env, id, c.get("botId"));
   return c.redirect("/admin/kb?deleted=1");
 });
 
 // Global reindex: repo fixtures + every dashboard doc.
 adminApp.post("/kb/reindex", async (c) => {
-  const r = await reindexAll(c.env);
+  const r = await reindexAll(c.env, c.get("botId"));
   return c.redirect(`/admin/kb?reindexed=${r.indexed}`);
 });
 
@@ -606,17 +606,17 @@ adminApp.get("/mejoras", async (c) =>
 
 // Run the detectors on demand (they also run nightly from scheduled()).
 adminApp.post("/mejoras/run", async (c) => {
-  const r = await runFlywheel(c.env);
+  const r = await runFlywheel(c.env, c.get("botId"));
   return c.redirect(`/admin/mejoras?found=${r.created}`);
 });
 
 adminApp.post("/mejoras/:id/apply", async (c) => {
-  const ok = await applySuggestion(c.env, c.req.param("id"));
+  const ok = await applySuggestion(c.env, c.req.param("id"), c.get("botId"));
   return c.redirect(ok ? "/admin/mejoras?applied=1" : "/admin/mejoras");
 });
 
 adminApp.post("/mejoras/:id/dismiss", async (c) => {
-  const ok = await dismissSuggestion(c.env, c.req.param("id"));
+  const ok = await dismissSuggestion(c.env, c.req.param("id"), c.get("botId"));
   return c.redirect(ok ? "/admin/mejoras?dismissed=1" : "/admin/mejoras");
 });
 
@@ -633,8 +633,8 @@ adminApp.post("/mejoras/autonomy", async (c) => {
 adminApp.post("/mejoras/lessons/remove", async (c) => {
   const form = await c.req.formData();
   const lesson = String(form.get("lesson") ?? "");
-  const lessons = (await getLessons(c.env)).filter((l) => l !== lesson);
-  await saveLessons(c.env, lessons);
+  const lessons = (await getLessons(c.env, c.get("botId"))).filter((l) => l !== lesson);
+  await saveLessons(c.env, lessons, c.get("botId"));
   return c.redirect("/admin/mejoras");
 });
 
@@ -675,22 +675,23 @@ adminApp.get("/conversations/:id", (c) =>
 // even without pressing "Analizar ahora". TODO: move the main run to
 // scheduled() in index.ts once the channels/meta work in flight there lands.
 adminApp.get("/insights", async (c) => {
+  const botId = c.get("botId");
   try {
     c.executionCtx.waitUntil(
-      analyzeConversations(c.env, { limit: 3 }).catch((e) =>
+      analyzeConversations(c.env, { limit: 3, botId }).catch((e) =>
         console.error("[insights] background analysis failed:", e),
       ),
     );
   } catch {
     // no executionCtx (tests) — render without background catch-up
   }
-  return c.html(await renderInsights(c.env, c.get("botId"), c.req.query("analyzed") ?? undefined));
+  return c.html(await renderInsights(c.env, botId, c.req.query("analyzed") ?? undefined));
 });
 
 // "Analizar ahora": grade up to 10 pending conversations inline, then redirect
 // back with the count for the confirmation banner.
 adminApp.post("/insights/analyze", async (c) => {
-  const result = await analyzeConversations(c.env, { limit: 10 });
+  const result = await analyzeConversations(c.env, { limit: 10, botId: c.get("botId") });
   return c.redirect(`/admin/insights?analyzed=${result.analyzed}`);
 });
 
@@ -845,6 +846,7 @@ adminApp.post("/campanas/send", async (c) => {
     campaignKey,
     freeformText: freeformText || undefined,
     template: templateSid ? { sid: templateSid, variables, body: templateBody } : undefined,
+    botId: c.get("botId"),
   });
   const q = new URLSearchParams({
     ok: "1",

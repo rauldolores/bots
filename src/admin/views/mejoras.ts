@@ -87,7 +87,7 @@ export async function renderMejoras(
   const [proposed, handled, lessons, autonomyRaw] = await Promise.all([
     repo.listProposed(),
     repo.listHandled(8),
-    getLessons(env),
+    getLessons(env, botId),
     new SettingsRepo(db, botId).get(SETTING_KEYS.autonomyLevel),
   ]);
   const copilot = autonomyRaw === "copilot";

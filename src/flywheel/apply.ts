@@ -13,9 +13,9 @@ import { resolveBotId } from "../tenant";
 import { KbDocsRepo, indexDoc } from "../kb/docs";
 import { getLessons, saveLessons, MAX_LESSONS } from "./detect";
 
-export async function applySuggestion(env: Env, id: string): Promise<boolean> {
+export async function applySuggestion(env: Env, id: string, botIdOverride?: string): Promise<boolean> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
+  const botId = botIdOverride ?? (await resolveBotId(db));
   const repo = new SuggestionsRepo(db, botId);
   const s = await repo.getById(id);
   if (!s || s.status !== "proposed") return false;
@@ -35,14 +35,14 @@ export async function applySuggestion(env: Env, id: string): Promise<boolean> {
     const docId = crypto.randomUUID();
     await docs.upsert({ id: docId, title, content });
     const doc = (await docs.getById(docId))!;
-    await indexDoc(env, doc);
+    await indexDoc(env, doc, botId);
   } else if (s.kind === "leccion") {
     const lesson = String(payload.lesson ?? s.title).trim();
     if (!lesson) return false;
-    const lessons = await getLessons(env);
+    const lessons = await getLessons(env, botId);
     if (!lessons.includes(lesson)) {
       lessons.push(lesson);
-      await saveLessons(env, lessons.slice(-MAX_LESSONS));
+      await saveLessons(env, lessons.slice(-MAX_LESSONS), botId);
     }
   } else {
     return false;
@@ -52,9 +52,9 @@ export async function applySuggestion(env: Env, id: string): Promise<boolean> {
   return true;
 }
 
-export async function dismissSuggestion(env: Env, id: string): Promise<boolean> {
+export async function dismissSuggestion(env: Env, id: string, botIdOverride?: string): Promise<boolean> {
   const db = new Db(env.DB);
-  const repo = new SuggestionsRepo(db, await resolveBotId(db));
+  const repo = new SuggestionsRepo(db, botIdOverride ?? (await resolveBotId(db)));
   const s = await repo.getById(id);
   if (!s || s.status !== "proposed") return false;
   await repo.setStatus(id, "dismissed");
@@ -91,7 +91,7 @@ export async function autoApplyPending(env: Env): Promise<{ applied: number; lef
         !payload.content.includes("[COMPLETA"));
     if (!safe) continue;
 
-    const ok = await applySuggestion(env, s.id);
+    const ok = await applySuggestion(env, s.id, botId);
     if (ok) {
       applied++;
       await db.run(

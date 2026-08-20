@@ -98,28 +98,28 @@ export function docChunks(doc: KbDoc): KbChunk[] {
 }
 
 /** Re-embed one doc: blanket-delete its old vectors, then upsert fresh ones. */
-export async function indexDoc(env: Env, doc: KbDoc): Promise<{ indexed: number }> {
+export async function indexDoc(env: Env, doc: KbDoc, botIdOverride?: string): Promise<{ indexed: number }> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
+  const botId = botIdOverride ?? (await resolveBotId(db));
   await new PgVectorStore(db, botId).deleteByIds(vectorIds(doc.id));
-  return reindexKb(env, docChunks(doc));
+  return reindexKb(env, docChunks(doc), botId);
 }
 
 /** Remove a deleted doc's vectors from the index. */
-export async function removeDocVectors(env: Env, docId: string): Promise<void> {
+export async function removeDocVectors(env: Env, docId: string, botIdOverride?: string): Promise<void> {
   const db = new Db(env.DB);
-  await new PgVectorStore(db, await resolveBotId(db)).deleteByIds(vectorIds(docId));
+  await new PgVectorStore(db, botIdOverride ?? (await resolveBotId(db))).deleteByIds(vectorIds(docId));
 }
 
 /** All dashboard docs as chunks (for the global reindex). */
-export async function dashboardChunks(env: Env): Promise<KbChunk[]> {
+export async function dashboardChunks(env: Env, botIdOverride?: string): Promise<KbChunk[]> {
   const db = new Db(env.DB);
-  const docs = await new KbDocsRepo(db, await resolveBotId(db)).list();
+  const docs = await new KbDocsRepo(db, botIdOverride ?? (await resolveBotId(db))).list();
   return docs.flatMap(docChunks);
 }
 
 /** Global reindex: repo fixtures + every dashboard doc. */
-export async function reindexAll(env: Env): Promise<{ indexed: number }> {
-  const chunks = [...FIXTURE_CHUNKS, ...(await dashboardChunks(env))];
-  return reindexKb(env, chunks);
+export async function reindexAll(env: Env, botIdOverride?: string): Promise<{ indexed: number }> {
+  const chunks = [...FIXTURE_CHUNKS, ...(await dashboardChunks(env, botIdOverride))];
+  return reindexKb(env, chunks, botIdOverride);
 }

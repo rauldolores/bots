@@ -58,7 +58,7 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
       // and, because this is a business-INITIATED message outside any 24h
       // session window, MUST use a pre-approved Content Template (HSM) — free
       // text would be rejected by WhatsApp. Both are best-effort.
-      await notifyOwner(env, { reason, summary, ticketId });
+      await notifyOwner(env, { reason, summary, ticketId }, botId);
 
       return { ticketId };
     },
@@ -100,9 +100,9 @@ export function handoffNotifyStatus(
  * reuses the bot token). Optional = Twilio WhatsApp via an approved Content
  * Template. Each channel is independent and never throws into the tool.
  */
-export async function notifyOwner(rawEnv: Env, notice: HandoffNotice): Promise<void> {
+export async function notifyOwner(rawEnv: Env, notice: HandoffNotice, botIdOverride?: string): Promise<void> {
   const notifyDb = new Db(rawEnv.DB);
-  const notifyBotId = await resolveBotId(notifyDb);
+  const notifyBotId = botIdOverride ?? (await resolveBotId(notifyDb));
   // El aviso al dueño sale por los MISMOS canales que le habla al cliente
   // (el token de Telegram/Twilio de este bot, si ya lo conectó) — sin esto,
   // un bot con canal propio le avisaría al dueño con el token de otro bot.
@@ -121,12 +121,9 @@ export async function notifyOwner(rawEnv: Env, notice: HandoffNotice): Promise<v
   if (!handoffContentSid) {
     try {
       const { SettingsRepo, SETTING_KEYS } = await import("../db/settings");
-      const { resolveBotId } = await import("../tenant");
       const settingsDb = new Db(env.DB);
       handoffContentSid =
-        (await new SettingsRepo(settingsDb, await resolveBotId(settingsDb)).get(
-          SETTING_KEYS.twilioHandoffContentSid,
-        )) ?? "";
+        (await new SettingsRepo(settingsDb, notifyBotId).get(SETTING_KEYS.twilioHandoffContentSid)) ?? "";
     } catch {
       // settings no disponible — se comporta como no configurado
     }

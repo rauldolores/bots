@@ -81,7 +81,7 @@ export async function renderInsights(env: Env, botId: string, analyzedParam?: st
     repo.missedKb(thirtyDays),
     repo.opportunities(thirtyDays),
     repo.recent(15),
-    countPending(env),
+    countPending(env, botId),
   ]);
 
   const resolvedPct =

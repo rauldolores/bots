@@ -94,11 +94,13 @@ export async function sendCampaign(
      *  agente tenga contexto cuando el cliente responda ("SÍ", "REPLAY"…). */
     template?: { sid: string; variables?: Record<string, string>; body?: string };
     now?: number;
+    /** El panel ya lo trae resuelto por request; sin esto, resolveBotId(db) global. */
+    botId?: string;
   },
 ): Promise<CampaignResult> {
   const now = opts.now ?? Date.now();
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
+  const botId = opts.botId ?? (await resolveBotId(db));
   const msgs = new MessagesRepo(db, botId);
   const members = await segmentMembers(db, botId, opts.segmentId, now);
 

@@ -5,7 +5,7 @@
 // del debounce de agent_jobs más el lease, así que hay que probarlo de verdad,
 // de webhook a respuesta.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
+import { createTestDb, createSecondTestBot, TEST_BOT_ID } from "../helpers/pgSetup";
 
 const streamTextMock = vi.fn();
 
@@ -244,5 +244,27 @@ describe("tick — sin trabajo y con fallos", () => {
     expect(r).toEqual({ claimed: 1, answered: 0, failed: 0 });
     // Si no se cerrara, reintentaría para siempre sobre un buffer vacío.
     expect(await db.all("SELECT conversation_key FROM agent_jobs")).toHaveLength(0);
+  });
+});
+
+describe("con 2+ bots en la tabla (F5): el webhook trae su propio botId, no debe adivinar", () => {
+  // Bug real de producción: resolveAgentConfig() se llamaba sin el botId ya
+  // resuelto por ingestMessage/runTurn, así que volvía a intentar
+  // resolveBotId(db) por su cuenta — que revienta ("Hay 2 bots...") en
+  // cuanto existe un segundo bot. Dormido mientras solo hubo un bot en toda
+  // la sesión de F5, hasta que el dueño creó uno real.
+  it("ingestMessage + tick responden bien con un segundo bot ya en la tabla", async () => {
+    const otherBotId = await createSecondTestBot(db);
+    const key = conversationKeyOf(otherBotId, "telegram", "u9");
+
+    await ingestMessage(env, { channel: "telegram", channelUserId: "u9", text: "hola" }, otherBotId);
+    await db.run(
+      "UPDATE agent_jobs SET run_after = (EXTRACT(EPOCH FROM now()) * 1000)::bigint - 1000 WHERE conversation_key = ?",
+      [key],
+    );
+
+    const r = await tick(env);
+    expect(r).toEqual({ claimed: 1, answered: 1, failed: 0 });
+    expect(sendReply).toHaveBeenCalledTimes(1);
   });
 });

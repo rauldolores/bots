@@ -159,7 +159,7 @@ export async function ingestMessage(
   await jobs.addPending(key, processedText);
   if (hasImage) await state.resetImageRetries(key);
 
-  const cfg = await resolveAgentConfig(env, []);
+  const cfg = await resolveAgentConfig(env, [], botId);
 
   // El dueño pausó el bot desde el panel → el mensaje queda en el buffer pero
   // NO se programa turno, así que nadie responde. Al despausar, el siguiente
@@ -204,7 +204,7 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
   if (aMedioEnviar) {
     const estado = await stateRepo.get(conversationKey);
     if (estado) {
-      await enviarRespuesta(env, estado, aMedioEnviar, await resolveAgentConfig(env, []));
+      await enviarRespuesta(env, estado, aMedioEnviar, await resolveAgentConfig(env, [], botId));
       console.log(`[runTurn] reenvío exitoso para ${conversationKey}`);
       reenviada = true;
     }
@@ -257,7 +257,7 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
 
   const tools = buildTools({ env, getConversationId: () => convId, botId, tier: bot?.tier ?? "free" });
   const toolNames = Object.keys(tools);
-  const cfg = await resolveAgentConfig(env, toolNames);
+  const cfg = await resolveAgentConfig(env, toolNames, botId);
 
   // Respetar los toggles del panel: el prompt solo anuncia las herramientas
   // habilitadas, así que el registro tiene que coincidir.

@@ -46,6 +46,8 @@ export interface AnalyzeOptions {
   limit?: number;
   /** Injectable clock for tests. */
   now?: number;
+  /** El panel ya lo trae resuelto por request; sin esto, resolveBotId(db) global (asume un solo bot en todo el despliegue). */
+  botId?: string;
 }
 
 export interface AnalyzeResult {
@@ -78,9 +80,9 @@ async function pickPending(db: Db, botId: string, now: number, limit: number): P
 }
 
 /** How many idle conversations are still waiting for analysis (for the UI). */
-export async function countPending(env: Env, now = Date.now()): Promise<number> {
+export async function countPending(env: Env, botIdOverride?: string, now = Date.now()): Promise<number> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
+  const botId = botIdOverride ?? (await resolveBotId(db));
   const row = await db.first<{ n: number }>(
     `SELECT COUNT(*) as n
      FROM conversations c
@@ -169,7 +171,7 @@ export async function analyzeConversations(
   const now = opts.now ?? Date.now();
   const limit = opts.limit ?? 10;
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
+  const botId = opts.botId ?? (await resolveBotId(db));
   const msgs = new MessagesRepo(db, botId);
   const insights = new InsightsRepo(db, botId);
   const bot = await new BotsRepo(db).getById(botId);
@@ -179,7 +181,7 @@ export async function analyzeConversations(
   let analyzed = 0;
   let errors = 0;
 
-  const { model } = createModel(env, "fast", await loadLlmOverrides(env));
+  const { model } = createModel(env, "fast", await loadLlmOverrides(env, botId));
 
   for (const conv of pending) {
     try {
@@ -221,6 +223,6 @@ export async function analyzeConversations(
     }
   }
 
-  const remaining = await countPending(env, now);
+  const remaining = await countPending(env, botId, now);
   return { analyzed, errors, pending: remaining };
 }

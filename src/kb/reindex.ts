@@ -33,6 +33,7 @@ const BATCH_SIZE = 100;
 export async function reindexKb(
   env: Env,
   chunks: KbChunk[] = kbChunks as KbChunk[],
+  botIdOverride?: string,
 ): Promise<{ indexed: number }> {
   if (!Array.isArray(chunks) || chunks.length === 0) {
     return { indexed: 0 };
@@ -40,7 +41,7 @@ export async function reindexKb(
 
   const embeddings = getEmbeddingProvider(env);
   const db = new Db(env.DB);
-  const store = new PgVectorStore(db, await resolveBotId(db));
+  const store = new PgVectorStore(db, botIdOverride ?? (await resolveBotId(db)));
   let indexed = 0;
 
   for (let start = 0; start < chunks.length; start += BATCH_SIZE) {
