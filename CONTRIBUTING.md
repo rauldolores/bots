@@ -13,15 +13,16 @@ ayudas un montón.
 
 ## ¿Quieres mandar un arreglo? → Pull Request (vía fork)
 1. Dale **Fork** a este repo (botón arriba a la derecha).
-2. En tu fork, crea una rama y haz tu cambio. Si usas Claude Code, pídele que lo haga y que
-   corra `npm test` + `npm run typecheck` antes.
+2. En tu fork, crea una rama y haz tu cambio dentro de `apps/bot/`. Si usas Claude Code,
+   pídele que lo haga y que corra `npm test` + `npm run typecheck` antes (desde `apps/bot/`).
 3. Abre un **Pull Request** hacia `main` de este repo, explicando **qué cambia y por qué**.
 4. El CI corre los tests solo. Un maintainer lo revisa y lo mergea. (Tú no mergeas directo —
    así protegemos la plantilla de todos.)
 
 ### Reglas
-- **No toques `member/`** (es la config de cada quien). Cambios solo en `src/`, `test/`,
-  `skill/` o documentación.
+- El chatbot vive en `apps/bot/` (este repo también trae `apps/web`, el sitio público).
+- **No toques `apps/bot/member/`** (es la config de cada quien). Cambios solo en
+  `apps/bot/src/`, `apps/bot/test/`, `apps/bot/skill/` o documentación.
 - **Un PR = un solo tema.** Enfocado y chico = se revisa y mergea más rápido.
 - Si tu **agente** abrió el PR, **revisa el diff tú mismo** antes — tú eres responsable.
 - **Nada de secrets ni API keys** en el código (van como `wrangler secret`).

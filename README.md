@@ -9,7 +9,7 @@
 <em>Self-hosted, open-source AI support bot for small businesses. Runs on Node, Docker, Cloudflare or Vercel. Your Supabase, your AI key. Spanish-first. Deploy in minutes.</em>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-f59e0b.svg)](./LICENSE)
-[![Multiplataforma](https://img.shields.io/badge/corre_en-Node%20·%20Docker%20·%20Cloudflare%20·%20Vercel-38bdf8.svg)](./docs/despliegue.md)
+[![Multiplataforma](https://img.shields.io/badge/corre_en-Node%20·%20Docker%20·%20Cloudflare%20·%20Vercel-38bdf8.svg)](./apps/bot/docs/despliegue.md)
 [![Supabase](https://img.shields.io/badge/datos-Supabase-3ecf8e.svg)](https://supabase.com/)
 [![Hecho por Horizontes IA](https://img.shields.io/badge/por-Horizontes%20IA-38bdf8.svg)](https://horizontesia.com)
 
@@ -53,11 +53,15 @@ npx nodia-agents init
 
 ### Opción B — manual (si ya programas)
 
+> Este repo es un monorepo: el chatbot vive en `apps/bot/` (también trae
+> `apps/web`, el sitio público de Nodia Agents). Todo lo de abajo corre
+> **dentro de `apps/bot/`**.
+
 Crea una [Supabase](https://supabase.com) gratis, copia su cadena de conexión, y:
 
 ```bash
 git clone https://github.com/rauldolores/bots.git mi-chatbot
-cd mi-chatbot
+cd mi-chatbot/apps/bot
 npm install
 cp .env.example .env        # pon ahí DATABASE_URL y tu llave de IA
 npm run db:apply            # crea las tablas
@@ -66,7 +70,7 @@ npm start                   # ¡listo!
 
 Tu panel queda en `http://localhost:8787/admin`.
 
-Para publicarlo en Cloudflare, Vercel o tu propio servidor: **[docs/despliegue.md](./docs/despliegue.md)**.
+Para publicarlo en Cloudflare, Vercel o tu propio servidor: **[docs/despliegue.md](./apps/bot/docs/despliegue.md)**.
 
 ---
 
@@ -111,7 +115,7 @@ Un mensaje entra por un canal → **el bot espera unos segundos por si sigues es
 - **pgvector** — base de conocimiento / RAG, en la misma base.
 - Embeddings y transcripción de voz con proveedor intercambiable (Workers AI en Cloudflare, OpenAI fuera).
 
-Un solo código para todos los destinos. Cómo desplegar en cada uno: **[docs/despliegue.md](./docs/despliegue.md)**.
+Un solo código para todos los destinos. Cómo desplegar en cada uno: **[docs/despliegue.md](./apps/bot/docs/despliegue.md)**.
 
 ---
 
@@ -130,7 +134,7 @@ El Starter de este repo sirve para **cualquier negocio**. Si quieres ir más all
 
 ## 🔒 Privacidad — quién ve los datos
 
-**Nadie más que tú.** Nodia Agents corre en TU cuenta de Cloudflare con TUS llaves: las conversaciones de tus clientes viven en tu base de datos y **el bot no envía telemetría ni datos de uso a Horizontes IA ni a nadie**. No hay ping de activación ni analíticas ocultas — puedes revisarlo tú mismo en `src/`.
+**Nadie más que tú.** Nodia Agents corre en TU cuenta de Cloudflare con TUS llaves: las conversaciones de tus clientes viven en tu base de datos y **el bot no envía telemetría ni datos de uso a Horizontes IA ni a nadie**. No hay ping de activación ni analíticas ocultas — puedes revisarlo tú mismo en `apps/bot/src/`.
 
 - Los **mensajes se borran solos a los 90 días** (cron diario). Los leads y tickets se quedan hasta que tú los borres.
 - **No se guardan audios ni imágenes**: se transcriben o describen y solo queda el texto.

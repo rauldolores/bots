@@ -80,7 +80,34 @@ git remote -v
 git fetch upstream main
 ```
 
-Lee la versión que viene en el template nuevo:
+**Antes de leer la versión, detecta si la estructura de carpetas cambió** (Nodia
+Agents pasó a vivir en `apps/bot/` dentro del repo oficial, junto a otras apps
+del mismo proyecto):
+```bash
+git show upstream/main:apps/bot/package.json >/dev/null 2>&1 && echo NUEVO || echo VIEJO
+```
+
+- Si dice **VIEJO** → la estructura de upstream sigue siendo la de siempre, continúa exactamente como antes (el resto de este skill no cambia).
+- Si dice **NUEVO** y el bot del miembro YA vive en `apps/bot/` (`ls apps/bot/package.json` existe) → continúa normal, solo que de aquí en adelante la ruta es `apps/bot/package.json` en vez de `package.json` a secas.
+- Si dice **NUEVO** pero el bot del miembro TODAVÍA tiene `package.json` en su raíz (no migró) → **no intentes el merge normal.** `member/` es justo lo más personalizado del miembro, y mezclar dos estructuras de carpetas distintas arriesga dejarlo huérfano. En vez de eso:
+
+  Dile: *"La estructura de carpetas de Nodia Agents cambió — para no arriesgar tu configuración, mejor la respaldamos y reinstalamos limpio en vez de mezclar. No pierdes nada, solo toma unos minutos más."*
+
+  Y guíalo:
+  ```bash
+  cp -r member ../member.backup-$(date +%Y%m%d)
+  cd ..
+  git clone https://github.com/rauldolores/bots.git mi-chatbot-nuevo
+  cp -r member.backup-*/* mi-chatbot-nuevo/apps/bot/member/
+  cd mi-chatbot-nuevo/apps/bot
+  ```
+  Desde ahí, retoma el Paso 0 de este mismo skill (ya con la estructura nueva)
+  para terminar la actualización, y al final ayúdalo a reconectar sus
+  secrets/canales y volver a desplegar. **Termina aquí** — no sigas con los
+  pasos de abajo en esta corrida.
+
+Lee la versión que viene en el template nuevo (usa `package.json` o
+`apps/bot/package.json` según lo que detectaste arriba):
 ```bash
 git show upstream/main:package.json | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>console.log(JSON.parse(s).version))"
 ```

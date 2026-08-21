@@ -8,7 +8,7 @@ Este documento explica **qué datos maneja el bot, dónde viven y qué te toca h
 
 ## 1. Nodia Agents no llama a casa
 
-El bot **no envía telemetría, analíticas ni datos de uso a nadie**. No hay ping de activación, ni contador de instalaciones, ni reporte de errores remoto. Puedes verificarlo tú mismo: busca en `src/` cualquier `fetch` a un dominio y verás que solo aparecen los servicios que **tú** conectas (Twilio, Meta, Telegram, ManyChat, Cal.com) y el proveedor de IA que elegiste.
+El bot **no envía telemetría, analíticas ni datos de uso a nadie**. No hay ping de activación, ni contador de instalaciones, ni reporte de errores remoto. Puedes verificarlo tú mismo: busca en `apps/bot/src/` cualquier `fetch` a un dominio y verás que solo aparecen los servicios que **tú** conectas (Twilio, Meta, Telegram, ManyChat, Cal.com) y el proveedor de IA que elegiste.
 
 Existe una API opcional en `/api/*` para conectar el bot a un panel externo. Está **apagada por defecto**: solo responde si tú configuras el secreto `CONTROL_PLANE_TOKEN`, y aun activada devuelve **únicamente números agregados** (cuántos leads, cuántos mensajes, cuántas conversaciones) más la versión del bot. Nunca el contenido de una conversación ni datos de una persona.
 
