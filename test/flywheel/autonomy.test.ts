@@ -15,7 +15,7 @@ vi.mock("../../src/tools/handoffHuman", () => ({
   handoffHumanTool: () => ({}),
 }));
 
-import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID, createSecondTestBot } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
@@ -158,6 +158,22 @@ describe("watchdog (checkBotHealth)", () => {
     await db.run("UPDATE messages SET created_at = ?", [now + 7 * 60 * 60_000 - 5 * 60_000]);
     expect((await checkBotHealth(env, now + 7 * 60 * 60_000)).alerted).toBe(true);
     expect(notifyOwnerMock).toHaveBeenCalledTimes(2);
+  });
+
+  describe("con 2+ bots en la tabla (F5): cada bot se revisa por su cuenta, no debe adivinar", () => {
+    it("un bot con fallos alerta; el otro, sin fallos, no — y cada notifyOwner lleva el botId correcto", async () => {
+      const otherBotId = await createSecondTestBot(db);
+      const now = 1_800_000_000_000;
+      await seedFailures(ALERT_THRESHOLD, now - 5 * 60_000); // solo TEST_BOT_ID falla
+
+      const r = await checkBotHealth(env, now);
+      // Antes del fix esto tronaba con "no se puede adivinar cuál bot usar".
+      expect(r).toEqual({ failures: 3, alerted: true });
+      expect(notifyOwnerMock).toHaveBeenCalledTimes(1);
+      const [, , botIdArg] = notifyOwnerMock.mock.calls[0] as unknown[];
+      expect(botIdArg).toBe(TEST_BOT_ID);
+      expect(botIdArg).not.toBe(otherBotId);
+    });
   });
 });
 

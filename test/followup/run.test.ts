@@ -26,7 +26,7 @@ vi.mock("../../src/replies/sender", () => ({
   pickAdapter: () => ({ sendReply: (...a: unknown[]) => sendReplyMock(...a) }),
 }));
 
-import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID, createSecondTestBot } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { MessagesRepo } from "../../src/db/messages";
@@ -191,5 +191,39 @@ describe("runFollowups — envío y garantías", () => {
     const r = await runFollowups(env, { now: NOW });
     expect(r.sent).toBe(0);
     expect(sendReplyMock).not.toHaveBeenCalled();
+  });
+
+  describe("con 2+ bots en la tabla (F5): cada bot corre su propio follow-up, no debe adivinar", () => {
+    it("manda a un candidato caliente de CADA bot, con su propio cap y claim", async () => {
+      const otherBotId = await createSecondTestBot(db);
+      const otherConvs = new (await import("../../src/db/conversations")).ConversationsRepo(db, otherBotId);
+      const otherMsgs = new MessagesRepo(db, otherBotId);
+      const otherInsights = new InsightsRepo(db, otherBotId);
+
+      const hot1 = await seed("bot1-hot"); // TEST_BOT_ID, vía el helper de siempre
+      await markHot(hot1);
+
+      const conv2 = await otherConvs.getOrCreate("manychat", "bot2-hot", "Lead bot2");
+      await otherMsgs.append(conv2.id, "user", "pregunta 1", { createdAt: IDLE_OK - 1000 });
+      await otherMsgs.append(conv2.id, "assistant", "respuesta del bot", { createdAt: IDLE_OK + 500 });
+      await otherConvs.touchLastMessage(conv2.id, IDLE_OK + 500);
+      await otherInsights.upsert({
+        conversationId: conv2.id,
+        sentiment: "positive",
+        resolution: "unresolved",
+        botScore: 4,
+        topics: [],
+        summary: "interesado",
+        missedKb: null,
+        saleOpportunity: true,
+      });
+
+      // Antes del fix esto tronaba con "no se puede adivinar cuál bot usar".
+      const r = await runFollowups(env, { now: NOW });
+      expect(r).toEqual({ sent: 2, skipped: 0, errors: 0 });
+      expect(sendReplyMock).toHaveBeenCalledTimes(2);
+      const recipients = sendReplyMock.mock.calls.map((c) => (c[0] as { channelUserId: string }).channelUserId);
+      expect(recipients.sort()).toEqual(["bot1-hot", "bot2-hot"]);
+    });
   });
 });

@@ -10,7 +10,7 @@
 import type { Env } from "./env";
 import { Db } from "./db/client";
 import { SettingsRepo } from "./db/settings";
-import { resolveBotId } from "./tenant";
+import { BotsRepo } from "./db/bots";
 import { notifyOwner } from "./tools/handoffHuman";
 
 const WINDOW_MS = 30 * 60 * 1000;
@@ -23,9 +23,8 @@ export interface WatchdogResult {
   alerted: boolean;
 }
 
-export async function checkBotHealth(env: Env, now = Date.now()): Promise<WatchdogResult> {
+async function checkBotHealthFor(env: Env, botId: string, now: number): Promise<WatchdogResult> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
   const failures =
     (
       await db.first<{ n: number }>(
@@ -44,11 +43,34 @@ export async function checkBotHealth(env: Env, now = Date.now()): Promise<Watchd
   }
 
   await settings.set(LAST_ALERT_KEY, String(now));
-  await notifyOwner(env, {
-    reason: "salud del bot",
-    summary: `⚠ ${failures} respuestas fallidas en los últimos 30 min — revisa el proveedor de IA (rate limits/keys) o pausa el bot desde el panel.`,
-    ticketId: "watchdog",
-  });
-  console.error(`[watchdog] ALERTA: ${failures} fallos en 30 min — dueño notificado`);
+  await notifyOwner(
+    env,
+    {
+      reason: "salud del bot",
+      summary: `⚠ ${failures} respuestas fallidas en los últimos 30 min — revisa el proveedor de IA (rate limits/keys) o pausa el bot desde el panel.`,
+      ticketId: "watchdog",
+    },
+    botId,
+  );
+  console.error(`[watchdog] ALERTA: bot ${botId} — ${failures} fallos en 30 min — dueño notificado`);
   return { failures, alerted: true };
+}
+
+/**
+ * Cada bot del despliegue se revisa por su cuenta (su propio umbral, su
+ * propio throttle, su propio dueño a quien avisar) — F5+: un despliegue
+ * puede tener 2+ bots. El resultado agregado (suma de fallos, alertó si
+ * ALGUNO alertó) es lo que se registra/devuelve.
+ */
+export async function checkBotHealth(env: Env, now = Date.now()): Promise<WatchdogResult> {
+  const db = new Db(env.DB);
+  const bots = await new BotsRepo(db).listAll();
+  let failures = 0;
+  let alerted = false;
+  for (const bot of bots) {
+    const r = await checkBotHealthFor(env, bot.id, now);
+    failures += r.failures;
+    alerted = alerted || r.alerted;
+  }
+  return { failures, alerted };
 }

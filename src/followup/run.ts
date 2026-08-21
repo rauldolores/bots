@@ -57,9 +57,10 @@ export async function pickFollowupCandidates(
   env: Env,
   now: number,
   limit: number,
+  botIdOverride?: string,
 ): Promise<FollowupCandidate[]> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
+  const botId = botIdOverride ?? (await resolveBotId(db));
   const rows = await db.all<CandidateRow>(
     `SELECT * FROM (
        SELECT c.id, c.channel, c.channel_user_id, c.display_name,
@@ -103,27 +104,43 @@ export interface RunFollowupsResult {
   errors: number;
 }
 
+/**
+ * Cada bot del despliegue corre su propia selección/envío/cap — F5+: un
+ * despliegue puede tener 2+ bots, y el cupo diario de uno no debe robarle
+ * cupo a otro (decisión M9, ahora aplicada por bot en vez de asumir el único).
+ */
 export async function runFollowups(
   env: Env,
   opts: { now?: number; limit?: number; dailyCap?: number } = {},
+): Promise<RunFollowupsResult> {
+  const db = new Db(env.DB);
+  const bots = await new BotsRepo(db).listAll();
+  const totals: RunFollowupsResult = { sent: 0, skipped: 0, errors: 0 };
+  for (const bot of bots) {
+    const r = await runFollowupsForBot(env, bot.id, opts);
+    totals.sent += r.sent;
+    totals.skipped += r.skipped;
+    totals.errors += r.errors;
+  }
+  return totals;
+}
+
+async function runFollowupsForBot(
+  env: Env,
+  botId: string,
+  opts: { now?: number; limit?: number; dailyCap?: number },
 ): Promise<RunFollowupsResult> {
   const now = opts.now ?? Date.now();
   const limit = opts.limit ?? 6;
   const dailyCap = opts.dailyCap ?? 30;
   const db = new Db(env.DB);
-  // Transicional (F2.1/F2.3): un despliegue sigue siendo un solo bot hasta
-  // F4, así que se resuelve una vez para toda la corrida. Cuando este cron
-  // sirva a más de un bot por despliegue tiene que iterar por cada uno, no
-  // asumir el único.
-  const botId = await resolveBotId(db);
 
   // Respeta la pausa global del bot (el dueño lo apagó a propósito).
-  const cfg = await resolveAgentConfig(env, []);
+  const cfg = await resolveAgentConfig(env, [], botId);
   if (cfg.botPaused) return { sent: 0, skipped: 0, errors: 0 };
 
-  // Cap diario — F2.3 (decisión M9): antes era del despliegue, ahora es del
-  // bot, porque agregar el filtro de bot_id sin más habría dejado que el
-  // consumo de un bot le robara cupo a otro en el mismo despliegue.
+  // Cap diario — F2.3 (decisión M9): es del bot, no del despliegue, para que
+  // el consumo de un bot no le robe cupo a otro en el mismo despliegue.
   const sentToday =
     (
       await db.first<{ n: number }>(
@@ -137,6 +154,7 @@ export async function runFollowups(
     env,
     now,
     Math.min(limit, dailyCap - sentToday),
+    botId,
   );
   if (candidates.length === 0) return { sent: 0, skipped: 0, errors: 0 };
 

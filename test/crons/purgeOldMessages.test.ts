@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
+import { createTestDb, TEST_BOT_ID, createSecondTestBot } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { MessagesRepo } from "../../src/db/messages";
@@ -48,5 +48,24 @@ describe("purgeOldMessages cron", () => {
     await insertAged("b", now - 10 * DAY);
     const deleted = await purgeOldMessages(env, now);
     expect(deleted).toBe(0);
+  });
+
+  describe("con 2+ bots en la tabla (F5): purga los mensajes viejos de TODOS, no de uno solo", () => {
+    it("suma lo borrado de cada bot", async () => {
+      const otherBotId = await createSecondTestBot(db);
+      const otherConv = await new ConversationsRepo(db, otherBotId).getOrCreate("telegram", "purge-test-2");
+      const now = 1_000 * DAY;
+      await insertAged("old-bot-1", now - (MESSAGE_RETENTION_DAYS + 5) * DAY);
+      await db.run(
+        `INSERT INTO messages (id, conversation_id, bot_id, role, content, created_at) VALUES (?, ?, ?, 'user', ?, ?)`,
+        [crypto.randomUUID(), otherConv.id, otherBotId, "old-bot-2", now - (MESSAGE_RETENTION_DAYS + 5) * DAY],
+      );
+
+      // Antes del fix esto tronaba con "no se puede adivinar cuál bot usar".
+      const deleted = await purgeOldMessages(env, now);
+      expect(deleted).toBe(2);
+      expect(await new MessagesRepo(db, TEST_BOT_ID).lastN(convId, 50)).toHaveLength(0);
+      expect(await new MessagesRepo(db, otherBotId).lastN(otherConv.id, 50)).toHaveLength(0);
+    });
   });
 });

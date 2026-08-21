@@ -148,6 +148,12 @@ export class BotsRepo {
     return rows.map(toBot);
   }
 
+  /** Todos los bots del despliegue, sin importar organización — para los crons nocturnos, que corren de todo el despliegue hacia abajo. */
+  async listAll(): Promise<Bot[]> {
+    const rows = await this.db.all<BotRow>("SELECT * FROM bots ORDER BY created_at ASC", []);
+    return rows.map(toBot);
+  }
+
   async updateIdentity(
     id: string,
     identity: { name: string; businessName: string; language: string; tier: "free" | "pro"; niche?: string | null },
