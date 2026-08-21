@@ -1,8 +1,16 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
+import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { LeadsRepo } from "../../src/db/leads";
+import { BotConnectorsRepo } from "../../src/db/botConnectors";
 import { captureLeadTool } from "../../src/tools/captureLead";
+
+const readSecretMock = vi.fn();
+vi.mock("../../src/db/vault", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/db/vault")>();
+  return { ...actual, readSecret: (...args: unknown[]) => readSecretMock(...args) };
+});
 
 let env: any;
 let leads: LeadsRepo;
@@ -37,5 +45,45 @@ describe("captureLeadTool", () => {
     const list = await leads.list(10);
     expect(list).toHaveLength(1);
     expect(list[0].intent).toBe("Corte + barba 5pm");
+  });
+});
+
+describe("captureLeadTool — con un CRM conectado", () => {
+  beforeEach(() => {
+    readSecretMock.mockReset();
+  });
+
+  it("además de guardar local, empuja el lead al CRM y marca exported_to/external_id", async () => {
+    await new BotConnectorsRepo(new Db(env.DB)).upsert({ botId: TEST_BOT_ID, category: "crm", provider: "hubspot", secretRef: "11111111-1111-1111-1111-111111111111" });
+    readSecretMock.mockResolvedValue("pat-fake");
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ id: "hs-777" }), { status: 201 })) as any;
+
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    const result = (await tool.execute!(
+      { name: "Ana", contact: "ana@x.com", intent: "Quiere cotización" },
+      {} as any,
+    )) as { leadId: string };
+
+    const row = await leads.list(10);
+    expect(row[0].exported_to).toBe("hubspot");
+    expect(row[0].external_id).toBe("hs-777");
+    expect(result.leadId).toBeTruthy();
+  });
+
+  it("si el CRM falla, el lead local NO se pierde (best-effort)", async () => {
+    await new BotConnectorsRepo(new Db(env.DB)).upsert({ botId: TEST_BOT_ID, category: "crm", provider: "hubspot", secretRef: "11111111-1111-1111-1111-111111111111" });
+    readSecretMock.mockResolvedValue("pat-fake");
+    global.fetch = vi.fn(async () => new Response("boom", { status: 500 })) as any;
+
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    const result = (await tool.execute!(
+      { name: "Ana", contact: "ana@x.com", intent: "Quiere cotización" },
+      {} as any,
+    )) as { leadId: string };
+
+    expect(result.leadId).toBeTruthy();
+    const row = await leads.list(10);
+    expect(row).toHaveLength(1);
+    expect(row[0].exported_to).toBeNull();
   });
 });

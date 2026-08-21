@@ -8,8 +8,20 @@
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { BotChannelsRepo, type BotChannel } from "../../db/botChannels";
+import { BotConnectorsRepo, type BotConnector } from "../../db/botConnectors";
 import { createSecret, deleteSecret } from "../../db/vault";
 import { setTelegramWebhook } from "../../channels/telegram";
+import {
+  CRM_PROVIDERS,
+  TICKET_PROVIDERS,
+  CALENDAR_PROVIDERS,
+  MCP_PROVIDERS,
+  CRM_ADAPTERS,
+  TICKET_ADAPTERS,
+  CATEGORY_LABELS,
+  type ConnectorCategory,
+  type ConnectorMeta,
+} from "../../connectors/registry";
 import { layout } from "./layout";
 
 function esc(s: string): string {
@@ -235,6 +247,223 @@ export async function disconnectChannel(env: Env, botId: string, channel: Connec
   await repo.disable(botId, channel);
 }
 
+// ── Conectores salientes: CRM / Tickets / Calendario / MCP ────────────────
+//
+// Distinto de los canales de arriba: aquí el bot LLAMA a la API externa con
+// un API key propio (Vault), no recibe un webhook. El molde del diálogo es
+// el mismo (pasos guiados + formulario), generalizado por ConnectorMeta.
+
+const CATEGORY_TABS: { key: string; label: string }[] = [
+  { key: "canales", label: "Canales" },
+  { key: "crm", label: CATEGORY_LABELS.crm },
+  { key: "tickets", label: CATEGORY_LABELS.tickets },
+  { key: "calendar", label: CATEGORY_LABELS.calendar },
+  { key: "mcp", label: CATEGORY_LABELS.mcp },
+];
+
+function providersFor(category: ConnectorCategory): Record<string, ConnectorMeta> {
+  if (category === "crm") return CRM_PROVIDERS;
+  if (category === "tickets") return TICKET_PROVIDERS;
+  if (category === "calendar") return CALENDAR_PROVIDERS;
+  return MCP_PROVIDERS;
+}
+
+function renderTabs(active: string): string {
+  return `<div style="display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:2px">
+    ${CATEGORY_TABS.map((t) => {
+      const isActive = t.key === active;
+      return `<a href="/admin/conexiones?cat=${t.key}" class="text-[12.5px]"
+        style="padding:7px 14px;font-weight:600;text-decoration:none;border-radius:8px;${
+          isActive ? "background:var(--accent);color:#1a1206" : "color:var(--muted)"
+        }">${esc(t.label)}</a>`;
+    }).join("")}
+  </div>`;
+}
+
+/** Diálogo de conexión genérico: instrucciones + API key + campos extra de config. */
+export function renderConnectorModal(meta: ConnectorMeta, opts?: { error?: string }): string {
+  const steps = (meta.steps ?? [])
+    .map((s, i) => `<li style="margin-bottom:6px"><span class="font-mono" style="color:var(--accent-2)">${i + 1}.</span> ${s}</li>`)
+    .join("");
+  const apiKeyField = `
+    <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+      <label for="api_key" class="text-[12px] font-semibold text-cream">${esc(meta.apiKeyLabel ?? "API key")}</label>
+      <input type="password" id="api_key" name="api_key" required
+             placeholder="${esc(meta.apiKeyPlaceholder ?? "········")}"
+             style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;font-family:inherit;outline:none">
+    </div>`;
+  const extraFields = (meta.fields ?? [])
+    .map(
+      (f) => `
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+        <label for="${f.name}" class="text-[12px] font-semibold text-cream">${esc(f.label)}</label>
+        <input type="${f.type ?? "text"}" id="${f.name}" name="${f.name}" required
+               placeholder="${esc(f.placeholder)}"
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;font-family:inherit;outline:none">
+      </div>`,
+    )
+    .join("");
+  const error = opts?.error
+    ? `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;margin-bottom:14px">${esc(opts.error)}</div>`
+    : "";
+
+  return modalShell(
+    meta.icon,
+    `Conectar ${meta.name}`,
+    `
+    <ol class="text-[12.5px]" style="color:var(--muted);line-height:1.6;padding-left:0;list-style:none;margin:0 0 16px">${steps}</ol>
+    ${error}
+    <form hx-post="/admin/conexiones/connectors/${meta.category}/${meta.id}/connect" hx-target="#modal-root" hx-swap="innerHTML">
+      ${apiKeyField}
+      ${extraFields}
+      <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:10px">Conectar</button>
+    </form>`,
+  );
+}
+
+function renderConnectorConnectedModal(meta: ConnectorMeta): string {
+  const what = meta.category === "crm" ? "los leads nuevos se dan de alta ahí" : "los handoffs nuevos se crean como tickets ahí";
+  return modalShell(
+    meta.icon,
+    `${meta.name} conectado`,
+    `<div class="text-[13px]" style="color:var(--ok);font-weight:600;margin-bottom:12px">✓ ${esc(meta.name)} conectado a este bot</div>
+     <p class="text-[12.5px]" style="color:var(--muted);margin:0 0 12px">A partir de ahora ${what}, y esta pantalla mostrará los datos de ${esc(meta.name)} en vez de la tabla local.</p>
+     <button type="button" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:9px"
+             onclick="document.getElementById('modal-root').innerHTML=''">Listo</button>`,
+  );
+}
+
+/** Procesa el formulario de conexión de un conector saliente: guarda el API key en Vault + bot_connectors. */
+export async function connectConnector(
+  env: Env,
+  botId: string,
+  category: ConnectorCategory,
+  provider: string,
+  form: FormData,
+): Promise<string> {
+  const meta = providersFor(category)[provider];
+  if (!meta || meta.comingSoon) {
+    return `<div class="text-[12.5px]" style="color:var(--bad)">Ese conector todavía no está disponible.</div>`;
+  }
+  const db = new Db(env.DB);
+  const str = (name: string) => String(form.get(name) ?? "").trim();
+
+  const apiKey = str("api_key");
+  if (!apiKey) {
+    return renderConnectorModal(meta, { error: `Falta ${(meta.apiKeyLabel ?? "el API key").toLowerCase()}.` });
+  }
+  const config: Record<string, string> = {};
+  for (const f of meta.fields ?? []) {
+    const v = str(f.name);
+    if (!v) return renderConnectorModal(meta, { error: `Falta "${f.label}".` });
+    config[f.name] = v;
+  }
+
+  const secretRef = await createSecret(db, apiKey, `${category}:${provider}:${botId}`);
+  await new BotConnectorsRepo(db).upsert({ botId, category, provider, name: meta.name, secretRef, config });
+  return renderConnectorConnectedModal(meta);
+}
+
+export async function disconnectConnector(env: Env, botId: string, provider: string): Promise<void> {
+  const db = new Db(env.DB);
+  const repo = new BotConnectorsRepo(db);
+  const row = await repo.getByBotAndProvider(botId, provider);
+  if (row?.secret_ref) await deleteSecret(db, row.secret_ref).catch(() => {});
+  await repo.disable(botId, provider);
+}
+
+/** Busca el conector por categoría+id y arma su diálogo — 404 amable si no existe o aún no está disponible. */
+export function renderConnectorConnectModal(category: ConnectorCategory, provider: string): string {
+  const meta = providersFor(category)[provider];
+  if (!meta || meta.comingSoon) {
+    return `<div class="text-[12.5px]" style="color:var(--bad)">Ese conector todavía no está disponible.</div>`;
+  }
+  return renderConnectorModal(meta);
+}
+
+/** Para saber a qué categoría redirigir tras desconectar (la URL de disconnect solo trae el provider). */
+export function categoryOfProvider(provider: string): ConnectorCategory | null {
+  if (CRM_PROVIDERS[provider]) return "crm";
+  if (TICKET_PROVIDERS[provider]) return "tickets";
+  if (CALENDAR_PROVIDERS[provider]) return "calendar";
+  if (MCP_PROVIDERS[provider]) return "mcp";
+  return null;
+}
+
+async function renderConnectorCard(db: Db, botId: string, meta: ConnectorMeta): Promise<string> {
+  if (meta.comingSoon) {
+    return `
+    <div class="bg-panel border border-line" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;opacity:.6">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <div class="font-display font-semibold text-[13.5px] text-cream" style="display:flex;align-items:center;gap:9px">
+          <i data-lucide="${meta.icon}" width="16" height="16" class="text-dim"></i>
+          ${esc(meta.name)}
+        </div>
+        <span style="font-size:10px;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);padding:3px 10px;font-weight:600">PRÓXIMAMENTE</span>
+      </div>
+      <p class="text-dim text-[12px]" style="margin:0">${esc(meta.desc)}</p>
+    </div>`;
+  }
+
+  const row = await new BotConnectorsRepo(db).getByBotAndProvider(botId, meta.id);
+  const ok = Boolean(row);
+  const badge = ok
+    ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>`
+    : `<span style="font-size:10px;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);padding:3px 10px;font-weight:600">○ SIN CONECTAR</span>`;
+
+  const action = ok
+    ? `<form method="POST" action="/admin/conexiones/connectors/${meta.id}/disconnect" onsubmit="return confirm('¿Desconectar ${esc(meta.name)}? ${meta.category === "crm" ? "Los leads" : "Los tickets"} nuevos dejarán de darse de alta ahí.')">
+         <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Desconectar</button>
+       </form>`
+    : `<button type="button" class="text-[12px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600"
+               hx-get="/admin/conexiones/connectors/${meta.category}/${meta.id}/connect" hx-target="#modal-root" hx-swap="innerHTML">Conectar</button>`;
+
+  return `
+    <div class="bg-panel border ${ok ? "" : "border-line"}" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;${ok ? "border-color:rgba(127,183,126,.45)" : ""}">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <div class="font-display font-semibold text-[13.5px] text-cream" style="display:flex;align-items:center;gap:9px">
+          <i data-lucide="${meta.icon}" width="16" height="16" class="${ok ? "text-accent" : "text-dim"}"></i>
+          ${esc(meta.name)}
+        </div>
+        ${badge}
+      </div>
+      <p class="text-dim text-[12px]" style="margin:0">${esc(meta.desc)}</p>
+      ${action}
+    </div>`;
+}
+
+async function renderCategoryBody(
+  env: Env,
+  botId: string,
+  category: ConnectorCategory,
+): Promise<{ summary: string; cards: string }> {
+  const db = new Db(env.DB);
+  const list = Object.values(providersFor(category));
+  if (list.length === 0) {
+    return {
+      summary: `${CATEGORY_LABELS[category]} — próximamente`,
+      cards: `<div style="padding:40px 18px;text-align:center" class="text-dim text-[12.5px]">Todavía no hay conectores de ${esc(CATEGORY_LABELS[category].toLowerCase())} disponibles.</div>`,
+    };
+  }
+  const repo = new BotConnectorsRepo(db);
+  const real = list.filter((m) => !m.comingSoon);
+  const connectedCount = (await Promise.all(real.map((m) => repo.getByBotAndProvider(botId, m.id)))).filter(
+    Boolean,
+  ).length;
+  const cards = (await Promise.all(list.map((m) => renderConnectorCard(db, botId, m)))).join("");
+  return { summary: `${CATEGORY_LABELS[category]} conectados: ${connectedCount} de ${real.length}`, cards };
+}
+
+/** Refresco OOB de la grilla + resumen de una categoría de conectores, tras conectar/desconectar. */
+export async function renderConnectorsGrid(env: Env, botId: string, category: ConnectorCategory): Promise<string> {
+  const { summary, cards } = await renderCategoryBody(env, botId, category);
+  return `
+    <div id="conexiones-summary" hx-swap-oob="innerHTML">${esc(summary)}</div>
+    <div id="conexiones-grid" hx-swap-oob="innerHTML" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px">
+      ${cards}
+    </div>`;
+}
+
 async function renderConnectableCard(env: Env, db: Db, botId: string, meta: ChannelMeta): Promise<string> {
   const row = await connectedRow(db, botId, meta.id);
   const ok = Boolean(row);
@@ -354,21 +583,42 @@ export async function renderConexionesGrid(env: Env, botId: string): Promise<str
     </div>`;
 }
 
-export async function renderConexiones(env: Env, botId: string): Promise<string> {
-  const db = new Db(env.DB);
-  const connected = (
-    await Promise.all(
-      (Object.keys(CHANNEL_META) as ConnectableChannel[]).map((id) => connectedRow(db, botId, id)),
-    )
-  ).filter(Boolean).length;
-  const total = Object.keys(CHANNEL_META).length + 2; // + Meta + WhatsApp Cloud, todavía del despliegue
-  const cards = await connectableCards(env, botId);
+const CATEGORY_INTRO: Record<string, string> = {
+  canales: "Conecta los canales donde están tus clientes de ESTE bot. Cuando un canal queda listo, su tarjeta se pone verde.",
+  crm: "Si conectas un CRM, los leads nuevos se dan de alta ahí y /admin/leads deja de mostrar la tabla local.",
+  tickets: "Si conectas una plataforma de tickets, los handoffs nuevos se crean ahí y /admin/tickets deja de mostrar la tabla local.",
+  calendar: "Gestiona la agenda del negocio conectando tu propio calendario.",
+  mcp: "Conecta cualquier servidor MCP remoto para darle más herramientas al agente.",
+};
+
+export async function renderConexiones(env: Env, botId: string, category: string = "canales"): Promise<string> {
+  const cat = ["crm", "tickets", "calendar", "mcp"].includes(category) ? (category as ConnectorCategory) : "canales";
+  const tabs = renderTabs(cat);
+
+  let summary: string;
+  let cards: string;
+  if (cat === "canales") {
+    const db = new Db(env.DB);
+    const connected = (
+      await Promise.all(
+        (Object.keys(CHANNEL_META) as ConnectableChannel[]).map((id) => connectedRow(db, botId, id)),
+      )
+    ).filter(Boolean).length;
+    const total = Object.keys(CHANNEL_META).length + 2; // + Meta + WhatsApp Cloud, todavía del despliegue
+    summary = `Canales conectados: ${connected} de ${total}`;
+    cards = await connectableCards(env, botId);
+  } else {
+    const result = await renderCategoryBody(env, botId, cat);
+    summary = result.summary;
+    cards = result.cards;
+  }
 
   const body = `
     <div style="display:flex;flex-direction:column;gap:18px">
+      ${tabs}
       <div style="display:flex;flex-direction:column;gap:2px">
-        <h2 class="font-display font-semibold text-[15px] text-cream" id="conexiones-summary">Canales conectados: ${connected} de ${total}</h2>
-        <p class="text-muted text-[12.5px]">Conecta los canales donde están tus clientes de ESTE bot. Cuando un canal queda listo, su tarjeta se pone verde.</p>
+        <h2 class="font-display font-semibold text-[15px] text-cream" id="conexiones-summary">${esc(summary)}</h2>
+        <p class="text-muted text-[12.5px]">${esc(CATEGORY_INTRO[cat])}</p>
       </div>
       <div id="conexiones-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px">
         ${cards}

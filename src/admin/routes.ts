@@ -49,7 +49,13 @@ import {
   renderConexionesGrid,
   connectChannel,
   disconnectChannel,
+  renderConnectorConnectModal,
+  renderConnectorsGrid,
+  connectConnector,
+  disconnectConnector,
+  categoryOfProvider,
 } from "./views/conexiones";
+import type { ConnectorCategory } from "../connectors/registry";
 import { renderCampanas } from "./views/campanas";
 import { sendCampaign, createHandoffTemplate, contentApprovalStatus } from "../campaigns";
 import { Db } from "../db/client";
@@ -767,8 +773,11 @@ adminApp.get("/leads", async (c) => c.html(await renderLeads(c.env, c.get("botId
 
 adminApp.get("/tickets", async (c) => c.html(await renderTickets(c.env, c.get("botId"))));
 
-// Conexiones: mapa de canales con estado verde/gris (paso 4 del onboarding).
-adminApp.get("/conexiones", async (c) => c.html(await renderConexiones(c.env, c.get("botId"))));
+// Conexiones: mapa de canales con estado verde/gris (paso 4 del onboarding),
+// más las pestañas de conectores salientes (CRM, tickets, calendario, MCP).
+adminApp.get("/conexiones", async (c) =>
+  c.html(await renderConexiones(c.env, c.get("botId"), c.req.query("cat") ?? "canales")),
+);
 
 // Diálogo de conexión: instrucciones + formulario para pegar el token, sin
 // terminal (F5/F4: cada bot conecta sus propios canales desde el panel).
@@ -800,6 +809,38 @@ adminApp.post("/conexiones/:channel/disconnect", async (c) => {
   }
   await disconnectChannel(c.env, c.get("botId"), channel);
   return c.redirect("/admin/conexiones", 302);
+});
+
+// Conectores salientes (CRM/Tickets/Calendario/MCP) — mismo diálogo guiado,
+// pero el bot LLAMA a la API externa con un API key propio en vez de recibir
+// un webhook.
+const CONNECTOR_CATEGORIES = ["crm", "tickets", "calendar", "mcp"];
+
+adminApp.get("/conexiones/connectors/:category/:provider/connect", (c) => {
+  const category = c.req.param("category");
+  const provider = c.req.param("provider");
+  if (!CONNECTOR_CATEGORIES.includes(category)) return c.text("Categoría desconocida", 404);
+  if (categoryOfProvider(provider) !== category) return c.text("Conector desconocido", 404);
+  return c.html(renderConnectorConnectModal(category as ConnectorCategory, provider));
+});
+
+adminApp.post("/conexiones/connectors/:category/:provider/connect", async (c) => {
+  const category = c.req.param("category");
+  const provider = c.req.param("provider");
+  if (!CONNECTOR_CATEGORIES.includes(category)) return c.text("Categoría desconocida", 404);
+  if (categoryOfProvider(provider) !== category) return c.text("Conector desconocido", 404);
+  const form = await c.req.formData();
+  const modalHtml = await connectConnector(c.env, c.get("botId"), category as ConnectorCategory, provider, form);
+  const gridHtml = await renderConnectorsGrid(c.env, c.get("botId"), category as ConnectorCategory);
+  return c.html(modalHtml + gridHtml);
+});
+
+adminApp.post("/conexiones/connectors/:provider/disconnect", async (c) => {
+  const provider = c.req.param("provider");
+  const category = categoryOfProvider(provider);
+  if (!category) return c.text("Conector desconocido", 404);
+  await disconnectConnector(c.env, c.get("botId"), provider);
+  return c.redirect(`/admin/conexiones?cat=${category}`, 302);
 });
 
 adminApp.get("/campanas", async (c) => {

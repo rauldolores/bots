@@ -2,6 +2,10 @@ import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { LeadsRepo, leadMetadata, type Lead } from "../../db/leads";
 import { BotsRepo } from "../../db/bots";
+import { BotConnectorsRepo } from "../../db/botConnectors";
+import { resolveConnectorCreds } from "../../connectors/creds";
+import { CRM_ADAPTERS, CRM_PROVIDERS } from "../../connectors/registry";
+import type { CrmRecord } from "../../connectors/types";
 import { getNiche } from "../../niches";
 import { isProTier } from "../../config";
 import { layout } from "./layout";
@@ -18,10 +22,63 @@ interface Col {
   cell: (l: Lead, meta: Record<string, string>) => string;
 }
 
+/** Tabla simple para cuando hay un CRM conectado — no tiene las columnas del nicho, esas son locales. */
+function renderCrmTable(providerLabel: string, items: CrmRecord[]): string {
+  const rows = items
+    .map(
+      (r) => `<div style="display:grid;grid-template-columns:94px minmax(120px,1.1fr) minmax(110px,1fr);gap:12px;padding:13px 18px;font-size:12.5px;align-items:center;border-top:1px solid var(--line)">
+        <span class="text-dim">${new Date(r.createdAt).toLocaleDateString("es-MX")}</span>
+        ${
+          r.url
+            ? `<a href="${esc(r.url)}" target="_blank" rel="noopener" class="text-accent" style="text-decoration:none">${esc(r.name)} ↗</a>`
+            : `<span class="text-cream">${esc(r.name)}</span>`
+        }
+        <span class="text-muted">${esc(r.contact)}</span>
+      </div>`,
+    )
+    .join("");
+  const empty = `<div style="padding:40px 18px;text-align:center" class="text-dim text-[12.5px]">Aún no hay registros en ${esc(providerLabel)}.</div>`;
+  return `
+    <div class="bg-panel border border-line" style="overflow-x:auto">
+      <div style="min-width:400px">
+        <div style="display:grid;grid-template-columns:94px minmax(120px,1.1fr) minmax(110px,1fr);gap:12px;padding:10px 18px;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)">
+          <span>Fecha</span><span>Nombre</span><span>Contacto</span>
+        </div>
+        ${items.length ? rows : empty}
+      </div>
+    </div>`;
+}
+
 export async function renderLeads(env: Env, botId: string): Promise<string> {
   const db = new Db(env.DB);
   const bot = await new BotsRepo(db).getById(botId);
   const niche = getNiche(bot?.niche);
+
+  // Si hay un CRM conectado, esta pantalla consulta ahí en vivo en vez de la
+  // tabla local — el CRM es donde el equipo humano de ventas ya vive. El bot
+  // sigue guardando local siempre (ver captureLead.ts), así que si el CRM
+  // falla, avisamos y caemos a la tabla local en vez de dejar la pantalla en blanco.
+  let crmErrorBanner = "";
+  const crmConnector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "crm");
+  if (crmConnector) {
+    const providerMeta = CRM_PROVIDERS[crmConnector.provider];
+    const providerLabel = providerMeta?.name ?? crmConnector.provider;
+    const adapter = CRM_ADAPTERS[crmConnector.provider];
+    const creds = adapter ? await resolveConnectorCreds(db, crmConnector) : null;
+    const result = adapter && creds ? await adapter.listRecent(creds, 100) : null;
+    if (result?.ok) {
+      const body = `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <h2 class="font-display font-semibold text-[15px] text-cream">Leads — ${esc(providerLabel)}</h2>
+          <a href="/admin/conexiones?cat=crm" class="text-[12px]" style="color:var(--muted)">gestionar conexión</a>
+        </div>
+        ${renderCrmTable(providerLabel, result.items)}`;
+      return layout({ title: "Leads", activeTab: "leads", body, pro: isProTier(bot?.tier) });
+    }
+    // Cayó a local — se avisa arriba de la tabla de siempre.
+    crmErrorBanner = `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px;margin-bottom:14px">No se pudo consultar ${esc(providerLabel)} (${esc(result?.error ?? "sin credenciales")}) — mostrando la copia local mientras tanto.</div>`;
+  }
+
   const leads = new LeadsRepo(db, botId);
   const list = await leads.list(100);
 
@@ -102,6 +159,7 @@ export async function renderLeads(env: Env, botId: string): Promise<string> {
     .join("");
 
   const body = `
+    ${crmErrorBanner}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
       <h2 class="font-display font-semibold text-[15px] text-cream">${esc(niche.recordPlural)}</h2>
       <a href="/admin/leads/export.csv" class="ghostbtn" style="display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:9px 14px;font-size:12.5px;transition:all .12s ease">

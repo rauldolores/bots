@@ -6,6 +6,9 @@ import { Db } from "../db/client";
 import { TicketsRepo } from "../db/tickets";
 import { ConversationsRepo } from "../db/conversations";
 import { BotsRepo } from "../db/bots";
+import { BotConnectorsRepo } from "../db/botConnectors";
+import { resolveConnectorCreds } from "../connectors/creds";
+import { TICKET_ADAPTERS } from "../connectors/registry";
 import { resolveBotId } from "../tenant";
 import { isProTier } from "../config";
 import { resolveChannelEnv } from "../channels/effectiveEnv";
@@ -33,6 +36,11 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
         const convs = new ConversationsRepo(db, botId);
         await convs.setOpenTicket(convId, ticketId);
       }
+
+      // El ticket SIEMPRE queda local primero (por eso el link de conversación
+      // de arriba funciona sin depender de una plataforma externa). Si hay una
+      // plataforma de tickets conectada, además se empuja ahí, best-effort.
+      await pushToTicketsIfConnected(db, botId, `[${reason}] ${summary}`, category);
 
       // Send email if Resend configured
       if (env.RESEND_API_KEY && env.OWNER_EMAIL) {
@@ -63,6 +71,23 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
       return { ticketId };
     },
   });
+}
+
+async function pushToTicketsIfConnected(db: Db, botId: string, summary: string, category: string): Promise<void> {
+  try {
+    const connector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "tickets");
+    if (!connector) return;
+    const adapter = TICKET_ADAPTERS[connector.provider];
+    if (!adapter) return;
+    const creds = await resolveConnectorCreds(db, connector);
+    if (!creds) return;
+    const result = await adapter.pushTicket(creds, { category, summary });
+    if (!result.ok) {
+      console.error(`[handoffHuman] push a ${connector.provider} falló:`, result.error);
+    }
+  } catch (e) {
+    console.error(`[handoffHuman] push a la plataforma de tickets falló:`, e);
+  }
 }
 
 interface HandoffNotice {
