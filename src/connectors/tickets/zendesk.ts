@@ -14,12 +14,22 @@ function baseUrl(creds: ConnectorCreds): string | null {
   return `https://${subdomain}.zendesk.com/api/v2`;
 }
 
+function isEmail(v: string): boolean {
+  return /.+@.+\..+/.test(v);
+}
+
 /** Zendesk vía API token de agente (Basic auth `email/token:token`) — sin OAuth. */
 export const zendeskConnector: TicketConnector = {
   async pushTicket(creds: ConnectorCreds, ticket: TicketInput): Promise<ConnectorPushResult> {
     const base = baseUrl(creds);
     const auth = authHeader(creds);
     if (!base || !auth) return { ok: false, error: "Falta el subdominio o el email de Zendesk en la configuración." };
+
+    // Zendesk usa exactamente los mismos 4 niveles de prioridad que este app.
+    const requester =
+      ticket.requesterContact && isEmail(ticket.requesterContact)
+        ? { name: ticket.requesterName || ticket.requesterContact, email: ticket.requesterContact }
+        : undefined;
 
     try {
       const res = await fetch(`${base}/tickets.json`, {
@@ -29,6 +39,8 @@ export const zendeskConnector: TicketConnector = {
           ticket: {
             subject: `[${ticket.category}] ${ticket.summary}`.slice(0, 150),
             comment: { body: ticket.summary },
+            priority: ticket.priority ?? "normal",
+            ...(requester ? { requester } : {}),
           },
         }),
       });
@@ -55,7 +67,7 @@ export const zendeskConnector: TicketConnector = {
         return { ok: false, items: [], error: `Zendesk respondió ${res.status}: ${(await res.text()).slice(0, 200)}` };
       }
       const body = (await res.json()) as {
-        tickets?: Array<{ id: number; subject?: string; status?: string; created_at?: string }>;
+        tickets?: Array<{ id: number; subject?: string; status?: string; priority?: string; created_at?: string }>;
       };
       const subdomain = creds.config.subdomain ?? "";
       const items: TicketRecord[] = (body.tickets ?? [])
@@ -65,6 +77,7 @@ export const zendeskConnector: TicketConnector = {
           id: String(t.id),
           subject: t.subject ?? "(sin asunto)",
           status: t.status ?? "open",
+          priority: t.priority,
           createdAt: t.created_at ? new Date(t.created_at).getTime() : Date.now(),
           url: subdomain ? `https://${subdomain}.zendesk.com/agent/tickets/${t.id}` : undefined,
         }));

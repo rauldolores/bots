@@ -3,8 +3,9 @@ import { z } from "zod";
 import { Resend } from "resend";
 import type { Env } from "../env";
 import { Db } from "../db/client";
-import { TicketsRepo } from "../db/tickets";
+import { TicketsRepo, type TicketPriority } from "../db/tickets";
 import { ConversationsRepo } from "../db/conversations";
+import { MessagesRepo } from "../db/messages";
 import { BotsRepo } from "../db/bots";
 import { BotConnectorsRepo } from "../db/botConnectors";
 import { resolveConnectorCreds } from "../connectors/creds";
@@ -12,6 +13,12 @@ import { TICKET_ADAPTERS } from "../connectors/registry";
 import { resolveBotId } from "../tenant";
 import { isProTier } from "../config";
 import { resolveChannelEnv } from "../channels/effectiveEnv";
+
+/** Últimos mensajes de la conversación, en texto plano — lo que ve el dueño (o la plataforma de tickets) al abrir el ticket. */
+async function buildTranscript(db: Db, botId: string, convId: string): Promise<string> {
+  const history = await new MessagesRepo(db, botId).lastN(convId, 20);
+  return history.map((m) => `${m.role === "user" ? "Cliente" : "Bot"}: ${m.content}`).join("\n");
+}
 
 export function handoffHumanTool(env: Env, getConversationId: () => string | null, botId: string) {
   return tool({
@@ -21,16 +28,38 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
       reason: z.string().describe("Categoría corta del problema"),
       summary: z.string().max(300).describe("Resumen en 1 frase del contexto"),
       category: z.enum(["billing", "product", "complaint", "other"]).default("other"),
+      priority: z
+        .enum(["low", "normal", "high", "urgent"])
+        .default("normal")
+        .describe("Qué tan urgente es: urgent = el cliente no puede operar/pagar; high = afecta bastante; normal = molestia normal; low = duda menor"),
     }),
-    execute: async ({ reason, summary, category }) => {
+    execute: async ({ reason, summary, category, priority }) => {
       const convId = getConversationId();
       const db = new Db(env.DB);
       const tickets = new TicketsRepo(db, botId);
+
+      // El nombre/contacto del cliente se saca de la conversación (no se le
+      // pide al LLM que lo recuerde/escriba bien) y la transcripción completa
+      // se congela AL MOMENTO del ticket — si la conversación sigue después,
+      // el ticket no cambia bajo los pies de quien lo está atendiendo.
+      let requesterName: string | null = null;
+      let requesterContact: string | null = null;
+      let transcript = "";
+      if (convId) {
+        const conv = await new ConversationsRepo(db, botId).getById(convId);
+        requesterName = conv?.display_name ?? null;
+        requesterContact = conv?.channel_user_id ?? null;
+        transcript = await buildTranscript(db, botId, convId);
+      }
+
       const ticketId = await tickets.create({
         conversationId: convId,
         category,
         summary: `[${reason}] ${summary}`,
-        transcript: "", // populated by agent if it has access; left blank otherwise
+        transcript,
+        priority: priority as TicketPriority,
+        requesterName,
+        requesterContact,
       });
       if (convId) {
         const convs = new ConversationsRepo(db, botId);
@@ -40,7 +69,7 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
       // El ticket SIEMPRE queda local primero (por eso el link de conversación
       // de arriba funciona sin depender de una plataforma externa). Si hay una
       // plataforma de tickets conectada, además se empuja ahí, best-effort.
-      await pushToTicketsIfConnected(env, db, botId, `[${reason}] ${summary}`, category);
+      await pushToTicketsIfConnected(env, db, botId, `[${reason}] ${summary}`, category, priority as TicketPriority, requesterName, requesterContact);
 
       // Send email if Resend configured
       if (env.RESEND_API_KEY && env.OWNER_EMAIL) {
@@ -73,7 +102,16 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
   });
 }
 
-async function pushToTicketsIfConnected(env: Env, db: Db, botId: string, summary: string, category: string): Promise<void> {
+async function pushToTicketsIfConnected(
+  env: Env,
+  db: Db,
+  botId: string,
+  summary: string,
+  category: string,
+  priority: TicketPriority,
+  requesterName: string | null,
+  requesterContact: string | null,
+): Promise<void> {
   try {
     const connector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "tickets");
     if (!connector) return;
@@ -81,7 +119,7 @@ async function pushToTicketsIfConnected(env: Env, db: Db, botId: string, summary
     if (!adapter) return;
     const creds = await resolveConnectorCreds(db, connector, env);
     if (!creds) return;
-    const result = await adapter.pushTicket(creds, { category, summary });
+    const result = await adapter.pushTicket(creds, { category, summary, priority, requesterName, requesterContact });
     if (!result.ok) {
       console.error(`[handoffHuman] push a ${connector.provider} falló:`, result.error);
     }

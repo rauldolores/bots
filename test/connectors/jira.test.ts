@@ -82,6 +82,23 @@ describe("jiraConnector.pushTicket", () => {
     expect(result).toEqual({ ok: true, externalId: "SUP-42" });
   });
 
+  it("mapea la prioridad a los nombres default de Jira (Highest/High/Medium/Low)", async () => {
+    const seen: string[] = [];
+    global.fetch = vi.fn(async (_url: any, init: any) => {
+      seen.push(JSON.parse(init.body).fields.priority.name);
+      return new Response(JSON.stringify({ key: "SUP-1" }), { status: 201 });
+    }) as any;
+    for (const [ours, jira] of [
+      ["urgent", "Highest"],
+      ["high", "High"],
+      ["normal", "Medium"],
+      ["low", "Low"],
+    ] as const) {
+      await jiraConnector.pushTicket(creds, { category: "x", summary: "y", priority: ours });
+      expect(seen.at(-1)).toBe(jira);
+    }
+  });
+
   it("sin projectKey configurado, error claro sin llamar a la API", async () => {
     global.fetch = vi.fn() as any;
     const result = await jiraConnector.pushTicket(

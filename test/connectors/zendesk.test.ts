@@ -40,6 +40,38 @@ describe("zendeskConnector.pushTicket", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain("403");
   });
+
+  it("manda la prioridad y el requester cuando el contacto es un email", async () => {
+    global.fetch = vi.fn(async (_url: any, init: any) => {
+      const body = JSON.parse(init.body);
+      expect(body.ticket.priority).toBe("urgent");
+      expect(body.ticket.requester).toEqual({ name: "Ana", email: "ana@x.com" });
+      return new Response(JSON.stringify({ ticket: { id: 1 } }), { status: 201 });
+    }) as any;
+    await zendeskConnector.pushTicket(creds, {
+      category: "billing",
+      summary: "x",
+      priority: "urgent",
+      requesterName: "Ana",
+      requesterContact: "ana@x.com",
+    });
+  });
+
+  it("sin prioridad especificada, manda 'normal' por default", async () => {
+    global.fetch = vi.fn(async (_url: any, init: any) => {
+      expect(JSON.parse(init.body).ticket.priority).toBe("normal");
+      return new Response(JSON.stringify({ ticket: { id: 1 } }), { status: 201 });
+    }) as any;
+    await zendeskConnector.pushTicket(creds, { category: "billing", summary: "x" });
+  });
+
+  it("un contacto que no es email (ej. un chat_id de Telegram) no arma un requester inválido", async () => {
+    global.fetch = vi.fn(async (_url: any, init: any) => {
+      expect(JSON.parse(init.body).ticket.requester).toBeUndefined();
+      return new Response(JSON.stringify({ ticket: { id: 1 } }), { status: 201 });
+    }) as any;
+    await zendeskConnector.pushTicket(creds, { category: "billing", summary: "x", requesterContact: "5215512345" });
+  });
 });
 
 describe("zendeskConnector.listOpen", () => {

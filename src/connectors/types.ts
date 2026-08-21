@@ -45,12 +45,17 @@ export interface CrmConnector {
 export interface TicketInput {
   category: string;
   summary: string;
+  priority?: "low" | "normal" | "high" | "urgent";
+  requesterName?: string | null;
+  requesterContact?: string | null;
 }
 
 export interface TicketRecord {
   id: string;
   subject: string;
   status: string;
+  priority?: string;
+  requesterName?: string;
   createdAt: number;
   url?: string;
 }

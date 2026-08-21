@@ -1,5 +1,7 @@
 import { Db } from "./client";
 
+export type TicketPriority = "low" | "normal" | "high" | "urgent";
+
 export interface Ticket {
   id: string;
   bot_id: string;
@@ -8,6 +10,9 @@ export interface Ticket {
   summary: string;
   transcript: string;
   status: "open" | "in_progress" | "resolved";
+  priority: TicketPriority;
+  requester_name: string | null;
+  requester_contact: string | null;
   resolved_at: number | null;
   resolved_by: string | null;
   created_at: number;
@@ -18,6 +23,9 @@ export interface CreateTicketInput {
   category: string;
   summary: string;
   transcript: string;
+  priority?: TicketPriority;
+  requesterName?: string | null;
+  requesterContact?: string | null;
 }
 
 export class TicketsRepo {
@@ -29,9 +37,20 @@ export class TicketsRepo {
   async create(input: CreateTicketInput): Promise<string> {
     const id = crypto.randomUUID();
     await this.db.run(
-      `INSERT INTO tickets (id, bot_id, conversation_id, category, summary, transcript, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, this.botId, input.conversationId, input.category, input.summary, input.transcript, Date.now()],
+      `INSERT INTO tickets (id, bot_id, conversation_id, category, summary, transcript, priority, requester_name, requester_contact, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        this.botId,
+        input.conversationId,
+        input.category,
+        input.summary,
+        input.transcript,
+        input.priority ?? "normal",
+        input.requesterName ?? null,
+        input.requesterContact ?? null,
+        Date.now(),
+      ],
     );
     return id;
   }
@@ -45,6 +64,10 @@ export class TicketsRepo {
       "SELECT * FROM tickets WHERE bot_id = ? AND status != 'resolved' ORDER BY created_at DESC",
       [this.botId],
     );
+  }
+
+  async setPriority(id: string, priority: TicketPriority): Promise<void> {
+    await this.db.run("UPDATE tickets SET priority = ? WHERE id = ? AND bot_id = ?", [priority, id, this.botId]);
   }
 
   async resolve(id: string, resolvedBy: string): Promise<void> {

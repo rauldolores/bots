@@ -15,7 +15,7 @@ vi.mock("../../src/db/vault", async (importOriginal) => {
   return { ...actual, readSecret: (...args: unknown[]) => readSecretMock(...args) };
 });
 
-const { renderTickets } = await import("../../src/admin/views/tickets");
+const { renderTickets, updateTicketPriority } = await import("../../src/admin/views/tickets");
 
 let db: Db;
 let env: any;
@@ -69,5 +69,54 @@ describe("renderTickets — con Zendesk conectado", () => {
     const html = await renderTickets(env, TEST_BOT_ID);
     expect(html).toContain("No se pudo consultar Zendesk");
     expect(html).toContain("Ticket local de prueba");
+  });
+});
+
+describe("renderTickets — ticket local con prioridad, requester y transcripción", () => {
+  it("muestra la prioridad, quién pide, la transcripción y el selector para cambiar prioridad", async () => {
+    await new TicketsRepo(db, TEST_BOT_ID).create({
+      conversationId: null,
+      category: "billing",
+      summary: "No puede pagar",
+      transcript: "Cliente: no puedo pagar mi pedido\nBot: entiendo, déjame ayudarte",
+      priority: "urgent",
+      requesterName: "Ana López",
+      requesterContact: "ana@x.com",
+    });
+    const html = await renderTickets(env, TEST_BOT_ID);
+    expect(html).toContain("Urgente");
+    expect(html).toContain("Ana López");
+    expect(html).toContain("ana@x.com");
+    expect(html).toContain("no puedo pagar mi pedido");
+    expect(html).toContain('action="/admin/tickets/');
+    expect(html).toContain('name="priority"');
+  });
+});
+
+describe("updateTicketPriority", () => {
+  it("cambia la prioridad de un ticket propio", async () => {
+    const id = await new TicketsRepo(db, TEST_BOT_ID).create({ conversationId: null, category: "x", summary: "y", transcript: "" });
+    await updateTicketPriority(env, TEST_BOT_ID, id, "high");
+    const html = await renderTickets(env, TEST_BOT_ID);
+    expect(html).toContain('selected value="high"');
+  });
+
+  it("ignora un valor de prioridad inválido, sin tronar", async () => {
+    const id = await new TicketsRepo(db, TEST_BOT_ID).create({ conversationId: null, category: "x", summary: "y", transcript: "" });
+    await updateTicketPriority(env, TEST_BOT_ID, id, "catastrofico");
+    const ticket = await new TicketsRepo(db, TEST_BOT_ID).getById(id);
+    expect(ticket?.priority).toBe("normal");
+  });
+
+  it("no cambia la prioridad de un ticket de otro bot", async () => {
+    const otherBotId = crypto.randomUUID();
+    await db.run(
+      `INSERT INTO bots (id, organization_id, slug, name, business_name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [otherBotId, crypto.randomUUID(), "otro-bot", "Otro", "Otro Negocio", Date.now(), Date.now()],
+    );
+    const theirId = await new TicketsRepo(db, otherBotId).create({ conversationId: null, category: "x", summary: "ajeno", transcript: "" });
+    await updateTicketPriority(env, TEST_BOT_ID, theirId, "urgent");
+    expect((await new TicketsRepo(db, otherBotId).getById(theirId))?.priority).toBe("normal");
   });
 });

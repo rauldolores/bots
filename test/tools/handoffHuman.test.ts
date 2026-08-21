@@ -3,6 +3,7 @@ import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { TicketsRepo } from "../../src/db/tickets";
 import { ConversationsRepo } from "../../src/db/conversations";
+import { MessagesRepo } from "../../src/db/messages";
 import { BotConnectorsRepo } from "../../src/db/botConnectors";
 import { handoffHumanTool } from "../../src/tools/handoffHuman";
 
@@ -43,6 +44,7 @@ describe("handoffHumanTool", () => {
         reason: "complejo",
         summary: "María pregunta sobre shampoo sin sulfatos",
         category: "product",
+        priority: "normal",
       },
       {} as any,
     );
@@ -73,7 +75,7 @@ describe("handoffHumanTool — con una plataforma de tickets conectada", () => {
     const envNoResend = { ...env, RESEND_API_KEY: undefined };
     const tool = handoffHumanTool(envNoResend, () => convId, TEST_BOT_ID);
     const result = await tool.execute!(
-      { reason: "complejo", summary: "María pregunta sobre shampoo", category: "product" },
+      { reason: "complejo", summary: "María pregunta sobre shampoo", category: "product", priority: "normal" },
       {} as any,
     );
     expect((result as { ticketId: string }).ticketId).toBeTruthy();
@@ -99,10 +101,66 @@ describe("handoffHumanTool — con una plataforma de tickets conectada", () => {
     const envNoResend = { ...env, RESEND_API_KEY: undefined };
     const tool = handoffHumanTool(envNoResend, () => convId, TEST_BOT_ID);
     const result = await tool.execute!(
-      { reason: "complejo", summary: "María pregunta sobre shampoo", category: "product" },
+      { reason: "complejo", summary: "María pregunta sobre shampoo", category: "product", priority: "normal" },
       {} as any,
     );
     expect((result as { ticketId: string }).ticketId).toBeTruthy();
     expect(await tickets.listOpen()).toHaveLength(1);
+  });
+});
+
+describe("handoffHumanTool — prioridad, quién pide, y transcripción", () => {
+  it("saca nombre/contacto de la conversación (no se le pide al LLM) y arma la transcripción", async () => {
+    const db = new Db(env.DB);
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "5215512345", "María López");
+    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "no puedo pagar mi pedido");
+    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "assistant", "entiendo, déjame ayudarte");
+
+    const tool = handoffHumanTool(env, () => conv.id, TEST_BOT_ID);
+    const result = await tool.execute!(
+      { reason: "pago", summary: "cliente no puede pagar", category: "billing", priority: "urgent" },
+      {} as any,
+    );
+    const ticket = await tickets.getById((result as { ticketId: string }).ticketId);
+    expect(ticket?.requester_name).toBe("María López");
+    expect(ticket?.requester_contact).toBe("5215512345");
+    expect(ticket?.priority).toBe("urgent");
+    expect(ticket?.transcript).toContain("no puedo pagar mi pedido");
+    expect(ticket?.transcript).toContain("entiendo, déjame ayudarte");
+  });
+
+  it("sin conversationId (ej. una llamada de sistema), no truena — requester/transcript quedan vacíos", async () => {
+    const tool = handoffHumanTool(env, () => null, TEST_BOT_ID);
+    const result = await tool.execute!(
+      { reason: "x", summary: "y", category: "other", priority: "normal" },
+      {} as any,
+    );
+    const ticket = await tickets.getById((result as { ticketId: string }).ticketId);
+    expect(ticket?.requester_name).toBeNull();
+    expect(ticket?.transcript).toBe("");
+  });
+
+  it("empuja prioridad y requester al conector de tickets conectado", async () => {
+    await new BotConnectorsRepo(new Db(env.DB)).upsert({
+      botId: TEST_BOT_ID,
+      category: "tickets",
+      provider: "zendesk",
+      secretRef: "11111111-1111-1111-1111-111111111111",
+      config: { subdomain: "acme", email: "agente@acme.com" },
+    });
+    readSecretMock.mockResolvedValue("tok-fake");
+    const db = new Db(env.DB);
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "ana@x.com", "Ana");
+    let pushedBody: any;
+    global.fetch = vi.fn(async (_url: any, init: any) => {
+      pushedBody = JSON.parse(init.body);
+      return new Response(JSON.stringify({ ticket: { id: 1 } }), { status: 201 });
+    }) as any;
+
+    const tool = handoffHumanTool({ ...env, RESEND_API_KEY: undefined }, () => conv.id, TEST_BOT_ID);
+    await tool.execute!({ reason: "x", summary: "y", category: "billing", priority: "high" }, {} as any);
+
+    expect(pushedBody.ticket.priority).toBe("high");
+    expect(pushedBody.ticket.requester).toEqual({ name: "Ana", email: "ana@x.com" });
   });
 });

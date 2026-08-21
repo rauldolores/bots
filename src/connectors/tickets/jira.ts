@@ -86,6 +86,11 @@ function baseUrl(creds: ConnectorCreds): string {
   return `https://api.atlassian.com/ex/jira/${creds.config.cloudId}/rest/api/3`;
 }
 
+// Jira no tiene "urgent/high/normal/low" — son los 5 niveles default de un
+// sitio nuevo (Highest/High/Medium/Low/Lowest); si el sitio los renombró, la
+// API igual acepta el nombre por defecto porque son los ids reales de Jira.
+const JIRA_PRIORITY: Record<string, string> = { urgent: "Highest", high: "High", normal: "Medium", low: "Low" };
+
 export const jiraConnector: TicketConnector = {
   async pushTicket(creds: ConnectorCreds, ticket: TicketInput): Promise<ConnectorPushResult> {
     const projectKey = creds.config.projectKey;
@@ -107,6 +112,7 @@ export const jiraConnector: TicketConnector = {
               version: 1,
               content: [{ type: "paragraph", content: [{ type: "text", text: ticket.summary }] }],
             },
+            priority: { name: JIRA_PRIORITY[ticket.priority ?? "normal"] },
           },
         }),
       });
@@ -130,13 +136,17 @@ export const jiraConnector: TicketConnector = {
       });
       if (!res.ok) return { ok: false, items: [], error: `Jira respondió ${res.status}: ${(await res.text()).slice(0, 200)}` };
       const body = (await res.json()) as {
-        issues?: Array<{ key: string; fields?: { summary?: string; status?: { name?: string }; created?: string } }>;
+        issues?: Array<{
+          key: string;
+          fields?: { summary?: string; status?: { name?: string }; priority?: { name?: string }; created?: string };
+        }>;
       };
       const siteUrl = creds.config.siteUrl;
       const items: TicketRecord[] = (body.issues ?? []).map((i) => ({
         id: i.key,
         subject: i.fields?.summary ?? "(sin asunto)",
         status: i.fields?.status?.name ?? "open",
+        priority: i.fields?.priority?.name,
         createdAt: i.fields?.created ? new Date(i.fields.created).getTime() : Date.now(),
         url: siteUrl ? `${siteUrl}/browse/${i.key}` : undefined,
       }));

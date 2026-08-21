@@ -41,7 +41,7 @@ import { renderMejoras } from "./views/mejoras";
 import { runFlywheel, getLessons, saveLessons } from "../flywheel/detect";
 import { applySuggestion, dismissSuggestion } from "../flywheel/apply";
 import { renderLeads, exportLeadsCsv } from "./views/leads";
-import { renderTickets } from "./views/tickets";
+import { renderTickets, updateTicketPriority } from "./views/tickets";
 import { renderCalendario, cancelAppointment } from "./views/calendario";
 import { renderConfig } from "./views/config";
 import {
@@ -1095,6 +1095,12 @@ adminApp.post("/tickets/:id/resolve", async (c) => {
   const db = new Db(c.env.DB);
   const tickets = new TicketsRepo(db, c.get("botId"));
   await tickets.resolve(c.req.param("id"), resolvedBy);
+  return c.redirect("/admin/tickets");
+});
+
+adminApp.post("/tickets/:id/priority", async (c) => {
+  const form = await c.req.formData();
+  await updateTicketPriority(c.env, c.get("botId"), c.req.param("id"), String(form.get("priority") ?? ""));
   return c.redirect("/admin/tickets");
 });
 
