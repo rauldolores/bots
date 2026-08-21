@@ -27,6 +27,7 @@ import type { Tier } from "../upgrade/modelSelector";
 import { monthIaCostUsd, applyBudgetGuard } from "../budget";
 import { CustomerFactsRepo } from "../db/facts";
 import { createModel } from "../llm/provider";
+import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 import { costOfUsage } from "../pricing";
 import type { ChannelId } from "../channels/shared";
 import { AgentJobsRepo } from "../queue/jobs";
@@ -381,9 +382,10 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
     // no puede quedarse mudo el día del evento.
     console.error("[runTurn] streamText failed:", e);
     const backoff = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    const { fallbackModel } = await import("../llm/provider");
+    const { fallbackModel, degradedModelFor } = await import("../llm/provider");
     const primary = createModel(env, tier, cfg.llm);
     const fb = fallbackModel(env, tier, primary.provider);
+    const degraded = degradedModelFor(env, tier, cfg.llm, primary);
     let ok = false;
 
     await backoff(2000 + Math.floor(Math.random() * 1500));
@@ -392,6 +394,31 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
       ok = true;
     } catch (e1: any) {
       console.error("[runTurn] primary retry failed:", e1);
+    }
+
+    // El modelo fijado a mano en /admin/config puede haber quedado obsoleto
+    // (el proveedor lo retiró) sin que nadie lo note — antes de saltar de
+    // PROVEEDOR, prueba el modelo automático (mantenido en código, ver
+    // src/llm/provider.ts) del MISMO proveedor: sigue vigente aunque el id
+    // que el dueño eligió ya no lo esté, y no depende de tener una segunda
+    // llave configurada.
+    if (!ok && degraded) {
+      try {
+        await attempt(degraded.model);
+        usedModelId = degraded.modelId;
+        ok = true;
+        console.warn(
+          `[runTurn] modelo fijado "${primary.modelId}" falló — degradado a "${degraded.modelId}" (mismo proveedor)`,
+        );
+        await new SettingsRepo(db, botId)
+          .set(
+            SETTING_KEYS.llmModelWarning,
+            JSON.stringify({ modelId: primary.modelId, provider: primary.provider, at: Date.now() }),
+          )
+          .catch((e) => console.warn("[runTurn] no se pudo guardar el aviso de modelo degradado:", e));
+      } catch (e1b: any) {
+        console.error("[runTurn] same-provider degrade failed:", e1b);
+      }
     }
 
     if (!ok && fb) {

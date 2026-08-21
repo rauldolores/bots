@@ -198,7 +198,7 @@ Resumen para decirle:
 - **Quiero la mejor calidad / es lo recomendado → Anthropic.**
 - **Quiero el costo más bajo / ya uso OpenAI → OpenAI.**
 - El proveedor solo cambia el "cerebro" que redacta las respuestas. La **voz** (notas de audio) y la **memoria** (base de conocimiento) van aparte: en Cloudflare las cubre Workers AI sin llave extra; en los demás destinos usan OpenAI, por eso ahí hace falta `OPENAI_API_KEY` aunque el cerebro sea Claude.
-- **Se puede cambiar después, y sin tocar código:** desde su propio panel, en **Configuración → Modelo de IA**, puede cambiar el proveedor, poner su propia API key y elegir entre modelos Claude / GPT / Grok. (También se puede a mano: cambiar la variable `LLM_PROVIDER`, poner la llave del otro proveedor y volver a desplegar.)
+- **Se puede cambiar después, y sin tocar código ni redesplegar:** desde su propio panel, en **Configuración → Modelo de IA**, puede cambiar el proveedor, poner su propia API key y elegir entre modelos Claude / GPT / Grok / DeepSeek. Esa pantalla es la ÚNICA que decide el proveedor y el modelo — no hay variable de entorno que lo cambie por fuera de ahí.
 
 **Según su elección, guarda la llave correcta.** Cómo se guarda depende del destino
 que eligió en el Paso 1.1 — en todos es una variable de entorno, cambia el dónde:
@@ -658,8 +658,8 @@ Con el bot YA vivo y probado (no antes), remata así — sin presión, ya probó
 
 **Variables** (no secretas):
 - `BOT_NAME`, `BUSINESS_NAME`, `BOT_LANGUAGE`, `BOT_TIER` (= `free` en el Starter), `BUFFER_SECONDS`, `DASHBOARD_BASE_URL`.
-- `LLM_PROVIDER` — `"anthropic"` (default) o `"openai"`. Cambia el proveedor de IA; se puede cambiar después y re-desplegar (o desde el panel → Configuración → Modelo de IA).
-- Opcionales para fijar modelos: `ANTHROPIC_MODEL_FAST`/`ANTHROPIC_MODEL_SMART`, `OPENAI_MODEL_FAST`/`OPENAI_MODEL_SMART`.
+- El proveedor y el modelo de IA NO se fijan aquí — se eligen desde el panel
+  → Configuración → Modelo de IA. No hay variable de entorno equivalente.
 
 **Dónde vive todo:** conversaciones, leads, base de conocimiento y la cola del agente
 están en **Supabase**. No hay más servicios que provisionar. En Cloudflare, además, el

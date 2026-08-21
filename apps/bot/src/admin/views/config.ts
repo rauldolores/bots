@@ -112,6 +112,7 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
     { v: "anthropic", l: "Claude (Anthropic)" },
     { v: "openai", l: "ChatGPT (OpenAI)" },
     { v: "xai", l: "Grok (xAI)" },
+    { v: "deepseek", l: "DeepSeek" },
   ]
     .map((o) => `<option value="${o.v}" ${provider === o.v ? "selected" : ""}>${o.l}</option>`)
     .join("");
@@ -125,6 +126,9 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
   const xaiOpts = CURATED_MODELS.filter((m) => m.provider === "xai")
     .map((m) => `<option value="${esc(m.id)}" ${model === m.id ? "selected" : ""}>${esc(m.label)}</option>`)
     .join("");
+  const deepseekOpts = CURATED_MODELS.filter((m) => m.provider === "deepseek")
+    .map((m) => `<option value="${esc(m.id)}" ${model === m.id ? "selected" : ""}>${esc(m.label)}</option>`)
+    .join("");
 
   let testBanner = "";
   if (llmTest?.startsWith("ok:")) {
@@ -133,12 +137,28 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
     testBanner = `<div style="border:1px solid var(--danger,#e0654d);background:rgba(224,101,77,.1);color:var(--danger,#e0654d);padding:9px 12px;font-size:12px;font-weight:600">✕ Falló la prueba: ${esc(llmTest.slice(4, 200))}</div>`;
   }
 
+  // Si el modelo fijado a mano falló en producción y el turno se degradó al
+  // automático del mismo proveedor (ver src/agent/runner.ts), avisa aquí en
+  // vez de dejarlo pasar en silencio — probablemente el proveedor lo retiró.
+  let degradedBanner = "";
+  const rawWarning = settings[SETTING_KEYS.llmModelWarning] ?? "";
+  if (rawWarning.trim() !== "") {
+    try {
+      const w = JSON.parse(rawWarning) as { modelId?: string; at?: number };
+      const when = w.at ? new Date(w.at).toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short" }) : "";
+      degradedBanner = `<div style="border:1px solid #d9a441;background:rgba(217,164,65,.1);color:#d9a441;padding:9px 12px;font-size:12px;font-weight:600">⚠ Tu modelo elegido (${esc(w.modelId ?? "?")}) dejó de responder${when ? ` el ${esc(when)}` : ""} — probablemente el proveedor lo retiró. Por ahora tu bot está usando el modelo automático de este mismo proveedor. Elige otro modelo y guarda para quitar este aviso.</div>`;
+    } catch {
+      // valor corrupto/legado — lo ignoramos, no vale la pena tronar el panel por esto
+    }
+  }
+
   return `
     <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:18px">
       <div style="display:flex;flex-direction:column;gap:2px">
         <h3 class="font-display font-semibold text-[13.5px] text-cream">🧠 Modelo de IA</h3>
         <p class="text-dim text-[12px]">Elige qué inteligencia artificial usa tu bot. Puedes usar tu propia API key para pagar tú el consumo directamente. Si lo dejas en automático, el bot usa la configuración incluida (rápido para lo simple, inteligente para lo difícil).</p>
       </div>
+      ${degradedBanner}
       ${testBanner}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
         <div style="display:flex;flex-direction:column;gap:6px">
@@ -152,6 +172,7 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
             <optgroup label="Claude (Anthropic)">${anthropicOpts}</optgroup>
             <optgroup label="ChatGPT (OpenAI)">${openaiOpts}</optgroup>
             <optgroup label="Grok (xAI)">${xaiOpts}</optgroup>
+            <optgroup label="DeepSeek">${deepseekOpts}</optgroup>
           </select>
         </div>
       </div>

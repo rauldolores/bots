@@ -37,21 +37,16 @@ export interface Env {
   // re-etiqueta el dashboard, aporta el playbook del giro y sus columnas.
   // Ausente/desconocido → pack genérico (comportamiento actual). Ver src/niches/.
   BOT_NICHE?: string;
-  // LLM provider for the chat brain: "anthropic" (default) | "openai".
-  // If unset and only OPENAI_API_KEY is present, auto-selects "openai".
-  // (Voice transcription + embeddings always run on Cloudflare Workers AI.)
-  LLM_PROVIDER?: "anthropic" | "openai";
-  // Optional per-tier model id overrides (fast = cheap default, smart = upgrade).
-  ANTHROPIC_MODEL_FAST?: string;
-  ANTHROPIC_MODEL_SMART?: string;
-  OPENAI_MODEL_FAST?: string;
-  OPENAI_MODEL_SMART?: string;
   BUFFER_SECONDS: string;
   DASHBOARD_BASE_URL: string;
 
   // Secrets (member-set via wrangler secret put)
+  // Qué proveedor/modelo de IA usa el bot se decide SOLO desde /admin/config
+  // (SettingsRepo, ver src/llm/provider.ts) — estas llaves son nada más el
+  // secreto de cada proveedor; no hay variable de entorno que fuerce
+  // proveedor o modelo por fuera del panel.
   ANTHROPIC_API_KEY: string;
-  OPENAI_API_KEY?: string;  // alternative LLM provider (see LLM_PROVIDER)
+  OPENAI_API_KEY?: string;  // proveedor LLM alterno (ver src/llm/provider.ts)
   RESEND_API_KEY?: string;
   TELEGRAM_BOT_TOKEN?: string;
   MANYCHAT_API_KEY?: string;
@@ -82,6 +77,7 @@ export interface Env {
   WHATSAPP_VERIFY_TOKEN?: string;     // handshake GET del webhook (si falta, usa META_VERIFY_TOKEN)
   WHATSAPP_APP_SECRET?: string;       // firma X-Hub-Signature-256 (si falta, usa META_APP_SECRET)
   XAI_API_KEY?: string;             // xAI (Grok) — proveedor LLM alterno (ver src/llm/provider.ts)
+  DEEPSEEK_API_KEY?: string;        // DeepSeek — proveedor LLM alterno (ver src/llm/provider.ts)
 
   // ── Cal.com (agenda real para scheduleAppointment) ───────────────────────
   // Con estas vars, el bot consulta disponibilidad real y reserva en Cal.com.

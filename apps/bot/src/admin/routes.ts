@@ -992,7 +992,9 @@ adminApp.get("/config/llm-test", async (c) => {
     const r = await generateText({
       model,
       prompt: "Responde únicamente: ok",
-      maxOutputTokens: 8,
+      // OpenAI exige max_output_tokens >= 16 (con menos, tira 400 antes de
+      // generar nada) — 20 da margen sin volverse una prueba lenta/cara.
+      maxOutputTokens: 20,
     });
     const okText = r.text.trim().slice(0, 20) || "ok";
     return c.redirect(
@@ -1038,12 +1040,15 @@ adminApp.post("/config", async (c) => {
     const v = String(provRaw).trim().toLowerCase();
     await repo.set(
       SETTING_KEYS.llmProvider,
-      v === "anthropic" || v === "openai" || v === "xai" ? v : "",
+      v === "anthropic" || v === "openai" || v === "xai" || v === "deepseek" ? v : "",
     );
   }
   const modelRaw = form.get(SETTING_KEYS.llmModel);
   if (modelRaw !== null) {
     await repo.set(SETTING_KEYS.llmModel, String(modelRaw).trim().slice(0, 100));
+    // Guardar de nuevo (aunque sea el mismo modelo) es la señal de que el
+    // dueño ya lo revisó — se apaga el aviso de "modelo degradado".
+    await repo.set(SETTING_KEYS.llmModelWarning, "");
   }
   // La API key SOLO se sobreescribe si escribieron algo (el input siempre
   // llega vacío cuando no la tocaron); el checkbox la borra explícitamente.

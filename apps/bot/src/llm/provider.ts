@@ -1,18 +1,21 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createXai } from "@ai-sdk/xai";
+import { createDeepSeek } from "@ai-sdk/deepseek";
 import type { Env } from "../env";
 import type { Tier } from "../upgrade/modelSelector";
 
 /**
  * LLM provider abstraction.
  *
- * The bot's chat brain can run on Anthropic (default) or OpenAI. Model selection
- * is decoupled into TIERS ("fast" = cheap default, "smart" = upgrade); each
- * provider maps a tier to a concrete model id (env-overridable). Embeddings and
+ * The bot's chat brain can run on Anthropic (default), OpenAI, xAI or DeepSeek.
+ * Model selection is decoupled into TIERS ("fast" = cheap default, "smart" =
+ * upgrade); each provider maps a tier to a concrete (hardcoded) model id.
+ * Provider/model choice lives ONLY in /admin/config (SettingsRepo) — no env
+ * var overrides it, so there is exactly one place to look. Embeddings and
  * voice transcription stay on Cloudflare Workers AI regardless of this setting.
  */
-export type LlmProvider = "anthropic" | "openai" | "xai";
+export type LlmProvider = "anthropic" | "openai" | "xai" | "deepseek";
 
 const ANTHROPIC_DEFAULTS: Record<Tier, string> = {
   fast: "claude-haiku-4-5-20251001",
@@ -27,6 +30,11 @@ const OPENAI_DEFAULTS: Record<Tier, string> = {
 const XAI_DEFAULTS: Record<Tier, string> = {
   fast: "grok-4-fast-non-reasoning",
   smart: "grok-4",
+};
+
+const DEEPSEEK_DEFAULTS: Record<Tier, string> = {
+  fast: "deepseek-chat",
+  smart: "deepseek-reasoner",
 };
 
 /**
@@ -53,36 +61,28 @@ export const CURATED_MODELS: { id: string; label: string; provider: LlmProvider 
   { id: "grok-4-fast-non-reasoning", label: "Grok 4 Fast · rápido y barato", provider: "xai" },
   { id: "grok-3-mini", label: "Grok 3 mini · económico", provider: "xai" },
   { id: "grok-4", label: "Grok 4 · más capaz", provider: "xai" },
+  { id: "deepseek-chat", label: "DeepSeek Chat · rápido y muy barato", provider: "deepseek" },
+  { id: "deepseek-reasoner", label: "DeepSeek Reasoner · razonamiento profundo", provider: "deepseek" },
 ];
 
 /**
- * Decide which provider to use. Explicit LLM_PROVIDER wins; otherwise, if only
- * an OpenAI key is set, use OpenAI; default to Anthropic.
+ * Decide qué proveedor usar cuando no hay uno elegido explícitamente (dashboard
+ * en "Automático" y sin modelo concreto elegido): si solo hay llave de OpenAI,
+ * usa OpenAI; si no, Anthropic. Es un default de arranque (para el bot recién
+ * instalado, antes de que el dueño guarde nada en /admin/config) — no un
+ * override de variable de entorno.
  */
 export function resolveProvider(env: Env): LlmProvider {
-  const explicit = (env.LLM_PROVIDER ?? "").trim().toLowerCase();
-  if (explicit === "openai") return "openai";
-  if (explicit === "anthropic") return "anthropic";
-  // BUG FIX 2026-07-12: faltaba la rama xai — LLM_PROVIDER="xai" caía al
-  // default (anthropic), dejando a Grok como mero fallback todo el tiempo.
-  if (explicit === "xai") return "xai";
   if (!env.ANTHROPIC_API_KEY && env.OPENAI_API_KEY) return "openai";
   return "anthropic";
 }
 
-/** Resolve the concrete model id for a provider + tier (env-overridable). */
+/** Resolve the concrete (hardcoded) model id for a provider + tier. */
 export function modelIdFor(env: Env, provider: LlmProvider, tier: Tier): string {
-  if (provider === "openai") {
-    const smart = env.OPENAI_MODEL_SMART?.trim() || OPENAI_DEFAULTS.smart;
-    const fast = env.OPENAI_MODEL_FAST?.trim() || OPENAI_DEFAULTS.fast;
-    return tier === "smart" ? smart : fast;
-  }
-  if (provider === "xai") {
-    return tier === "smart" ? XAI_DEFAULTS.smart : XAI_DEFAULTS.fast;
-  }
-  const smart = env.ANTHROPIC_MODEL_SMART?.trim() || ANTHROPIC_DEFAULTS.smart;
-  const fast = env.ANTHROPIC_MODEL_FAST?.trim() || ANTHROPIC_DEFAULTS.fast;
-  return tier === "smart" ? smart : fast;
+  if (provider === "openai") return OPENAI_DEFAULTS[tier];
+  if (provider === "xai") return XAI_DEFAULTS[tier];
+  if (provider === "deepseek") return DEEPSEEK_DEFAULTS[tier];
+  return ANTHROPIC_DEFAULTS[tier];
 }
 
 export interface ResolvedModel {
@@ -98,21 +98,23 @@ export interface ResolvedModel {
 function envKeyFor(env: Env, provider: LlmProvider): string | undefined {
   if (provider === "openai") return env.OPENAI_API_KEY;
   if (provider === "xai") return env.XAI_API_KEY;
+  if (provider === "deepseek") return env.DEEPSEEK_API_KEY;
   return env.ANTHROPIC_API_KEY;
 }
 
 /**
  * Build the AI SDK model for the given tier. Dashboard overrides (BYO key /
- * provider / concrete model) win over env. Si el dueño eligió un proveedor
- * para el que no hay NINGUNA llave (ni suya ni del sistema), caemos al default
- * del env — el bot nunca se queda mudo por una config incompleta.
+ * provider / concrete model, guardados en /admin/config) ganan sobre el
+ * default de arranque. Si el dueño eligió un proveedor para el que no hay
+ * NINGUNA llave (ni suya ni del sistema), caemos al default de arranque —
+ * el bot nunca se queda mudo por una config incompleta.
  */
 export function createModel(env: Env, tier: Tier, ov?: LlmOverrides): ResolvedModel {
   const ovModel = (ov?.model ?? "").trim();
   const ovProviderRaw = (ov?.provider ?? "").trim().toLowerCase();
 
   let provider: LlmProvider | null =
-    ovProviderRaw === "anthropic" || ovProviderRaw === "openai" || ovProviderRaw === "xai"
+    ovProviderRaw === "anthropic" || ovProviderRaw === "openai" || ovProviderRaw === "xai" || ovProviderRaw === "deepseek"
       ? ovProviderRaw
       : null;
   // Modelo elegido sin proveedor explícito → dedúcelo del id.
@@ -121,7 +123,9 @@ export function createModel(env: Env, tier: Tier, ov?: LlmOverrides): ResolvedMo
       ? "xai"
       : /^(gpt|o\d)/i.test(ovModel)
         ? "openai"
-        : "anthropic";
+        : /^deepseek/i.test(ovModel)
+          ? "deepseek"
+          : "anthropic";
   }
   if (!provider) provider = resolveProvider(env);
 
@@ -129,7 +133,7 @@ export function createModel(env: Env, tier: Tier, ov?: LlmOverrides): ResolvedMo
   let apiKey = ovKey || envKeyFor(env, provider);
   let useOvModel = ovModel;
   if (!apiKey) {
-    console.warn(`[llm] no API key for provider "${provider}" — falling back to env default`);
+    console.warn(`[llm] no API key for provider "${provider}" — falling back to default`);
     provider = resolveProvider(env);
     apiKey = envKeyFor(env, provider);
     useOvModel = ""; // el modelo elegido era del proveedor sin llave — no aplica
@@ -147,12 +151,36 @@ export function createModel(env: Env, tier: Tier, ov?: LlmOverrides): ResolvedMo
     return { provider, modelId, model: xai(modelId), supportsPromptCache: false };
   }
 
+  if (provider === "deepseek") {
+    const deepseek = createDeepSeek({ apiKey });
+    return { provider, modelId, model: deepseek(modelId), supportsPromptCache: false };
+  }
+
   const anthropic = createAnthropic({ apiKey });
   return { provider, modelId, model: anthropic(modelId), supportsPromptCache: true };
 }
 
 /**
- * Plan B ante fallo del proveedor primario (rate limit, 5xx, red): el primer
+ * Plan B ante un modelo FIJADO a mano (ov.model) que dejó de responder —
+ * probablemente el proveedor lo retiró — antes de saltar a otro proveedor:
+ * el modelo automático (mantenido en código) del MISMO proveedor, que sigue
+ * vigente aunque el id elegido ya no lo esté. null si no había un modelo
+ * fijado, o si el fijado ya coincidía con el automático (nada que degradar).
+ */
+export function degradedModelFor(
+  env: Env,
+  tier: Tier,
+  ov: LlmOverrides | undefined,
+  primary: ResolvedModel,
+): ResolvedModel | null {
+  if (!(ov?.model ?? "").trim()) return null;
+  const degraded = createModel(env, tier, { ...ov, provider: primary.provider, model: undefined });
+  if (degraded.modelId === primary.modelId) return null;
+  return degraded;
+}
+
+/**
+ * Plan C ante fallo del proveedor primario (rate limit, 5xx, red): el primer
  * proveedor DISTINTO al que falló que tenga API key en el env, con sus modelos
  * default del tier. null = no hay respaldo configurado.
  */
@@ -161,7 +189,7 @@ export function fallbackModel(
   tier: Tier,
   failedProvider: LlmProvider,
 ): ResolvedModel | null {
-  const order: LlmProvider[] = ["anthropic", "openai", "xai"];
+  const order: LlmProvider[] = ["anthropic", "openai", "xai", "deepseek"];
   for (const p of order) {
     if (p === failedProvider) continue;
     if (!envKeyFor(env, p)) continue;

@@ -24,6 +24,12 @@ export const SETTING_KEYS = {
   llmProvider: "llm_provider", // "" (auto) | anthropic | openai
   llmApiKey: "llm_api_key", // owner's API key; empty = use the env key
   llmModel: "llm_model", // concrete model id; empty = auto tiers (fast⇄smart)
+  // JSON {modelId, provider, at} — se escribe cuando el modelo fijado en
+  // "llm_model" falla en producción y el turno tuvo que degradarse al modelo
+  // automático del mismo proveedor (ver src/agent/runner.ts). Es la señal
+  // visible de "tu modelo ya no responde, probablemente el proveedor lo
+  // retiró" — se borra sola en cuanto el dueño guarda /admin/config de nuevo.
+  llmModelWarning: "llm_model_warning",
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];
