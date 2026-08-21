@@ -306,29 +306,43 @@ export async function renderOverview(env: Env, botId: string): Promise<string> {
         <div class="flex items-center justify-between">
           <div class="font-display font-semibold text-[15px] text-cream flex items-center gap-2">
             <i data-lucide="activity" width="16" height="16" class="text-accent"></i>
-            Salud del bot
+            Salud de ${esc(bot?.name ?? "tu bot")}
           </div>
           <a href="/admin/tickets" class="flex items-center gap-1 text-[11.5px]">
             ver tickets <i data-lucide="arrow-right" width="13" height="13"></i>
           </a>
         </div>
+        ${(() => {
+          // Cuando el bot escala a humano, ¿alguien se entera? Antes esto
+          // fallaba en silencio; ahora es la alerta principal de esta tarjeta
+          // si falta configurar, porque un handoff mudo deja tickets huérfanos.
+          const notify = handoffNotifyStatus(env, tier);
+          if (notify.ok) return "";
+          return `
+          <div class="mt-3" style="display:flex;align-items:flex-start;gap:10px;background:rgba(220,38,38,.06);border:1px solid rgba(220,38,38,.3);padding:11px 13px">
+            <span style="width:7px;height:7px;border-radius:50%;background:var(--bad);margin-top:5px;flex:none"></span>
+            <div class="flex flex-col gap-0.5" style="flex:1;min-width:0">
+              <div class="text-[13px] font-semibold" style="color:var(--bad)">Handoff sin aviso</div>
+              <div class="text-[12px]" style="color:var(--muted);line-height:1.45">El bot crea tickets pero nadie recibe notificación. Configura Telegram, WhatsApp o email del dueño.</div>
+            </div>
+            <a href="/admin/conexiones" class="flex-none text-[11.5px]" style="background:var(--panel);border:1px solid rgba(220,38,38,.35);border-radius:8px;padding:6px 10px;color:var(--bad);white-space:nowrap">Configurar</a>
+          </div>`;
+        })()}
         <div class="mt-3" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          ${
-            openTickets > 0
-              ? `<span style="font-size:9px;color:var(--bad);border:1px solid var(--bad);padding:1px 6px">⚠ ${openTickets} tickets abiertos</span>`
-              : `<span style="font-size:9px;color:var(--ok);border:1px solid var(--ok);padding:1px 6px">✓ 0 tickets abiertos</span>`
-          }
           ${(() => {
-            // Cuando el bot escala a humano, ¿alguien se entera? Antes esto
-            // fallaba en silencio; ahora se ve aquí en rojo si falta configurar.
+            const ok = openTickets === 0;
+            const color = ok ? "var(--ok)" : "var(--bad)";
+            return `<span class="text-[11.5px]" style="display:flex;align-items:center;gap:6px;color:${ok ? "var(--muted)" : color};border:1px solid ${ok ? "var(--line)" : color};border-radius:8px;padding:6px 10px">${ok ? "✓" : "⚠"} ${openTickets} tickets abiertos</span>`;
+          })()}
+          ${(() => {
             const notify = handoffNotifyStatus(env, tier);
-            return notify.ok
-              ? `<span style="font-size:9px;color:var(--ok);border:1px solid var(--ok);padding:1px 6px">✓ handoff avisa por ${notify.channels.join(" + ")}</span>`
-              : `<span style="font-size:9px;color:var(--bad);border:1px solid var(--bad);padding:1px 6px">⚠ HANDOFF SIN AVISO — el bot crea tickets pero NADIE recibe notificación (configura Telegram, WhatsApp o email del dueño)</span>`;
+            if (!notify.ok) return "";
+            return `<span class="text-[11.5px]" style="display:flex;align-items:center;gap:6px;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:6px 10px">✓ handoff avisa por ${notify.channels.join(" + ")}</span>`;
           })()}
           ${(() => {
             const ok = conn.connected > 0;
-            return `<a href="/admin/conexiones" style="font-size:9px;color:${ok ? "var(--ok)" : "var(--bad)"};border:1px solid ${ok ? "var(--ok)" : "var(--bad)"};padding:1px 6px;text-decoration:none">${ok ? "✓" : "⚠"} ${conn.connected}/${conn.total} canales conectados</a>`;
+            const color = ok ? "var(--ok)" : "var(--bad)";
+            return `<a href="/admin/conexiones" class="text-[11.5px]" style="display:flex;align-items:center;gap:6px;color:${ok ? "var(--muted)" : color};border:1px solid ${ok ? "var(--line)" : color};border-radius:8px;padding:6px 10px;text-decoration:none">${ok ? "✓" : "⚠"} ${conn.connected}/${conn.total} canales conectados</a>`;
           })()}
         </div>
       </section>
