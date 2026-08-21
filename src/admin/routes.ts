@@ -42,6 +42,7 @@ import { runFlywheel, getLessons, saveLessons } from "../flywheel/detect";
 import { applySuggestion, dismissSuggestion } from "../flywheel/apply";
 import { renderLeads, exportLeadsCsv } from "./views/leads";
 import { renderTickets } from "./views/tickets";
+import { renderCalendario, cancelAppointment } from "./views/calendario";
 import { renderConfig } from "./views/config";
 import {
   renderConexiones,
@@ -54,6 +55,8 @@ import {
   connectConnector,
   disconnectConnector,
   categoryOfProvider,
+  renderMcpConnectModal,
+  connectMcp,
 } from "./views/conexiones";
 import type { ConnectorCategory } from "../connectors/registry";
 import { renderCampanas } from "./views/campanas";
@@ -773,6 +776,14 @@ adminApp.get("/leads", async (c) => c.html(await renderLeads(c.env, c.get("botId
 
 adminApp.get("/tickets", async (c) => c.html(await renderTickets(c.env, c.get("botId"))));
 
+// Calendario (F5 Fase 2): agenda del bot — local, o el calendario conectado si hay uno.
+adminApp.get("/calendario", async (c) => c.html(await renderCalendario(c.env, c.get("botId"))));
+
+adminApp.post("/calendario/:id/cancel", async (c) => {
+  await cancelAppointment(c.env, c.get("botId"), c.req.param("id"));
+  return c.redirect("/admin/calendario", 302);
+});
+
 // Conexiones: mapa de canales con estado verde/gris (paso 4 del onboarding),
 // más las pestañas de conectores salientes (CRM, tickets, calendario, MCP).
 adminApp.get("/conexiones", async (c) =>
@@ -841,6 +852,16 @@ adminApp.post("/conexiones/connectors/:provider/disconnect", async (c) => {
   if (!category) return c.text("Conector desconocido", 404);
   await disconnectConnector(c.env, c.get("botId"), provider);
   return c.redirect(`/admin/conexiones?cat=${category}`, 302);
+});
+
+// Conectores MCP: sin catálogo fijo, el usuario da de alta los suyos (nombre + URL + token opcional).
+adminApp.get("/conexiones/connectors/mcp/add", (c) => c.html(renderMcpConnectModal()));
+
+adminApp.post("/conexiones/connectors/mcp/add", async (c) => {
+  const form = await c.req.formData();
+  const modalHtml = await connectMcp(c.env, c.get("botId"), form);
+  const gridHtml = await renderConnectorsGrid(c.env, c.get("botId"), "mcp");
+  return c.html(modalHtml + gridHtml);
 });
 
 adminApp.get("/campanas", async (c) => {

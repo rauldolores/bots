@@ -24,9 +24,10 @@ export const PRO_ONLY_TOOLS = [
 
 // Tabs del dashboard reservadas al tier Pro (Análisis + growth). El tier free
 // ve un panel funcional (Resumen, Conversaciones, Leads, Tickets, Flujo, KB,
-// Conexiones, Config) pero sin el Analista IA, métricas, costos, mejoras ni
-// campañas — esos desbloquean con la comunidad.
-export const PRO_ONLY_TABS = ["insights", "stats", "costs", "mejoras", "campanas"] as const;
+// Conexiones, Config) pero sin el Analista IA, métricas, costos, mejoras,
+// campañas ni calendario (va de la mano de scheduleAppointment, también Pro)
+// — esos desbloquean con la comunidad.
+export const PRO_ONLY_TABS = ["insights", "stats", "costs", "mejoras", "campanas", "calendario"] as const;
 
 export function isToolAvailable(tier: string | undefined | null, toolName: string): boolean {
   if (!PRO_ONLY_TOOLS.includes(toolName as (typeof PRO_ONLY_TOOLS)[number])) return true;

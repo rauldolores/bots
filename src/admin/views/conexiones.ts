@@ -383,6 +383,9 @@ export function renderConnectorConnectModal(category: ConnectorCategory, provide
 
 /** Para saber a qué categoría redirigir tras desconectar (la URL de disconnect solo trae el provider). */
 export function categoryOfProvider(provider: string): ConnectorCategory | null {
+  // Los conectores MCP no tienen catálogo fijo — el usuario los nombra, así
+  // que el provider es un id generado (mcp-<uuid>), no una entrada de MCP_PROVIDERS.
+  if (provider.startsWith("mcp-")) return "mcp";
   if (CRM_PROVIDERS[provider]) return "crm";
   if (TICKET_PROVIDERS[provider]) return "tickets";
   if (CALENDAR_PROVIDERS[provider]) return "calendar";
@@ -432,11 +435,116 @@ async function renderConnectorCard(db: Db, botId: string, meta: ConnectorMeta): 
     </div>`;
 }
 
+// ── Conectores MCP: sin catálogo fijo, el usuario nombra los suyos ─────────
+//
+// A diferencia de CRM/Tickets/Calendario (proveedores conocidos de antemano),
+// aquí puede haber varios a la vez y cada uno lo da de alta el usuario con su
+// propio nombre + URL — por eso viven fuera del molde genérico de arriba.
+
+function renderMcpConnectedCard(c: BotConnector): string {
+  const url = typeof c.config.url === "string" ? c.config.url : "";
+  return `
+    <div class="bg-panel border" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;border-color:rgba(127,183,126,.45)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <div class="font-display font-semibold text-[13.5px] text-cream" style="display:flex;align-items:center;gap:9px">
+          <i data-lucide="plug" width="16" height="16" class="text-accent"></i>
+          ${esc(c.name ?? "Conector MCP")}
+        </div>
+        <span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>
+      </div>
+      <p class="text-dim text-[12px]" style="margin:0;word-break:break-all">${esc(url)}</p>
+      <form method="POST" action="/admin/conexiones/connectors/${c.provider}/disconnect" onsubmit="return confirm('¿Quitar ${esc(c.name ?? "este conector")}? El agente perderá acceso a sus tools.')">
+        <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Quitar</button>
+      </form>
+    </div>`;
+}
+
+function renderMcpAddCard(): string {
+  return `
+    <div class="bg-panel border border-line" style="padding:18px 20px;display:flex;align-items:center;justify-content:center;min-height:118px">
+      <button type="button" class="text-[12px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600"
+              hx-get="/admin/conexiones/connectors/mcp/add" hx-target="#modal-root" hx-swap="innerHTML">+ Agregar conector MCP</button>
+    </div>`;
+}
+
+/** Diálogo para dar de alta un servidor MCP remoto — nombre + URL + token opcional. */
+export function renderMcpConnectModal(opts?: { error?: string }): string {
+  const error = opts?.error
+    ? `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;margin-bottom:14px">${esc(opts.error)}</div>`
+    : "";
+  return modalShell(
+    "plug",
+    "Conectar un servidor MCP",
+    `
+    <p class="text-[12.5px]" style="color:var(--muted);line-height:1.6;margin:0 0 16px">Pega la URL de un servidor MCP remoto (HTTP) — sus tools quedarán disponibles para el agente. Si el servidor pide autenticación, agrega el token; si no, déjalo en blanco.</p>
+    ${error}
+    <form hx-post="/admin/conexiones/connectors/mcp/add" hx-target="#modal-root" hx-swap="innerHTML">
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+        <label class="text-[12px] font-semibold text-cream">Nombre</label>
+        <input type="text" name="name" required placeholder="Ej. Notion"
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;font-family:inherit;outline:none">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+        <label class="text-[12px] font-semibold text-cream">URL del servidor MCP</label>
+        <input type="text" name="url" required placeholder="https://mcp.ejemplo.com/mcp"
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;font-family:inherit;outline:none">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+        <label class="text-[12px] font-semibold text-cream">Token (opcional)</label>
+        <input type="password" name="token" placeholder="········"
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;font-family:inherit;outline:none">
+      </div>
+      <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:10px">Conectar</button>
+    </form>`,
+  );
+}
+
+/** Procesa el alta de un conector MCP: valida la URL, guarda el token (si hay) en Vault, e inserta una fila nueva. */
+export async function connectMcp(env: Env, botId: string, form: FormData): Promise<string> {
+  const db = new Db(env.DB);
+  const str = (n: string) => String(form.get(n) ?? "").trim();
+  const name = str("name");
+  const url = str("url");
+  const token = str("token");
+
+  if (!name) return renderMcpConnectModal({ error: "Falta el nombre." });
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return renderMcpConnectModal({ error: "La URL no es válida." });
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return renderMcpConnectModal({ error: "La URL debe empezar con http:// o https://." });
+  }
+
+  const secretRef = token ? await createSecret(db, token, `mcp:${botId}:${name}`) : null;
+  const provider = `mcp-${crypto.randomUUID()}`;
+  await new BotConnectorsRepo(db).upsert({ botId, category: "mcp", provider, name, secretRef, config: { url } });
+
+  return modalShell(
+    "plug",
+    `${name} conectado`,
+    `<div class="text-[13px]" style="color:var(--ok);font-weight:600;margin-bottom:12px">✓ ${esc(name)} conectado a este bot</div>
+     <p class="text-[12.5px]" style="color:var(--muted);margin:0 0 14px">Sus tools ya están disponibles para el agente.</p>
+     <button type="button" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:9px"
+             onclick="document.getElementById('modal-root').innerHTML=''">Listo</button>`,
+  );
+}
+
+async function renderMcpCategoryBody(env: Env, botId: string): Promise<{ summary: string; cards: string }> {
+  const db = new Db(env.DB);
+  const connectors = (await new BotConnectorsRepo(db).listByBot(botId)).filter((c) => c.category === "mcp");
+  const cards = connectors.map(renderMcpConnectedCard).join("") + renderMcpAddCard();
+  return { summary: `Conectores MCP: ${connectors.length} conectado${connectors.length === 1 ? "" : "s"}`, cards };
+}
+
 async function renderCategoryBody(
   env: Env,
   botId: string,
   category: ConnectorCategory,
 ): Promise<{ summary: string; cards: string }> {
+  if (category === "mcp") return renderMcpCategoryBody(env, botId);
   const db = new Db(env.DB);
   const list = Object.values(providersFor(category));
   if (list.length === 0) {

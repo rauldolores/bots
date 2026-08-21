@@ -18,6 +18,7 @@ import { BotsRepo } from "../db/bots";
 import { isProTier } from "../config";
 import { resolveAgentConfig } from "../settings-loader";
 import { buildTools } from "../tools";
+import { loadMcpTools } from "../tools/mcpTools";
 import { buildMultimodalUserMessage } from "../media/vision";
 import { chunkReply } from "../replies/chunker";
 import { pickAdapter } from "../replies/sender";
@@ -264,6 +265,13 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
   const enabledTools = Object.fromEntries(
     Object.entries(tools).filter(([name]) => cfg.enabledToolNames.includes(name)),
   );
+
+  // Conectores MCP (F5 Fase 3): tools de terceros, fuera del registro estático
+  // de arriba — por eso no pasan por el filtro de enabledToolNames (el panel
+  // de tools no las conoce una por una; se activan/desactivan conectando o
+  // desconectando el MCP entero desde /admin/conexiones).
+  const mcpTools = await loadMcpTools(db, botId);
+  Object.assign(enabledTools, mcpTools);
 
   let tier: Tier =
     cfg.modelOverride === "haiku"

@@ -1,38 +1,68 @@
 import { tool } from "ai";
 import { z } from "zod";
 import type { Env } from "../env";
+import { Db } from "../db/client";
+import { AppointmentsRepo } from "../db/appointments";
+import { BotConnectorsRepo } from "../db/botConnectors";
+import { resolveConnectorCreds } from "../connectors/creds";
+import { CALENDAR_ADAPTERS } from "../connectors/registry";
 
-const CALCOM_API = "https://api.cal.com/v1";
-
-export function scheduleAppointmentTool(env: Env, _getConversationId: () => string | null) {
+/**
+ * Agenda una cita. Si el bot tiene un calendario conectado (Cal.com…), la
+ * reserva se hace ahí de verdad — es quien sabe si el horario ya está
+ * ocupado, así que un rechazo suyo es un rechazo real (el agente debe
+ * proponer otro horario, no fingir que ya quedó). Sin calendario conectado,
+ * cae a la agenda local del bot (sin choques de horario, para que la
+ * función funcione desde el día uno sin configurar nada).
+ */
+export function scheduleAppointmentTool(env: Env, getConversationId: () => string | null, botId: string) {
   return tool({
     description:
-      "Agenda una cita usando Cal.com. Necesitas eventTypeId (el dueño lo configura en Cal.com), fecha/hora, nombre y email del cliente.",
+      "Agenda una cita con el cliente. Necesitas su nombre, email y la fecha/hora deseada. Si el horario ya está ocupado en el calendario conectado, devuelve un error — propónle otro horario al cliente.",
     inputSchema: z.object({
-      eventTypeId: z.number().int().describe("Cal.com event type ID"),
-      startTime: z.string().describe("ISO datetime, e.g. 2026-06-01T17:00:00Z"),
       attendeeName: z.string(),
       attendeeEmail: z.string().email(),
+      startTime: z.string().describe("ISO datetime, e.g. 2026-06-01T17:00:00Z"),
       notes: z.string().optional(),
     }),
-    execute: async ({ eventTypeId, startTime, attendeeName, attendeeEmail, notes }) => {
-      if (!env.CALCOM_API_KEY) return { error: "calcom_not_configured" as const };
-      try {
-        const res = await fetch(`${CALCOM_API}/bookings?apiKey=${env.CALCOM_API_KEY}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            eventTypeId,
-            start: startTime,
-            responses: { name: attendeeName, email: attendeeEmail, notes: notes ?? "" },
-          }),
+    execute: async ({ attendeeName, attendeeEmail, startTime, notes }) => {
+      const db = new Db(env.DB);
+      const connector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "calendar");
+      const appts = new AppointmentsRepo(db, botId);
+      const startsAt = new Date(startTime).getTime();
+
+      if (!connector) {
+        const appointmentId = await appts.create({
+          conversationId: getConversationId(),
+          customerName: attendeeName,
+          customerContact: attendeeEmail,
+          startsAt,
+          notes,
         });
-        if (!res.ok) return { error: "calcom_failed" as const, status: res.status };
-        const body = (await res.json()) as any;
-        return { bookingId: body.id, status: body.status };
-      } catch (e: any) {
-        return { error: "transient" as const, message: String(e?.message ?? e) };
+        return { appointmentId, message: "Cita agendada." };
       }
+
+      const adapter = CALENDAR_ADAPTERS[connector.provider];
+      const creds = adapter ? await resolveConnectorCreds(db, connector) : null;
+      if (!adapter || !creds) return { error: "calendar_not_configured" as const };
+
+      const result = await adapter.pushAppointment(creds, {
+        name: attendeeName,
+        contact: attendeeEmail,
+        startTime,
+        notes,
+      });
+      if (!result.ok) return { error: "calendar_failed" as const, message: result.error };
+
+      const appointmentId = await appts.create({
+        conversationId: getConversationId(),
+        customerName: attendeeName,
+        customerContact: attendeeEmail,
+        startsAt,
+        notes,
+        externalRef: result.externalId ?? null,
+      });
+      return { appointmentId, message: "Cita agendada." };
     },
   });
 }

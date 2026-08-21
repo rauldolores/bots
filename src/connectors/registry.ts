@@ -3,10 +3,11 @@
 // para plataformas que el bot LLAMA (CRM, tickets) en vez de canales que le
 // hablan a él. `comingSoon: true` = aparece en la pestaña pero sin botón de
 // conectar todavía (honesto sobre lo que ya funciona vs. lo que falta).
-import type { CrmConnector, TicketConnector } from "./types";
+import type { CrmConnector, TicketConnector, CalendarConnector } from "./types";
 import { hubspotConnector } from "./crm/hubspot";
 import { pipedriveConnector } from "./crm/pipedrive";
 import { zendeskConnector } from "./tickets/zendesk";
+import { calcomConnector } from "./calendar/calcom";
 
 export type ConnectorCategory = "crm" | "tickets" | "calendar" | "mcp";
 
@@ -98,11 +99,27 @@ export const TICKET_PROVIDERS: Record<string, ConnectorMeta> = {
   },
 };
 
-export const CALENDAR_PROVIDERS: Record<string, ConnectorMeta> = {};
+export const CALENDAR_PROVIDERS: Record<string, ConnectorMeta> = {
+  calcom: {
+    id: "calcom",
+    category: "calendar",
+    name: "Cal.com",
+    icon: "calendar-clock",
+    desc: "El agente agenda citas directo en tu Cal.com.",
+    steps: [
+      'En Cal.com: <span class="font-mono">Settings → Developer → API Keys</span>, crea una nueva.',
+      'Ve al tipo de evento donde quieres que caigan las citas del bot y copia su <b>Event Type ID</b> (aparece en la URL del editor, ej. <span class="font-mono">cal.com/event-types/12345</span> → 12345).',
+    ],
+    apiKeyLabel: "API Key",
+    apiKeyPlaceholder: "cal_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    fields: [{ name: "eventTypeId", label: "Event Type ID", placeholder: "12345", isConfig: true }],
+  },
+};
 export const MCP_PROVIDERS: Record<string, ConnectorMeta> = {};
 
 export const CRM_ADAPTERS: Record<string, CrmConnector> = { hubspot: hubspotConnector, pipedrive: pipedriveConnector };
 export const TICKET_ADAPTERS: Record<string, TicketConnector> = { zendesk: zendeskConnector };
+export const CALENDAR_ADAPTERS: Record<string, CalendarConnector> = { calcom: calcomConnector };
 
 export const CATEGORY_LABELS: Record<ConnectorCategory, string> = {
   crm: "CRM",

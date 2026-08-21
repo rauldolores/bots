@@ -59,3 +59,24 @@ export interface TicketConnector {
   pushTicket(creds: ConnectorCreds, ticket: TicketInput): Promise<ConnectorPushResult>;
   listOpen(creds: ConnectorCreds, limit: number): Promise<ConnectorListResult<TicketRecord>>;
 }
+
+export interface AppointmentInput {
+  name: string;
+  contact: string;
+  /** ISO datetime. */
+  startTime: string;
+  notes?: string;
+}
+
+export interface AppointmentRecord {
+  id: string;
+  name: string;
+  contact: string;
+  startsAt: number;
+  url?: string;
+}
+
+export interface CalendarConnector {
+  pushAppointment(creds: ConnectorCreds, appt: AppointmentInput): Promise<ConnectorPushResult>;
+  listUpcoming(creds: ConnectorCreds, limit: number): Promise<ConnectorListResult<AppointmentRecord>>;
+}
