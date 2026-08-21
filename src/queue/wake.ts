@@ -8,6 +8,15 @@
 // seguir trabajando DESPUÉS de haber respondido el webhook: se aprovecha para
 // esperar el buffer y correr el turno. Donde no lo hay, esto no hace nada y el
 // disparador del adaptador (setInterval o cron) se encarga.
+//
+// En Vercel esto exige que la función dure AL MENOS lo que el buffer más
+// configurado en el panel (hasta 60s, ver el nodo "Buffer" de Mi Agente) más
+// MARGEN_MS — si el runtime mata la función antes, este setTimeout nunca
+// dispara y el turno solo llega con el cron de /cron/tick (hasta 60s después,
+// o cuando otro mensaje entrante lo alcance a procesar junto). `vercel.json`
+// declara `functions["api/index.js"].maxDuration` para esto — encontrado en
+// vivo: un cliente mandaba un audio, no recibía respuesta, y el bot solo
+// "revelaba" que ya lo había leído hasta el siguiente mensaje de texto.
 
 import type { Env } from "../env";
 import { tick } from "./tick";
