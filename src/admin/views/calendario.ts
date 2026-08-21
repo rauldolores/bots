@@ -75,7 +75,7 @@ export async function renderCalendario(env: Env, botId: string): Promise<string>
     const providerMeta = CALENDAR_PROVIDERS[connector.provider];
     const providerLabel = providerMeta?.name ?? connector.provider;
     const adapter = CALENDAR_ADAPTERS[connector.provider];
-    const creds = adapter ? await resolveConnectorCreds(db, connector) : null;
+    const creds = adapter ? await resolveConnectorCreds(db, connector, env) : null;
     const result = adapter && creds ? await adapter.listUpcoming(creds, 50) : null;
     if (result?.ok) {
       const body = `

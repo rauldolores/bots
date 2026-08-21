@@ -43,7 +43,7 @@ export function scheduleAppointmentTool(env: Env, getConversationId: () => strin
       }
 
       const adapter = CALENDAR_ADAPTERS[connector.provider];
-      const creds = adapter ? await resolveConnectorCreds(db, connector) : null;
+      const creds = adapter ? await resolveConnectorCreds(db, connector, env) : null;
       if (!adapter || !creds) return { error: "calendar_not_configured" as const };
 
       const result = await adapter.pushAppointment(creds, {

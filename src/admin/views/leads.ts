@@ -64,7 +64,7 @@ export async function renderLeads(env: Env, botId: string): Promise<string> {
     const providerMeta = CRM_PROVIDERS[crmConnector.provider];
     const providerLabel = providerMeta?.name ?? crmConnector.provider;
     const adapter = CRM_ADAPTERS[crmConnector.provider];
-    const creds = adapter ? await resolveConnectorCreds(db, crmConnector) : null;
+    const creds = adapter ? await resolveConnectorCreds(db, crmConnector, env) : null;
     const result = adapter && creds ? await adapter.listRecent(creds, 100) : null;
     if (result?.ok) {
       const body = `

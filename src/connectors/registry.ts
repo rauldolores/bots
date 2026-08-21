@@ -7,7 +7,9 @@ import type { CrmConnector, TicketConnector, CalendarConnector } from "./types";
 import { hubspotConnector } from "./crm/hubspot";
 import { pipedriveConnector } from "./crm/pipedrive";
 import { zendeskConnector } from "./tickets/zendesk";
+import { jiraConnector } from "./tickets/jira";
 import { calcomConnector } from "./calendar/calcom";
+import { googleCalendarConnector } from "./calendar/googleCalendar";
 
 export type ConnectorCategory = "crm" | "tickets" | "calendar" | "mcp";
 
@@ -27,10 +29,14 @@ export interface ConnectorMeta {
   icon: string;
   desc: string;
   comingSoon?: boolean;
+  /** "apikey" (default): formulario con token. "oauth": botón que redirige al consentimiento del proveedor. */
+  authType?: "apikey" | "oauth";
   steps?: string[];
   apiKeyLabel?: string;
   apiKeyPlaceholder?: string;
   fields?: ConnectorFieldSpec[];
+  /** Solo oauth: config que se completa DESPUÉS de conectar (ej. a qué proyecto de Jira caen los tickets). */
+  postAuthFields?: ConnectorFieldSpec[];
 }
 
 export const CRM_PROVIDERS: Record<string, ConnectorMeta> = {
@@ -97,6 +103,15 @@ export const TICKET_PROVIDERS: Record<string, ConnectorMeta> = {
     desc: "Próximamente.",
     comingSoon: true,
   },
+  jira: {
+    id: "jira",
+    category: "tickets",
+    name: "Jira",
+    icon: "life-buoy",
+    desc: "Los handoffs del bot se crean como incidencias en tu Jira.",
+    authType: "oauth",
+    postAuthFields: [{ name: "projectKey", label: "Project Key", placeholder: "SUP", isConfig: true }],
+  },
 };
 
 export const CALENDAR_PROVIDERS: Record<string, ConnectorMeta> = {
@@ -114,12 +129,24 @@ export const CALENDAR_PROVIDERS: Record<string, ConnectorMeta> = {
     apiKeyPlaceholder: "cal_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     fields: [{ name: "eventTypeId", label: "Event Type ID", placeholder: "12345", isConfig: true }],
   },
+  "google-calendar": {
+    id: "google-calendar",
+    category: "calendar",
+    name: "Google Calendar",
+    icon: "calendar-clock",
+    desc: "El agente agenda citas directo en tu Google Calendar.",
+    authType: "oauth",
+    postAuthFields: [
+      { name: "calendarId", label: "Calendario (opcional)", placeholder: "primary", isConfig: true },
+      { name: "durationMinutes", label: "Duración de cada cita en minutos (opcional)", placeholder: "30", isConfig: true },
+    ],
+  },
 };
 export const MCP_PROVIDERS: Record<string, ConnectorMeta> = {};
 
 export const CRM_ADAPTERS: Record<string, CrmConnector> = { hubspot: hubspotConnector, pipedrive: pipedriveConnector };
-export const TICKET_ADAPTERS: Record<string, TicketConnector> = { zendesk: zendeskConnector };
-export const CALENDAR_ADAPTERS: Record<string, CalendarConnector> = { calcom: calcomConnector };
+export const TICKET_ADAPTERS: Record<string, TicketConnector> = { zendesk: zendeskConnector, jira: jiraConnector };
+export const CALENDAR_ADAPTERS: Record<string, CalendarConnector> = { calcom: calcomConnector, "google-calendar": googleCalendarConnector };
 
 export const CATEGORY_LABELS: Record<ConnectorCategory, string> = {
   crm: "CRM",
@@ -127,3 +154,11 @@ export const CATEGORY_LABELS: Record<ConnectorCategory, string> = {
   calendar: "Calendario",
   mcp: "Conectores MCP",
 };
+
+/** Busca la ficha de un proveedor en cualquier categoría — usado donde solo se tiene (category, provider), como al refrescar credenciales OAuth. */
+export function metaFor(category: ConnectorCategory, provider: string): ConnectorMeta | undefined {
+  if (category === "crm") return CRM_PROVIDERS[provider];
+  if (category === "tickets") return TICKET_PROVIDERS[provider];
+  if (category === "calendar") return CALENDAR_PROVIDERS[provider];
+  return MCP_PROVIDERS[provider];
+}

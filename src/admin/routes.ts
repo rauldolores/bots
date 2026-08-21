@@ -57,7 +57,9 @@ import {
   categoryOfProvider,
   renderMcpConnectModal,
   connectMcp,
+  updateConnectorConfig,
 } from "./views/conexiones";
+import { startOAuth, handleOAuthCallback } from "./oauthConnect";
 import type { ConnectorCategory } from "../connectors/registry";
 import { renderCampanas } from "./views/campanas";
 import { sendCampaign, createHandoffTemplate, contentApprovalStatus } from "../campaigns";
@@ -787,7 +789,12 @@ adminApp.post("/calendario/:id/cancel", async (c) => {
 // Conexiones: mapa de canales con estado verde/gris (paso 4 del onboarding),
 // más las pestañas de conectores salientes (CRM, tickets, calendario, MCP).
 adminApp.get("/conexiones", async (c) =>
-  c.html(await renderConexiones(c.env, c.get("botId"), c.req.query("cat") ?? "canales")),
+  c.html(
+    await renderConexiones(c.env, c.get("botId"), c.req.query("cat") ?? "canales", {
+      ok: c.req.query("ok") === "1",
+      err: c.req.query("err"),
+    }),
+  ),
 );
 
 // Diálogo de conexión: instrucciones + formulario para pegar el token, sin
@@ -862,6 +869,44 @@ adminApp.post("/conexiones/connectors/mcp/add", async (c) => {
   const modalHtml = await connectMcp(c.env, c.get("botId"), form);
   const gridHtml = await renderConnectorsGrid(c.env, c.get("botId"), "mcp");
   return c.html(modalHtml + gridHtml);
+});
+
+// Config posterior a un OAuth (ej. Project Key de Jira) — solo config, nunca el token.
+adminApp.post("/conexiones/connectors/:provider/config", async (c) => {
+  const provider = c.req.param("provider");
+  await updateConnectorConfig(c.env, c.get("botId"), provider, await c.req.formData());
+  const category = categoryOfProvider(provider);
+  return c.redirect(`/admin/conexiones${category ? `?cat=${category}` : ""}`, 302);
+});
+
+// Conectores OAuth (Google Calendar, Jira): "Conectar" redirige de verdad al
+// consentimiento del proveedor — no es un diálogo HTMX como los de API key.
+const OAUTH_STATE_COOKIE = "nodia_oauth_state";
+
+adminApp.get("/conexiones/oauth/:provider/start", (c) => {
+  const provider = c.req.param("provider");
+  const result = startOAuth(c.env, provider, c.get("botId"));
+  if ("error" in result) return c.redirect(`/admin/conexiones?err=${encodeURIComponent(result.error)}`, 302);
+  setCookie(c, OAUTH_STATE_COOKIE, JSON.stringify(result.state), {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    maxAge: 600,
+  });
+  return c.redirect(result.url, 302);
+});
+
+adminApp.get("/conexiones/oauth/:provider/callback", async (c) => {
+  const provider = c.req.param("provider");
+  const cookieRaw = getCookie(c, OAUTH_STATE_COOKIE);
+  const { redirectTo } = await handleOAuthCallback(
+    c.env,
+    provider,
+    { code: c.req.query("code"), state: c.req.query("state"), error: c.req.query("error") },
+    cookieRaw,
+  );
+  deleteCookie(c, OAUTH_STATE_COOKIE);
+  return c.redirect(redirectTo, 302);
 });
 
 adminApp.get("/campanas", async (c) => {

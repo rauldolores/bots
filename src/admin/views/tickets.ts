@@ -56,7 +56,7 @@ export async function renderTickets(env: Env, botId: string): Promise<string> {
     const providerMeta = TICKET_PROVIDERS[ticketsConnector.provider];
     const providerLabel = providerMeta?.name ?? ticketsConnector.provider;
     const adapter = TICKET_ADAPTERS[ticketsConnector.provider];
-    const creds = adapter ? await resolveConnectorCreds(db, ticketsConnector) : null;
+    const creds = adapter ? await resolveConnectorCreds(db, ticketsConnector, env) : null;
     const result = adapter && creds ? await adapter.listOpen(creds, 50) : null;
     if (result?.ok) {
       const body = `

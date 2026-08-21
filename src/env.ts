@@ -91,6 +91,17 @@ export interface Env {
   CALCOM_EVENT_TYPES?: string;             // opcional: JSON {"corte":123,"barba":456} servicio→eventTypeId
   CALCOM_TIMEZONE?: string;                // zona horaria (default America/Mexico_City)
   GOOGLE_SERVICE_ACCOUNT_JSON?: string;  // base64-encoded JSON
+
+  // ── Conectores OAuth (F5 Fase 4): Google Calendar y Jira ─────────────────
+  // El bot es una "app" registrada UNA VEZ por el dueño del despliegue (en
+  // Google Cloud Console / Atlassian Developer Console) — el client_id/secret
+  // son del DESPLIEGUE, no del bot; cada bot autoriza el suyo (su propio
+  // refresh_token) al conectar desde /admin/conexiones, igual que cualquier
+  // "Iniciar sesión con Google" de una app de terceros.
+  GOOGLE_CALENDAR_CLIENT_ID?: string;
+  GOOGLE_CALENDAR_CLIENT_SECRET?: string;
+  JIRA_CLIENT_ID?: string;
+  JIRA_CLIENT_SECRET?: string;
   OWNER_EMAIL: string;  // for handoff notifications (email)
   OWNER_TELEGRAM_CHAT_ID?: string;  // for handoff notifications (default channel)
   OWNER_WA_NUMBER?: string;  // for Pro handoff WhatsApp DM (requires template)

@@ -108,6 +108,26 @@ export class BotConnectorsRepo {
     );
   }
 
+  /**
+   * Mezcla `patch` sobre la config ya guardada (nunca toca secret_ref) — para
+   * completar/editar config posterior a la conexión (ej. el Project Key de
+   * Jira) sin arriesgar borrar el token OAuth al no volver a pasarlo.
+   */
+  async mergeConfig(botId: string, provider: string, patch: ConnectorConfig): Promise<void> {
+    // El merge se hace en JS, no con `config || ?::jsonb`: postgres.js
+    // serializa un string ya JSON.stringify'd como un jsonb STRING escalar,
+    // no como objeto — `escalar || escalar` concatena en un array en vez de
+    // mezclar llaves. Se lee (ya bien desenvuelto por toBotConnector) y se
+    // escribe entero, igual que hace upsert().
+    const current = await this.getByBotAndProvider(botId, provider);
+    const merged = { ...(current?.config ?? {}), ...patch };
+    await this.db.run("UPDATE bot_connectors SET config = ?::jsonb WHERE bot_id = ? AND provider = ?", [
+      JSON.stringify(merged),
+      botId,
+      provider,
+    ]);
+  }
+
   async disable(botId: string, provider: string): Promise<void> {
     await this.db.run("UPDATE bot_connectors SET enabled = false WHERE bot_id = ? AND provider = ?", [
       botId,

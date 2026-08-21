@@ -372,6 +372,19 @@ export async function disconnectConnector(env: Env, botId: string, provider: str
   await repo.disable(botId, provider);
 }
 
+/** Guarda la config posterior a un OAuth (ej. Project Key de Jira) — solo config, nunca toca el secret_ref/token. */
+export async function updateConnectorConfig(env: Env, botId: string, provider: string, form: FormData): Promise<void> {
+  const category = categoryOfProvider(provider);
+  if (!category) return;
+  const meta = providersFor(category)[provider];
+  const patch: Record<string, string> = {};
+  for (const f of meta?.postAuthFields ?? []) {
+    const v = String(form.get(f.name) ?? "").trim();
+    if (v) patch[f.name] = v;
+  }
+  await new BotConnectorsRepo(new Db(env.DB)).mergeConfig(botId, provider, patch);
+}
+
 /** Busca el conector por categoría+id y arma su diálogo — 404 amable si no existe o aún no está disponible. */
 export function renderConnectorConnectModal(category: ConnectorCategory, provider: string): string {
   const meta = providersFor(category)[provider];
@@ -414,12 +427,29 @@ async function renderConnectorCard(db: Db, botId: string, meta: ConnectorMeta): 
     ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>`
     : `<span style="font-size:10px;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);padding:3px 10px;font-weight:600">○ SIN CONECTAR</span>`;
 
-  const action = ok
-    ? `<form method="POST" action="/admin/conexiones/connectors/${meta.id}/disconnect" onsubmit="return confirm('¿Desconectar ${esc(meta.name)}? ${meta.category === "crm" ? "Los leads" : "Los tickets"} nuevos dejarán de darse de alta ahí.')">
+  const disconnectWarning: Record<ConnectorCategory, string> = {
+    crm: "Los leads",
+    tickets: "Los handoffs",
+    calendar: "Las citas",
+    mcp: "El agente perderá acceso a sus tools",
+  };
+
+  const disconnectForm = `<form method="POST" action="/admin/conexiones/connectors/${meta.id}/disconnect" onsubmit="return confirm('¿Desconectar ${esc(meta.name)}? ${esc(disconnectWarning[meta.category])} nuevos dejarán de darse de alta ahí.')">
          <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Desconectar</button>
-       </form>`
-    : `<button type="button" class="text-[12px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600"
+       </form>`;
+
+  let action: string;
+  if (!ok) {
+    action =
+      meta.authType === "oauth"
+        ? `<a href="/admin/conexiones/oauth/${meta.id}/start" class="text-[12px]" style="display:inline-block;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600;text-decoration:none">Conectar con ${esc(meta.name)}</a>`
+        : `<button type="button" class="text-[12px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600"
                hx-get="/admin/conexiones/connectors/${meta.category}/${meta.id}/connect" hx-target="#modal-root" hx-swap="innerHTML">Conectar</button>`;
+  } else if (meta.postAuthFields?.length) {
+    action = `${renderPostAuthForm(meta, row!)}${disconnectForm}`;
+  } else {
+    action = disconnectForm;
+  }
 
   return `
     <div class="bg-panel border ${ok ? "" : "border-line"}" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;${ok ? "border-color:rgba(127,183,126,.45)" : ""}">
@@ -433,6 +463,25 @@ async function renderConnectorCard(db: Db, botId: string, meta: ConnectorMeta): 
       <p class="text-dim text-[12px]" style="margin:0">${esc(meta.desc)}</p>
       ${action}
     </div>`;
+}
+
+/** Config que se completa/edita DESPUÉS de un OAuth (ej. a qué proyecto de Jira caen los tickets). */
+function renderPostAuthForm(meta: ConnectorMeta, row: BotConnector): string {
+  const fields = (meta.postAuthFields ?? [])
+    .map((f) => {
+      const current = typeof row.config[f.name] === "string" ? row.config[f.name] : "";
+      return `
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label class="text-[10.5px]" style="color:var(--dim)">${esc(f.label)}</label>
+        <input type="text" name="${f.name}" value="${esc(current)}" placeholder="${esc(f.placeholder)}"
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:7px 9px;font-size:12px;font-family:inherit;outline:none">
+      </div>`;
+    })
+    .join("");
+  return `<form method="POST" action="/admin/conexiones/connectors/${meta.id}/config" style="display:flex;flex-direction:column;gap:8px">
+      ${fields}
+      <button type="submit" class="text-[11px]" style="align-self:flex-start;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:5px 10px;cursor:pointer;font-weight:600">Guardar</button>
+    </form>`;
 }
 
 // ── Conectores MCP: sin catálogo fijo, el usuario nombra los suyos ─────────
@@ -699,9 +748,19 @@ const CATEGORY_INTRO: Record<string, string> = {
   mcp: "Conecta cualquier servidor MCP remoto para darle más herramientas al agente.",
 };
 
-export async function renderConexiones(env: Env, botId: string, category: string = "canales"): Promise<string> {
+export async function renderConexiones(
+  env: Env,
+  botId: string,
+  category: string = "canales",
+  notice?: { ok?: boolean; err?: string },
+): Promise<string> {
   const cat = ["crm", "tickets", "calendar", "mcp"].includes(category) ? (category as ConnectorCategory) : "canales";
   const tabs = renderTabs(cat);
+  const noticeBanner = notice?.err
+    ? `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px">${esc(notice.err)}</div>`
+    : notice?.ok
+      ? `<div class="text-[12px]" style="color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:9px 12px">✓ Conectado correctamente.</div>`
+      : "";
 
   let summary: string;
   let cards: string;
@@ -724,6 +783,7 @@ export async function renderConexiones(env: Env, botId: string, category: string
   const body = `
     <div style="display:flex;flex-direction:column;gap:18px">
       ${tabs}
+      ${noticeBanner}
       <div style="display:flex;flex-direction:column;gap:2px">
         <h2 class="font-display font-semibold text-[15px] text-cream" id="conexiones-summary">${esc(summary)}</h2>
         <p class="text-muted text-[12.5px]">${esc(CATEGORY_INTRO[cat])}</p>

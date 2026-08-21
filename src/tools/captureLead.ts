@@ -34,7 +34,7 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
       // el link a la conversación y no depende de que el CRM esté disponible).
       // Si hay un CRM conectado, además se empuja ahí, best-effort: si falla,
       // el lead no se pierde, solo no llegó todavía al CRM del cliente.
-      await pushToCrmIfConnected(db, botId, leadId, { name: name ?? null, contact: contact ?? null, intent, notes: notes ?? null });
+      await pushToCrmIfConnected(env, db, botId, leadId, { name: name ?? null, contact: contact ?? null, intent, notes: notes ?? null });
 
       return { leadId, message: "Lead capturado." };
     },
@@ -42,6 +42,7 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
 }
 
 async function pushToCrmIfConnected(
+  env: Env,
   db: Db,
   botId: string,
   leadId: string,
@@ -52,7 +53,7 @@ async function pushToCrmIfConnected(
     if (!connector) return;
     const adapter = CRM_ADAPTERS[connector.provider];
     if (!adapter) return;
-    const creds = await resolveConnectorCreds(db, connector);
+    const creds = await resolveConnectorCreds(db, connector, env);
     if (!creds) return;
     const result = await adapter.pushLead(creds, lead);
     if (result.ok && result.externalId) {
