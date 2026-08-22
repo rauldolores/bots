@@ -87,7 +87,7 @@ describe("tres mensajes seguidos = una sola respuesta", () => {
     await vencerTurnos();
     const r = await tick(env);
 
-    expect(r).toEqual({ claimed: 1, answered: 1, failed: 0 });
+    expect(r).toEqual({ claimed: 1, answered: 1, failed: 0, campaignsSent: 0 });
     expect(streamTextMock).toHaveBeenCalledTimes(1);
     expect(sendReply).toHaveBeenCalledTimes(1);
 
@@ -105,7 +105,7 @@ describe("tres mensajes seguidos = una sola respuesta", () => {
     await tick(env);
     const segundo = await tick(env);
 
-    expect(segundo).toEqual({ claimed: 0, answered: 0, failed: 0 });
+    expect(segundo).toEqual({ claimed: 0, answered: 0, failed: 0, campaignsSent: 0 });
     expect(sendReply).toHaveBeenCalledTimes(1);
   });
 
@@ -138,14 +138,14 @@ describe("tres mensajes seguidos = una sola respuesta", () => {
 
 describe("tick — sin trabajo y con fallos", () => {
   it("no hace nada cuando la cola está vacía", async () => {
-    expect(await tick(env)).toEqual({ claimed: 0, answered: 0, failed: 0 });
+    expect(await tick(env)).toEqual({ claimed: 0, answered: 0, failed: 0, campaignsSent: 0 });
     expect(streamTextMock).not.toHaveBeenCalled();
   });
 
   it("no toma trabajos que todavía no vencen", async () => {
     await ingestMessage(env, { channel: "telegram", channelUserId: "u1", text: "hola" });
     // Sin vencerTurnos(): el buffer de 8s sigue corriendo.
-    expect(await tick(env)).toEqual({ claimed: 0, answered: 0, failed: 0 });
+    expect(await tick(env)).toEqual({ claimed: 0, answered: 0, failed: 0, campaignsSent: 0 });
     expect(sendReply).not.toHaveBeenCalled();
   });
 
@@ -241,9 +241,33 @@ describe("tick — sin trabajo y con fallos", () => {
 
     const r = await tick(env);
 
-    expect(r).toEqual({ claimed: 1, answered: 0, failed: 0 });
+    expect(r).toEqual({ claimed: 1, answered: 0, failed: 0, campaignsSent: 0 });
     // Si no se cerrara, reintentaría para siempre sobre un buffer vacío.
     expect(await db.all("SELECT conversation_key FROM agent_jobs")).toHaveLength(0);
+  });
+});
+
+describe("tick también procesa campañas encoladas (F6)", () => {
+  it("un envío de campaña pendiente sale en el mismo tick, junto con los turnos del agente", async () => {
+    const { enqueueCampaign } = await import("../../src/campaigns");
+    const { ConversationsRepo } = await import("../../src/db/conversations");
+    const { MessagesRepo } = await import("../../src/db/messages");
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "u5");
+    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "hola");
+
+    await enqueueCampaign(env, {
+      filters: {},
+      campaignKey: "camp-en-tick",
+      freeformText: "aviso de campaña",
+      botId: TEST_BOT_ID,
+    });
+
+    const r = await tick(env);
+    expect(r.campaignsSent).toBe(1);
+    expect(sendReply).toHaveBeenCalledWith(
+      expect.objectContaining({ channelUserId: "u5", chunks: ["aviso de campaña"] }),
+      env,
+    );
   });
 });
 
@@ -264,7 +288,7 @@ describe("con 2+ bots en la tabla (F5): el webhook trae su propio botId, no debe
     );
 
     const r = await tick(env);
-    expect(r).toEqual({ claimed: 1, answered: 1, failed: 0 });
+    expect(r).toEqual({ claimed: 1, answered: 1, failed: 0, campaignsSent: 0 });
     expect(sendReply).toHaveBeenCalledTimes(1);
   });
 });

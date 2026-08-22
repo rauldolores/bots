@@ -61,8 +61,10 @@ import {
 } from "./views/conexiones";
 import { startOAuth, handleOAuthCallback } from "./oauthConnect";
 import type { ConnectorCategory } from "../connectors/registry";
-import { renderCampanas } from "./views/campanas";
-import { sendCampaign, createHandoffTemplate, contentApprovalStatus } from "../campaigns";
+import { renderCampanas, renderLivePreview } from "./views/campanas";
+import { enqueueCampaign, createHandoffTemplate, contentApprovalStatus, listContentTemplates } from "../campaigns";
+import { segmentCount, parseCampaignFilters } from "../segments";
+import { resolveTimezone } from "../datetime";
 import { Db } from "../db/client";
 import { LeadsRepo, type Lead } from "../db/leads";
 import { TicketsRepo } from "../db/tickets";
@@ -779,7 +781,7 @@ adminApp.get("/leads", async (c) => c.html(await renderLeads(c.env, c.get("botId
 adminApp.get("/tickets", async (c) => c.html(await renderTickets(c.env, c.get("botId"))));
 
 // Calendario (F5 Fase 2): agenda del bot — local, o el calendario conectado si hay uno.
-adminApp.get("/calendario", async (c) => c.html(await renderCalendario(c.env, c.get("botId"))));
+adminApp.get("/calendario", async (c) => c.html(await renderCalendario(c.env, c.get("botId"), c.req.query("month"))));
 
 adminApp.post("/calendario/:id/cancel", async (c) => {
   await cancelAppointment(c.env, c.get("botId"), c.req.param("id"));
@@ -913,24 +915,46 @@ adminApp.get("/campanas", async (c) => {
   const q: Record<string, string | undefined> = {
     ok: c.req.query("ok"),
     err: c.req.query("err"),
-    ff: c.req.query("ff"),
-    tp: c.req.query("tp"),
-    dup: c.req.query("dup"),
-    quota: c.req.query("quota"),
-    fail: c.req.query("fail"),
+    audience: c.req.query("audience"),
+    enqueued: c.req.query("enqueued"),
+    skipped: c.req.query("skipped"),
   };
   return c.html(await renderCampanas(c.env, c.get("botId"), q));
 });
 
+// Vista previa en vivo del conteo de audiencia — se llama con htmx cada vez
+// que el dueño cambia un filtro, sin recargar la página ni tocar la cuota.
+// Devuelve el banner de audiencia (swap normal) + el resumen de la derecha
+// (out-of-band) para que ambos reflejen los mismos filtros a la vez.
+adminApp.post("/campanas/preview", async (c) => {
+  const form = await c.req.formData();
+  const filters = parseCampaignFilters(form);
+  const botId = c.get("botId");
+  const db = new Db(c.env.DB);
+  const [counts, templates] = await Promise.all([
+    segmentCount(db, botId, filters),
+    listContentTemplates(c.env).catch(() => []),
+  ]);
+  const templateSid = String(form.get("template_sid") ?? "").trim();
+  const campaignKey = String(form.get("campaign_key") ?? "").trim();
+  return c.html(
+    renderLivePreview(counts, {
+      hasTemplateSelected: templateSid !== "",
+      hasAnyTemplate: templates.length > 0,
+      campaignKeyPresent: campaignKey !== "",
+    }),
+  );
+});
+
 adminApp.post("/campanas/send", async (c) => {
   const form = await c.req.formData();
-  const segmentId = String(form.get("segment") ?? "");
+  const filters = parseCampaignFilters(form);
   const campaignKey = String(form.get("campaign_key") ?? "").trim();
   const freeformText = String(form.get("freeform_text") ?? "").trim();
   const templateSid = String(form.get("template_sid") ?? "").trim();
   const varsRaw = String(form.get("template_vars") ?? "").trim();
-  if (!segmentId || !campaignKey || (!freeformText && !templateSid)) {
-    return c.redirect("/admin/campanas?err=" + encodeURIComponent("Falta el segmento, el nombre de campaña, o un mensaje/plantilla."));
+  if (!campaignKey || (!freeformText && !templateSid)) {
+    return c.redirect("/admin/campanas?err=" + encodeURIComponent("Falta el nombre de campaña, o un mensaje/plantilla."));
   }
   let variables: Record<string, string> | undefined;
   if (varsRaw) {
@@ -944,12 +968,14 @@ adminApp.post("/campanas/send", async (c) => {
   // el agente no sabría qué se le preguntó al cliente cuando responda.
   let templateBody: string | undefined;
   if (templateSid) {
-    const { listContentTemplates } = await import("../campaigns");
     const tpl = (await listContentTemplates(c.env).catch(() => [])).find((t) => t.sid === templateSid);
     templateBody = tpl?.body || undefined;
   }
-  const result = await sendCampaign(c.env, {
-    segmentId,
+  // F6: ya no se manda aquí mismo — se encola, y el tick de cada minuto la
+  // va procesando en lotes (así una campaña de miles no muere a medias por
+  // el límite de tiempo de la función). Ver src/campaigns.ts.
+  const result = await enqueueCampaign(c.env, {
+    filters,
     campaignKey,
     freeformText: freeformText || undefined,
     template: templateSid ? { sid: templateSid, variables, body: templateBody } : undefined,
@@ -957,11 +983,9 @@ adminApp.post("/campanas/send", async (c) => {
   });
   const q = new URLSearchParams({
     ok: "1",
-    ff: String(result.sentFreeform),
-    tp: String(result.sentTemplate),
-    dup: String(result.skippedDuplicate),
-    quota: String(result.skippedQuota),
-    fail: String(result.failed),
+    audience: String(result.audience),
+    enqueued: String(result.enqueued),
+    skipped: String(result.skipped),
   });
   return c.redirect("/admin/campanas?" + q.toString());
 });
@@ -1032,6 +1056,12 @@ adminApp.post("/config", async (c) => {
     const raw = form.get(key);
     if (raw === null) continue;
     await repo.set(key, String(raw).trim());
+  }
+
+  // Zona horaria: allow-list contra TIMEZONE_OPTIONS — nunca texto libre.
+  const tzRaw = form.get(SETTING_KEYS.timezone);
+  if (tzRaw !== null) {
+    await repo.set(SETTING_KEYS.timezone, resolveTimezone(String(tzRaw)));
   }
 
   // BYO-LLM: proveedor y modelo se guardan tal cual (allow-list de valores).

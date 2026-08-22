@@ -26,6 +26,7 @@ import { selectModel } from "../upgrade/modelSelector";
 import type { Tier } from "../upgrade/modelSelector";
 import { monthIaCostUsd, applyBudgetGuard } from "../budget";
 import { CustomerFactsRepo } from "../db/facts";
+import { LeadsRepo } from "../db/leads";
 import { createModel } from "../llm/provider";
 import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 import { costOfUsage } from "../pricing";
@@ -332,6 +333,27 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
     }
   } catch (e) {
     console.warn("[runTurn] customer facts lookup failed:", e);
+  }
+
+  // Nombre/contacto conocidos (F6): a diferencia de customer_facts (texto libre,
+  // solo se llena si el analizador de insights corrió tras 3h de inactividad),
+  // esto se busca en cada turno por channel_user_id — así un cliente que ya dio
+  // su nombre alguna vez (captureLead) no lo tiene que repetir aunque escriba
+  // meses después. Igual de best-effort: si falla, el turno sigue.
+  try {
+    const knownLead = await new LeadsRepo(db, botId).findLatestByChannelUserId(state.channelUserId);
+    if (knownLead && (knownLead.name || knownLead.contact)) {
+      system.push({
+        role: "system",
+        content: `<cliente_conocido>\nYa conoces a este cliente de una conversación anterior: ${
+          knownLead.name ? `nombre=${knownLead.name}` : ""
+        }${knownLead.name && knownLead.contact ? ", " : ""}${
+          knownLead.contact ? `contacto=${knownLead.contact}` : ""
+        }. No se lo vuelvas a preguntar. Si él dice que ese no es su nombre o que cambió su contacto, créele a él y no a este dato.\n</cliente_conocido>`,
+      });
+    }
+  } catch (e) {
+    console.warn("[runTurn] known-lead lookup failed:", e);
   }
 
   let assistantText = "";

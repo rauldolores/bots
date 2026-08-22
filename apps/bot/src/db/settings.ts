@@ -30,6 +30,10 @@ export const SETTING_KEYS = {
   // visible de "tu modelo ya no responde, probablemente el proveedor lo
   // retiró" — se borra sola en cuanto el dueño guarda /admin/config de nuevo.
   llmModelWarning: "llm_model_warning",
+  // Zona horaria del negocio (IANA, ej. "America/Mexico_City") — para que las
+  // citas y las fechas del panel se lean en la hora del dueño, no en UTC.
+  // Vacío = America/Mexico_City (ver src/datetime.ts DEFAULT_TIMEZONE).
+  timezone: "timezone",
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

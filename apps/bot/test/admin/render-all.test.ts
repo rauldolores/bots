@@ -35,6 +35,8 @@ const VISTAS = [
   "/agente",
   "/leads",
   "/tickets",
+  "/calendario",
+  "/calendario?month=2026-08",
   "/conexiones",
   "/campanas",
   "/config",

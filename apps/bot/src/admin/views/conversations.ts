@@ -17,6 +17,8 @@ import { InsightsRepo } from "../../db/insights";
 import { SENTIMENT_BADGE } from "./insights";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
+import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
+import { resolveTimezone } from "../../datetime";
 import { layout } from "./layout";
 
 /** Tiempo relativo corto en español (ej. "hace 5 min", "hace 2 h", "hace 3 d"). */
@@ -175,8 +177,8 @@ export async function renderInboxList(env: Env, botId: string, p: InboxParams): 
         const b = LEAD_BADGE[r.lead_status as string] ?? LEAD_BADGE.new;
         badges.push(`<span style="${smallPill(b.color)}">${b.txt}</span>`);
       }
-      if (r.open_tickets > 0) badges.push(`<span style="${smallPill("var(--accent-2)")}">🔔</span>`);
-      if (paused) badges.push(`<span style="${smallPill("var(--dim)")}">⏸</span>`);
+      if (r.open_tickets > 0) badges.push(`<span style="${smallPill("var(--accent-2)")}">🔔 Ticket abierto</span>`);
+      if (paused) badges.push(`<span style="${smallPill("var(--dim)")}">⏸ Pausado</span>`);
       if (r.ai_sentiment === "frustrated" || r.ai_sentiment === "angry") {
         const s = SENTIMENT_BADGE[r.ai_sentiment as string];
         badges.push(`<span style="${smallPill(SENTIMENT_COLOR[r.ai_sentiment as string])}">${s.txt}</span>`);
@@ -189,11 +191,11 @@ export async function renderInboxList(env: Env, botId: string, p: InboxParams): 
 
       return `
       <a href="${inboxUrl(p, r.id)}" class="convrow" style="display:flex;gap:11px;padding:12px 14px;border-bottom:1px solid var(--line);cursor:pointer;${selected ? "background:var(--panel2);border-left:2px solid var(--accent)" : "border-left:2px solid transparent"}">
-        <div style="width:34px;height:34px;flex:none;background:var(--raise);border:1px solid var(--linelit);display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:var(--accent-2)">${initials}</div>
+        <div style="width:34px;height:34px;border-radius:9px;flex:none;background:var(--raise);border:1px solid var(--linelit);display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:var(--accent-2)">${initials}</div>
         <div style="min-width:0;flex:1">
           <div style="display:flex;align-items:center;gap:6px">
             <span style="font-size:12.5px;font-weight:600;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;color:var(--cream)">${name}</span>
-            <span style="font-size:9px;letter-spacing:.05em;color:${chanColor};border:1px solid ${chanColor};padding:0 5px;flex:none">${escapeHtml(channelLabel(r.channel))}</span>
+            <span style="font-size:9px;letter-spacing:.05em;color:${chanColor};background:var(--panel2);border-radius:5px;padding:1px 6px;flex:none">${escapeHtml(channelLabel(r.channel))}</span>
             <span style="margin-left:auto;font-size:9.5px;color:var(--dim);white-space:nowrap">${ago(r.last_message_at)}</span>
           </div>
           <div style="font-size:11.5px;color:var(--muted);white-space:nowrap;text-overflow:ellipsis;overflow:hidden;margin-top:3px">${preview || "—"}</div>
@@ -214,6 +216,7 @@ export async function renderThreadLive(env: Env, botId: string, convId: string):
   const conv = await db.first<any>("SELECT * FROM conversations WHERE id = ? AND bot_id = ?", [convId, botId]);
   if (!conv) return `<div style="padding:24px;font-size:12.5px;color:var(--dim)">Conversación no encontrada.</div>`;
 
+  const timezone = resolveTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
   const insight = await new InsightsRepo(db, botId).getByConversation(convId);
   const msgs = await db.all<any>(
     "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at DESC, seq DESC LIMIT 100",
@@ -248,7 +251,7 @@ export async function renderThreadLive(env: Env, botId: string, convId: string):
         <p style="font-size:11px;color:var(--muted);margin:0 0 8px">Cuéntale al bot qué resolviste para que siga con contexto.</p>
         <textarea name="summary" rows="3" required placeholder="Ej. Ya le confirmé su pago y le di acceso."
                   style="width:100%;background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:8px 10px;font-size:12px;outline:none;resize:vertical;margin-bottom:8px"></textarea>
-        <button class="bigbtn" style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px;font-size:12px;font-weight:700;font-family:'Plus Jakarta Sans';cursor:pointer">Devolver al bot</button>
+        <button class="bigbtn" style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px;font-size:12px;font-weight:700;font-family:'Archivo';cursor:pointer">Devolver al bot</button>
       </form>
     </details>`
     : `
@@ -257,9 +260,14 @@ export async function renderThreadLive(env: Env, botId: string, convId: string):
       ⏸ Pausar bot aquí
     </button>`;
 
+  const threadName = conv.display_name ?? conv.channel_user_id ?? "—";
   const header = `
-  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)">
-    <span style="font-family:'Plus Jakarta Sans';font-weight:600;font-size:14px;color:var(--cream)">${escapeHtml(conv.display_name ?? conv.channel_user_id)}</span>
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)">
+    <div style="width:36px;height:36px;flex:none;border-radius:10px;background:var(--raise);border:1px solid var(--linelit);display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;color:var(--accent-2)">${escapeHtml(initialsOf(threadName))}</div>
+    <div style="display:flex;flex-direction:column;line-height:1.3">
+      <span style="font-family:'Archivo';font-weight:600;font-size:14px;color:var(--cream)">${escapeHtml(threadName)}</span>
+      ${conv.channel_user_id && conv.channel_user_id !== threadName ? `<span style="font-size:11px;color:var(--dim)">${escapeHtml(conv.channel_user_id)}</span>` : ""}
+    </div>
     <span style="${smallPill("var(--info)")}">${escapeHtml(channelLabel(conv.channel))}</span>
     ${statusPill}
     ${sentBadge}
@@ -271,7 +279,7 @@ export async function renderThreadLive(env: Env, botId: string, convId: string):
   const bubbles = msgs
     .map((m) => {
       const time = new Date(m.created_at).toLocaleString("es-MX", {
-        day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+        day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: timezone,
       });
 
       // Tool chips (what the bot DID this turn) render above the bubble; in a
@@ -283,16 +291,19 @@ export async function renderThreadLive(env: Env, botId: string, convId: string):
           chips = calls
             .map(
               (tc) => `
-            <div style="align-self:flex-end;display:inline-flex;align-items:center;gap:6px;font-size:10.5px;color:var(--dim);border:1px dashed var(--linelit);padding:3px 10px;margin-bottom:2px">→ <span style="color:var(--accent-2);font-weight:600">${escapeHtml(tc.toolName ?? "?")}</span> «${escapeHtml(toolInputSummary(tc.input))}»</div>`,
+            <div style="align-self:flex-start;display:inline-flex;align-items:center;gap:6px;font-size:10.5px;color:var(--dim);border:1px dashed var(--linelit);padding:3px 10px;margin-bottom:2px">→ <span style="color:var(--accent-2);font-weight:600">${escapeHtml(tc.toolName ?? "?")}</span> «${escapeHtml(toolInputSummary(tc.input))}»</div>`,
             )
             .join("");
         } catch { /* legacy/malformed tool_calls JSON — skip chips */ }
       }
 
+      // El cliente va a la DERECHA (burbuja oscura) y el bot/dueño a la
+      // IZQUIERDA (burbuja clara con borde) — el cliente es la voz principal
+      // del hilo, el bot/dueño responde. Bordes 14px en ambas.
       if (m.role === "user") {
         return `
-        <div style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;max-width:78%">
-          <div style="background:var(--panel2);border:1px solid var(--line);padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--cream)">${escapeHtml(m.content)}</div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;max-width:78%;margin-left:auto">
+          <div style="background:var(--cream);border-radius:14px;padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--bg)">${escapeHtml(m.content)}</div>
           <span style="font-size:9.5px;color:var(--dim)">${time}</span>
         </div>`;
       }
@@ -304,11 +315,11 @@ export async function renderThreadLive(env: Env, botId: string, convId: string):
         : [m.model_used ? modelShort(m.model_used) : null, cost || null, time].filter(Boolean).join(" · ");
       const bubbleBg = isOwner
         ? "background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.4)"
-        : "background:var(--accent-soft);border:1px solid var(--linelit)";
+        : "background:var(--panel);border:1px solid var(--line)";
       return `
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;max-width:78%;margin-left:auto">
+      <div style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;max-width:78%">
         ${chips}
-        <div style="${bubbleBg};padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--cream)">${escapeHtml(m.content)}</div>
+        <div style="${bubbleBg};border-radius:14px;padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--cream)">${escapeHtml(m.content)}</div>
         <span style="font-size:9.5px;color:var(--dim)">${meta}</span>
       </div>`;
     })
@@ -338,7 +349,7 @@ function renderComposer(convId: string): string {
               class="chip" style="background:var(--panel2);border:1px solid var(--linelit);color:var(--accent-2);padding:11px 13px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:6px" title="El co-pilot sugiere una respuesta">
         <i data-lucide="sparkles" width="13" height="13"></i> Sugerir
       </button>
-      <button type="submit" class="bigbtn" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:11px 18px;font-size:12.5px;font-weight:700;font-family:'Plus Jakarta Sans';cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:6px">
+      <button type="submit" class="bigbtn" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:11px 18px;font-size:12.5px;font-weight:700;font-family:'Archivo';cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:6px">
         Enviar <i data-lucide="send" width="14" height="14"></i>
       </button>
     </form>
@@ -389,10 +400,13 @@ export async function renderInbox(env: Env, botId: string, p: InboxParams): Prom
       [botId, now],
     ))?.n ?? 0;
 
+  // Solo la pastilla ACTIVA lleva su color de categoría (fondo sólido) — las
+  // inactivas comparten un borde neutro, para que el ojo vaya directo al
+  // filtro aplicado en vez de competir con 5 colores a la vez.
   const filterPill = (href: string, label: string, active: boolean, color: string) =>
-    `<a href="${href}" class="chip" style="font-size:11px;letter-spacing:.05em;padding:5px 12px;white-space:nowrap;border:1px solid ${color};${
-      active ? `background:${color};color:#1a1206;font-weight:700` : `color:${color}`
-    }">${label}</a>`;
+    `<a href="${href}" class="chip" style="font-size:11px;letter-spacing:.05em;padding:5px 12px;white-space:nowrap;border:1px solid ${
+      active ? color : "var(--linelit)"
+    };${active ? `background:${color};color:#1a1206;font-weight:700` : "color:var(--muted)"}">${label}</a>`;
 
   const list = await renderInboxList(env, botId, p);
 

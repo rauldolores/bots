@@ -1,3 +1,5 @@
+import { DEFAULT_TIMEZONE, formatTodayLong } from "./datetime";
+
 export interface SystemPromptInput {
   botName: string;
   businessName: string;
@@ -8,6 +10,14 @@ export interface SystemPromptInput {
   tone?: string;                    // owner-chosen tone (e.g. "cálido y cercano")
   extraEscalationKeywords?: string[]; // extra words that trigger a human handoff
   lessons?: string[];               // flywheel: rules distilled from owner takeovers
+  /** Momento del turno — para que el modelo calcule bien fechas relativas
+   *  ("mañana", "el viernes"). Por defecto `new Date()`; parametrizable solo
+   *  para tests deterministas. */
+  now?: Date;
+  /** Zona horaria del negocio (IANA, ej. "America/Mexico_City") — ver
+   *  src/datetime.ts. "Hoy" y toda hora que el modelo use (ej. al agendar
+   *  citas) es en ESTA zona, no UTC. */
+  timezone?: string;
 }
 
 const TEMPLATE = `<output_language>
@@ -30,6 +40,18 @@ Eres {{BOT_NAME}}, el asistente de {{BUSINESS_NAME}}. Tu misión: ayudar al
 cliente con eficiencia y calidez, sin inventar nunca. Conoces este negocio.
 Si una pregunta no tiene respuesta en lo que sabes, escalas a un humano.
 </role>
+
+<fecha_actual>
+Hoy es {{FECHA_HOY}}. Úsala para calcular cualquier fecha relativa que
+mencione el cliente ("mañana", "el viernes", "la próxima semana", "en 15
+días"). NUNCA uses una fecha de tu entrenamiento ni un año viejo — si vas a
+agendar algo o dar una fecha concreta, el año debe ser el de hoy o uno
+futuro respecto a esta fecha.
+
+Toda hora que menciones o mandes a una herramienta (ej. agendar una cita) es
+en la zona horaria LOCAL del negocio ({{TIMEZONE}}), no UTC — el sistema ya
+convierte, tú solo usas la hora tal cual la dice el cliente.
+</fecha_actual>
 
 <business_context>
 {{BUSINESS_CONTEXT}}
@@ -120,16 +142,28 @@ ${lessons.map((l) => `- ${l}`).join("\n")}
 </lecciones_aprendidas>`
       : "";
 
+  // Sin esto el modelo no tiene forma de saber qué día es "hoy" y adivina —
+  // vimos un caso real donde agendó una cita para "mañana" usando 2023 (año
+  // de su entrenamiento) en vez del año real, y la cita quedó invisible en
+  // /admin/calendario por quedar en el pasado. "Hoy" es en la zona horaria
+  // del NEGOCIO (no UTC) — si el tick corre a media noche UTC, para un
+  // negocio en México todavía puede ser "ayer".
+  const now = input.now ?? new Date();
+  const timezone = input.timezone || DEFAULT_TIMEZONE;
+  const fechaHoy = formatTodayLong(now, timezone);
+
   return TEMPLATE
     .replaceAll("{{LANGUAGE}}", input.language)
     .replaceAll("{{BOT_NAME}}", input.botName)
     .replaceAll("{{BUSINESS_NAME}}", input.businessName)
     .replaceAll("{{BUSINESS_CONTEXT}}", input.businessContext)
     .replaceAll("{{TOOL_LIST}}", toolList)
+    .replaceAll("{{TIMEZONE}}", timezone)
     .replaceAll("{{NICHO_PLAYBOOK}}", input.nichoPlaybook ?? "")
     .replaceAll("{{LECCIONES}}", lessonsBlock)
     .replaceAll("{{TONE_LINE}}", toneLine)
-    .replaceAll("{{EXTRA_ESCALATION}}", extraEscalation);
+    .replaceAll("{{EXTRA_ESCALATION}}", extraEscalation)
+    .replaceAll("{{FECHA_HOY}}", fechaHoy);
 }
 
 export interface SystemPromptOverrides {
@@ -137,6 +171,7 @@ export interface SystemPromptOverrides {
   extraEscalationKeywords?: string[];
   botName?: string;
   lessons?: string[];
+  timezone?: string;
 }
 
 /** F3 de docs/multitenancy.md: identidad ya no es env, es la fila del bot. */
@@ -163,5 +198,6 @@ export function systemPromptFromEnv(
     tone: overrides?.tone,
     extraEscalationKeywords: overrides?.extraEscalationKeywords,
     lessons: overrides?.lessons,
+    timezone: overrides?.timezone,
   });
 }

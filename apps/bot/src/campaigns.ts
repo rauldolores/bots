@@ -7,16 +7,28 @@
  *   contra el tope diario de conversaciones iniciadas por el negocio
  *   (WA_DAILY_TEMPLATE_CAP, default 250 — el tier 1 de Meta).
  *
- * Anti-doble-envío: claim-before-send en template_sends con UNIQUE
- * (campaign_key, conversation_id) — reintentar una campaña NUNCA duplica.
+ * F6: el envío ya NO pasa por un loop síncrono dentro de la petición HTTP de
+ * "Enviar campaña" — con audiencias grandes eso se pasaba del maxDuration de
+ * Vercel (65s) y la función moría a medias. Ahora `enqueueCampaign()` solo
+ * ENCOLA una fila por destinatario en campaign_jobs (rápido) y
+ * `processCampaignJobs()` — llamado desde el tick de cada minuto, ver
+ * src/queue/tick.ts — manda un lote chico por corrida, sin límite de tiempo
+ * por request y con reintento automático si un envío falla a medias.
+ *
+ * Anti-doble-envío en dos capas: `campaign_jobs` tiene UNIQUE
+ * (campaign_key, conversation_id) — reintentar el ENCOLADO nunca duplica
+ * filas — y el claim-before-send en `template_sends` (misma UNIQUE) evita
+ * que un job procesado dos veces (ej. el tick se cae después de mandar pero
+ * antes de borrar la fila) mande el mensaje otra vez.
  */
 import type { Env } from "./env";
 import { Db } from "./db/client";
 import { MessagesRepo } from "./db/messages";
 import { resolveBotId } from "./tenant";
-import { segmentMembers } from "./segments";
+import { segmentMembers, type CampaignFilters } from "./segments";
 import { pickAdapter } from "./replies/sender";
 import type { ChannelId } from "./channels/shared";
+import { CampaignJobsRepo, type CampaignJob } from "./queue/campaignJobs";
 
 export interface ContentTemplate {
   sid: string;
@@ -68,26 +80,26 @@ export async function templatesSentLast24h(db: Db, botId: string, now = Date.now
   return row?.n ?? 0;
 }
 
-export interface CampaignResult {
-  segment: string;
+export interface EnqueueResult {
   audience: number;
-  sentFreeform: number;
-  sentTemplate: number;
-  skippedDuplicate: number;
-  skippedQuota: number;
-  failed: number;
+  enqueued: number;
+  /** audience - enqueued: ya tenían una fila de esta misma campaña (reintento) o no aplican a ningún envío. */
+  skipped: number;
 }
 
 /**
- * Manda una campaña a un segmento.
- * - freeformText: se manda a los que están DENTRO de ventana (si se da).
- * - template: se manda a los que están FUERA (si se da), hasta agotar cuota.
+ * Encola una campaña para la audiencia que cumple los filtros dados — el
+ * envío real lo hace `processCampaignJobs()` en los siguientes ticks, no esta
+ * función (por eso es rápida incluso con miles de destinatarios: es un solo
+ * INSERT por persona, nada de red).
+ * - freeformText: se encola para quien está DENTRO de ventana (si se da).
+ * - template: se encola para quien está FUERA (si se da).
  * Se puede dar solo uno de los dos (p.ej. solo free-form a los de ventana).
  */
-export async function sendCampaign(
+export async function enqueueCampaign(
   env: Env,
   opts: {
-    segmentId: string;
+    filters: CampaignFilters;
     campaignKey: string; // identificador humano — el candado anti-duplicados
     freeformText?: string;
     /** body = texto de la plantilla — se persiste en el historial para que el
@@ -97,90 +109,165 @@ export async function sendCampaign(
     /** El panel ya lo trae resuelto por request; sin esto, resolveBotId(db) global. */
     botId?: string;
   },
-): Promise<CampaignResult> {
+): Promise<EnqueueResult> {
   const now = opts.now ?? Date.now();
   const db = new Db(env.DB);
   const botId = opts.botId ?? (await resolveBotId(db));
-  const msgs = new MessagesRepo(db, botId);
-  const members = await segmentMembers(db, botId, opts.segmentId, now);
+  const members = await segmentMembers(db, botId, opts.filters, now);
+  const jobs = new CampaignJobsRepo(db);
 
-  const cap = dailyTemplateCap(env);
-  let spent = await templatesSentLast24h(db, botId, now);
+  // Quien ya recibió ESTA campaña en una corrida anterior (template_sends,
+  // permanente) ni se encola — si no, un reintento la volvería a mandar
+  // apenas se completara la corrida vieja y sus filas de campaign_jobs (esas
+  // sí efímeras) ya se hubieran borrado.
+  const already = await db.all<{ conversation_id: string }>(
+    "SELECT conversation_id FROM template_sends WHERE campaign_key = ? AND bot_id = ?",
+    [opts.campaignKey, botId],
+  );
+  const alreadySet = new Set(already.map((r) => r.conversation_id));
 
-  const result: CampaignResult = {
-    segment: opts.segmentId,
-    audience: members.length,
+  const toEnqueue = members
+    .map((m) => {
+      if (alreadySet.has(m.conversationId)) return null;
+      const useFreeform = m.inWindow && opts.freeformText;
+      const useTemplate = !m.inWindow && opts.template;
+      if (!useFreeform && !useTemplate) return null;
+      return {
+        botId,
+        campaignKey: opts.campaignKey,
+        conversationId: m.conversationId,
+        channel: m.channel,
+        channelUserId: m.channelUserId,
+        kind: (useFreeform ? "freeform" : "template") as "freeform" | "template",
+        freeformText: useFreeform ? opts.freeformText : undefined,
+        templateSid: useTemplate ? opts.template!.sid : undefined,
+        templateVariables: useTemplate ? opts.template!.variables : undefined,
+        templateBody: useTemplate ? opts.template!.body : undefined,
+      };
+    })
+    .filter((j): j is NonNullable<typeof j> => j !== null);
+
+  const enqueued = await jobs.enqueue(toEnqueue);
+  console.log(
+    `[campaigns] ${opts.campaignKey} filtros=${JSON.stringify(opts.filters)} audiencia=${members.length} ` +
+      `encolados=${enqueued} (de ${toEnqueue.length} elegibles)`,
+  );
+  return { audience: members.length, enqueued, skipped: members.length - enqueued };
+}
+
+export interface ProcessJobsResult {
+  claimed: number;
+  sentFreeform: number;
+  sentTemplate: number;
+  releasedForQuota: number;
+  failed: number;
+  abandoned: number;
+}
+
+/** Tras este número de intentos fallidos, el trabajo se abandona (no es cuota — un fallo real). */
+const MAX_JOB_ATTEMPTS = 5;
+
+/**
+ * Procesa un lote de envíos pendientes de campaña — llamado desde el tick de
+ * cada minuto (src/queue/tick.ts). El límite de lote sostiene el ritmo muy
+ * por debajo de cualquier timeout de función: 20/min = 1200/hora, de sobra
+ * incluso para una campaña de varios miles.
+ */
+export async function processCampaignJobs(env: Env, limit = 20): Promise<ProcessJobsResult> {
+  const db = new Db(env.DB);
+  const jobs = new CampaignJobsRepo(db);
+  const claimed = await jobs.claimDue(limit);
+  const result: ProcessJobsResult = {
+    claimed: claimed.length,
     sentFreeform: 0,
     sentTemplate: 0,
-    skippedDuplicate: 0,
-    skippedQuota: 0,
+    releasedForQuota: 0,
     failed: 0,
+    abandoned: 0,
   };
 
-  for (const m of members) {
-    const useFreeform = m.inWindow && opts.freeformText;
-    const useTemplate = !m.inWindow && opts.template;
-    if (!useFreeform && !useTemplate) continue;
+  // La cuota es por bot y cambia mientras se procesa el lote — se recalcula
+  // una vez por bot visto en este lote, no una vez por job.
+  const capByBot = new Map<string, { cap: number; spent: number }>();
 
-    if (useTemplate && spent >= cap) {
-      result.skippedQuota++;
-      continue;
-    }
-
-    // Claim ANTES de mandar — si ya existe (campaña reintentada), saltar.
-    try {
-      await db.run(
-        `INSERT INTO template_sends (campaign_key, bot_id, conversation_id, kind, template_sid, sent_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [
-          opts.campaignKey,
-          botId,
-          m.conversationId,
-          useFreeform ? "freeform" : "template",
-          useTemplate ? opts.template!.sid : null,
-          now,
-        ],
-      );
-    } catch {
-      result.skippedDuplicate++;
-      continue;
-    }
-
-    try {
-      if (useFreeform) {
-        const channel = m.channel as ChannelId;
-        await pickAdapter(channel).sendReply(
-          { channel, channelUserId: m.channelUserId, chunks: [opts.freeformText!] },
-          env,
-        );
-        await msgs.append(m.conversationId, "assistant", opts.freeformText!);
-        result.sentFreeform++;
-      } else {
-        await sendTwilioTemplate(env, m.channelUserId, opts.template!.sid, opts.template!.variables);
-        // Persistimos el TEXTO real (variables sustituidas), no el SID: cuando
-        // el cliente conteste "SÍ", el agente debe ver qué se le preguntó.
-        const rendered = renderTemplateBody(opts.template!.body, opts.template!.variables);
-        await msgs.append(
-          m.conversationId,
-          "assistant",
-          rendered ?? `[plantilla ${opts.template!.sid} enviada]`,
-        );
-        result.sentTemplate++;
-        spent++;
+  for (const job of claimed) {
+    if (job.kind === "template") {
+      let c = capByBot.get(job.bot_id);
+      if (!c) {
+        c = { cap: dailyTemplateCap(env), spent: await templatesSentLast24h(db, job.bot_id) };
+        capByBot.set(job.bot_id, c);
       }
-    } catch (e) {
-      result.failed++;
-      // El claim queda — mejor no reintentar solo que arriesgar doble mensaje.
-      console.error(`[campaigns] send failed conv=${m.conversationId}:`, e);
+      if (c.spent >= c.cap) {
+        // No es un fallo — solo hay que esperar a que la ventana rolling de
+        // 24h libere cuota. Se suelta SIN gastar un intento.
+        await jobs.releaseForQuota(job.id);
+        result.releasedForQuota++;
+        continue;
+      }
     }
+    await processOneJob(env, db, job, jobs, result, capByBot);
+  }
+  return result;
+}
+
+async function processOneJob(
+  env: Env,
+  db: Db,
+  job: CampaignJob,
+  jobs: CampaignJobsRepo,
+  result: ProcessJobsResult,
+  capByBot: Map<string, { cap: number; spent: number }>,
+): Promise<void> {
+  const msgs = new MessagesRepo(db, job.bot_id);
+  // Claim ANTES de mandar — si ya existe (el job se procesó antes y se cayó
+  // justo después de mandar pero antes de borrarse), saltar sin reenviar.
+  try {
+    await db.run(
+      `INSERT INTO template_sends (campaign_key, bot_id, conversation_id, kind, template_sid, sent_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [job.campaign_key, job.bot_id, job.conversation_id, job.kind, job.template_sid, Date.now()],
+    );
+  } catch {
+    await jobs.complete(job.id); // ya se mandó en una corrida anterior — solo limpiar la cola
+    return;
   }
 
-  console.log(
-    `[campaigns] ${opts.campaignKey} seg=${opts.segmentId} audiencia=${result.audience} ` +
-      `freeform=${result.sentFreeform} plantilla=${result.sentTemplate} ` +
-      `dup=${result.skippedDuplicate} cuota=${result.skippedQuota} fail=${result.failed}`,
-  );
-  return result;
+  try {
+    if (job.kind === "freeform") {
+      const channel = job.channel as ChannelId;
+      await pickAdapter(channel).sendReply(
+        { channel, channelUserId: job.channel_user_id, chunks: [job.freeform_text!] },
+        env,
+      );
+      await msgs.append(job.conversation_id, "assistant", job.freeform_text!);
+      result.sentFreeform++;
+    } else {
+      const variables = job.template_variables ? (JSON.parse(job.template_variables) as Record<string, string>) : undefined;
+      await sendTwilioTemplate(env, job.channel_user_id, job.template_sid!, variables);
+      // Persistimos el TEXTO real (variables sustituidas), no el SID: cuando
+      // el cliente conteste "SÍ", el agente debe ver qué se le preguntó.
+      const rendered = renderTemplateBody(job.template_body ?? undefined, variables);
+      await msgs.append(job.conversation_id, "assistant", rendered ?? `[plantilla ${job.template_sid} enviada]`);
+      result.sentTemplate++;
+      const c = capByBot.get(job.bot_id);
+      if (c) c.spent++;
+    }
+    await jobs.complete(job.id);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (job.attempts >= MAX_JOB_ATTEMPTS) {
+      // Rendirse es mejor que reintentar para siempre un envío que nunca
+      // va a funcionar (ej. número inválido) — mismo criterio que el tick del
+      // agente (src/queue/tick.ts): se borra y queda en los logs.
+      console.error(`[campaigns] job ${job.id} abandonado tras ${job.attempts} intentos: ${msg}`);
+      await jobs.complete(job.id);
+      result.abandoned++;
+    } else {
+      console.error(`[campaigns] job ${job.id} falló (intento ${job.attempts}): ${msg}`);
+      await jobs.fail(job.id, msg);
+      result.failed++;
+    }
+  }
 }
 
 /** "Hola {{1}}" + {"1":"Ana"} → "Hola Ana". null si no hay body. */
@@ -249,6 +336,18 @@ export async function campaignHistory(db: Db, botId: string, limit = 15) {
      FROM template_sends WHERE bot_id = ? GROUP BY campaign_key ORDER BY last_at DESC LIMIT ?`,
     [botId, limit],
   );
+}
+
+/**
+ * Cuántos envíos siguen en cola por campaña (F6) — para que el historial
+ * muestre "N en curso" mientras el tick todavía la está mandando en lotes.
+ */
+export async function pendingByCampaignKey(db: Db, botId: string): Promise<Map<string, number>> {
+  const rows = await db.all<{ campaign_key: string; n: number }>(
+    `SELECT campaign_key, COUNT(*) as n FROM campaign_jobs WHERE bot_id = ? GROUP BY campaign_key`,
+    [botId],
+  );
+  return new Map(rows.map((r) => [r.campaign_key, r.n]));
 }
 
 

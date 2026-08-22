@@ -15,6 +15,8 @@ export interface Ticket {
   requester_contact: string | null;
   resolved_at: number | null;
   resolved_by: string | null;
+  exported_to: string | null;
+  external_id: string | null;
   created_at: number;
 }
 
@@ -74,6 +76,21 @@ export class TicketsRepo {
     await this.db.run(
       "UPDATE tickets SET status = 'resolved', resolved_at = ?, resolved_by = ? WHERE id = ? AND bot_id = ?",
       [Date.now(), resolvedBy, id, this.botId],
+    );
+  }
+
+  async setExported(id: string, target: string, externalId: string): Promise<void> {
+    await this.db.run(
+      "UPDATE tickets SET exported_to = ?, external_id = ? WHERE id = ? AND bot_id = ?",
+      [target, externalId, id, this.botId],
+    );
+  }
+
+  /** Todos los tickets (abiertos y resueltos) — para cruzar contra la plataforma externa, que puede seguir mostrando uno ya resuelto localmente. */
+  async listAll(limit = 200): Promise<Ticket[]> {
+    return this.db.all<Ticket>(
+      "SELECT * FROM tickets WHERE bot_id = ? ORDER BY created_at DESC LIMIT ?",
+      [this.botId, limit],
     );
   }
 }

@@ -8,6 +8,7 @@ import { renderBusinessContext } from "./businessContext";
 import { getBufferMs } from "./config";
 import { getNiche } from "./niches";
 import type { LlmOverrides } from "./llm/provider";
+import { resolveTimezone } from "./datetime";
 
 export type ModelOverride = "auto" | "haiku" | "sonnet";
 
@@ -141,6 +142,8 @@ export async function resolveAgentConfig(
   const disabledTools = parseCsvList(get(SETTING_KEYS.disabledTools));
   const enabledToolNames = toolNames.filter((n) => !disabledTools.includes(n));
 
+  const timezone = resolveTimezone(get(SETTING_KEYS.timezone));
+
   const systemPrompt =
     systemPromptOverride ??
     systemPromptFromEnv(identity, enabledToolNames, businessContext, niche.playbook || undefined, {
@@ -148,6 +151,7 @@ export async function resolveAgentConfig(
       extraEscalationKeywords: escalationKeywords,
       botName,
       lessons,
+      timezone,
     });
 
   const bufferSecondsRaw = get(SETTING_KEYS.bufferSeconds);

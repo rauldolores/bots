@@ -84,7 +84,12 @@ describe("handoffHumanTool — con una plataforma de tickets conectada", () => {
       expect.objectContaining({ method: "POST" }),
     );
     // Sigue quedando local también — no se reemplaza, se complementa.
-    expect(await tickets.listOpen()).toHaveLength(1);
+    const open = await tickets.listOpen();
+    expect(open).toHaveLength(1);
+    // Y guarda con qué id quedó en Zendesk, para que /admin/tickets pueda
+    // cruzar la fila externa con este ticket local (requester, transcript, link).
+    expect(open[0].exported_to).toBe("zendesk");
+    expect(open[0].external_id).toBe("321");
   });
 
   it("si la plataforma de tickets falla, el ticket local NO se pierde (best-effort)", async () => {

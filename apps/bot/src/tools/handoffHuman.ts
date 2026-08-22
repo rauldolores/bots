@@ -69,7 +69,7 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
       // El ticket SIEMPRE queda local primero (por eso el link de conversación
       // de arriba funciona sin depender de una plataforma externa). Si hay una
       // plataforma de tickets conectada, además se empuja ahí, best-effort.
-      await pushToTicketsIfConnected(env, db, botId, `[${reason}] ${summary}`, category, priority as TicketPriority, requesterName, requesterContact);
+      await pushToTicketsIfConnected(env, db, botId, ticketId, `[${reason}] ${summary}`, category, priority as TicketPriority, requesterName, requesterContact);
 
       // Send email if Resend configured
       if (env.RESEND_API_KEY && env.OWNER_EMAIL) {
@@ -106,6 +106,7 @@ async function pushToTicketsIfConnected(
   env: Env,
   db: Db,
   botId: string,
+  ticketId: string,
   summary: string,
   category: string,
   priority: TicketPriority,
@@ -120,7 +121,9 @@ async function pushToTicketsIfConnected(
     const creds = await resolveConnectorCreds(db, connector, env);
     if (!creds) return;
     const result = await adapter.pushTicket(creds, { category, summary, priority, requesterName, requesterContact });
-    if (!result.ok) {
+    if (result.ok && result.externalId) {
+      await new TicketsRepo(db, botId).setExported(ticketId, connector.provider, result.externalId);
+    } else if (!result.ok) {
       console.error(`[handoffHuman] push a ${connector.provider} falló:`, result.error);
     }
   } catch (e) {

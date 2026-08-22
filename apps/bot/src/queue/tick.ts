@@ -10,9 +10,13 @@ import type { Env } from "../env";
 import { Db } from "../db/client";
 import { AgentJobsRepo } from "./jobs";
 import { runTurn } from "../agent/runner";
+import { processCampaignJobs } from "../campaigns";
 
 /** Cuántas conversaciones atiende un tick. */
 const DEFAULT_LIMIT = 10;
+
+/** Cuántos envíos de campaña procesa un tick (F6) — ver src/campaigns.ts. */
+const CAMPAIGN_BATCH_LIMIT = 20;
 
 /** Tras este número de intentos fallidos, el trabajo se abandona. */
 const MAX_ATTEMPTS = 5;
@@ -24,6 +28,8 @@ export interface TickResult {
   claimed: number;
   answered: number;
   failed: number;
+  /** Envíos de campaña (F6) procesados en esta misma corrida — ver src/campaigns.ts. */
+  campaignsSent: number;
 }
 
 export async function tick(
@@ -34,7 +40,7 @@ export async function tick(
   const jobs = new AgentJobsRepo(db);
 
   const keys = await jobs.claimDue(opts.limit ?? DEFAULT_LIMIT);
-  const result: TickResult = { claimed: keys.length, answered: 0, failed: 0 };
+  const result: TickResult = { claimed: keys.length, answered: 0, failed: 0, campaignsSent: 0 };
 
   for (const key of keys) {
     try {
@@ -58,6 +64,15 @@ export async function tick(
         await jobs.fail(key, msg, RETRY_DELAY_MS);
       }
     }
+  }
+
+  // Campañas (F6): un lote chico de envíos pendientes por corrida — nunca
+  // debe tumbar el tick de turnos, que es lo que de verdad no puede esperar.
+  try {
+    const camp = await processCampaignJobs(env, CAMPAIGN_BATCH_LIMIT);
+    result.campaignsSent = camp.sentFreeform + camp.sentTemplate;
+  } catch (e) {
+    console.error("[tick] processCampaignJobs:", e);
   }
 
   return result;

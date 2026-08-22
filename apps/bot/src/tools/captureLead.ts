@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Env } from "../env";
 import { Db } from "../db/client";
 import { LeadsRepo } from "../db/leads";
+import { ConversationsRepo } from "../db/conversations";
 import { BotConnectorsRepo } from "../db/botConnectors";
 import { resolveConnectorCreds } from "../connectors/creds";
 import { CRM_ADAPTERS } from "../connectors/registry";
@@ -21,11 +22,15 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
       const convId = getConversationId();
       const db = new Db(env.DB);
       const leads = new LeadsRepo(db, botId);
+      // channel_user_id (no el nombre/contacto que el cliente escribió) es la
+      // llave con la que el bot lo reconoce si vuelve a escribir semanas después
+      // — ver findLatestByChannelUserId, usado en runner.ts.
+      const conv = convId ? await new ConversationsRepo(db, botId).getById(convId) : null;
       const leadId = await leads.create({
         conversationId: convId,
         name,
         contact,
-        channelUserId: null,
+        channelUserId: conv?.channel_user_id ?? null,
         intent,
         notes,
       });

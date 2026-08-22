@@ -100,9 +100,14 @@ export async function renderMejoras(
         ? `<div style="border:1px solid var(--line);background:var(--panel2);color:var(--muted);padding:10px 14px;font-size:12.5px;margin-bottom:16px">Descartada. No se volverá a proponer.</div>`
         : "";
 
+  // Sin mejoras pendientes: el estado vacío se funde visualmente con la tarjeta
+  // "Modo nocturno" de arriba (un solo módulo, sin costura) en vez de flotar
+  // como una tarjeta redondeada aparte — así se lee como una sola cosa: "así
+  // está tu cola de mejoras ahora mismo". Con sugerencias reales, cada una
+  // vuelve a ser su propia tarjeta accionable (Aplicar/Descartar), separada.
   const proposedList = proposed.length
-    ? proposed.map(suggestionCard).join("")
-    : `<div class="bg-panel border border-line text-dim text-[12.5px]" style="padding:32px;text-align:center">
+    ? `<div style="display:flex;flex-direction:column;gap:12px;margin-bottom:24px">${proposed.map(suggestionCard).join("")}</div>`
+    : `<div class="bg-panel text-dim text-[12.5px]" style="border:1px solid var(--line);border-top:0;border-radius:0 0 13px 13px;padding:32px;text-align:center;margin-top:-16px;margin-bottom:24px">
          Sin mejoras pendientes. El sistema busca cada noche — o presiona "Buscar mejoras ahora".
        </div>`;
 
@@ -155,7 +160,9 @@ export async function renderMejoras(
       </form>
     </div>
 
-    <div class="bg-panel border border-line" style="padding:14px 18px;margin-bottom:16px;display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <div class="bg-panel border border-line" style="padding:14px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:12px${
+      proposed.length ? ";margin-bottom:16px" : ";border-radius:13px 13px 0 0"
+    }">
       <div style="flex:1;min-width:220px">
         <div class="font-display font-semibold text-[13px] text-cream" style="display:flex;align-items:center;gap:8px">
           <i data-lucide="moon" width="13" height="13"></i> Modo nocturno
@@ -176,9 +183,9 @@ export async function renderMejoras(
       </form>
     </div>
 
-    <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:24px">${proposedList}</div>
+    ${proposedList}
 
-    <div style="display:grid;grid-template-columns:1fr;gap:16px" class="md:grid-cols-2">
+    <div style="display:flex;flex-direction:column;gap:16px">
       <div class="bg-panel border border-line" style="padding:18px">
         <div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:8px">🎓 Lecciones activas en el prompt <span class="text-dim" style="font-weight:400;font-size:11px">(${lessons.length}/${MAX_LESSONS})</span></div>
         <p class="text-dim text-[11.5px]" style="margin-bottom:12px">Reglas aprendidas de tus intervenciones. El bot las sigue en cada respuesta (solo con prompt automático).</p>

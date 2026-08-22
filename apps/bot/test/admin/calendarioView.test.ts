@@ -19,7 +19,11 @@ const { renderCalendario, cancelAppointment } = await import("../../src/admin/vi
 let db: Db;
 let env: any;
 
-const FUTURE = Date.now() + 30 * 86_400_000;
+// La vista ahora es una grilla del MES actual (no "próximas N" sin importar
+// cuándo) — la cita de prueba tiene que caer hoy para no depender de en qué
+// día del mes corre la prueba. +1min (no exactamente Date.now()): listUpcoming
+// exige starts_at > now() y para cuando el test la consulta ya pasó tiempo real.
+const FUTURE = Date.now() + 60_000;
 
 beforeEach(async () => {
   db = await createTestDb();
@@ -74,10 +78,31 @@ describe("renderCalendario — con Cal.com conectado", () => {
 });
 
 describe("cancelAppointment", () => {
-  it("la cita cancelada ya no aparece en la agenda", async () => {
+  it("la cita cancelada se sigue viendo en el mes (marcada) pero ya sin botón de cancelar", async () => {
     const list = await new AppointmentsRepo(db, TEST_BOT_ID).listUpcoming(10);
     await cancelAppointment(env, TEST_BOT_ID, list[0].id);
     const html = await renderCalendario(env, TEST_BOT_ID);
-    expect(html).not.toContain("Cita Local");
+    expect(html).toContain("Cita Local");
+    expect(html).toContain("Cancelada");
+    expect(html).not.toContain(`/admin/calendario/${list[0].id}/cancel`);
+  });
+});
+
+describe("renderCalendario — grilla mensual", () => {
+  it("navega a otro mes y no muestra la cita del mes actual", async () => {
+    const html = await renderCalendario(env, TEST_BOT_ID);
+    expect(html).toContain("Cita Local");
+
+    const thisMonth = new Date(FUTURE);
+    const otherMonthParam = `${thisMonth.getFullYear()}-${String(((thisMonth.getMonth() + 6) % 12) + 1).padStart(2, "0")}`;
+    const htmlOtroMes = await renderCalendario(env, TEST_BOT_ID, otherMonthParam);
+    expect(htmlOtroMes).not.toContain("Cita Local");
+  });
+
+  it("trae los botones de mes anterior/siguiente", async () => {
+    const html = await renderCalendario(env, TEST_BOT_ID);
+    expect(html).toContain("?month=");
+    expect(html).toContain("chevron-left");
+    expect(html).toContain("chevron-right");
   });
 });

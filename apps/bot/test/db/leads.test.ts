@@ -40,6 +40,43 @@ describe("LeadsRepo", () => {
     expect(list[0].status).toBe("sold");
   });
 
+  it("findLatestByChannelUserId trae el lead más reciente con nombre/contacto de esa cuenta", async () => {
+    await repo.create({
+      name: "Julián (viejo)",
+      contact: "+521111",
+      intent: "cotización antigua",
+      conversationId: null,
+      channelUserId: "wa-123",
+    });
+    await new Promise((r) => setTimeout(r, 2));
+    const latestId = await repo.create({
+      name: "Julián Pérez",
+      contact: "+521111",
+      intent: "cotización nueva",
+      conversationId: null,
+      channelUserId: "wa-123",
+    });
+    const found = await repo.findLatestByChannelUserId("wa-123");
+    expect(found?.id).toBe(latestId);
+    expect(found?.name).toBe("Julián Pérez");
+  });
+
+  it("findLatestByChannelUserId no encuentra nada si nunca se capturó nombre/contacto de esa cuenta", async () => {
+    expect(await repo.findLatestByChannelUserId("wa-desconocido")).toBeNull();
+  });
+
+  it("findLatestByChannelUserId no cruza leads de otro bot", async () => {
+    const otherBotId = await createSecondTestBot(db);
+    await new LeadsRepo(db, otherBotId).create({
+      name: "Cliente ajeno",
+      contact: "otro@x.com",
+      intent: "otro negocio",
+      conversationId: null,
+      channelUserId: "wa-compartido",
+    });
+    expect(await repo.findLatestByChannelUserId("wa-compartido")).toBeNull();
+  });
+
   it("un bot no ve ni puede tocar los leads de otro", async () => {
     const otherBotId = await createSecondTestBot(db);
     const otherRepo = new LeadsRepo(db, otherBotId);

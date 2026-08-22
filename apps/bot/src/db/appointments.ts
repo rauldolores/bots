@@ -61,6 +61,14 @@ export class AppointmentsRepo {
     );
   }
 
+  /** Todas las citas (agendadas y canceladas, pasadas o futuras) dentro de un rango — para pintar un mes completo de calendario, no solo lo próximo. */
+  async listForMonth(startMs: number, endMs: number): Promise<Appointment[]> {
+    return this.db.all<Appointment>(
+      "SELECT * FROM appointments WHERE bot_id = ? AND starts_at >= ? AND starts_at < ? ORDER BY starts_at ASC",
+      [this.botId, startMs, endMs],
+    );
+  }
+
   async cancel(id: string): Promise<void> {
     await this.db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ? AND bot_id = ?", [id, this.botId]);
   }

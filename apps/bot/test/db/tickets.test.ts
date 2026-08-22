@@ -74,6 +74,23 @@ describe("TicketsRepo", () => {
     expect((await repo.getById(id))?.priority).toBe("high");
   });
 
+  it("setExported guarda a qué plataforma se empujó y con qué id", async () => {
+    const id = await repo.create({ conversationId: null, category: "x", summary: "a", transcript: "" });
+    await repo.setExported(id, "jira", "SUP-42");
+    const ticket = await repo.getById(id);
+    expect(ticket?.exported_to).toBe("jira");
+    expect(ticket?.external_id).toBe("SUP-42");
+  });
+
+  it("listAll incluye tickets resueltos (a diferencia de listOpen)", async () => {
+    await repo.create({ conversationId: null, category: "x", summary: "abierto", transcript: "" });
+    const resolvedId = await repo.create({ conversationId: null, category: "x", summary: "resuelto", transcript: "" });
+    await repo.resolve(resolvedId, "agente@x.com");
+    const all = await repo.listAll();
+    expect(all).toHaveLength(2);
+    expect(await repo.listOpen()).toHaveLength(1);
+  });
+
   it("setPriority no toca el ticket de otro bot", async () => {
     const otherBotId = await createSecondTestBot(db);
     const otherRepo = new TicketsRepo(db, otherBotId);

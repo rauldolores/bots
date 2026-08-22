@@ -9,7 +9,7 @@ import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
 import { layout } from "./layout";
 
-const ACCENT = "#eab308";
+const ACCENT = "#f5c518";
 
 function esc(s: string): string {
   return s.replace(

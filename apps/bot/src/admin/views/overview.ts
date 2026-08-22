@@ -319,13 +319,13 @@ export async function renderOverview(env: Env, botId: string): Promise<string> {
           const notify = handoffNotifyStatus(env, tier);
           if (notify.ok) return "";
           return `
-          <div class="mt-3" style="display:flex;align-items:flex-start;gap:10px;background:rgba(220,38,38,.06);border:1px solid rgba(220,38,38,.3);padding:11px 13px">
-            <span style="width:7px;height:7px;border-radius:50%;background:var(--bad);margin-top:5px;flex:none"></span>
+          <div class="mt-3" style="display:flex;align-items:flex-start;gap:10px;background:#fdf4f3;border:1px solid #f0cfc9;border-radius:10px;padding:11px 13px">
+            <span style="width:7px;height:7px;border-radius:50%;background:#c2410c;margin-top:5px;flex:none"></span>
             <div class="flex flex-col gap-0.5" style="flex:1;min-width:0">
-              <div class="text-[13px] font-semibold" style="color:var(--bad)">Handoff sin aviso</div>
-              <div class="text-[12px]" style="color:var(--muted);line-height:1.45">El bot crea tickets pero nadie recibe notificación. Configura Telegram, WhatsApp o email del dueño.</div>
+              <div class="text-[13px] font-semibold" style="color:#7c2d12">Handoff sin aviso</div>
+              <div class="text-[12px]" style="color:#8a5a44;line-height:1.45">El bot crea tickets pero nadie recibe notificación. Configura Telegram, WhatsApp o email del dueño.</div>
             </div>
-            <a href="/admin/conexiones" class="flex-none text-[11.5px]" style="background:var(--panel);border:1px solid rgba(220,38,38,.35);border-radius:8px;padding:6px 10px;color:var(--bad);white-space:nowrap">Configurar</a>
+            <a href="/admin/conexiones" class="flex-none text-[11.5px]" style="background:var(--panel);border:1px solid #e5c9c2;border-radius:8px;padding:6px 10px;color:#7c2d12;white-space:nowrap">Configurar</a>
           </div>`;
         })()}
         <div class="mt-3" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">

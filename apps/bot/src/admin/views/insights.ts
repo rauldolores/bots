@@ -96,7 +96,7 @@ export async function renderInsights(env: Env, botId: string, analyzedParam?: st
 
   const statCard = (value: string, label: string, sub = "", accent = "") => `
     <div class="card bg-panel border border-line p-4${accent ? ` border-l-[3px] ${accent}` : ""}">
-      <div class="font-display font-bold text-[30px] leading-none">${value}</div>
+      <div class="font-display font-bold text-[34px] leading-none">${value}</div>
       <div class="text-[11px] text-muted mt-1">${label}</div>
       ${sub ? `<div class="text-[10px] text-dim mt-0.5">${sub}</div>` : ""}
     </div>`;
@@ -118,7 +118,7 @@ export async function renderInsights(env: Env, botId: string, analyzedParam?: st
     ? missed
         .map(
           (m) => `
-      <div class="border border-linelit p-[10px_12px]" style="background:var(--panel2)">
+      <div class="border border-linelit p-[10px_12px] rounded-[10px]" style="background:var(--panel2)">
         <div class="text-[10.5px] text-accent2">${m.n} ${m.n === 1 ? "cliente preguntó" : "clientes preguntaron"} · el bot no supo</div>
         <div class="text-[12.5px] mt-[3px] text-cream">${esc(m.question)}</div>
       </div>`,
@@ -138,7 +138,7 @@ export async function renderInsights(env: Env, botId: string, analyzedParam?: st
     ? opportunities
         .map(
           (o) => `
-      <div class="border border-linelit p-[10px_12px]" style="background:var(--panel2)">
+      <div class="border border-linelit p-[10px_12px] rounded-[10px]" style="background:var(--panel2)">
         <div class="flex items-center justify-between gap-2">
           <a href="/admin/conversations/${encodeURIComponent(o.conversation_id)}" class="text-[12.5px] font-semibold text-accent hover:text-accent2">${convName(o)}</a>
           <span class="text-[10px] text-dim whitespace-nowrap">${ago(o.last_message_at)}</span>
@@ -147,13 +147,13 @@ export async function renderInsights(env: Env, botId: string, analyzedParam?: st
       </div>`,
         )
         .join("")
-    : `<p class="text-[12.5px] text-dim">Sin ventas abiertas detectadas.</p>`;
+    : `<div class="flex-1 flex items-center justify-center text-[12.5px] text-dim" style="min-height:60px">Sin ventas abiertas detectadas.</div>`;
 
   const oppCard = `
-    <div class="card bg-panel border border-line p-[18px]">
+    <div class="card bg-panel border border-line p-[18px] flex flex-col" style="min-height:180px">
       <div class="font-display font-semibold text-[14px] flex items-center gap-2"><i data-lucide="dollar-sign" width="16" height="16" class="text-ok"></i> Ventas que quedaron abiertas <span class="text-[10px] text-dim font-normal">(30 días)</span></div>
       <p class="text-[11px] text-dim my-[6px_0_12px] leading-relaxed">Clientes con interés que no cerraron. Un mensaje de seguimiento puede recuperarlos.</p>
-      <div class="flex flex-col gap-2">${oppRows}</div>
+      <div class="flex flex-col gap-2 flex-1">${oppRows}</div>
     </div>`;
 
   // --- Análisis recientes --------------------------------------------------------

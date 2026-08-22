@@ -104,4 +104,18 @@ export class LeadsRepo {
       [target, externalId, Date.now(), id, this.botId],
     );
   }
+
+  /**
+   * El lead más reciente con nombre o contacto para este channel_user_id — para
+   * que el bot no le vuelva a preguntar su nombre a alguien que ya lo dio en una
+   * conversación anterior (misma cuenta de WhatsApp/Telegram/etc., semanas o
+   * meses después). Null si nunca se capturó nada identificable de esta cuenta.
+   */
+  async findLatestByChannelUserId(channelUserId: string): Promise<Lead | null> {
+    return this.db.first<Lead>(
+      `SELECT * FROM leads WHERE bot_id = ? AND channel_user_id = ? AND (name IS NOT NULL OR contact IS NOT NULL)
+       ORDER BY created_at DESC LIMIT 1`,
+      [this.botId, channelUserId],
+    );
+  }
 }

@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { TicketsRepo } from "../../src/db/tickets";
+import { ConversationsRepo } from "../../src/db/conversations";
 import { BotConnectorsRepo } from "../../src/db/botConnectors";
 
 const readSecretMock = vi.fn();
@@ -69,6 +70,56 @@ describe("renderTickets — con Zendesk conectado", () => {
     const html = await renderTickets(env, TEST_BOT_ID);
     expect(html).toContain("No se pudo consultar Zendesk");
     expect(html).toContain("Ticket local de prueba");
+  });
+});
+
+describe("renderTickets — con Zendesk conectado, cruce con el ticket local", () => {
+  beforeEach(async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "tickets",
+      provider: "zendesk",
+      secretRef: "11111111-1111-1111-1111-111111111111",
+      config: { subdomain: "acme", email: "agente@acme.com" },
+    });
+    readSecretMock.mockResolvedValue("tok-fake");
+  });
+
+  it("si el ticket local está exportado a Zendesk, muestra contacto, transcript y el link a la conversación", async () => {
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("whatsapp", "wa-2");
+    const ticketId = await new TicketsRepo(db, TEST_BOT_ID).create({
+      conversationId: conv.id,
+      category: "billing",
+      summary: "No puede pagar",
+      transcript: "Cliente: no puedo pagar mi pedido",
+      requesterName: "Ana López",
+      requesterContact: "ana@x.com",
+    });
+    await new TicketsRepo(db, TEST_BOT_ID).setExported(ticketId, "zendesk", "1");
+
+    global.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ tickets: [{ id: 1, subject: "No puede pagar", status: "open", created_at: "2026-08-20T00:00:00Z" }] }),
+        { status: 200 },
+      ),
+    ) as any;
+    const html = await renderTickets(env, TEST_BOT_ID);
+    expect(html).toContain("Tickets — Zendesk");
+    expect(html).toContain("ana@x.com");
+    expect(html).toContain("no puedo pagar mi pedido");
+    expect(html).toContain(`/admin/conversations?c=${conv.id}`);
+  });
+
+  it("si el ticket de Zendesk no lo creó el bot (sin external_id local), muestra la fila simple sin tronar", async () => {
+    global.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ tickets: [{ id: 999, subject: "Ticket ajeno a Zendesk", status: "open", created_at: "2026-08-20T00:00:00Z" }] }),
+        { status: 200 },
+      ),
+    ) as any;
+    const html = await renderTickets(env, TEST_BOT_ID);
+    expect(html).toContain("Ticket ajeno a Zendesk");
+    expect(html).not.toContain("Ver conversación completa");
   });
 });
 

@@ -69,7 +69,7 @@ const NAV: Section[] = [
 const HEAD_ASSETS = `
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -77,24 +77,24 @@ const HEAD_ASSETS = `
       theme: {
         extend: {
           colors: {
-            bg: "#f7f7f5",
+            bg: "#f3f1ec",
             panel: "#ffffff",
-            panel2: "#f4f4f2",
-            raise: "#fafaf9",
-            line: "#e7e5e4",
-            linelit: "#d6d3d1",
-            accent: { DEFAULT: "#eab308", soft: "rgba(234,179,8,.13)" },
-            accent2: "#a16207",
-            cream: "#1c1917",
-            muted: "#57534e",
-            dim: "#a8a29e",
-            ok: "#16a34a",
+            panel2: "#f5f3ee",
+            raise: "#efece3",
+            line: "#e4e0d6",
+            linelit: "#dcd8cd",
+            accent: { DEFAULT: "#f5c518", soft: "rgba(245,197,24,.13)" },
+            accent2: "#8a6a00",
+            cream: "#1c1b18",
+            muted: "#4a463d",
+            dim: "#a39c8e",
+            ok: "#1f9d55",
             info: "#2563eb",
             bad: "#dc2626",
             violet: "#7c3aed",
           },
           fontFamily: {
-            display: ["'Plus Jakarta Sans'", "ui-sans-serif", "system-ui", "sans-serif"],
+            display: ["'Archivo'", "ui-sans-serif", "system-ui", "sans-serif"],
             mono: ["'JetBrains Mono'", "ui-monospace", "monospace"],
           },
         },
@@ -111,25 +111,25 @@ const HEAD_ASSETS = `
 const GLOBAL_STYLE = `
 <style>
   :root{
-    --bg:#f7f7f5; --panel:#ffffff; --panel2:#f4f4f2; --raise:#fafaf9;
-    --line:#e7e5e4; --linelit:#d6d3d1;
-    --accent:#eab308; --accent-2:#a16207; --accent-soft:rgba(234,179,8,.13);
-    --cream:#1c1917; --muted:#57534e; --dim:#a8a29e;
-    --ok:#16a34a; --info:#2563eb; --bad:#dc2626; --violet:#7c3aed;
+    --bg:#f3f1ec; --panel:#ffffff; --panel2:#f5f3ee; --raise:#efece3;
+    --line:#e4e0d6; --linelit:#dcd8cd;
+    --accent:#f5c518; --accent-hover:#e8b00a; --accent-2:#8a6a00; --accent-soft:rgba(245,197,24,.13);
+    --cream:#1c1b18; --muted:#4a463d; --dim:#a39c8e;
+    --ok:#1f9d55; --ok-soft:rgba(31,157,85,.14); --info:#2563eb; --bad:#dc2626; --violet:#7c3aed;
     /* sombras y radios del sistema (Kontrolia): suaves, nunca offset duro */
     --shadow-sm:0 1px 2px rgba(28,25,23,.05);
     --shadow-md:0 2px 8px rgba(28,25,23,.06),0 1px 2px rgba(28,25,23,.05);
-    --shadow-lg:0 12px 32px rgba(28,25,23,.14);
-    --radius:14px; --radius-sm:10px;
+    --shadow-lg:0 24px 52px -14px rgba(28,27,24,.30);
+    --radius:13px; --radius-sm:10px;
     /* la sidebar es oscura aunque el contenido sea claro (firma del ecosistema) */
-    --sb-bg:#161509; --sb-panel:#1e1c0e; --sb-line:rgba(255,255,255,.07);
-    --sb-text:#b6b1a4; --sb-dim:#7d7868;
+    --sb-bg:#1b1a16; --sb-panel:#26241e; --sb-line:rgba(255,255,255,.07);
+    --sb-text:#c3beb2; --sb-dim:#8b8578;
     /* legacy aliases kept so mockup-derived snippets keep working */
-    --border:#e7e5e4; --border-lit:#d6d3d1; --green:#16a34a; --blue:#2563eb; --red:#dc2626;
+    --border:#e4e0d6; --border-lit:#dcd8cd; --green:#1f9d55; --blue:#2563eb; --red:#dc2626;
   }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;background:var(--bg);color:var(--cream);
-    font-family:'Plus Jakarta Sans',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+    font-family:'Archivo',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
   a{color:var(--accent-2);text-decoration:none}
   a:hover{color:var(--cream)}
   ::-webkit-scrollbar{width:10px;height:10px}
@@ -282,7 +282,7 @@ function navItemLocked(item: Item): string {
     "display:flex;align-items:center;gap:11px;padding:9px 12px;font-size:13px;color:var(--sb-dim)";
   return `<a href="${UPGRADE_URL}" class="navlink" style="${base}" title="Disponible en Pro">
     <i data-lucide="lock" width="15" height="15" style="color:var(--sb-dim)"></i> ${item.label}
-    <span style="margin-left:auto;font-size:8.5px;letter-spacing:.14em;color:var(--accent);border:1px solid var(--sb-line);border-radius:999px;padding:1px 7px">PRO</span>
+    <span style="margin-left:auto;font-size:8.5px;letter-spacing:.1em;color:var(--sb-dim);background:#2a2822;border-radius:4px;padding:2px 6px">PRO</span>
   </a>`;
 }
 
@@ -314,7 +314,7 @@ function sidebar(activeTab: string, pro: boolean, niche: NichePack | null): stri
           <i data-lucide="bot" width="19" height="19" style="color:#231d05"></i>
         </div>
         <div style="line-height:1.1">
-          <div style="font-family:'Plus Jakarta Sans';font-weight:800;font-size:15px;letter-spacing:-.01em;color:#fff">NODIA AGENTS</div>
+          <div style="font-family:'Archivo';font-weight:800;font-size:15px;letter-spacing:-.01em;color:#fff">NODIA AGENTS</div>
           <div style="font-size:9px;letter-spacing:.24em;color:var(--accent);text-transform:uppercase;font-weight:600">by Kontrolia</div>
         </div>
       </div>
@@ -365,7 +365,7 @@ export function layout(opts: {
           <div style="display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.2em;color:var(--accent-2);text-transform:uppercase;font-weight:700">
             <i data-lucide="activity" width="12" height="12"></i> ${section.label} / ${item.label}
           </div>
-          <h1 style="font-family:'Plus Jakarta Sans';font-weight:800;font-size:22px;margin:2px 0 0;letter-spacing:-.02em">${item.label}</h1>
+          <h1 style="font-family:'Archivo';font-weight:800;font-size:22px;margin:2px 0 0;letter-spacing:-.02em">${item.label}</h1>
         </div>
         <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
           <div id="ctx-switcher" style="position:relative"></div>
@@ -399,7 +399,7 @@ export function layout(opts: {
 
     function dot(paused, ring) {
       return 'width:7px;height:7px;border-radius:50%;flex:none;display:inline-block;background:' +
-        (paused ? 'var(--dim)' : 'var(--ok)') + (ring ? ';box-shadow:0 0 0 3px var(--accent-soft)' : '');
+        (paused ? 'var(--dim)' : 'var(--ok)') + (ring ? ';box-shadow:0 0 0 3px var(--ok-soft)' : '');
     }
     function rowStyle(active) {
       return 'display:flex;align-items:center;gap:10px;width:100%;padding:7px 8px;border:0;border-radius:9px;' +
@@ -608,7 +608,7 @@ export function renderUpgrade(feature?: string): string {
     .map(
       ([icon, title, desc]) => `<div style="display:flex;gap:12px;padding:14px;border:1px solid var(--line);background:var(--panel)">
         <i data-lucide="${icon}" width="20" height="20" style="color:var(--accent);flex:none;margin-top:2px"></i>
-        <div><div style="font-family:'Plus Jakarta Sans';font-weight:600;font-size:14px;margin-bottom:3px">${title}</div>
+        <div><div style="font-family:'Archivo';font-weight:600;font-size:14px;margin-bottom:3px">${title}</div>
         <div style="font-size:12.5px;color:var(--muted);line-height:1.5">${desc}</div></div>
       </div>`,
     )
@@ -620,7 +620,7 @@ export function renderUpgrade(feature?: string): string {
         <div style="display:inline-flex;align-items:center;gap:8px;border:1px solid var(--accent);color:var(--accent2);font-size:10px;letter-spacing:.16em;padding:4px 10px;text-transform:uppercase">
           <i data-lucide="lock" width="13" height="13"></i> Función Pro
         </div>
-        <h2 style="font-family:'Plus Jakarta Sans';font-weight:700;font-size:24px;letter-spacing:-.02em;margin:14px 0 6px">
+        <h2 style="font-family:'Archivo';font-weight:700;font-size:24px;letter-spacing:-.02em;margin:14px 0 6px">
           ${feature ? `“${feature}” es parte de Pro` : "Desbloquea el panel Pro"}
         </h2>
         <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0 0 20px;max-width:560px">
@@ -629,7 +629,7 @@ export function renderUpgrade(feature?: string): string {
         </p>
         <div style="display:grid;gap:10px;margin-bottom:22px">${perks}</div>
         <a href="https://horizontesia.com" target="_blank" rel="noopener" class="bigbtn"
-          style="display:inline-flex;align-items:center;gap:8px;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:12px 20px;font-family:'Plus Jakarta Sans';font-weight:700;font-size:14px">
+          style="display:inline-flex;align-items:center;gap:8px;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:12px 20px;font-family:'Archivo';font-weight:700;font-size:14px">
           <i data-lucide="arrow-up-right" width="17" height="17"></i> Subir a Pro con la comunidad
         </a>
       </div>
@@ -654,7 +654,7 @@ export function loginPage(error?: string): string {
         <i data-lucide="terminal" width="18" height="18" style="color:var(--accent)"></i>
       </div>
       <div>
-        <h1 style="font-family:'Plus Jakarta Sans';font-weight:700;font-size:18px;margin:0;letter-spacing:-.02em">Dashboard del bot</h1>
+        <h1 style="font-family:'Archivo';font-weight:700;font-size:18px;margin:0;letter-spacing:-.02em">Dashboard del bot</h1>
         <p style="font-size:11px;color:var(--dim);margin:2px 0 0">Te mandamos un link a tu email para entrar.</p>
       </div>
     </div>
@@ -662,7 +662,7 @@ export function loginPage(error?: string): string {
     <input name="email" type="email" required placeholder="tu@email.com"
       style="width:100%;background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:13px;outline:none;margin-bottom:14px">
     <button class="bigbtn" type="submit"
-      style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:11px;font-family:'Plus Jakarta Sans';font-weight:700;font-size:13px;cursor:pointer">
+      style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:11px;font-family:'Archivo';font-weight:700;font-size:13px;cursor:pointer">
       Mandar link
     </button>
   </form>
