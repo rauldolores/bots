@@ -244,7 +244,7 @@ export async function renderThreadLive(env: Env, botId: string, convId: string):
 
   const controls = paused
     ? `
-    <details style="position:relative;margin-left:auto">
+    <details style="position:relative">
       <summary class="chip" style="cursor:pointer;list-style:none;font-size:11px;color:var(--accent-2);background:var(--panel2);border:1px solid var(--linelit);padding:6px 11px;display:inline-flex;align-items:center;gap:6px">▸ Devolver al bot</summary>
       <form method="POST" action="/admin/conversations/${encodeURIComponent(convId)}/resume"
             style="position:absolute;right:0;z-index:10;margin-top:8px;width:280px;background:var(--panel);border:1px solid var(--linelit);box-shadow:var(--shadow-lg);padding:12px">
@@ -256,9 +256,17 @@ export async function renderThreadLive(env: Env, botId: string, convId: string):
     </details>`
     : `
     <button hx-post="/admin/conversations/${encodeURIComponent(convId)}/pause" hx-target="#thread-live" hx-swap="innerHTML"
-            class="chip" style="margin-left:auto;font-size:11px;color:var(--muted);background:var(--panel2);border:1px solid var(--linelit);padding:6px 11px;cursor:pointer">
+            class="chip" style="font-size:11px;color:var(--muted);background:var(--panel2);border:1px solid var(--linelit);padding:6px 11px;cursor:pointer">
       ⏸ Pausar bot aquí
     </button>`;
+
+  const ticketAction =
+    openTicket > 0
+      ? `<a href="/admin/tickets" class="chip" style="font-size:11px;color:var(--muted);background:var(--panel2);border:1px solid var(--linelit);padding:6px 11px;text-decoration:none">Ver ticket</a>`
+      : `<button hx-post="/admin/conversations/${encodeURIComponent(convId)}/create-ticket" hx-target="#thread-live" hx-swap="innerHTML"
+                class="chip" style="font-size:11px;color:var(--muted);background:var(--panel2);border:1px solid var(--linelit);padding:6px 11px;cursor:pointer">
+          Crear ticket
+        </button>`;
 
   const threadName = conv.display_name ?? conv.channel_user_id ?? "—";
   const header = `
@@ -272,7 +280,10 @@ export async function renderThreadLive(env: Env, botId: string, convId: string):
     ${statusPill}
     ${sentBadge}
     ${openTicket > 0 ? `<span style="${statusBadge("var(--accent-2)")}">🔔 ticket abierto</span>` : ""}
-    ${controls}
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      ${ticketAction}
+      ${controls}
+    </div>
   </div>`;
 
   // Messages, DESC in the DOM + column-reverse = pinned to bottom.

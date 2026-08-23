@@ -80,4 +80,14 @@ describe("BotChannelsRepo", () => {
       expect(row?.config).toEqual({});
     });
   });
+
+  describe("updateConfig (widget: config-only, sin tocar external_id)", () => {
+    it("actualiza config sin borrar la llave pública en external_id", async () => {
+      await repo.upsert({ botId: TEST_BOT_ID, channel: "widget", externalId: "public-key-1", config: {} });
+      await repo.updateConfig(TEST_BOT_ID, "widget", { position: "bottom-left", bubbleColor: "#000000" });
+      const row = await repo.getByBotAndChannel(TEST_BOT_ID, "widget");
+      expect(row?.external_id).toBe("public-key-1");
+      expect(row?.config).toEqual({ position: "bottom-left", bubbleColor: "#000000" });
+    });
+  });
 });

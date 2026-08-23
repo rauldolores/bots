@@ -37,6 +37,21 @@ describe("MessagesRepo", () => {
     expect(msgs[19].content).toBe("msg 24");
   });
 
+  describe("since (polling del widget)", () => {
+    it("excluye role='tool' y respeta el cursor", async () => {
+      const t0 = Date.now();
+      await msgRepo.append(convId, "user", "hola", { createdAt: t0 });
+      await msgRepo.append(convId, "tool", "internal", { createdAt: t0 + 1 });
+      await msgRepo.append(convId, "assistant", "hola, ¿en qué ayudo?", { createdAt: t0 + 2 });
+
+      const all = await msgRepo.since(convId, t0 - 1);
+      expect(all.map((m) => m.role)).toEqual(["user", "assistant"]);
+
+      const afterFirst = await msgRepo.since(convId, t0);
+      expect(afterFirst.map((m) => m.content)).toEqual(["hola, ¿en qué ayudo?"]);
+    });
+  });
+
   it("purgeOlderThan deletes messages past the cutoff", async () => {
     await msgRepo.append(convId, "user", "old", { createdAt: Date.now() - 100 * 86_400_000 });
     await msgRepo.append(convId, "user", "new");

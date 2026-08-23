@@ -102,7 +102,7 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
   });
 }
 
-async function pushToTicketsIfConnected(
+export async function pushToTicketsIfConnected(
   env: Env,
   db: Db,
   botId: string,

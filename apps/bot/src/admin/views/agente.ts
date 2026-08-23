@@ -220,29 +220,54 @@ interface NodeSpec {
   big?: boolean;
   /** Canal con tráfico: borde+fondo+chip verdes, imposible no verlo. */
   on?: boolean;
+  /** Puerto visual de conexión (estilo n8n) en el borde izquierdo/derecho. */
+  port?: "in" | "out" | "both";
 }
 
 function nodeHtml(n: NodeSpec): string {
+  const big = !!n.big;
+  const box = big ? 30 : 24;
+  const icon = big ? 16 : 13;
+
+  // Tarjeta: blanca con sombra suave; verde si el canal trae tráfico; ámbar si
+  // es el nodo protagonista (Agente). El hover lo da .node-card (shell).
+  const cardStyle = n.on
+    ? "background:linear-gradient(135deg, rgba(22,163,74,.13), rgba(22,163,74,.03)), var(--panel);border:1px solid var(--ok);box-shadow:0 0 0 1px rgba(22,163,74,.16), 0 0 24px -8px rgba(22,163,74,.5);"
+    : n.id === "brain"
+      ? "background:linear-gradient(135deg, rgba(245,158,11,.12), rgba(245,158,11,.03)), var(--panel);border:1px solid var(--accent);box-shadow:var(--shadow-sm);"
+      : "background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-sm);";
+
+  const iconStyle = n.on
+    ? "background:rgba(22,163,74,.14);border:1px solid var(--ok)"
+    : n.id === "brain"
+      ? "background:var(--accent-soft);border:1px solid var(--accent)"
+      : "background:var(--panel2);border:1px solid var(--line)";
+
+  const offStyle = n.off ? "opacity:.55;filter:grayscale(.5);" : "";
+  const portColor = n.on ? "var(--ok)" : "var(--line)";
+
   return `
   <div class="node-card absolute cursor-pointer"
-       style="left:${n.x}px;top:${n.y}px;width:${n.w}px;padding:11px 13px;${
-         n.on
-           ? "background:linear-gradient(135deg, rgba(127,183,126,.16), rgba(127,183,126,.05)), var(--panel2);border:1px solid var(--ok);box-shadow:0 0 0 1px rgba(127,183,126,.25), 0 0 18px -6px rgba(127,183,126,.5);"
-           : "background:var(--panel2);border:1px solid var(--linelit);"
-       }${n.off ? "opacity:.55;" : ""}"
+       style="left:${n.x}px;top:${n.y}px;width:${n.w}px;padding:${big ? "13px 15px" : "10px 12px"};${cardStyle}${offStyle}"
        hx-get="/admin/agente/node/${encodeURIComponent(n.id)}" hx-target="#modal-root" hx-swap="innerHTML"
        title="Configurar">
-    <div class="flex items-center gap-2">
-      <span class="w-[22px] h-[22px] flex-none flex items-center justify-center" style="border:1px solid ${n.accent};background:${n.on ? "rgba(127,183,126,.18)" : "var(--panel2)"}">
-        <i data-lucide="${n.icon}" width="13" height="13" style="color:${n.accent}"></i>
+    ${n.port === "in" || n.port === "both"
+      ? `<span class="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full" style="left:-5px;background:var(--panel);border:1.5px solid ${portColor}"></span>`
+      : ""}
+    ${n.port === "out" || n.port === "both"
+      ? `<span class="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full" style="right:-5px;background:var(--panel);border:1.5px solid ${portColor}"></span>`
+      : ""}
+    <div class="flex items-center gap-2.5">
+      <span class="flex-none flex items-center justify-center" style="width:${box}px;height:${box}px;border-radius:9px;${iconStyle}">
+        <i data-lucide="${n.icon}" width="${icon}" height="${icon}" style="color:${n.accent}"></i>
       </span>
-      <span class="font-display font-semibold text-cream whitespace-nowrap overflow-hidden text-ellipsis" style="font-size:${n.big ? "14px" : "12.5px"}">${esc(n.title)}</span>
-      ${n.off ? `<span class="ml-auto text-[8.5px] tracking-[.1em]" style="color:var(--dim);border:1px solid var(--linelit);padding:0 4px">OFF</span>` : ""}
-      ${n.on ? `<span class="ml-auto text-[8.5px] tracking-[.1em] font-semibold" style="color:var(--ok);border:1px solid var(--ok);padding:0 4px;background:rgba(127,183,126,.12)">● ACTIVO</span>` : ""}
+      <span class="font-display font-semibold text-cream min-w-0 truncate" style="font-size:${big ? "14px" : "12.5px"}">${esc(n.title)}</span>
+      ${n.off ? `<span class="ml-auto flex-none text-[8.5px] font-semibold tracking-[.1em]" style="color:var(--dim);border:1px solid var(--linelit);padding:1px 7px;border-radius:999px">OFF</span>` : ""}
+      ${n.on ? `<span class="ml-auto flex-none text-[8.5px] font-semibold tracking-[.08em]" style="color:var(--ok);border:1px solid var(--ok);background:rgba(22,163,74,.1);padding:1px 7px;border-radius:999px">● ACTIVO</span>` : ""}
     </div>
-    <div class="text-[10.5px] mt-1 leading-snug" style="color:var(--muted)">${n.caption}</div>
-    ${n.count ? `<div class="text-[9.5px] mt-1.5" style="color:var(--accent-2)">${esc(n.count)}</div>` : ""}
-    ${n.live ? `<span class="absolute -top-1.5 -right-1.5 w-[11px] h-[11px] rounded-full" style="background:var(--ok);border:2px solid var(--panel);animation:pulse 1.8s ease-in-out infinite"></span>` : ""}
+    <div class="text-[10.5px] mt-1.5 leading-snug" style="color:var(--muted)">${n.caption}</div>
+    ${n.count ? `<div class="text-[9.5px] mt-2 inline-flex items-center gap-1.5" style="color:var(--accent-2)"><span class="inline-block w-1 h-1 rounded-full" style="background:var(--accent)"></span>${esc(n.count)}</div>` : ""}
+    ${n.live ? `<span class="absolute -top-1.5 -right-1.5 w-[11px] h-[11px] rounded-full" style="background:var(--ok);border:2px solid var(--panel);box-shadow:0 0 0 3px rgba(22,163,74,.18);animation:pulse 1.8s ease-in-out infinite"></span>` : ""}
   </div>`;
 }
 
@@ -254,6 +279,41 @@ function bezier(x1: number, y1: number, x2: number, y2: number): string {
 function bezierDown(x1: number, y1: number, x2: number, y2: number): string {
   const dy = Math.max(30, (y2 - y1) / 2);
   return `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`;
+}
+
+// --- Conectores --------------------------------------------------------------
+// Defs compartidos del SVG: gradiente del flujo + flechas de dirección.
+const FLOW_DEFS = `
+  <defs>
+    <linearGradient id="agente-grad-flow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="55%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+    <marker id="agente-arrow-on" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f59e0b"/>
+    </marker>
+    <marker id="agente-arrow-off" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/>
+    </marker>
+  </defs>`;
+
+/**
+ * Conector del flujo de mensajes: subcapa gris con flecha de dirección; si hay
+ * actividad, encima va una capa ámbar con guiones en movimiento (SMIL) que
+ * "corren" hacia la respuesta.
+ */
+function flowPath(d: string, live: boolean): string {
+  const marker = live ? "url(#agente-arrow-on)" : "url(#agente-arrow-off)";
+  const overlay = live
+    ? `<path d="${d}" fill="none" stroke="url(#agente-grad-flow)" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="10 8"><animate attributeName="stroke-dashoffset" from="0" to="-36" dur="1.3s" repeatCount="indefinite"/></path>`
+    : "";
+  return `<path d="${d}" fill="none" stroke="var(--line)" stroke-width="3" stroke-linecap="round" marker-end="${marker}"/>${overlay}`;
+}
+
+/** Conector de recursos (modelo/memoria/tools): punteado gris, más oscuro si está activo. */
+function resPath(d: string, on: boolean): string {
+  return `<path d="${d}" fill="none" stroke="${on ? "var(--muted)" : "var(--linelit)"}" stroke-width="1.6" stroke-linecap="round" stroke-dasharray="3 5"/>`;
 }
 
 export async function renderAgenteCanvas(env: Env, botId: string): Promise<string> {
@@ -279,12 +339,7 @@ export async function renderAgenteCanvas(env: Env, botId: string): Promise<strin
   const nodes: NodeSpec[] = [];
   const paths: string[] = [];
 
-  // flujo de mensajes = acento naranja cuando hay actividad, gris/café cuando no.
-  const FLOW_ON = "var(--accent)";
-  const FLOW_OFF = "var(--linelit)";
-  // recursos del agente (model/memory/tools) = conector punteado gris.
-  const RES_ON = "var(--muted)";
-  const RES_OFF = "var(--linelit)";
+  // Los conectores se arman con flowPath/resPath (defs en FLOW_DEFS).
 
   // Channels → Buffer
   d.channels.forEach((ch, i) => {
@@ -301,10 +356,9 @@ export async function renderAgenteCanvas(env: Env, botId: string): Promise<strin
       accent: ch.convs === 0 ? "var(--dim)" : "var(--ok)",
       live,
       on: ch.convs > 0,
+      port: "out",
     });
-    paths.push(
-      `<path d="${bezier(CH_X + CH_W, y + CH_H / 2, BUF.x, midY)}" fill="none" stroke="${live ? FLOW_ON : FLOW_OFF}" stroke-width="2"/>`,
-    );
+    paths.push(flowPath(bezier(CH_X + CH_W, y + CH_H / 2, BUF.x, midY), live));
   });
 
   const brainLive = !!d.lastAssistantAt && now - d.lastAssistantAt < LIVE_MS;
@@ -317,10 +371,9 @@ export async function renderAgenteCanvas(env: Env, botId: string): Promise<strin
     caption: `agrupa mensajes · ${Math.round(d.cfg.bufferMs / 1000)} s`,
     accent: "var(--accent)",
     live: false,
+    port: "both",
   });
-  paths.push(
-    `<path d="${bezier(BUF.x + BUF.w, midY, BRAIN.x, midY)}" fill="none" stroke="${brainLive ? FLOW_ON : FLOW_OFF}" stroke-width="2"/>`,
-  );
+  paths.push(flowPath(bezier(BUF.x + BUF.w, midY, BRAIN.x, midY), brainLive));
 
   nodes.push({
     id: "brain",
@@ -332,10 +385,9 @@ export async function renderAgenteCanvas(env: Env, botId: string): Promise<strin
     live: brainLive,
     count: `${d.turns30d} turnos/30d`,
     big: true,
+    port: "both",
   });
-  paths.push(
-    `<path d="${bezier(BRAIN.x + BRAIN.w, midY, REPLY.x, midY)}" fill="none" stroke="${brainLive ? FLOW_ON : FLOW_OFF}" stroke-width="2"/>`,
-  );
+  paths.push(flowPath(bezier(BRAIN.x + BRAIN.w, midY, REPLY.x, midY), brainLive));
 
   nodes.push({
     id: "reply",
@@ -345,6 +397,7 @@ export async function renderAgenteCanvas(env: Env, botId: string): Promise<strin
     caption: `máx ${d.cfg.maxChunks} mensajes · ${(d.cfg.interChunkDelayMs / 1000).toFixed(1)} s entre msgs`,
     accent: "var(--ok)",
     live: false,
+    port: "in",
   });
 
   // Row 2: model + memory hang below the brain (n8n-style dotted resources)
@@ -370,8 +423,8 @@ export async function renderAgenteCanvas(env: Env, botId: string): Promise<strin
   });
   const brainBottom = midY + BRAIN.h / 2;
   paths.push(
-    `<path d="${bezierDown(BRAIN.x + 60, brainBottom, modelNode.x + modelNode.w / 2, row2Y)}" fill="none" stroke="${RES_ON}" stroke-width="1.5" stroke-dasharray="4 4"/>`,
-    `<path d="${bezierDown(BRAIN.x + 140, brainBottom, memNode.x + memNode.w / 2, row2Y)}" fill="none" stroke="${RES_ON}" stroke-width="1.5" stroke-dasharray="4 4"/>`,
+    resPath(bezierDown(BRAIN.x + 60, brainBottom, modelNode.x + modelNode.w / 2, row2Y), true),
+    resPath(bezierDown(BRAIN.x + 140, brainBottom, memNode.x + memNode.w / 2, row2Y), true),
   );
 
   // Row 3: tools
@@ -391,15 +444,16 @@ export async function renderAgenteCanvas(env: Env, botId: string): Promise<strin
       off,
     });
     const fanX = BRAIN.x + 30 + (i * (BRAIN.w - 60)) / Math.max(1, d.toolNames.length - 1);
-    paths.push(
-      `<path d="${bezierDown(fanX, brainBottom, x + TOOL_W / 2, row3Y)}" fill="none" stroke="${off ? RES_OFF : RES_ON}" stroke-width="1.5" stroke-dasharray="4 4"/>`,
-    );
+    paths.push(resPath(bezierDown(fanX, brainBottom, x + TOOL_W / 2, row3Y), !off));
   });
 
   return `
   <div class="overflow-x-auto border border-line bg-panel">
-    <div class="relative" style="min-width:${width}px;height:${height}px;background:radial-gradient(circle,var(--line) 1px,transparent 1px) 0 0/22px 22px">
-      <svg class="absolute inset-0 w-full h-full pointer-events-none" aria-hidden="true">${paths.join("")}</svg>
+    <div class="relative" style="min-width:${width}px;height:${height}px;background:
+        radial-gradient(1000px 520px at 22% 16%, rgba(245,158,11,.07), transparent 55%),
+        radial-gradient(1000px 520px at 78% 42%, rgba(124,58,237,.05), transparent 55%),
+        radial-gradient(circle, var(--line) 1px, transparent 1px) 0 0/22px 22px">
+      <svg class="absolute inset-0 w-full h-full pointer-events-none" aria-hidden="true">${FLOW_DEFS}${paths.join("")}</svg>
       ${nodes.map(nodeHtml).join("")}
     </div>
   </div>`;
@@ -415,10 +469,10 @@ export async function renderAgentePage(env: Env, botId: string): Promise<string>
     <div class="flex flex-col gap-3.5">
       <div class="flex flex-wrap items-center gap-3.5">
         <p class="text-[12px] max-w-[520px] leading-relaxed" style="color:var(--muted)">Así funciona tu bot por dentro — una radiografía en vivo. Haz clic en cualquier nodo para ver y ajustar su configuración.</p>
-        <div class="ml-auto flex items-center gap-4 text-[10.5px]" style="color:var(--dim)">
-          <span class="flex items-center gap-1.5"><span class="inline-block w-4 h-0.5 align-middle" style="background:var(--accent)"></span>flujo de mensajes</span>
-          <span class="flex items-center gap-1.5"><span class="inline-block w-4 align-middle" style="border-top:1.5px dashed var(--muted)"></span>recursos del agente</span>
-          <span class="flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full align-middle" style="background:var(--ok)"></span>actividad en los últimos 5 min</span>
+        <div class="ml-auto flex flex-wrap items-center gap-2 text-[10.5px]" style="color:var(--dim)">
+          <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1" style="background:var(--panel);border:1px solid var(--line)"><span class="inline-block w-4 h-0.5 align-middle" style="background:linear-gradient(90deg,#fbbf24,#b45309)"></span>flujo de mensajes</span>
+          <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1" style="background:var(--panel);border:1px solid var(--line)"><span class="inline-block w-4 align-middle" style="border-top:1.5px dashed var(--muted)"></span>recursos del agente</span>
+          <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1" style="background:var(--panel);border:1px solid var(--line)"><span class="inline-block w-2 h-2 rounded-full align-middle" style="background:var(--ok);box-shadow:0 0 0 2px rgba(22,163,74,.15)"></span>actividad en los últimos 5 min</span>
         </div>
       </div>
       <div id="canvas-wrap" hx-get="/admin/agente/canvas" hx-trigger="every 15s, canvas-refresh from:body" hx-swap="innerHTML">

@@ -31,7 +31,7 @@ function esc(s: string): string {
   );
 }
 
-type ConnectableChannel = "telegram" | "twilio" | "manychat";
+type ConnectableChannel = "telegram" | "twilio" | "manychat" | "widget";
 
 interface FieldSpec {
   name: string;
@@ -96,6 +96,19 @@ const CHANNEL_META: Record<ConnectableChannel, ChannelMeta> = {
     webhookNote:
       'Después de guardar, copia la URL del webhook y úsala en un paso "External Request" de tu flujo de ManyChat.',
   },
+  widget: {
+    id: "widget",
+    name: "Widget para tu sitio web",
+    icon: "message-square",
+    desc: "Una burbuja de chat para tu propio sitio — el visitante escribe, tu bot responde.",
+    steps: [
+      "Haz clic en <b>Conectar</b> — generamos una llave para tu sitio, sin que tengas que pegar nada.",
+      "Copia el código que te damos y pégalo justo antes de <span class=\"font-mono\">&lt;/body&gt;</span> en tu sitio web.",
+      "Listo — la burbuja aparece sola. Puedes ajustar posición, color y saludo desde esta pantalla cuando quieras.",
+    ],
+    fields: [],
+    webhookNote: "Copia el código y pégalo en tu sitio.",
+  },
 };
 
 function webhookUrlFor(env: Env, channel: string, botId: string): string {
@@ -112,6 +125,21 @@ function copyRow(label: string, value: string): string {
               onclick="navigator.clipboard.writeText('${esc(value)}');this.textContent='copiado ✓'">copiar</button>
     </div>
   </div>`;
+}
+
+/** Como copyRow(), pero para un valor multilínea (el <script> del widget) — usa <pre> para conservar el formato. */
+function copyBlock(label: string, value: string): string {
+  return `<div style="display:flex;flex-direction:column;gap:4px">
+    <span class="text-[10.5px]" style="color:var(--dim)">${esc(label)}</span>
+    <pre class="font-mono text-[10.5px]" style="border:1px solid var(--line);padding:10px 12px;background:var(--bg);white-space:pre-wrap;word-break:break-all;margin:0">${esc(value)}</pre>
+    <button type="button" class="text-[10.5px]" style="align-self:flex-start;border:1px solid var(--line);color:var(--cream);padding:5px 9px;cursor:pointer;background:none"
+            onclick="navigator.clipboard.writeText(${esc(JSON.stringify(value))});this.textContent='copiado ✓'">copiar</button>
+  </div>`;
+}
+
+function widgetSnippet(env: Env, botId: string, key: string): string {
+  const base = (env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
+  return `<script src="${base}/widget.js" data-bot="${botId}" data-key="${key}" async></script>`;
 }
 
 function modalShell(icon: string, title: string, inner: string): string {
@@ -143,10 +171,10 @@ export function renderConnectModal(channel: ConnectableChannel, opts?: { error?:
     .map(
       (f) => `
       <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
-        <label for="${f.name}" class="text-[12px] font-semibold text-cream">${esc(f.label)}</label>
+        <label for="${f.name}" class="font-display font-semibold text-[12.5px] text-cream">${esc(f.label)}</label>
         <input type="${f.type ?? "text"}" id="${f.name}" name="${f.name}" ${f.optional ? "" : "required"}
                placeholder="${esc(f.placeholder)}"
-               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;font-family:inherit;outline:none">
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
       </div>`,
     )
     .join("");
@@ -190,7 +218,22 @@ function renderConnectedModal(
     `${meta.name} conectado`,
     `<div class="text-[13px]" style="color:var(--ok);font-weight:600;margin-bottom:12px">✓ ${esc(meta.name)} conectado a este bot</div>
      ${status}
-     <button type="button" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;margin-top:14px;background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:9px"
+     <button type="button" class="ghostbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;margin-top:14px;background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:9px"
+             onclick="document.getElementById('modal-root').innerHTML=''">Listo</button>`,
+  );
+}
+
+/** Confirmación tras generar la llave del widget — muestra el <script> para pegar en el sitio del dueño. */
+function renderWidgetConnectedModal(env: Env, botId: string, key: string): string {
+  const meta = CHANNEL_META.widget;
+  return modalShell(
+    meta.icon,
+    "Widget conectado",
+    `<div class="text-[13px]" style="color:var(--ok);font-weight:600;margin-bottom:12px">✓ Widget conectado a este bot</div>
+     <p class="text-[12.5px]" style="color:var(--muted);margin:0 0 12px">Pega este código justo antes de <span class="font-mono">&lt;/body&gt;</span> en tu sitio web:</p>
+     ${copyBlock("Código para tu sitio", widgetSnippet(env, botId, key))}
+     <p class="text-[11.5px]" style="color:var(--dim);margin-top:10px">Puedes ajustar posición, color y saludo desde la tarjeta de esta pantalla en cualquier momento.</p>
+     <button type="button" class="ghostbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;margin-top:14px;background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:9px"
              onclick="document.getElementById('modal-root').innerHTML=''">Listo</button>`,
   );
 }
@@ -209,6 +252,14 @@ export async function connectChannel(
   const db = new Db(env.DB);
   const repo = new BotChannelsRepo(db);
   const str = (name: string) => String(form.get(name) ?? "").trim();
+
+  if (channel === "widget") {
+    // Al revés que los demás: aquí no pedimos un token de un 3º, generamos
+    // nosotros la llave pública y se la damos al dueño para pegar en su sitio.
+    const key = crypto.randomUUID();
+    await repo.upsert({ botId, channel: "widget", externalId: key, config: {} });
+    return renderWidgetConnectedModal(env, botId, key);
+  }
 
   if (channel === "telegram") {
     const token = str("token");
@@ -247,6 +298,18 @@ export async function disconnectChannel(env: Env, botId: string, channel: Connec
   await repo.disable(botId, channel);
 }
 
+/** Guarda posición/color/saludo del widget — nunca toca external_id (la llave pública), a diferencia de upsert(). */
+export async function saveWidgetConfig(env: Env, botId: string, form: FormData): Promise<void> {
+  const db = new Db(env.DB);
+  const repo = new BotChannelsRepo(db);
+  const row = await repo.getByBotAndChannel(botId, "widget");
+  if (!row) return;
+  const position = String(form.get("position") ?? "") === "bottom-left" ? "bottom-left" : "bottom-right";
+  const bubbleColor = String(form.get("bubble_color") ?? "").trim() || row.config.bubbleColor || "#F5C518";
+  const greeting = String(form.get("greeting") ?? "").trim();
+  await repo.updateConfig(botId, "widget", { ...row.config, position, bubbleColor, greeting });
+}
+
 // ── Conectores salientes: CRM / Tickets / Calendario / MCP ────────────────
 //
 // Distinto de los canales de arriba: aquí el bot LLAMA a la API externa con
@@ -273,7 +336,7 @@ function renderTabs(active: string): string {
     ${CATEGORY_TABS.map((t) => {
       const isActive = t.key === active;
       return `<a href="/admin/conexiones?cat=${t.key}" class="text-[12.5px]"
-        style="padding:7px 14px;font-weight:600;text-decoration:none;border-radius:8px;${
+        style="padding:7px 14px;font-weight:600;text-decoration:none;border-radius:var(--radius-sm);${
           isActive ? "background:var(--accent);color:#1a1206" : "color:var(--muted)"
         }">${esc(t.label)}</a>`;
     }).join("")}
@@ -287,19 +350,19 @@ export function renderConnectorModal(meta: ConnectorMeta, opts?: { error?: strin
     .join("");
   const apiKeyField = `
     <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
-      <label for="api_key" class="text-[12px] font-semibold text-cream">${esc(meta.apiKeyLabel ?? "API key")}</label>
+      <label for="api_key" class="font-display font-semibold text-[12.5px] text-cream">${esc(meta.apiKeyLabel ?? "API key")}</label>
       <input type="password" id="api_key" name="api_key" required
              placeholder="${esc(meta.apiKeyPlaceholder ?? "········")}"
-             style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;font-family:inherit;outline:none">
+             style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
     </div>`;
   const extraFields = (meta.fields ?? [])
     .map(
       (f) => `
       <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
-        <label for="${f.name}" class="text-[12px] font-semibold text-cream">${esc(f.label)}</label>
+        <label for="${f.name}" class="font-display font-semibold text-[12.5px] text-cream">${esc(f.label)}</label>
         <input type="${f.type ?? "text"}" id="${f.name}" name="${f.name}" required
                placeholder="${esc(f.placeholder)}"
-               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;font-family:inherit;outline:none">
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
       </div>`,
     )
     .join("");
@@ -529,19 +592,19 @@ export function renderMcpConnectModal(opts?: { error?: string }): string {
     ${error}
     <form hx-post="/admin/conexiones/connectors/mcp/add" hx-target="#modal-root" hx-swap="innerHTML">
       <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
-        <label class="text-[12px] font-semibold text-cream">Nombre</label>
+        <label class="font-display font-semibold text-[12.5px] text-cream">Nombre</label>
         <input type="text" name="name" required placeholder="Ej. Notion"
-               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;font-family:inherit;outline:none">
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
       </div>
       <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
-        <label class="text-[12px] font-semibold text-cream">URL del servidor MCP</label>
+        <label class="font-display font-semibold text-[12.5px] text-cream">URL del servidor MCP</label>
         <input type="text" name="url" required placeholder="https://mcp.ejemplo.com/mcp"
-               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;font-family:inherit;outline:none">
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
       </div>
       <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
-        <label class="text-[12px] font-semibold text-cream">Token (opcional)</label>
+        <label class="font-display font-semibold text-[12.5px] text-cream">Token (opcional)</label>
         <input type="password" name="token" placeholder="········"
-               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;font-family:inherit;outline:none">
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
       </div>
       <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:10px">Conectar</button>
     </form>`,
@@ -628,10 +691,31 @@ async function renderConnectableCard(env: Env, db: Db, botId: string, meta: Chan
     ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>`
     : `<span style="font-size:10px;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);padding:3px 10px;font-weight:600">○ SIN CONECTAR</span>`;
 
+  const widgetConfigForm =
+    ok && meta.id === "widget" && row
+      ? `<form method="POST" action="/admin/conexiones/widget/config" style="display:flex;flex-direction:column;gap:8px;margin-top:2px">
+           <label class="text-[10.5px]" style="color:var(--dim);display:flex;flex-direction:column;gap:4px">Posición
+             <select name="position" style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:7px 9px;font-size:12px;font-family:inherit">
+               <option value="bottom-right" ${row.config.position !== "bottom-left" ? "selected" : ""}>Abajo a la derecha</option>
+               <option value="bottom-left" ${row.config.position === "bottom-left" ? "selected" : ""}>Abajo a la izquierda</option>
+             </select>
+           </label>
+           <label class="text-[10.5px]" style="color:var(--dim);display:flex;align-items:center;gap:8px">Color de la burbuja
+             <input type="color" name="bubble_color" value="${esc(row.config.bubbleColor ?? "#F5C518")}" style="width:44px;height:26px;border:1px solid var(--line);background:none;cursor:pointer;padding:0">
+           </label>
+           <label class="text-[10.5px]" style="color:var(--dim);display:flex;flex-direction:column;gap:4px">Mensaje de bienvenida
+             <input type="text" name="greeting" value="${esc(row.config.greeting ?? "")}" placeholder="¡Hola! ¿En qué puedo ayudarte?"
+                    style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:7px 9px;font-size:12px;font-family:inherit">
+           </label>
+           <button type="submit" class="text-[11px]" style="align-self:flex-start;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:5px 12px;cursor:pointer;font-weight:600">Guardar</button>
+         </form>`
+      : "";
+
   const action = ok
     ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-         ${copyRow("Webhook", webhookUrlFor(env, meta.id, botId))}
+         ${meta.id === "widget" && row ? copyBlock("Código para tu sitio", widgetSnippet(env, botId, row.external_id ?? "")) : copyRow("Webhook", webhookUrlFor(env, meta.id, botId))}
        </div>
+       ${widgetConfigForm}
        <form method="POST" action="/admin/conexiones/${meta.id}/disconnect" style="margin-top:4px" onsubmit="return confirm('¿Desconectar ${esc(meta.name)}? El bot dejará de recibir mensajes por aquí.')">
          <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Desconectar</button>
        </form>`

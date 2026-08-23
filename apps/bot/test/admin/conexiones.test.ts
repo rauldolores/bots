@@ -25,7 +25,9 @@ vi.mock("../../src/channels/telegram", async (importOriginal) => {
   return { ...actual, setTelegramWebhook: (...args: unknown[]) => setTelegramWebhookMock(...args) };
 });
 
-const { connectChannel, disconnectChannel, renderConexionesGrid } = await import("../../src/admin/views/conexiones");
+const { connectChannel, disconnectChannel, renderConexionesGrid, saveWidgetConfig } = await import(
+  "../../src/admin/views/conexiones"
+);
 
 let db: Db;
 let env: Env;
@@ -104,6 +106,52 @@ describe("connectChannel — manychat", () => {
   });
 });
 
+describe("connectChannel — widget", () => {
+  it("genera una llave pública sin pedir ningún campo, y no toca Vault", async () => {
+    const html = await connectChannel(env, TEST_BOT_ID, "widget", form({}));
+    expect(html).toContain("conectado a este bot");
+    expect(html).toContain("&lt;script"); // el <pre> lo muestra HTML-escapado
+    expect(createSecretMock).not.toHaveBeenCalled();
+
+    const row = await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "widget");
+    expect(row?.external_id).toBeTruthy();
+    expect(row?.secret_ref).toBeNull();
+  });
+
+  it("el snippet trae el botId y la llave generada (el <pre> lo muestra HTML-escapado)", async () => {
+    const html = await connectChannel(env, TEST_BOT_ID, "widget", form({}));
+    const row = await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "widget");
+    expect(html).toContain(`data-bot=&quot;${TEST_BOT_ID}&quot;`);
+    expect(html).toContain(`data-key=&quot;${row?.external_id}&quot;`);
+  });
+});
+
+describe("saveWidgetConfig", () => {
+  it("guarda posición/color/saludo sin borrar la llave pública", async () => {
+    await connectChannel(env, TEST_BOT_ID, "widget", form({}));
+    const before = await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "widget");
+
+    await saveWidgetConfig(
+      env,
+      TEST_BOT_ID,
+      form({ position: "bottom-left", bubble_color: "#112233", greeting: "¡Hola! ¿En qué ayudo?" }),
+    );
+
+    const after = await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "widget");
+    expect(after?.external_id).toBe(before?.external_id);
+    expect(after?.config).toEqual({
+      position: "bottom-left",
+      bubbleColor: "#112233",
+      greeting: "¡Hola! ¿En qué ayudo?",
+    });
+  });
+
+  it("sin canal conectado, no hace nada", async () => {
+    await expect(saveWidgetConfig(env, TEST_BOT_ID, form({ position: "bottom-left" }))).resolves.toBeUndefined();
+    expect(await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "widget")).toBeNull();
+  });
+});
+
 describe("disconnectChannel", () => {
   it("borra el secreto de Vault y desactiva la fila", async () => {
     await new BotChannelsRepo(db).upsert({ botId: TEST_BOT_ID, channel: "telegram", secretRef: "22222222-2222-2222-2222-222222222222" });
@@ -111,6 +159,13 @@ describe("disconnectChannel", () => {
     expect(deleteSecretMock).toHaveBeenCalledWith(expect.anything(), "22222222-2222-2222-2222-222222222222");
     const row = await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "telegram");
     expect(row).toBeNull(); // getByBotAndChannel solo trae enabled=true
+  });
+
+  it("widget: desconecta sin llamar a Vault (no tiene secret_ref)", async () => {
+    await connectChannel(env, TEST_BOT_ID, "widget", form({}));
+    await disconnectChannel(env, TEST_BOT_ID, "widget");
+    expect(deleteSecretMock).not.toHaveBeenCalled();
+    expect(await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "widget")).toBeNull();
   });
 });
 

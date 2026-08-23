@@ -84,6 +84,20 @@ export class MessagesRepo {
     return rows;
   }
 
+  /**
+   * Todo lo que el widget necesita en un lote de polling: cualquier rol menos
+   * 'tool' (nunca se le muestra al visitante), estrictamente después del
+   * cursor del cliente, en orden de aparición.
+   */
+  async since(conversationId: string, afterMs: number): Promise<Message[]> {
+    return this.db.all<Message>(
+      `SELECT * FROM messages
+       WHERE conversation_id = ? AND bot_id = ? AND role != 'tool' AND created_at > ?
+       ORDER BY created_at ASC, seq ASC`,
+      [conversationId, this.botId, afterMs],
+    );
+  }
+
   /** Retención global: borra por antigüedad sin importar el bot. */
   async purgeOlderThan(cutoffMs: number): Promise<number> {
     const res = await this.db.run(

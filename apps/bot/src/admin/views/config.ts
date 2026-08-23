@@ -140,9 +140,9 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
 
   let testBanner = "";
   if (llmTest?.startsWith("ok:")) {
-    testBanner = `<div style="border:1px solid var(--ok);background:rgba(127,183,126,.1);color:var(--ok);border-radius:10px;padding:9px 12px;font-size:12px;font-weight:600">✓ Conexión exitosa — respondió ${esc(llmTest.slice(3))}</div>`;
+    testBanner = `<div style="border:1px solid var(--ok);background:rgba(127,183,126,.1);color:var(--ok);border-radius:var(--radius-sm);padding:9px 12px;font-size:12px;font-weight:600">✓ Conexión exitosa — respondió ${esc(llmTest.slice(3))}</div>`;
   } else if (llmTest?.startsWith("err:")) {
-    testBanner = `<div style="border:1px solid var(--danger,#e0654d);background:rgba(224,101,77,.1);color:var(--danger,#e0654d);border-radius:10px;padding:9px 12px;font-size:12px;font-weight:600">✕ Falló la prueba: ${esc(llmTest.slice(4, 200))}</div>`;
+    testBanner = `<div style="border:1px solid var(--bad);background:rgba(220,38,38,.1);color:var(--bad);border-radius:var(--radius-sm);padding:9px 12px;font-size:12px;font-weight:600">✕ Falló la prueba: ${esc(llmTest.slice(4, 200))}</div>`;
   }
 
   // Si el modelo fijado a mano falló en producción y el turno se degradó al
@@ -155,7 +155,7 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
       const w = JSON.parse(rawWarning) as { modelId?: string; at?: number };
       const tz = resolveTimezone(settings[SETTING_KEYS.timezone]);
       const when = w.at ? new Date(w.at).toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short", timeZone: tz }) : "";
-      degradedBanner = `<div style="border:1px solid #d9a441;background:rgba(217,164,65,.1);color:#d9a441;border-radius:10px;padding:9px 12px;font-size:12px;font-weight:600">⚠ Tu modelo elegido (${esc(w.modelId ?? "?")}) dejó de responder${when ? ` el ${esc(when)}` : ""} — probablemente el proveedor lo retiró. Por ahora tu bot está usando el modelo automático de este mismo proveedor. Elige otro modelo y guarda para quitar este aviso.</div>`;
+      degradedBanner = `<div style="border:1px solid var(--accent-2);background:var(--accent-soft);color:var(--accent-2);border-radius:var(--radius-sm);padding:9px 12px;font-size:12px;font-weight:600">⚠ Tu modelo elegido (${esc(w.modelId ?? "?")}) dejó de responder${when ? ` el ${esc(when)}` : ""} — probablemente el proveedor lo retiró. Por ahora tu bot está usando el modelo automático de este mismo proveedor. Elige otro modelo y guarda para quitar este aviso.</div>`;
     } catch {
       // valor corrupto/legado — lo ignoramos, no vale la pena tronar el panel por esto
     }
@@ -166,7 +166,7 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
       <div style="display:flex;flex-direction:column;gap:2px">
         <h3 class="font-display font-semibold text-[13.5px] text-cream">🧠 Modelo de IA</h3>
       </div>
-      <div style="display:flex;align-items:flex-start;gap:9px;background:var(--accent-soft);border:1px solid #ead79a;border-radius:11px;padding:13px 15px">
+      <div style="display:flex;align-items:flex-start;gap:9px;background:var(--accent-soft);border:1px solid rgba(245,197,24,.35);border-radius:var(--radius-sm);padding:13px 15px">
         <span style="color:var(--accent-2);flex:none;line-height:1">◆</span>
         <p class="text-[12px]" style="color:var(--muted);margin:0">Elige qué inteligencia artificial usa tu bot. Puedes usar tu propia API key para pagar tú el consumo directamente. Si lo dejas en automático, el bot usa la configuración incluida (rápido para lo simple, inteligente para lo difícil).</p>
       </div>
@@ -212,7 +212,7 @@ function renderSectionNav(): string {
   const items = SECTIONS.map(
     (s, i) => `
     <button type="button" class="cfg-nav-item" data-target="${s.id}"
-            style="text-align:left;width:100%;border:0;cursor:pointer;font-family:inherit;padding:9px 12px;font-size:12.5px;border-radius:9px;${
+            style="text-align:left;width:100%;border:0;cursor:pointer;font-family:inherit;padding:9px 12px;font-size:12.5px;border-radius:var(--radius-sm);${
               i === 0 ? "background:var(--cream);color:var(--accent);font-weight:600" : "background:transparent;color:var(--muted)"
             }">${esc(s.label)}</button>`,
   ).join("");
@@ -242,7 +242,7 @@ export function renderConfig(
   // todas son el mismo <form>, nada más ocultas/mostradas con JS.
   const saveBar = `
     <div id="cfg-save-bar" data-saved="${saved ? "1" : "0"}"
-         style="position:sticky;top:72px;z-index:20;display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 16px;box-shadow:var(--shadow-sm)">
+         style="position:sticky;top:72px;z-index:20;display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 16px;box-shadow:var(--shadow-sm)">
       <span id="cfg-save-dot" style="width:7px;height:7px;border-radius:50%;flex:none;background:var(--ok)"></span>
       <span id="cfg-save-label" class="text-[12.5px]" style="color:var(--muted);font-weight:600">Todo guardado</span>
       <div style="margin-left:auto;display:flex;gap:8px">

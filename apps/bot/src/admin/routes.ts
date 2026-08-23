@@ -58,6 +58,7 @@ import {
   renderMcpConnectModal,
   connectMcp,
   updateConnectorConfig,
+  saveWidgetConfig,
 } from "./views/conexiones";
 import { startOAuth, handleOAuthCallback } from "./oauthConnect";
 import type { ConnectorCategory } from "../connectors/registry";
@@ -68,6 +69,7 @@ import { resolveTimezone } from "../datetime";
 import { Db } from "../db/client";
 import { LeadsRepo, type Lead } from "../db/leads";
 import { TicketsRepo } from "../db/tickets";
+import { pushToTicketsIfConnected } from "../tools/handoffHuman";
 import { ConversationsRepo } from "../db/conversations";
 import { BotsRepo } from "../db/bots";
 import { MessagesRepo } from "../db/messages";
@@ -781,11 +783,17 @@ adminApp.get("/leads", async (c) => c.html(await renderLeads(c.env, c.get("botId
 adminApp.get("/tickets", async (c) => c.html(await renderTickets(c.env, c.get("botId"))));
 
 // Calendario (F5 Fase 2): agenda del bot — local, o el calendario conectado si hay uno.
-adminApp.get("/calendario", async (c) => c.html(await renderCalendario(c.env, c.get("botId"), c.req.query("month"))));
+adminApp.get("/calendario", async (c) =>
+  c.html(await renderCalendario(c.env, c.get("botId"), c.req.query("month"), c.req.query("day"))),
+);
 
 adminApp.post("/calendario/:id/cancel", async (c) => {
   await cancelAppointment(c.env, c.get("botId"), c.req.param("id"));
-  return c.redirect("/admin/calendario", 302);
+  // Vuelve al mes/día que se estaba viendo (el panel del día seleccionado lo
+  // manda como campo oculto) en vez de perder el lugar y saltar al mes actual.
+  const form = await c.req.parseBody();
+  const redirect = typeof form.redirect === "string" && form.redirect.startsWith("?") ? form.redirect : "";
+  return c.redirect(`/admin/calendario${redirect}`, 302);
 });
 
 // Conexiones: mapa de canales con estado verde/gris (paso 4 del onboarding),
@@ -803,7 +811,7 @@ adminApp.get("/conexiones", async (c) =>
 // terminal (F5/F4: cada bot conecta sus propios canales desde el panel).
 adminApp.get("/conexiones/:channel/connect", (c) => {
   const channel = c.req.param("channel");
-  if (channel !== "telegram" && channel !== "twilio" && channel !== "manychat") {
+  if (channel !== "telegram" && channel !== "twilio" && channel !== "manychat" && channel !== "widget") {
     return c.text("Canal desconocido", 404);
   }
   return c.html(renderConnectModal(channel));
@@ -811,7 +819,7 @@ adminApp.get("/conexiones/:channel/connect", (c) => {
 
 adminApp.post("/conexiones/:channel/connect", async (c) => {
   const channel = c.req.param("channel");
-  if (channel !== "telegram" && channel !== "twilio" && channel !== "manychat") {
+  if (channel !== "telegram" && channel !== "twilio" && channel !== "manychat" && channel !== "widget") {
     return c.text("Canal desconocido", 404);
   }
   const form = await c.req.formData();
@@ -824,11 +832,18 @@ adminApp.post("/conexiones/:channel/connect", async (c) => {
 
 adminApp.post("/conexiones/:channel/disconnect", async (c) => {
   const channel = c.req.param("channel");
-  if (channel !== "telegram" && channel !== "twilio" && channel !== "manychat") {
+  if (channel !== "telegram" && channel !== "twilio" && channel !== "manychat" && channel !== "widget") {
     return c.text("Canal desconocido", 404);
   }
   await disconnectChannel(c.env, c.get("botId"), channel);
   return c.redirect("/admin/conexiones", 302);
+});
+
+// Config visual del widget (posición/color/saludo) — no pasa por
+// connectChannel(): no crea/renueva la conexión, solo actualiza `config`.
+adminApp.post("/conexiones/widget/config", async (c) => {
+  await saveWidgetConfig(c.env, c.get("botId"), await c.req.formData());
+  return c.redirect("/admin/conexiones?ok=1", 302);
 });
 
 // Conectores salientes (CRM/Tickets/Calendario/MCP) — mismo diálogo guiado,
@@ -1223,6 +1238,46 @@ adminApp.post("/conversations/:id/resume", async (c) => {
   const msgs = new MessagesRepo(db, botId);
   await msgs.append(id, "owner", summary);
   return c.redirect(`/admin/conversations?c=${encodeURIComponent(id)}`);
+});
+
+// Manual "Crear ticket" from the panel — the owner is already looking at the
+// conversation, so unlike handoffHuman.ts (the agent's own tool) this skips
+// the owner notification (email/Telegram/WhatsApp ping): there's no one to
+// notify who isn't already here. It still pushes to an external tickets
+// platform if one is connected, same as the agent-created path.
+adminApp.post("/conversations/:id/create-ticket", async (c) => {
+  const id = c.req.param("id");
+  const db = new Db(c.env.DB);
+  const botId = c.get("botId");
+  const convs = new ConversationsRepo(db, botId);
+  const conv = await convs.getById(id);
+  if (!conv) return c.html(await renderThreadLive(c.env, botId, id));
+
+  const history = await new MessagesRepo(db, botId).lastN(id, 20);
+  const transcript = history.map((m) => `${m.role === "user" ? "Cliente" : "Bot"}: ${m.content}`).join("\n");
+
+  const ticketId = await new TicketsRepo(db, botId).create({
+    conversationId: id,
+    category: "other",
+    summary: "Ticket creado manualmente desde el panel de conversaciones",
+    transcript,
+    requesterName: conv.display_name,
+    requesterContact: conv.channel_user_id,
+  });
+  await convs.setOpenTicket(id, ticketId);
+  await pushToTicketsIfConnected(
+    c.env,
+    db,
+    botId,
+    ticketId,
+    "Ticket creado manualmente desde el panel de conversaciones",
+    "other",
+    "normal",
+    conv.display_name,
+    conv.channel_user_id,
+  );
+
+  return c.html(await renderThreadLive(c.env, botId, id));
 });
 
 // --- Co-pilot (HTMX-driven suggestion) --------------------------------------

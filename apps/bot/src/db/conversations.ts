@@ -52,6 +52,18 @@ export class ConversationsRepo {
     ))!;
   }
 
+  /**
+   * Lectura pura — a diferencia de getOrCreate, NUNCA inserta. La usa el
+   * polling del widget: abrir el chat (antes de escribir nada) no debe crear
+   * una conversación vacía.
+   */
+  async findByChannelUserId(channel: string, channelUserId: string): Promise<Conversation | null> {
+    return this.db.first<Conversation>(
+      "SELECT * FROM conversations WHERE bot_id = ? AND channel = ? AND channel_user_id = ?",
+      [this.botId, channel, channelUserId],
+    );
+  }
+
   async getById(id: string): Promise<Conversation | null> {
     return this.db.first<Conversation>(
       "SELECT * FROM conversations WHERE id = ? AND bot_id = ?",

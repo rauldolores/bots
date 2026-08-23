@@ -4,6 +4,10 @@ import { Db } from "./client";
 export interface BotChannelConfig {
   accountSid?: string;
   waFrom?: string;
+  // widget (channel "widget"): la llave pública va en external_id, no aquí.
+  bubbleColor?: string;
+  position?: "bottom-right" | "bottom-left";
+  greeting?: string;
 }
 
 export interface BotChannel {
@@ -110,6 +114,20 @@ export class BotChannelsRepo {
 
   async disable(botId: string, channel: string): Promise<void> {
     await this.db.run("UPDATE bot_channels SET enabled = false WHERE bot_id = ? AND channel = ?", [
+      botId,
+      channel,
+    ]);
+  }
+
+  /**
+   * Guarda SOLO `config` — a diferencia de `upsert()`, cuyo ON CONFLICT
+   * sobreescribe `external_id` sin COALESCE (bueno para reconectar con datos
+   * nuevos, pero un guardado de config-only vía upsert() borraría la llave
+   * pública del widget si no se le vuelve a pasar externalId).
+   */
+  async updateConfig(botId: string, channel: string, config: BotChannelConfig): Promise<void> {
+    await this.db.run("UPDATE bot_channels SET config = ? WHERE bot_id = ? AND channel = ?", [
+      JSON.stringify(config),
       botId,
       channel,
     ]);

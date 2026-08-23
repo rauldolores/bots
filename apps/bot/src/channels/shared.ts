@@ -1,4 +1,4 @@
-export type ChannelId = "manychat" | "telegram" | "twilio" | "messenger" | "instagram" | "whatsapp";
+export type ChannelId = "manychat" | "telegram" | "twilio" | "messenger" | "instagram" | "whatsapp" | "widget";
 
 export interface IncomingMessage {
   channel: ChannelId;

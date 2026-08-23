@@ -20,9 +20,11 @@ import { detectKind } from "./learn/fieldPath";
 import { saveCapture, isLearnMode } from "./learn/mapping";
 import { tokensMatch } from "./http-auth";
 import { apiApp } from "./api";
+import { widgetApp, widgetScriptHandler } from "./widget/routes";
 import { ingestMessage } from "./agent/runner";
 import { wakeTickAfter } from "./queue/wake";
 import { tick } from "./queue/tick";
+import { ctxOpcional } from "./hono-utils";
 
 /** La expresión del cron nocturno (wrangler.toml, vercel.json). */
 export const DAILY_CRON = "0 3 * * *";
@@ -36,23 +38,6 @@ export const DAILY_CRON = "0 3 * * *";
 export const TICK_CRON = "* * * * *";
 
 const app = new Hono<{ Bindings: Env }>();
-
-/**
- * El contexto de ejecución, si la plataforma lo tiene.
- *
- * Hono LANZA al acceder a `c.executionCtx` cuando no existe (que es el caso en
- * un servidor Node), así que hay que envolverlo. Sin esto, el webhook devolvía
- * 500 y el canal lo reintentaba: el cliente terminaba con la respuesta
- * duplicada.
- */
-function ctxOpcional(c: { executionCtx?: unknown }): { waitUntil(p: Promise<unknown>): void } | null {
-  try {
-    const ctx = c.executionCtx as { waitUntil?: unknown } | undefined;
-    return ctx && typeof ctx.waitUntil === "function" ? (ctx as any) : null;
-  } catch {
-    return null;
-  }
-}
 
 app.get("/health", (c) => c.text("ok", 200));
 
@@ -289,6 +274,13 @@ app.route("/admin", adminApp);
 // Control-plane API — Bearer-guarded (CONTROL_PLANE_TOKEN) read-only sub-app
 // mounted at /api/* for a future hosted control plane (health + metrics).
 app.route("/api", apiApp);
+
+// Widget de chat embebible — el único endpoint público/cross-origin de la
+// app (llave pública en vez de sesión/HMAC). /widget.js va aparte de la
+// sub-app porque un <script src> no está sujeto a CORS, a diferencia de los
+// fetch() que ese script hace después contra /widget/*.
+app.get("/widget.js", widgetScriptHandler);
+app.route("/widget", widgetApp);
 
 // KB reindex — embeds scripts/kb-fixtures.json into pgvector. Guarded by the
 // KB_REINDEX_TOKEN secret via the X-Reindex-Token header. Trigger after deploy:

@@ -40,6 +40,20 @@ describe("ConversationsRepo", () => {
     expect(await repo.isPaused(conv.id)).toBe(false);
   });
 
+  describe("findByChannelUserId (solo lectura, no crea)", () => {
+    it("devuelve null cuando no existe — sin crear una fila", async () => {
+      expect(await repo.findByChannelUserId("widget", "nunca-escribio")).toBeNull();
+      const rows = await db.all("SELECT id FROM conversations WHERE bot_id = ?", [TEST_BOT_ID]);
+      expect(rows).toHaveLength(0);
+    });
+
+    it("encuentra la conversación creada por getOrCreate", async () => {
+      const conv = await repo.getOrCreate("widget", "visitante_1");
+      const found = await repo.findByChannelUserId("widget", "visitante_1");
+      expect(found?.id).toBe(conv.id);
+    });
+  });
+
   // F2.1: el riesgo dominante del plan de multitenencia — dos bots con un
   // cliente que comparte el mismo id de canal (mismo chat_id, mismo número)
   // NUNCA deben terminar viendo la misma fila.
