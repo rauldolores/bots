@@ -34,6 +34,27 @@ export const SETTING_KEYS = {
   // citas y las fechas del panel se lean en la hora del dueño, no en UTC.
   // Vacío = America/Mexico_City (ver src/datetime.ts DEFAULT_TIMEZONE).
   timezone: "timezone",
+  // Canal Voice (F7 fase 3): API key de OpenAI para el modelo de audio en
+  // tiempo real (Realtime) — proveedor distinto al de "Modelo de IA" de
+  // arriba, así que necesita la suya aunque el bot piense con Claude/otro.
+  // Vacío = se detecta sola (BYO-LLM si eligieron OpenAI ahí, si no la del
+  // despliegue) — ver channels/voice/openaiKey.ts.
+  voiceOpenAiApiKey: "voice_openai_api_key",
+  // F7 fase 10 — observabilidad de Voice. "No almacenar datos sensibles
+  // innecesariamente": el transcript estructurado de una llamada (más
+  // detallado que los mensajes normales — ver voice_sessions.transcript)
+  // solo se guarda si el dueño lo prende aquí. Vacío/"0" = no se guarda.
+  voiceStoreTranscript: "voice_store_transcript", // 0 | 1
+  // Días que se conservan voice_sessions/voice_call_events (y su
+  // transcript, si se guardó) antes de purgarse — ver crons/purgeVoiceCalls.ts.
+  // Vacío = 90 días por default (ver DEFAULT_VOICE_RETENTION_DAYS).
+  voiceCallRetentionDays: "voice_call_retention_days",
+  // Tarifa de telefonía para estimar el costo por llamada
+  // (channels/voice/callCost.ts) — el costo de IA se calcula con el uso
+  // REAL de tokens de Realtime (mismo motor que src/pricing.ts para el
+  // resto del bot); Twilio no da tokens, así que su lado sigue siendo
+  // minutos × tarifa configurable. Vacío = default razonable.
+  voiceTelephonyCostPerMinuteUsd: "voice_telephony_cost_per_minute_usd",
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

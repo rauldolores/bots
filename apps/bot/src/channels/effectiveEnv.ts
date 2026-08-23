@@ -13,6 +13,11 @@ const SECRET_ENV_KEY: Partial<Record<ChannelId, keyof Env>> = {
   telegram: "TELEGRAM_BOT_TOKEN",
   manychat: "MANYCHAT_API_KEY",
   twilio: "TWILIO_AUTH_TOKEN",
+  // F7 fase 2: mismo Auth Token que "twilio" (WhatsApp) — Twilio firma TODOS
+  // sus webhooks (mensajería o voz) con el Auth Token de la cuenta, no hay
+  // uno distinto por producto. Lo que sí puede diferir por bot es el NÚMERO
+  // (ver applyChannelConfig) — un bot puede tener Voice sin tener WhatsApp.
+  voice: "TWILIO_AUTH_TOKEN",
 };
 
 /** Twilio necesita SID y número de origen además del token — ninguno de los
@@ -23,6 +28,13 @@ function applyChannelConfig(env: Env, channel: ChannelId, config: BotChannel["co
       ...env,
       ...(config.accountSid ? { TWILIO_ACCOUNT_SID: config.accountSid } : {}),
       ...(config.waFrom ? { TWILIO_WA_FROM: config.waFrom } : {}),
+    };
+  }
+  if (channel === "voice") {
+    return {
+      ...env,
+      ...(config.accountSid ? { TWILIO_ACCOUNT_SID: config.accountSid } : {}),
+      ...(config.voiceNumber ? { TWILIO_VOICE_NUMBER: config.voiceNumber } : {}),
     };
   }
   return env;

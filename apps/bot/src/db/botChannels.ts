@@ -4,6 +4,13 @@ import { Db } from "./client";
 export interface BotChannelConfig {
   accountSid?: string;
   waFrom?: string;
+  // canal "voice" (F7 fase 2): número de Twilio Voice-capable de este bot —
+  // puede ser distinto del número de WhatsApp (waFrom).
+  voiceNumber?: string;
+  // canal "voice" (F7 fase 9): a qué número se transfiere la llamada cuando
+  // el agente pide un humano (transfer_to_human). Nunca lo elige el modelo —
+  // siempre este valor, configurado por el dueño.
+  transferNumber?: string;
   // widget (channel "widget"): la llave pública va en external_id, no aquí.
   bubbleColor?: string;
   position?: "bottom-right" | "bottom-left";

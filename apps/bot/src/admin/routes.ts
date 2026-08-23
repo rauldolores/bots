@@ -43,6 +43,8 @@ import { applySuggestion, dismissSuggestion } from "../flywheel/apply";
 import { renderLeads, exportLeadsCsv } from "./views/leads";
 import { renderTickets, updateTicketPriority } from "./views/tickets";
 import { renderCalendario, cancelAppointment } from "./views/calendario";
+import { renderTelefono } from "./views/telefono";
+import { startOnboarding, activateOnboarding, disableOnboarding, retryOnboarding } from "../channels/voice/onboarding/service";
 import { renderConfig } from "./views/config";
 import {
   renderConexiones,
@@ -67,6 +69,7 @@ import { enqueueCampaign, createHandoffTemplate, contentApprovalStatus, listCont
 import { segmentCount, parseCampaignFilters } from "../segments";
 import { resolveTimezone } from "../datetime";
 import { Db } from "../db/client";
+import { BotChannelsRepo } from "../db/botChannels";
 import { LeadsRepo, type Lead } from "../db/leads";
 import { TicketsRepo } from "../db/tickets";
 import { pushToTicketsIfConnected } from "../tools/handoffHuman";
@@ -796,6 +799,50 @@ adminApp.post("/calendario/:id/cancel", async (c) => {
   return c.redirect(`/admin/calendario${redirect}`, 302);
 });
 
+// Tu número (F7 fase 8): onboarding para conectar el número existente del
+// cliente vía desvío de llamadas — máquina de estados propia (ver
+// channels/voice/onboarding/), independiente de Conexiones.
+adminApp.get("/telefono", async (c) =>
+  c.html(await renderTelefono(c.env, c.get("botId"), { ok: c.req.query("ok") === "1", err: c.req.query("err") })),
+);
+
+adminApp.post("/telefono/start", async (c) => {
+  const form = await c.req.formData();
+  const result = await startOnboarding(c.env, c.get("botId"), String(form.get("source_phone_number") ?? ""));
+  if (!result.ok) return c.redirect(`/admin/telefono?err=${encodeURIComponent(result.error ?? "No se pudo continuar.")}`, 302);
+  return c.redirect("/admin/telefono?ok=1", 302);
+});
+
+adminApp.post("/telefono/:id/activate", async (c) => {
+  const ok = await activateOnboarding(c.env, c.get("botId"), c.req.param("id"));
+  return c.redirect(ok ? "/admin/telefono?ok=1" : "/admin/telefono?err=No se pudo activar todavía.", 302);
+});
+
+adminApp.post("/telefono/:id/disable", async (c) => {
+  await disableOnboarding(c.env, c.get("botId"), c.req.param("id"));
+  return c.redirect("/admin/telefono?ok=1", 302);
+});
+
+adminApp.post("/telefono/:id/retry", async (c) => {
+  const ok = await retryOnboarding(c.env, c.get("botId"), c.req.param("id"));
+  return c.redirect(ok ? "/admin/telefono?ok=1" : "/admin/telefono?err=No se pudo reintentar.", 302);
+});
+
+// F7 fase 9: a qué número transfiere el agente cuando el cliente pide un
+// humano — independiente del estado del onboarding (item de config, no de
+// la máquina de estados de arriba).
+adminApp.post("/telefono/transfer-number", async (c) => {
+  const botId = c.get("botId");
+  const form = await c.req.formData();
+  const transferNumber = String(form.get("transfer_number") ?? "").trim();
+  const db = new Db(c.env.DB);
+  const repo = new BotChannelsRepo(db);
+  const row = await repo.getByBotAndChannel(botId, "voice");
+  if (!row) return c.redirect("/admin/telefono?err=Primero conecta Voice.", 302);
+  await repo.updateConfig(botId, "voice", { ...row.config, transferNumber: transferNumber || undefined });
+  return c.redirect("/admin/telefono?ok=1", 302);
+});
+
 // Conexiones: mapa de canales con estado verde/gris (paso 4 del onboarding),
 // más las pestañas de conectores salientes (CRM, tickets, calendario, MCP).
 adminApp.get("/conexiones", async (c) =>
@@ -811,7 +858,7 @@ adminApp.get("/conexiones", async (c) =>
 // terminal (F5/F4: cada bot conecta sus propios canales desde el panel).
 adminApp.get("/conexiones/:channel/connect", (c) => {
   const channel = c.req.param("channel");
-  if (channel !== "telegram" && channel !== "twilio" && channel !== "manychat" && channel !== "widget") {
+  if (channel !== "telegram" && channel !== "twilio" && channel !== "voice" && channel !== "manychat" && channel !== "widget") {
     return c.text("Canal desconocido", 404);
   }
   return c.html(renderConnectModal(channel));
@@ -819,7 +866,7 @@ adminApp.get("/conexiones/:channel/connect", (c) => {
 
 adminApp.post("/conexiones/:channel/connect", async (c) => {
   const channel = c.req.param("channel");
-  if (channel !== "telegram" && channel !== "twilio" && channel !== "manychat" && channel !== "widget") {
+  if (channel !== "telegram" && channel !== "twilio" && channel !== "voice" && channel !== "manychat" && channel !== "widget") {
     return c.text("Canal desconocido", 404);
   }
   const form = await c.req.formData();
@@ -832,7 +879,7 @@ adminApp.post("/conexiones/:channel/connect", async (c) => {
 
 adminApp.post("/conexiones/:channel/disconnect", async (c) => {
   const channel = c.req.param("channel");
-  if (channel !== "telegram" && channel !== "twilio" && channel !== "manychat" && channel !== "widget") {
+  if (channel !== "telegram" && channel !== "twilio" && channel !== "voice" && channel !== "manychat" && channel !== "widget") {
     return c.text("Canal desconocido", 404);
   }
   await disconnectChannel(c.env, c.get("botId"), channel);
@@ -1018,6 +1065,7 @@ adminApp.get("/config", async (c) => {
       { name: bot?.name ?? c.env.BOT_NAME, businessName: bot?.business_name ?? c.env.BUSINESS_NAME },
       saved,
       c.req.query("llmtest"),
+      Boolean(c.env.OPENAI_API_KEY),
     ),
   );
 });
@@ -1103,6 +1151,16 @@ adminApp.post("/config", async (c) => {
     const keyRaw = form.get(SETTING_KEYS.llmApiKey);
     if (keyRaw !== null && String(keyRaw).trim() !== "") {
       await repo.set(SETTING_KEYS.llmApiKey, String(keyRaw).trim());
+    }
+  }
+
+  // API key de OpenAI para Voz (Realtime) — mismo patrón que la de arriba.
+  if (form.get("voice_openai_api_key_clear") === "1") {
+    await repo.set(SETTING_KEYS.voiceOpenAiApiKey, "");
+  } else {
+    const voiceKeyRaw = form.get(SETTING_KEYS.voiceOpenAiApiKey);
+    if (voiceKeyRaw !== null && String(voiceKeyRaw).trim() !== "") {
+      await repo.set(SETTING_KEYS.voiceOpenAiApiKey, String(voiceKeyRaw).trim());
     }
   }
 

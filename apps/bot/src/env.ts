@@ -55,6 +55,30 @@ export interface Env {
   TWILIO_AUTH_TOKEN?: string;
   TWILIO_WA_FROM?: string;
   TWILIO_HANDOFF_CONTENT_SID?: string;  // approved WhatsApp template for owner handoff DM
+  // Canal Voice (F7 fase 2): número de Twilio Voice-capable que recibe llamadas.
+  // Usa las MISMAS credenciales de cuenta (TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN)
+  // que WhatsApp — Twilio firma todos sus webhooks con el mismo Auth Token sin
+  // importar el producto.
+  TWILIO_VOICE_NUMBER?: string;
+  // Canal Voice (F7 fase 3): OpenAI Realtime — el modelo de audio en tiempo
+  // real. La API key NO vive aquí (se resuelve por bot desde /admin/config →
+  // Voz, con fallback a OPENAI_API_KEY — ver channels/voice/openaiKey.ts);
+  // este var es solo el override del modelo concreto si hace falta cambiarlo
+  // sin tocar código. Vacío = "gpt-realtime-2.1-mini" (realtimeClient.ts).
+  OPENAI_REALTIME_MODEL?: string;
+  // Override del endpoint de Realtime — para pruebas (un servidor falso
+  // local). Vacío = wss://api.openai.com/v1/realtime (uso normal).
+  OPENAI_REALTIME_URL?: string;
+  // Duración máxima de una llamada antes de cerrarla sola (protección contra
+  // una sesión de Realtime atorada). Vacío = 30 minutos.
+  VOICE_MAX_CALL_DURATION_MS?: string;
+  // F7 fase 6: manejo de silencios largos. Cuánto silencio del cliente (sin
+  // respuesta activa) antes de sondear si sigue en la línea, y cuánto en
+  // total antes de colgar si no contesta. Vacío = 15s / 45s.
+  VOICE_SILENCE_NUDGE_MS?: string;
+  VOICE_SILENCE_HANGUP_MS?: string;
+  /** Cada cuánto se revisa (setInterval) — para pruebas. Vacío = 5s. */
+  VOICE_SILENCE_CHECK_INTERVAL_MS?: string;
   // Meta oficial (Facebook Messenger + Instagram DMs, sin ManyChat).
   META_PAGE_ACCESS_TOKEN?: string;  // Messenger / IG ligado a Página (graph.facebook.com)
   INSTAGRAM_ACCESS_TOKEN?: string;  // Instagram API con Instagram Login, token IGAA… (graph.instagram.com)

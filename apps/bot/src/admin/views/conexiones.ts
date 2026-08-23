@@ -9,7 +9,8 @@ import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { BotChannelsRepo, type BotChannel } from "../../db/botChannels";
 import { BotConnectorsRepo, type BotConnector } from "../../db/botConnectors";
-import { createSecret, deleteSecret } from "../../db/vault";
+import { VoiceNumbersRepo, DuplicateVoiceNumberError } from "../../db/voiceNumbers";
+import { createSecret, updateSecret, deleteSecret } from "../../db/vault";
 import { setTelegramWebhook } from "../../channels/telegram";
 import {
   CRM_PROVIDERS,
@@ -31,7 +32,7 @@ function esc(s: string): string {
   );
 }
 
-type ConnectableChannel = "telegram" | "twilio" | "manychat" | "widget";
+type ConnectableChannel = "telegram" | "twilio" | "voice" | "manychat" | "widget";
 
 interface FieldSpec {
   name: string;
@@ -82,6 +83,24 @@ const CHANNEL_META: Record<ConnectableChannel, ChannelMeta> = {
     ],
     webhookNote:
       "Después de guardar, copia la URL del webhook que aparece en la tarjeta y pégala en Twilio → tu número de WhatsApp → \"WHEN A MESSAGE COMES IN\".",
+  },
+  voice: {
+    id: "voice",
+    name: "Llamadas telefónicas (Twilio Voice)",
+    icon: "phone-call",
+    desc: "Tu bot contesta llamadas de verdad — la misma personalidad y las mismas herramientas, pero habladas.",
+    steps: [
+      'Entra a <span class="font-mono">twilio.com/console</span> y copia tu <b>Account SID</b> y tu <b>Auth Token</b> (los mismos que usarías para WhatsApp por Twilio — están en la página principal del dashboard).',
+      "Consigue un número de Twilio (cualquier número normal de Twilio puede recibir llamadas) — cómpralo o usa uno que ya tengas.",
+      "Pega los tres datos aquí abajo.",
+    ],
+    fields: [
+      { name: "account_sid", label: "Account SID", placeholder: "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" },
+      { name: "auth_token", label: "Auth Token", placeholder: "········", type: "password" },
+      { name: "phone_number", label: "Número de teléfono", placeholder: "+14155551234" },
+    ],
+    webhookNote:
+      'Después de guardar, copia la URL del webhook y pégala en Twilio → tu número → sección "Voice" → "A CALL COMES IN" (método <span class="font-mono">HTTP POST</span>).',
   },
   manychat: {
     id: "manychat",
@@ -242,6 +261,23 @@ async function connectedRow(db: Db, botId: string, channel: ConnectableChannel):
   return new BotChannelsRepo(db).getByBotAndChannel(botId, channel);
 }
 
+/**
+ * Guarda el secreto de un canal en Vault — actualiza el existente si el bot
+ * YA estaba conectado (reconectar con un token nuevo, ej. rotarlo), o crea
+ * uno si es la primera vez. Antes esto SIEMPRE creaba uno nuevo con un
+ * `name` fijo (`<canal>:<botId>`) — Vault tiene un índice único en `name`,
+ * así que reconectar sin desconectar primero tronaba con un error de
+ * Postgres sin manejar en vez de guardar el token nuevo.
+ */
+async function saveChannelSecret(db: Db, botId: string, channel: ConnectableChannel, value: string): Promise<string> {
+  const existing = await connectedRow(db, botId, channel);
+  if (existing?.secret_ref) {
+    await updateSecret(db, existing.secret_ref, value);
+    return existing.secret_ref;
+  }
+  return createSecret(db, value, `${channel}:${botId}`);
+}
+
 /** Procesa el formulario de conexión: guarda en Vault + bot_channels, y para Telegram registra el webhook solo. */
 export async function connectChannel(
   env: Env,
@@ -264,7 +300,7 @@ export async function connectChannel(
   if (channel === "telegram") {
     const token = str("token");
     if (!token) return renderConnectModal("telegram", { error: "Falta el token." });
-    const secretRef = await createSecret(db, token, `telegram:${botId}`);
+    const secretRef = await saveChannelSecret(db, botId, "telegram", token);
     await repo.upsert({ botId, channel: "telegram", secretRef });
     const result = await setTelegramWebhook(token, webhookUrlFor(env, "telegram", botId));
     return renderConnectedModal("telegram", env, botId, result);
@@ -277,15 +313,37 @@ export async function connectChannel(
     if (!accountSid || !authToken || !waFrom) {
       return renderConnectModal("twilio", { error: "Faltan datos — los tres campos son obligatorios." });
     }
-    const secretRef = await createSecret(db, authToken, `twilio:${botId}`);
+    const secretRef = await saveChannelSecret(db, botId, "twilio", authToken);
     await repo.upsert({ botId, channel: "twilio", secretRef, config: { accountSid, waFrom } });
     return renderConnectedModal("twilio", env, botId);
+  }
+
+  if (channel === "voice") {
+    const accountSid = str("account_sid");
+    const authToken = str("auth_token");
+    const phoneNumber = str("phone_number");
+    if (!accountSid || !authToken || !phoneNumber) {
+      return renderConnectModal("voice", { error: "Faltan datos — los tres campos son obligatorios." });
+    }
+    // F7 fase 7: el número se registra ANTES de tocar Vault/bot_channels —
+    // si ya es de otro bot, no se deja el canal a medio conectar.
+    try {
+      await new VoiceNumbersRepo(db).claim({ botId, phoneNumber, provider: "twilio" });
+    } catch (e) {
+      if (e instanceof DuplicateVoiceNumberError) {
+        return renderConnectModal("voice", { error: `${e.message} Si es un error, desconecta Voice del otro bot primero.` });
+      }
+      throw e;
+    }
+    const secretRef = await saveChannelSecret(db, botId, "voice", authToken);
+    await repo.upsert({ botId, channel: "voice", secretRef, config: { accountSid, voiceNumber: phoneNumber } });
+    return renderConnectedModal("voice", env, botId);
   }
 
   // manychat
   const apiKey = str("api_key");
   if (!apiKey) return renderConnectModal("manychat", { error: "Falta la API Key." });
-  const secretRef = await createSecret(db, apiKey, `manychat:${botId}`);
+  const secretRef = await saveChannelSecret(db, botId, "manychat", apiKey);
   await repo.upsert({ botId, channel: "manychat", secretRef });
   return renderConnectedModal("manychat", env, botId);
 }
@@ -296,6 +354,10 @@ export async function disconnectChannel(env: Env, botId: string, channel: Connec
   const row = await connectedRow(db, botId, channel);
   if (row?.secret_ref) await deleteSecret(db, row.secret_ref).catch(() => {});
   await repo.disable(botId, channel);
+  // El webhook YA rechaza llamadas sin la fila de bot_channels (arriba), pero
+  // también se apagan los números para que /admin no los siga mostrando
+  // como activos — y por si algún día se registran contra otra capa.
+  if (channel === "voice") await new VoiceNumbersRepo(db).disableAllForBot(botId);
 }
 
 /** Guarda posición/color/saludo del widget — nunca toca external_id (la llave pública), a diferencia de upsert(). */
@@ -711,11 +773,20 @@ async function renderConnectableCard(env: Env, db: Db, botId: string, meta: Chan
          </form>`
       : "";
 
+  // F7 fase 8: desde aquí se descubre el flujo de "conserva tu número
+  // existente" — solo tiene sentido una vez que YA hay un número de Twilio
+  // conectado (el destino del desvío).
+  const voiceOnboardingLink =
+    ok && meta.id === "voice"
+      ? `<a href="/admin/telefono" class="text-[11px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:5px 12px;text-decoration:none;font-weight:600">¿Quieres conservar tu número actual?</a>`
+      : "";
+
   const action = ok
     ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
          ${meta.id === "widget" && row ? copyBlock("Código para tu sitio", widgetSnippet(env, botId, row.external_id ?? "")) : copyRow("Webhook", webhookUrlFor(env, meta.id, botId))}
        </div>
        ${widgetConfigForm}
+       ${voiceOnboardingLink}
        <form method="POST" action="/admin/conexiones/${meta.id}/disconnect" style="margin-top:4px" onsubmit="return confirm('¿Desconectar ${esc(meta.name)}? El bot dejará de recibir mensajes por aquí.')">
          <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Desconectar</button>
        </form>`

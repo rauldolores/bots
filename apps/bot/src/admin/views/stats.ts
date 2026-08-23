@@ -164,6 +164,38 @@ export async function renderStats(env: Env, botId: string): Promise<string> {
       new InsightsRepo(db, botId).stats(thirtyDays),
     ]);
 
+  // --- F7 fase 10: Voice — integra duración/costo/transferencias/latencia
+  // con las MISMAS pantallas de análisis, no una pantalla aparte. ---
+  const [voiceSummary, voiceByNumber] = await Promise.all([
+    db.first<{
+      calls: number;
+      failed: number;
+      transferred: number;
+      avg_duration_ms: number | null;
+      avg_ttfa_ms: number | null;
+      avg_response_latency_ms: number | null;
+      avg_interruptions: number | null;
+    }>(
+      `SELECT COUNT(*) as calls,
+              COUNT(*) FILTER (WHERE status = 'failed') as failed,
+              COUNT(*) FILTER (WHERE transfer_status IN ('requested','started','completed')) as transferred,
+              AVG(duration_ms) as avg_duration_ms,
+              AVG(time_to_first_audio_ms) as avg_ttfa_ms,
+              AVG(NULLIF(total_response_latency_ms, 0)) as avg_response_latency_ms,
+              AVG(interruption_count) as avg_interruptions
+       FROM voice_sessions
+       WHERE bot_id = ? AND started_at > ?`,
+      [botId, thirtyDays],
+    ),
+    db.all<{ called_number: string | null; calls: number; avg_duration_ms: number | null }>(
+      `SELECT called_number, COUNT(*) as calls, AVG(duration_ms) as avg_duration_ms
+       FROM voice_sessions WHERE bot_id = ? AND started_at > ?
+       GROUP BY called_number ORDER BY calls DESC`,
+      [botId, thirtyDays],
+    ),
+  ]);
+  const voiceCalls = voiceSummary?.calls ?? 0;
+
   // --- Derived business numbers ---
   let cost30 = 0;
   for (const r of tokenRows) {
@@ -184,12 +216,48 @@ export async function renderStats(env: Env, botId: string): Promise<string> {
   const heatCells = new Map(heatRows.map((r) => [`${r.dow}:${r.hour}`, r.n]));
 
   const money = (n: number) => `$${n.toFixed(n < 0.1 ? 3 : 2)}`;
+  const fmtDuration = (ms: number | null) => {
+    if (ms == null) return "—";
+    const s = Math.round(ms / 1000);
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+  };
+  const fmtMs = (ms: number | null) => (ms == null ? "—" : `${Math.round(ms)}ms`);
   const bigCard = (value: string, label: string, sub: string, accent = false) => `
     <div class="card bg-panel border border-line p-4${accent ? " border-l-[3px] border-l-accent" : ""}">
       <div class="font-display font-bold text-[28px] leading-none">${value}</div>
       <div class="text-[11px] text-muted mt-1">${label}</div>
       <div class="text-[10px] text-dim mt-0.5">${sub}</div>
     </div>`;
+
+  // --- F7 fase 10: sección de Voice — solo aparece si el bot ya tiene llamadas. ---
+  const failedPct = voiceCalls > 0 ? Math.round(((voiceSummary?.failed ?? 0) / voiceCalls) * 100) : 0;
+  const transferPct = voiceCalls > 0 ? Math.round(((voiceSummary?.transferred ?? 0) / voiceCalls) * 100) : 0;
+  const voiceSection =
+    voiceCalls > 0
+      ? `
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        ${bigCard(String(voiceCalls), "🎙️ Llamadas", "30 días", true)}
+        ${bigCard(fmtDuration(voiceSummary?.avg_duration_ms ?? null), "Duración promedio", "por llamada · 30 días")}
+        ${bigCard(`<span class="${transferPct > 0 ? "text-accent" : ""}">${transferPct}%</span>`, "↪ Tasa de transferencia", `${voiceSummary?.transferred ?? 0} transferida${(voiceSummary?.transferred ?? 0) === 1 ? "" : "s"} · 30 días`)}
+        ${bigCard(`<span class="${failedPct > 10 ? "text-bad" : ""}">${failedPct}%</span>`, "Llamadas fallidas", `${voiceSummary?.failed ?? 0} de ${voiceCalls} · 30 días`)}
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-[14px]">
+        <div class="card bg-panel border border-line p-[18px]">
+          <div class="font-display font-semibold text-[14px] mb-2.5">⚡ Latencia de voz <span class="text-[10px] text-dim font-normal">(promedio, 30 días)</span></div>
+          <table class="w-full text-[12.5px]"><tbody>
+            <tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">Tiempo a primer audio</td><td class="text-right text-muted text-[11px]">${fmtMs(voiceSummary?.avg_ttfa_ms ?? null)}</td></tr>
+            <tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">Latencia de respuesta (total/llamada)</td><td class="text-right text-muted text-[11px]">${fmtMs(voiceSummary?.avg_response_latency_ms ?? null)}</td></tr>
+            <tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">Interrupciones por llamada</td><td class="text-right text-muted text-[11px]">${(voiceSummary?.avg_interruptions ?? 0).toFixed(1)}</td></tr>
+          </tbody></table>
+        </div>
+        <div class="card bg-panel border border-line p-[18px]">
+          <div class="font-display font-semibold text-[14px] mb-2.5">📞 Llamadas por número</div>
+          <table class="w-full text-[12.5px]"><tbody>
+            ${voiceByNumber.map((r) => `<tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream font-mono text-[11px]">${esc(r.called_number ?? "—")}</td><td class="text-right text-muted text-[11px]">${r.calls} · ${fmtDuration(r.avg_duration_ms)} prom.</td></tr>`).join("") || `<tr><td class="py-3 text-dim text-[12.5px]">Sin datos.</td></tr>`}
+          </tbody></table>
+        </div>
+      </div>`
+      : "";
 
   const body = `
     <div class="flex flex-col gap-4" style="max-width:1080px">
@@ -199,6 +267,8 @@ export async function renderStats(env: Env, botId: string): Promise<string> {
         ${bigCard(`<span class="text-accent">${costPerLead === null ? "—" : money(costPerLead)}</span>`, "💰 Costo por lead", "IA / leads captados · 30 días")}
         ${bigCard(`<span class="text-ok">${resolvedPct === null ? "—" : `${resolvedPct}%`}</span>`, "Resueltas sin humano", "según el análisis de IA · 30 días")}
       </div>
+
+      ${voiceSection}
 
       <div class="card bg-panel border border-line p-[18px]">
         <div class="font-display font-semibold text-[14px] mb-3">📈 Mensajes por día <span class="text-[10px] text-dim font-normal">(30 días)</span></div>

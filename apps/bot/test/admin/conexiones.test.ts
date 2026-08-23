@@ -10,12 +10,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createTestDb, createSecondTestBot, TEST_BOT_ID } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { BotChannelsRepo } from "../../src/db/botChannels";
+import { VoiceNumbersRepo } from "../../src/db/voiceNumbers";
 import type { Env } from "../../src/env";
 
 const createSecretMock = vi.fn();
+const updateSecretMock = vi.fn();
 const deleteSecretMock = vi.fn();
 vi.mock("../../src/db/vault", () => ({
   createSecret: (...args: unknown[]) => createSecretMock(...args),
+  updateSecret: (...args: unknown[]) => updateSecretMock(...args),
   deleteSecret: (...args: unknown[]) => deleteSecretMock(...args),
 }));
 
@@ -42,6 +45,7 @@ beforeEach(async () => {
   db = await createTestDb();
   env = { DB: db.driver, DASHBOARD_BASE_URL: "https://bot.test" } as unknown as Env;
   createSecretMock.mockReset().mockResolvedValue("11111111-1111-1111-1111-111111111111");
+  updateSecretMock.mockReset().mockResolvedValue(undefined);
   deleteSecretMock.mockReset().mockResolvedValue(undefined);
   setTelegramWebhookMock.mockReset().mockResolvedValue({ ok: true });
 });
@@ -94,6 +98,60 @@ describe("connectChannel — twilio", () => {
     expect(html).toContain("Faltan datos");
     const row = await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "twilio");
     expect(row).toBeNull();
+  });
+});
+
+describe("connectChannel — voice", () => {
+  it("guarda el auth_token en Vault, el SID/número en config, y registra el número en voice_numbers", async () => {
+    const html = await connectChannel(
+      env,
+      TEST_BOT_ID,
+      "voice",
+      form({ account_sid: "ACxxx", auth_token: "tok123", phone_number: "+14155551234" }),
+    );
+    expect(html).toContain("conectado a este bot");
+    const row = await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "voice");
+    expect(row?.config).toEqual({ accountSid: "ACxxx", voiceNumber: "+14155551234" });
+    expect(createSecretMock).toHaveBeenCalledWith(expect.anything(), "tok123", expect.stringContaining("voice"));
+
+    const number = await new VoiceNumbersRepo(db).findByNumber("twilio", "+14155551234");
+    expect(number?.bot_id).toBe(TEST_BOT_ID);
+    expect(number?.enabled).toBe(true);
+  });
+
+  it("faltando cualquier campo: error, no crea ni la fila de canal ni el número", async () => {
+    const html = await connectChannel(env, TEST_BOT_ID, "voice", form({ account_sid: "ACxxx" }));
+    expect(html).toContain("Faltan datos");
+    expect(await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "voice")).toBeNull();
+    expect(createSecretMock).not.toHaveBeenCalled();
+  });
+
+  it("número ya conectado a OTRO bot: error amigable, no toca Vault ni bot_channels de este bot", async () => {
+    const otherBotId = await createSecondTestBot(db);
+    await new VoiceNumbersRepo(db).register({ botId: otherBotId, phoneNumber: "+14155551234" });
+
+    const html = await connectChannel(
+      env,
+      TEST_BOT_ID,
+      "voice",
+      form({ account_sid: "ACxxx", auth_token: "tok123", phone_number: "+14155551234" }),
+    );
+    expect(html).toContain("ya está registrado en otro bot");
+    expect(createSecretMock).not.toHaveBeenCalled();
+    expect(await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "voice")).toBeNull();
+  });
+
+  it("reconectar el MISMO bot con el MISMO número no truena como 'duplicado' (claim es idempotente)", async () => {
+    await connectChannel(env, TEST_BOT_ID, "voice", form({ account_sid: "ACxxx", auth_token: "tok1", phone_number: "+14155551234" }));
+    const html = await connectChannel(
+      env,
+      TEST_BOT_ID,
+      "voice",
+      form({ account_sid: "ACxxx", auth_token: "tok2", phone_number: "+14155551234" }),
+    );
+    expect(html).toContain("conectado a este bot");
+    const numbers = await new VoiceNumbersRepo(db).listByBot(TEST_BOT_ID);
+    expect(numbers).toHaveLength(1); // no duplicó la fila
   });
 });
 
@@ -161,11 +219,46 @@ describe("disconnectChannel", () => {
     expect(row).toBeNull(); // getByBotAndChannel solo trae enabled=true
   });
 
+  it("voice: al desconectar, también se apagan sus números en voice_numbers", async () => {
+    await connectChannel(env, TEST_BOT_ID, "voice", form({ account_sid: "ACxxx", auth_token: "tok123", phone_number: "+14155551234" }));
+    await disconnectChannel(env, TEST_BOT_ID, "voice");
+
+    expect(await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "voice")).toBeNull();
+    const number = await new VoiceNumbersRepo(db).findByNumber("twilio", "+14155551234");
+    expect(number?.enabled).toBe(false); // sigue registrado (no se borra), pero apagado
+  });
+
   it("widget: desconecta sin llamar a Vault (no tiene secret_ref)", async () => {
     await connectChannel(env, TEST_BOT_ID, "widget", form({}));
     await disconnectChannel(env, TEST_BOT_ID, "widget");
     expect(deleteSecretMock).not.toHaveBeenCalled();
     expect(await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "widget")).toBeNull();
+  });
+});
+
+describe("reconectar un canal YA conectado actualiza el secreto en vez de crear uno nuevo", () => {
+  it("telegram: la segunda conexión llama a updateSecret sobre el MISMO secret_ref, no a createSecret otra vez", async () => {
+    await connectChannel(env, TEST_BOT_ID, "telegram", form({ token: "token-viejo" }));
+    const before = await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "telegram");
+    createSecretMock.mockClear();
+
+    await connectChannel(env, TEST_BOT_ID, "telegram", form({ token: "token-nuevo" }));
+    const after = await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "telegram");
+
+    expect(createSecretMock).not.toHaveBeenCalled();
+    expect(updateSecretMock).toHaveBeenCalledWith(expect.anything(), before?.secret_ref, "token-nuevo");
+    expect(after?.secret_ref).toBe(before?.secret_ref); // mismo UUID de Vault, no uno nuevo
+  });
+
+  it("después de DESCONECTAR, sí crea un secreto nuevo (el anterior ya se borró)", async () => {
+    await connectChannel(env, TEST_BOT_ID, "telegram", form({ token: "token-1" }));
+    await disconnectChannel(env, TEST_BOT_ID, "telegram");
+    createSecretMock.mockReset().mockResolvedValue("22222222-2222-2222-2222-222222222222");
+    updateSecretMock.mockClear();
+
+    await connectChannel(env, TEST_BOT_ID, "telegram", form({ token: "token-2" }));
+    expect(createSecretMock).toHaveBeenCalledWith(expect.anything(), "token-2", expect.stringContaining("telegram"));
+    expect(updateSecretMock).not.toHaveBeenCalled();
   });
 });
 

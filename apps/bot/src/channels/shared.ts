@@ -1,4 +1,9 @@
-export type ChannelId = "manychat" | "telegram" | "twilio" | "messenger" | "instagram" | "whatsapp" | "widget";
+// "voice" (F7): a diferencia de los demás, todavía no tiene un ChannelAdapter
+// real registrado en replies/sender.ts — el transporte (Twilio + audio en
+// vivo) llega en una fase posterior. Se agrega aquí primero porque
+// conversations.channel / agent_state.channel ya necesitan el valor para que
+// una llamada comparta memoria con los demás canales (ver channels/voice/).
+export type ChannelId = "manychat" | "telegram" | "twilio" | "messenger" | "instagram" | "whatsapp" | "widget" | "voice";
 
 export interface IncomingMessage {
   channel: ChannelId;

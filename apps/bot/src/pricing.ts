@@ -21,6 +21,17 @@ export const PRICING = {
     cacheRead: 1.25,
     output: 10.00,
   },
+  // Voz en tiempo real (F7 fase 10, gpt-realtime-2.1-mini). Realtime cobra
+  // tokens de audio y de texto a tarifas MUY distintas — esto es una
+  // tarifa COMBINADA aproximada, predominantemente audio (lo típico en una
+  // llamada) — ajustar si OpenAI cambia su tabla de precios. El resto del
+  // estimado de una llamada (minutos de telefonía, que no tiene tokens)
+  // vive en channels/voice/callCost.ts.
+  "gpt-realtime-2.1-mini": {
+    input: 10.00,
+    cacheRead: 2.50,
+    output: 20.00,
+  },
 } as const;
 
 interface Rates {
@@ -44,6 +55,7 @@ const RATES: Record<string, Rates> = {
   "grok-4": { input: 3.0, cacheRead: 0.75, output: 15.0 },
   "grok-4-fast-non-reasoning": { input: 0.2, cacheRead: 0.05, output: 0.5 },
   "grok-3-mini": { input: 0.3, cacheRead: 0.075, output: 0.5 },
+  "gpt-realtime-2.1-mini": PRICING["gpt-realtime-2.1-mini"],
 };
 
 // Any concrete model id string (Anthropic or OpenAI). Kept as a string alias so

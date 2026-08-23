@@ -9,6 +9,7 @@ import { serve } from "@hono/node-server";
 import app, { runScheduledJobs, DAILY_CRON } from "../app";
 import { prepareEnv, closeDrivers } from "./env";
 import { tick } from "../queue/tick";
+import { attachVoiceGateway } from "../channels/voice/gateway";
 import type { Env } from "../env";
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -26,6 +27,10 @@ const server = serve({ fetch: (req: Request) => app.fetch(req, env), port: PORT 
   console.log(`Nodia Agents escuchando en http://localhost:${info.port}`);
   console.log(`Panel: http://localhost:${info.port}/admin`);
 });
+
+// Voice Gateway (F7 fase 2): el WebSocket de Media Streams solo existe acá —
+// es el único de los 3 destinos con un proceso de larga vida para sostenerlo.
+attachVoiceGateway(server, env);
 
 // El latido de la cola. `enCurso` evita que un turno lento se solape consigo
 // mismo: sin eso, un tick de 2s sobre un LLM de 10s acumularía trabajo.

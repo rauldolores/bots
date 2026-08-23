@@ -52,6 +52,7 @@ const NAV: Section[] = [
       { id: "kb", label: "Conocimiento", href: "/admin/kb", icon: "book-open" },
       { id: "mejoras", label: "Mejoras", href: "/admin/mejoras", icon: "sparkles" },
       { id: "conexiones", label: "Conexiones", href: "/admin/conexiones", icon: "plug-zap" },
+      { id: "telefono", label: "Tu número", href: "/admin/telefono", icon: "phone-forwarded" },
       { id: "config", label: "Configuración", href: "/admin/config", icon: "sliders-horizontal" },
     ],
   },

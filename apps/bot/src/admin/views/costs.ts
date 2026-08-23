@@ -101,18 +101,42 @@ export async function renderCosts(env: Env, botId: string, saved = false): Promi
       </form>
     </div>`;
 
-  // --- Twilio: costo real del mes -------------------------------------------
+  // --- Voz (F7 fase 10): estimado, NO exacto — ver channels/voice/callCost.ts.
+  // El lado de IA usa tokens reales de Realtime (mismo costOfUsage que arriba),
+  // el de telefonía es minutos × tarifa configurable (Twilio no da tokens).
+  const voiceRows = await db.all<{ day: string; calls: number; ai_cost: number; tel_cost: number }>(
+    `SELECT to_char(to_timestamp(started_at / 1000.0) AT TIME ZONE 'UTC', 'YYYY-MM-DD') as day,
+            COUNT(*) as calls,
+            SUM(COALESCE(estimated_ai_cost_usd, 0)) as ai_cost,
+            SUM(COALESCE(estimated_telephony_cost_usd, 0)) as tel_cost
+     FROM voice_sessions
+     WHERE bot_id = ? AND started_at > ?
+     GROUP BY day
+     ORDER BY day DESC`,
+    [botId, thirtyDays],
+  );
+  let voiceAiMonth = 0;
+  let voiceTelMonth = 0;
+  let voiceCallsMonth = 0;
+  for (const r of voiceRows) {
+    voiceAiMonth += r.ai_cost;
+    voiceTelMonth += r.tel_cost;
+    voiceCallsMonth += r.calls;
+  }
+  const voiceMonth = voiceAiMonth + voiceTelMonth;
+
+  // --- Twilio: costo real del mes (mensajería/números — no incluye llamadas, ver voiceCard) --
   const tw = await fetchTwilioUsage(env, "ThisMonth");
   const twMonth = tw.available ? tw.total : 0;
-  const totalMonth = iaMonth + twMonth;
+  const totalMonth = iaMonth + twMonth + voiceMonth;
 
   // --- Cards resumen ---------------------------------------------------------
   const cards = `
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+    <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
       <div class="card bg-panel border border-line border-l-[3px] border-l-accent p-5">
         <div class="text-muted text-[11px]">Total este mes</div>
         <div class="font-display font-bold text-[30px] mt-1 leading-none">${money(totalMonth)}</div>
-        <div class="text-[10px] text-dim mt-1">IA + Twilio</div>
+        <div class="text-[10px] text-dim mt-1">IA + Twilio + Voz</div>
       </div>
       <div class="card bg-panel border border-line p-5">
         <div class="text-muted text-[11px]">🧠 IA (Claude)</div>
@@ -123,6 +147,11 @@ export async function renderCosts(env: Env, botId: string, saved = false): Promi
         <div class="text-muted text-[11px]">💬 WhatsApp / Twilio</div>
         <div class="font-display font-bold text-[24px] mt-1.5 leading-none">${tw.available ? money(twMonth) : "—"}</div>
         <div class="text-[10px] text-dim mt-1">${tw.available ? `${tw.waConversations} conversaciones` : (tw.error ?? "no disponible")}</div>
+      </div>
+      <div class="card bg-panel border border-line p-5">
+        <div class="text-muted text-[11px]">🎙️ Llamadas <span class="text-dim">(estimado)</span></div>
+        <div class="font-display font-bold text-[24px] mt-1.5 leading-none">${money(voiceMonth)}</div>
+        <div class="text-[10px] text-dim mt-1">${voiceCallsMonth} llamada${voiceCallsMonth === 1 ? "" : "s"}</div>
       </div>
     </div>`;
 
@@ -176,6 +205,23 @@ export async function renderCosts(env: Env, botId: string, saved = false): Promi
       ${twSubtotal}
     </div>`;
 
+  // --- Desglose Voz (F7 fase 10, estimado) ------------------------------------
+  const voiceCard =
+    voiceCallsMonth > 0
+      ? `
+    <div class="card bg-panel border border-line p-[18px]">
+      <div class="font-display font-semibold text-[14px] mb-1">🎙️ Llamadas telefónicas <span class="text-[10px] text-dim font-normal">(30 días · ESTIMADO, no tu factura real)</span></div>
+      <table class="w-full text-[12px] mt-2">
+        <thead><tr class="text-[9.5px] tracking-[.1em] uppercase text-dim text-left"><th class="font-normal pb-2">Concepto</th><th class="font-normal text-right pb-2">Costo</th></tr></thead>
+        <tbody>
+          <tr style="border-top:1px solid var(--line)"><td class="py-2 pr-2 text-cream">🧠 IA (Realtime, tokens reales)</td><td class="text-right font-semibold text-cream">${money4(voiceAiMonth)}</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-2 pr-2 text-cream">📞 Telefonía (minutos × tarifa)</td><td class="text-right font-semibold text-cream">${money4(voiceTelMonth)}</td></tr>
+        </tbody>
+      </table>
+      <p class="text-[10.5px] text-dim mt-2.5">Ajusta la tarifa de telefonía en /admin/telefono si la real de tu operador es distinta.</p>
+    </div>`
+      : "";
+
   // --- Costo IA por día ------------------------------------------------------
   const dayRows = [...byDay.entries()]
     .sort((a, b) => (a[0] < b[0] ? 1 : -1))
@@ -197,7 +243,9 @@ export async function renderCosts(env: Env, botId: string, saved = false): Promi
       El costo de <b class="text-muted">IA</b> es exacto (calculado desde los tokens de cada mensaje).
       El de <b class="text-muted">Twilio</b> viene de la Usage Records API de Twilio: es lo que tu cuenta
       realmente gastó (incluye renta de números). Los precios de Meta por conversación de
-      WhatsApp aparecen dentro de las categorías de Twilio.
+      WhatsApp aparecen dentro de las categorías de Twilio. El de <b class="text-muted">Llamadas</b>
+      es un ESTIMADO: la IA usa tokens reales de Realtime (igual de exacto que el resto), pero la
+      telefonía es minutos × una tarifa configurable, no tu factura real de Twilio Voice.
     </p>`;
 
   const body = `
@@ -207,6 +255,7 @@ export async function renderCosts(env: Env, botId: string, saved = false): Promi
       <div class="grid grid-cols-1 md:grid-cols-2 gap-[14px]">
         ${iaCard}
         ${twCard}
+        ${voiceCard}
       </div>
       ${dayCard}
       ${note}

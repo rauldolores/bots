@@ -8,8 +8,6 @@
 // conversación se procesaba de a una. Acá esa garantía la da el lease de
 // agent_jobs, y quien lo respeta es el tick — runTurn asume que ya lo tomaron.
 
-import { streamText } from "ai";
-import type { SystemModelMessage } from "ai";
 import type { Env } from "../env";
 import { Db } from "../db/client";
 import { ConversationsRepo } from "../db/conversations";
@@ -17,18 +15,8 @@ import { MessagesRepo } from "../db/messages";
 import { BotsRepo } from "../db/bots";
 import { isProTier } from "../config";
 import { resolveAgentConfig } from "../settings-loader";
-import { buildTools } from "../tools";
-import { loadMcpTools } from "../tools/mcpTools";
-import { buildMultimodalUserMessage } from "../media/vision";
 import { chunkReply } from "../replies/chunker";
 import { pickAdapter } from "../replies/sender";
-import { selectModel } from "../upgrade/modelSelector";
-import type { Tier } from "../upgrade/modelSelector";
-import { monthIaCostUsd, applyBudgetGuard } from "../budget";
-import { CustomerFactsRepo } from "../db/facts";
-import { LeadsRepo } from "../db/leads";
-import { createModel } from "../llm/provider";
-import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 import { costOfUsage } from "../pricing";
 import type { ChannelId } from "../channels/shared";
 import { AgentJobsRepo } from "../queue/jobs";
@@ -36,6 +24,7 @@ import { AgentStateRepo } from "./state";
 import { conversationKeyOf, botIdFromKey, channelFromKey } from "./key";
 import { resolveChannelEnv } from "../channels/effectiveEnv";
 import { resolveBotId } from "../tenant";
+import { runAgentTurnCore } from "./turn";
 
 export { conversationKeyOf };
 
@@ -184,7 +173,6 @@ export async function ingestMessage(
 export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boolean> {
   const db = new Db(rawEnv.DB);
   const botId = botIdFromKey(conversationKey);
-  const bot = await new BotsRepo(db).getById(botId);
   // El token de ESTE bot para ESTE canal (Vault), si ya está conectado —
   // si no, el env del despliegue, igual que siempre. Sin esto, un bot con
   // canal propio pensaría con su identidad pero respondería con el token
@@ -228,268 +216,36 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
   }
   const convId = state.conversationId;
 
-  const msgs = new MessagesRepo(db, botId);
-  const convs = new ConversationsRepo(db, botId);
-
-  await msgs.append(convId, "user", combined);
-  await convs.touchLastMessage(convId);
-
-  // Historial (últimos 20).
-  const history = await msgs.lastN(convId, 20);
-  const aiMessages: any[] = history.slice(0, -1).map((m) => ({
-    role: (m.role === "tool"
-      ? "user"
-      : m.role === "owner"
-        ? "assistant"
-        : m.role) as "user" | "assistant",
-    content: m.content,
-  }));
-  // El ÚLTIMO mensaje se arma multimodal: si trae un marcador [IMAGE_URL: ...]
-  // y estamos en Pro, se adjunta la imagen.
-  const lastUserMsg = history[history.length - 1];
-  if (lastUserMsg) {
-    const imgMatch = lastUserMsg.content.match(/\[IMAGE_URL: (.+?)\]/);
-    if (imgMatch && isProTier(bot?.tier)) {
-      const imageUrl = imgMatch[1];
-      const cleanText = lastUserMsg.content.replace(/\n?\[IMAGE_URL: .+?\]/, "").trim();
-      aiMessages.push(buildMultimodalUserMessage(cleanText, imageUrl));
-    } else {
-      aiMessages.push({ role: "user", content: lastUserMsg.content });
-    }
-  }
-
-  const tools = buildTools({ env, getConversationId: () => convId, botId, tier: bot?.tier ?? "free" });
-  const toolNames = Object.keys(tools);
-  const cfg = await resolveAgentConfig(env, toolNames, botId);
-
-  // Respetar los toggles del panel: el prompt solo anuncia las herramientas
-  // habilitadas, así que el registro tiene que coincidir.
-  const enabledTools = Object.fromEntries(
-    Object.entries(tools).filter(([name]) => cfg.enabledToolNames.includes(name)),
-  );
-
-  // Conectores MCP (F5 Fase 3): tools de terceros, fuera del registro estático
-  // de arriba — por eso no pasan por el filtro de enabledToolNames (el panel
-  // de tools no las conoce una por una; se activan/desactivan conectando o
-  // desconectando el MCP entero desde /admin/conexiones).
-  const mcpTools = await loadMcpTools(db, botId);
-  Object.assign(enabledTools, mcpTools);
-
-  let tier: Tier =
-    cfg.modelOverride === "haiku"
-      ? "fast"
-      : cfg.modelOverride === "sonnet"
-        ? "smart"
-        : selectModel({
-            toolCallsInLast2Turns: state.toolCallsInLast2Turns,
-            lastUserText: combined,
-            lastUserLang: bot?.language ?? env.BOT_LANGUAGE,
-            hasImage: false,
-            imageRetryCount: state.imageRetryCount,
-            lastSearchKbScore: state.lastSearchKbScore,
-          });
-
-  // Guardia de presupuesto: llegado al tope mensual el bot sigue respondiendo,
-  // pero en el modelo barato (nunca se queda mudo por dinero).
-  if (cfg.monthlyBudgetUsd !== undefined && tier !== "fast") {
-    const spent = await monthIaCostUsd(db, botId);
-    const guard = applyBudgetGuard(tier, spent, cfg.monthlyBudgetUsd);
-    if (guard.downgraded) {
-      console.warn(
-        `[runTurn] presupuesto mensual alcanzado ($${spent.toFixed(2)}/$${cfg.monthlyBudgetUsd}) — bajando a modelo rápido`,
-      );
-    }
-    tier = guard.tier;
-  }
-
-  const { model, modelId, supportsPromptCache } = createModel(env, tier, cfg.llm);
-
-  // El prompt de sistema (grande y estable) se cachea con un breakpoint
-  // efímero. Solo se cachea ese bloque — los mensajes cambian cada turno. El
-  // cacheo de prompt es de Anthropic; en OpenAI va el bloque plano.
-  const system: SystemModelMessage[] = [
-    {
-      role: "system",
-      content: cfg.systemPrompt,
-      ...(supportsPromptCache
-        ? { providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } } }
-        : {}),
-    },
-  ];
-
-  // Memoria del cliente (flywheel): los hechos que extrajo el analizador entran
-  // como un bloque de sistema chico y SIN cachear, para que a un cliente que
-  // vuelve lo reciba un bot que se acuerda de él. Es un extra, nunca la ruta
-  // crítica: si la consulta falla, la respuesta igual sale.
-  try {
-    const facts = await new CustomerFactsRepo(db, botId).forConversation(convId, 8);
-    if (facts.length > 0) {
-      system.push({
-        role: "system",
-        content: `<cliente>\nLo que ya sabes de este cliente (de conversaciones pasadas):\n${facts
-          .map((f) => `- ${f.fact}`)
-          .join("\n")}\n</cliente>`,
-      });
-    }
-  } catch (e) {
-    console.warn("[runTurn] customer facts lookup failed:", e);
-  }
-
-  // Nombre/contacto conocidos (F6): a diferencia de customer_facts (texto libre,
-  // solo se llena si el analizador de insights corrió tras 3h de inactividad),
-  // esto se busca en cada turno por channel_user_id — así un cliente que ya dio
-  // su nombre alguna vez (captureLead) no lo tiene que repetir aunque escriba
-  // meses después. Igual de best-effort: si falla, el turno sigue.
-  try {
-    const knownLead = await new LeadsRepo(db, botId).findLatestByChannelUserId(state.channelUserId);
-    if (knownLead && (knownLead.name || knownLead.contact)) {
-      system.push({
-        role: "system",
-        content: `<cliente_conocido>\nYa conoces a este cliente de una conversación anterior: ${
-          knownLead.name ? `nombre=${knownLead.name}` : ""
-        }${knownLead.name && knownLead.contact ? ", " : ""}${
-          knownLead.contact ? `contacto=${knownLead.contact}` : ""
-        }. No se lo vuelvas a preguntar. Si él dice que ese no es su nombre o que cambió su contacto, créele a él y no a este dato.\n</cliente_conocido>`,
-      });
-    }
-  } catch (e) {
-    console.warn("[runTurn] known-lead lookup failed:", e);
-  }
-
-  let assistantText = "";
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let cachedTokens = 0;
-  let toolCallCount = 0;
-  let toolCallsMade: { toolName: string; input: unknown }[] = [];
-  let usedModelId = modelId;
-
-  const attempt = async (m: any) => {
-    const result = streamText({
-      model: m,
-      system,
-      messages: aiMessages,
-      tools: enabledTools,
-      stopWhen: ({ steps }) => steps.length >= 6,
-      ...(cfg.temperature !== undefined ? { temperature: cfg.temperature } : {}),
-    });
-    let text = "";
-    for await (const chunk of result.textStream) {
-      text += chunk;
-    }
-    assistantText = text;
-    const usage = await result.usage;
-    inputTokens = usage?.inputTokens ?? 0;
-    outputTokens = usage?.outputTokens ?? 0;
-    cachedTokens = usage?.cachedInputTokens ?? 0;
-    const steps = await result.steps;
-    toolCallCount = steps.reduce((n, s) => n + (s.toolCalls?.length ?? 0), 0);
-    // Se guarda lo que el agente HIZO (no solo lo que dijo): nombre de la
-    // herramienta y su entrada, que alimentan el panel y las estadísticas.
-    toolCallsMade = steps.flatMap((s) =>
-      (s.toolCalls ?? []).map((tc: any) => ({
-        toolName: tc.toolName as string,
-        input: tc.input,
-      })),
-    );
-  };
-
-  try {
-    await attempt(model);
-  } catch (e: any) {
-    // FAILOVER con backoff: en ráfagas el primario suele dar un rate-limit
-    // TRANSITORIO — esperar con jitter y reintentar resuelve la mayoría; si no,
-    // se prueba el proveedor alterno (también con un segundo intento). El
-    // jitter des-sincroniza mensajes que llegaron en el mismo segundo. El bot
-    // no puede quedarse mudo el día del evento.
-    console.error("[runTurn] streamText failed:", e);
-    const backoff = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    const { fallbackModel, degradedModelFor } = await import("../llm/provider");
-    const primary = createModel(env, tier, cfg.llm);
-    const fb = fallbackModel(env, tier, primary.provider);
-    const degraded = degradedModelFor(env, tier, cfg.llm, primary);
-    let ok = false;
-
-    await backoff(2000 + Math.floor(Math.random() * 1500));
-    try {
-      await attempt(model);
-      ok = true;
-    } catch (e1: any) {
-      console.error("[runTurn] primary retry failed:", e1);
-    }
-
-    // El modelo fijado a mano en /admin/config puede haber quedado obsoleto
-    // (el proveedor lo retiró) sin que nadie lo note — antes de saltar de
-    // PROVEEDOR, prueba el modelo automático (mantenido en código, ver
-    // src/llm/provider.ts) del MISMO proveedor: sigue vigente aunque el id
-    // que el dueño eligió ya no lo esté, y no depende de tener una segunda
-    // llave configurada.
-    if (!ok && degraded) {
-      try {
-        await attempt(degraded.model);
-        usedModelId = degraded.modelId;
-        ok = true;
-        console.warn(
-          `[runTurn] modelo fijado "${primary.modelId}" falló — degradado a "${degraded.modelId}" (mismo proveedor)`,
-        );
-        await new SettingsRepo(db, botId)
-          .set(
-            SETTING_KEYS.llmModelWarning,
-            JSON.stringify({ modelId: primary.modelId, provider: primary.provider, at: Date.now() }),
-          )
-          .catch((e) => console.warn("[runTurn] no se pudo guardar el aviso de modelo degradado:", e));
-      } catch (e1b: any) {
-        console.error("[runTurn] same-provider degrade failed:", e1b);
-      }
-    }
-
-    if (!ok && fb) {
-      console.warn(`[runTurn] failover ${primary.provider} → ${fb.provider}/${fb.modelId}`);
-      try {
-        await attempt(fb.model);
-        usedModelId = fb.modelId;
-        ok = true;
-      } catch (e2: any) {
-        console.error("[runTurn] fallback failed:", e2);
-        await backoff(2500 + Math.floor(Math.random() * 1500));
-        try {
-          await attempt(fb.model);
-          usedModelId = fb.modelId;
-          ok = true;
-        } catch (e3: any) {
-          console.error("[runTurn] fallback retry failed:", e3);
-        }
-      }
-    }
-
-    if (!ok) {
-      assistantText = "Algo falló de mi lado, intenta de nuevo en un momento.";
-    }
-  }
-
-  await msgs.append(convId, "assistant", assistantText, {
-    modelUsed: usedModelId,
-    inputTokens,
-    outputTokens,
-    cachedInputTokens: cachedTokens,
-    toolCalls: toolCallsMade.length > 0 ? toolCallsMade : undefined,
+  // Todo lo que hace que el bot "piense" (tools, RAG, MCP, system prompt,
+  // memoria, LLM con failover) vive en runAgentTurnCore() — la misma función
+  // que usaría cualquier canal nuevo (Voice, F7). Este archivo solo se ocupa
+  // de CUÁNDO correr un turno (el buffer/debounce de arriba) y CÓMO entregar
+  // la respuesta (el chunking/envío de abajo).
+  const result = await runAgentTurnCore({
+    env,
+    botId,
+    conversationId: convId,
+    conversationKey,
+    userText: combined,
   });
 
-  await stateRepo.saveTurnCounters(conversationKey, {
-    toolCallsInLast2Turns: toolCallCount,
-  });
+  // maxChunks/interChunkDelayMs son config de ENTREGA (no del turno en sí),
+  // así que se resuelve aparte — mismo patrón que ya usaba el camino de
+  // reenvío de arriba (resolveAgentConfig con toolNames vacío es barato: no
+  // rearma el system prompt, solo lee overlays de settings).
+  const cfg = await resolveAgentConfig(env, [], botId);
 
   // La respuesta se aparta ANTES de mandarla. Si el canal falla, el reintento
   // la reenvía en vez de perderla — que era lo que pasaba antes.
-  await jobs.savePendingReply(conversationKey, assistantText);
-  await enviarRespuesta(env, state, assistantText, cfg);
+  await jobs.savePendingReply(conversationKey, result.text);
+  await enviarRespuesta(env, state, result.text, cfg);
   await jobs.clearPendingReply(conversationKey);
 
-  const chunks = chunkReply(assistantText, cfg.maxChunks);
+  const chunks = chunkReply(result.text, cfg.maxChunks);
   console.log(
-    `[runTurn] sent ${chunks.length} chunks, model=${usedModelId}, cost=$${costOfUsage(
-      usedModelId,
-      { input: inputTokens, cached: cachedTokens, output: outputTokens },
+    `[runTurn] sent ${chunks.length} chunks, model=${result.modelId}, cost=$${costOfUsage(
+      result.modelId,
+      { input: result.inputTokens, cached: result.cachedTokens, output: result.outputTokens },
     ).toFixed(5)}`,
   );
   return true;

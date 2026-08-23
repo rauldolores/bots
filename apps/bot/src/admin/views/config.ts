@@ -8,6 +8,7 @@ import type { BotConfig } from "../../db/bots";
 import { renderBusinessContext } from "../../businessContext";
 import { CURATED_MODELS } from "../../llm/provider";
 import { TIMEZONE_OPTIONS, resolveTimezone } from "../../datetime";
+import { resolveKeySource } from "../../channels/voice/openaiKey";
 import {
   CONTROL_LIST,
   valueToLevel,
@@ -200,6 +201,49 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
     </div>`;
 }
 
+/** Sección "Voz": API key de OpenAI para Realtime — detecta si ya hay una utilizable antes de pedirla (channels/voice/openaiKey.ts). */
+function renderVoiceSection(settings: Record<string, string>, hasEnvOpenAiKey: boolean): string {
+  const source = resolveKeySource(settings, hasEnvOpenAiKey);
+  const hasVoiceKey = source === "voice_setting";
+  const voiceKeyTail = hasVoiceKey ? (settings[SETTING_KEYS.voiceOpenAiApiKey] ?? "").trim().slice(-4) : "";
+
+  let detectionBanner = "";
+  if (source === "byo_llm_setting") {
+    detectionBanner = `<div style="border:1px solid var(--ok);background:rgba(127,183,126,.1);color:var(--ok);border-radius:var(--radius-sm);padding:9px 12px;font-size:12px;font-weight:600">✓ Ya tienes una API key de OpenAI configurada arriba, en "Modelo de IA" — las llamadas la van a usar también. No hace falta capturarla dos veces.</div>`;
+  } else if (source === "env") {
+    detectionBanner = `<div style="border:1px solid var(--ok);background:rgba(127,183,126,.1);color:var(--ok);border-radius:var(--radius-sm);padding:9px 12px;font-size:12px;font-weight:600">✓ Este despliegue ya tiene una API key de OpenAI configurada — las llamadas la van a usar también.</div>`;
+  } else if (source === "voice_setting") {
+    detectionBanner = `<div style="border:1px solid var(--ok);background:rgba(127,183,126,.1);color:var(--ok);border-radius:var(--radius-sm);padding:9px 12px;font-size:12px;font-weight:600">✓ Hay una key guardada específicamente para llamadas (termina en …${esc(voiceKeyTail)}).</div>`;
+  }
+
+  const detected = source !== "none";
+
+  return `
+    <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:18px">
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <h3 class="font-display font-semibold text-[13.5px] text-cream">🎙️ Voz — llamadas telefónicas en tiempo real</h3>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:9px;background:var(--accent-soft);border:1px solid rgba(245,197,24,.35);border-radius:var(--radius-sm);padding:13px 15px">
+        <span style="color:var(--accent-2);flex:none;line-height:1">◆</span>
+        <p class="text-[12px]" style="color:var(--muted);margin:0">Las llamadas telefónicas usan el modelo de audio en tiempo real de OpenAI — un proveedor distinto al de "Modelo de IA" de arriba, así que necesita su propia API key aunque tu bot piense con Claude u otro modelo.</p>
+      </div>
+      ${detectionBanner}
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="font-display font-semibold text-[12.5px] text-cream">${detected ? "Usar una API key distinta solo para llamadas (opcional)" : "API key de OpenAI para llamadas"}</label>
+        <p class="text-dim text-[11px]">${
+          hasVoiceKey
+            ? "Escribe una nueva para reemplazarla, o marca la casilla para quitarla y volver a detectar automáticamente."
+            : detected
+              ? "Déjalo vacío para seguir usando la que ya se detectó arriba."
+              : "No detectamos ninguna todavía. Sin esto, las llamadas telefónicas no van a poder responder."
+        }</p>
+        <input type="password" name="${SETTING_KEYS.voiceOpenAiApiKey}" value="" autocomplete="off"
+               placeholder="${hasVoiceKey ? "••••••••••••" : "sk-…"}" style="${INPUT_STYLE}">
+        ${hasVoiceKey ? `<label class="text-dim text-[11.5px]" style="display:flex;align-items:center;gap:7px;cursor:pointer"><input type="checkbox" name="voice_openai_api_key_clear" value="1"> Quitar esta key y volver a detectar automáticamente</label>` : ""}
+      </div>
+    </div>`;
+}
+
 const SECTIONS = [
   { id: "personalidad", label: "Personalidad" },
   { id: "modelo", label: "Modelo de IA" },
@@ -230,6 +274,7 @@ export function renderConfig(
   identity: { name: string; businessName: string },
   saved = false,
   llmTest?: string,
+  hasEnvOpenAiKey = false,
 ): string {
   const personalidadCards = CONTROL_LIST.filter((c) => c.key !== SETTING_KEYS.modelOverride)
     .map((c) => renderCardGroup(c, settings))
@@ -278,6 +323,7 @@ export function renderConfig(
               ${modelTierCards}
             </div>
             ${renderLlmSection(settings, llmTest)}
+            ${renderVoiceSection(settings, hasEnvOpenAiKey)}
           </div>
 
           <div class="cfg-pane" data-pane="negocio" style="display:none;flex-direction:column;gap:24px">

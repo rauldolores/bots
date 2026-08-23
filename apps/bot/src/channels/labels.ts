@@ -14,6 +14,7 @@ export const CHANNEL_LABELS: Record<string, string> = {
   messenger: "Messenger",
   manychat: "ManyChat",
   widget: "Widget web",
+  voice: "Llamada telefónica",
 };
 
 export function channelLabel(channel: string | null | undefined): string {

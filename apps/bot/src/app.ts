@@ -8,8 +8,11 @@ import { manychatAdapter } from "./channels/manychat";
 import { twilioAdapter } from "./channels/twilio";
 import { parseMetaEvents, verifyMetaSignature } from "./channels/meta";
 import { parseWhatsAppEvents, serveWhatsAppMedia } from "./channels/whatsapp";
+import { handleIncomingVoiceCall } from "./channels/voice/webhook";
+import { handleTransferStatusCallback } from "./channels/voice/transfer";
 import { adminApp } from "./admin/routes";
 import { purgeOldMessages } from "./crons/purgeOldMessages";
+import { purgeOldVoiceCalls } from "./crons/purgeOldVoiceCalls";
 import { reindexKb } from "./kb/reindex";
 import { analyzeConversations } from "./insights/analyzer";
 import { Db } from "./db/client";
@@ -144,6 +147,19 @@ app.post("/webhooks/twilio", (c) => routeTwilioToAgent(c));
 // viva (M5) mientras el bot actual no re-registre su URL en la consola de
 // Twilio.
 app.post("/webhooks/twilio/:botId", (c) => routeTwilioToAgent(c, c.req.param("botId")));
+
+// --- Voice (F7 fase 2): llamadas telefónicas por Twilio ---------------------
+// Solo la ruta nueva (no hay una "legacy" sin :botId — Voice nace ya
+// multi-tenant). Este POST es portable (Node/Cloudflare/Vercel): valida la
+// firma y devuelve el TwiML que le dice a Twilio adónde conectar el
+// WebSocket bidireccional — el WebSocket EN SÍ (/webhooks/voice/:botId/stream)
+// solo lo atiende el runtime Node (ver channels/voice/gateway.ts,
+// runtime/node.ts) porque es el único de los 3 destinos con un proceso de
+// larga vida capaz de sostenerlo.
+app.post("/webhooks/voice/:botId", (c) => handleIncomingVoiceCall(c.req.raw, c.env, c.req.param("botId")));
+// F7 fase 9: adónde Twilio reporta cómo terminó un intento de transferencia
+// a humano (contestó, ocupado, no contestó, falló) — ver channels/voice/transfer.ts.
+app.post("/webhooks/voice/:botId/transfer-status", (c) => handleTransferStatusCallback(c.req.raw, c.env, c.req.param("botId")));
 
 // --- Meta oficial (Facebook Messenger + Instagram DMs, sin ManyChat) --------
 // GET = handshake de verificación de Meta: devuelve hub.challenge si el
@@ -369,6 +385,9 @@ export async function runScheduledJobs(env: Env, cron?: string): Promise<void> {
 
   // Purga los mensajes de más de 90 días.
   await purgeOldMessages(env);
+  // F7 fase 10: política de retención de llamadas (configurable por bot —
+  // ver SETTING_KEYS.voiceCallRetentionDays). No debe tumbar el resto de la purga.
+  await purgeOldVoiceCalls(env).catch((e) => console.error("purgeOldVoiceCalls:", e));
   // Corrida nocturna del Analista de insights (F2). No debe tumbar la purga.
   await analyzeConversations(env, { limit: 50 }).catch((e) => console.error("insights:", e));
   // Flywheel (F5): detecta huecos de KB y lecciones de takeovers → propone
