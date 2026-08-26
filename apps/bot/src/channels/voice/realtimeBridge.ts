@@ -235,7 +235,7 @@ export class RealtimeCallBridge {
     // nombre disponible ahí mismo y lo usa en el saludo sin que se lo
     // pidamos aparte cada vez.
     this.requestResponse(
-      `${this.instructions}\n\n<saludo_inicial>\nAcabas de contestar la llamada — el cliente todavía no ha dicho nada. Saluda TÚ primero, breve y natural, preséntate y pregunta en qué puedes ayudar. Si ya conoces el nombre del cliente (ver <cliente_conocido> arriba, si está presente), salúdalo por su nombre. Nunca te quedes esperando en silencio a que hable primero.\n</saludo_inicial>`,
+      `${this.instructions}\n\n<saludo_inicial>\nAcabas de contestar la llamada — el cliente todavía no ha dicho nada. Saluda TÚ primero, breve y natural, preséntate y pregunta en qué puedes ayudar. Si ya conoces el nombre del cliente (ver <cliente_conocido> arriba, si está presente), salúdalo por su nombre. Nunca te quedes esperando en silencio a que hable primero. Es tu PRIMERA frase de la llamada: no hay ningún idioma que "reconocer" ni ningún cambio que anunciar — simplemente saluda, en una sola frase corta y cálida, como contestaría el teléfono una persona real de este negocio.\n</saludo_inicial>`,
     );
   }
 
