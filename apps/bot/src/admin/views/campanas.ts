@@ -153,6 +153,7 @@ export async function renderCampanas(
   env: Env,
   botId: string,
   q: Record<string, string | undefined> = {},
+  visibleNavIds: Set<string> | null = null,
 ): Promise<string> {
   const db = new Db(env.DB);
   const [counts, templates, spent, history, pending] = await Promise.all([
@@ -392,5 +393,5 @@ export async function renderCampanas(
   })();
   </script>`;
 
-  return layout({ title: "Campañas", activeTab: "campanas", body, pro: true });
+  return layout({ title: "Campañas", activeTab: "campanas", body, pro: true, visibleNavIds });
 }

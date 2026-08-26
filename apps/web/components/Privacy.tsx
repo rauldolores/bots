@@ -14,8 +14,8 @@ const points = [
   },
   {
     icon: MicOff,
-    title: "No guarda audios ni imágenes",
-    desc: "Se transcriben o describen y solo queda el texto. El cliente no deja archivos flotando.",
+    title: "No guarda audios",
+    desc: "Las llamadas y notas de voz se transcriben (si activas el guardado) y solo queda el texto. Nunca se almacenan los audios.",
   },
   {
     icon: Bot,

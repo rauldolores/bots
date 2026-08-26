@@ -44,12 +44,20 @@ export class FakeRealtimeServer {
     return this.received.get(ws) ?? [];
   }
 
-  async waitForMessageType(ws: WebSocket, type: string, timeoutMs = 2000): Promise<any> {
+  /**
+   * `after`: cuántas ocurrencias de este `type` ya vistas se ignoran antes
+   * de devolver la siguiente — el bridge manda un "response.create" propio
+   * apenas conecta (el saludo inicial, ver realtimeBridge.ts), así que un
+   * test que espera el response.create de SU PROPIO flujo (no el saludo)
+   * necesita `{ after: 1 }` para no engancharse con ese primero.
+   */
+  async waitForMessageType(ws: WebSocket, type: string, timeoutMs = 2000, opts?: { after?: number }): Promise<any> {
+    const skip = opts?.after ?? 0;
     const start = Date.now();
     for (;;) {
-      const found = this.messagesFrom(ws).find((m) => m.type === type);
-      if (found) return found;
-      if (Date.now() - start > timeoutMs) throw new Error(`nunca llegó "${type}"`);
+      const matches = this.messagesFrom(ws).filter((m) => m.type === type);
+      if (matches.length > skip) return matches[skip];
+      if (Date.now() - start > timeoutMs) throw new Error(`nunca llegó "${type}" (después de ${skip} ya vistos)`);
       await new Promise((r) => setTimeout(r, 15));
     }
   }

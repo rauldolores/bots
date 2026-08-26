@@ -2,8 +2,9 @@ import { ArrowRight, Sparkles } from "lucide-react";
 import { Container } from "./ui";
 
 const items = [
-  "Un recorrido en vivo por el panel de administración",
+  "Una llamada de prueba real a tu número, contestada por el agente",
   "Una conversación de prueba real en WhatsApp o Telegram",
+  "Un recorrido en vivo por el panel de administración",
   "Una propuesta a la medida de tu negocio",
 ];
 

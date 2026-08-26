@@ -67,3 +67,50 @@ describe("BotsRepo.create", () => {
     expect(b.slug).toBe("sofia");
   });
 });
+
+describe("BotsRepo.mergeConfig", () => {
+  it("un patch parcial preserva las llaves de config que no tocó", async () => {
+    await repo.updateConfig(TEST_BOT_ID, { hours: "9-6", location: "Reforma 123" });
+    await repo.mergeConfig(TEST_BOT_ID, { catalog: [{ name: "Corte", price: 150 }] });
+    const bot = await repo.getById(TEST_BOT_ID);
+    expect(bot?.config.hours).toBe("9-6");
+    expect(bot?.config.location).toBe("Reforma 123");
+    expect(bot?.config.catalog).toEqual([{ name: "Corte", price: 150 }]);
+  });
+
+  it("cada llave del patch REEMPLAZA su valor anterior, no lo mergea profundo", async () => {
+    await repo.mergeConfig(TEST_BOT_ID, { customFields: { Especialidad: "Barba" } });
+    await repo.mergeConfig(TEST_BOT_ID, { customFields: { Garantía: "30 días" } });
+    const bot = await repo.getById(TEST_BOT_ID);
+    expect(bot?.config.customFields).toEqual({ Garantía: "30 días" });
+  });
+
+  it("con config vacío/ausente no truena — arranca desde {}", async () => {
+    await expect(repo.mergeConfig(TEST_BOT_ID, { country: "México" })).resolves.not.toThrow();
+    const bot = await repo.getById(TEST_BOT_ID);
+    expect(bot?.config.country).toBe("México");
+  });
+});
+
+describe("BotsRepo.updateNiche / updateLanguage", () => {
+  it("updateNiche solo toca la columna niche", async () => {
+    await repo.updateNiche(TEST_BOT_ID, "barbería");
+    const bot = await repo.getById(TEST_BOT_ID);
+    expect(bot?.niche).toBe("barbería");
+    expect(bot?.name).toBeTruthy(); // no se tocó
+  });
+
+  it("updateNiche con texto vacío guarda null (sin giro)", async () => {
+    await repo.updateNiche(TEST_BOT_ID, "  ");
+    const bot = await repo.getById(TEST_BOT_ID);
+    expect(bot?.niche).toBeNull();
+  });
+
+  it("updateLanguage solo toca la columna language", async () => {
+    const before = await repo.getById(TEST_BOT_ID);
+    await repo.updateLanguage(TEST_BOT_ID, "en");
+    const after = await repo.getById(TEST_BOT_ID);
+    expect(after?.language).toBe("en");
+    expect(after?.name).toBe(before?.name);
+  });
+});

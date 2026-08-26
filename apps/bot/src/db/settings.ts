@@ -55,6 +55,14 @@ export const SETTING_KEYS = {
   // resto del bot); Twilio no da tokens, así que su lado sigue siendo
   // minutos × tarifa configurable. Vacío = default razonable.
   voiceTelephonyCostPerMinuteUsd: "voice_telephony_cost_per_minute_usd",
+  // Instrucciones de venta/trato del dueño — llena {{NICHO_PLAYBOOK}} en
+  // system-prompt.ts (antes siempre vacío: no había forma de escribirlo sin
+  // pasar por systemPromptOverride, que reemplaza TODO el prompt).
+  salesPlaybook: "sales_playbook",
+  // Voz de OpenAI Realtime para llamadas telefónicas (alloy, shimmer, verse…)
+  // — antes no era configurable, siempre caía al default hardcodeado
+  // "alloy" en realtimeClient.ts.
+  voiceName: "voice_name",
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

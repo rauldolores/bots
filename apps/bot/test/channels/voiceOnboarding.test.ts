@@ -156,11 +156,20 @@ describe("Diagnóstico de punta a punta: una llamada de prueba REAL confirma la 
 
     // 2) Ahora se completa el resto del diagnóstico: la llamada real sigue
     // hasta el WebSocket de Twilio → Realtime, como cualquier llamada normal.
+    // Twilio no manda el query string de <Stream url> al abrir el WebSocket
+    // (confirmado en producción) — lo que autoriza la conexión son los
+    // <Parameter> del TwiML, que llegan en customParameters del "start".
     const streamUrlMatch = twiml.match(/url="(wss:\/\/[^"]+)"/);
     expect(streamUrlMatch).toBeTruthy();
-    // El TwiML es XML: el atributo trae "&amp;" entre query params, no "&" crudo.
-    const streamUrl = streamUrlMatch![1].replace(/&amp;/g, "&");
-    const streamPath = new URL(streamUrl).pathname + new URL(streamUrl).search;
+    const streamUrl = streamUrlMatch![1];
+    const streamPath = new URL(streamUrl).pathname;
+    const customParameters = Object.fromEntries(
+      [...twiml.matchAll(/<Parameter name="([^"]+)" value="([^"]*)"\/>/g)].map(([, name, value]) => [
+        name,
+        value.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"'),
+      ]),
+    );
+    expect(customParameters.t).toBeTruthy(); // el token firmado sí viajó, solo que como <Parameter>, no en la URL
     const twilioWs = new WebSocket(`${wsBase}${streamPath}`);
     twilioWs.on("error", () => {});
     await new Promise<void>((resolve) => twilioWs.once("open", resolve));
@@ -173,6 +182,7 @@ describe("Diagnóstico de punta a punta: una llamada de prueba REAL confirma la 
           streamSid: "MZonboarding1",
           callSid: "CAonboarding1",
           mediaFormat: { encoding: "audio/x-mulaw", sampleRate: 8000, channels: 1 },
+          customParameters,
         },
       }),
     );
@@ -180,7 +190,7 @@ describe("Diagnóstico de punta a punta: una llamada de prueba REAL confirma la 
     const openaiWs = await fakeRealtime.waitForConnection();
     await fakeRealtime.waitForMessageType(openaiWs, "session.update");
     fakeRealtime.send(openaiWs, { type: "response.created" });
-    fakeRealtime.send(openaiWs, { type: "response.audio.delta", delta: "AAAA" });
+    fakeRealtime.send(openaiWs, { type: "response.output_audio.delta", delta: "AAAA" });
     await new Promise((r) => setTimeout(r, 120)); // los hitos se registran async, sin eco al cliente
 
     const { onboarding: finalRow, milestones } = await getOnboardingDiagnostics(env, TEST_BOT_ID);

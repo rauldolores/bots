@@ -35,6 +35,7 @@ export async function renderKbList(
   env: Env,
   botId: string,
   flash?: { saved?: boolean; deleted?: boolean; reindexed?: string },
+  visibleNavIds: Set<string> | null = null,
 ): Promise<string> {
   const db = new Db(env.DB);
   const docs = await new KbDocsRepo(db, botId).list();
@@ -95,10 +96,10 @@ export async function renderKbList(
       </form>
     </div>`;
 
-  return layout({ title: "Conocimiento", activeTab: "kb", body, pro: true });
+  return layout({ title: "Conocimiento", activeTab: "kb", body, pro: true, visibleNavIds });
 }
 
-export function renderKbEditor(doc: KbDoc | null, env: Env): string {
+export function renderKbEditor(doc: KbDoc | null, env: Env, visibleNavIds: Set<string> | null = null): string {
   const isNew = doc === null;
   const body = `
     <div style="margin-bottom:16px">
@@ -141,5 +142,5 @@ export function renderKbEditor(doc: KbDoc | null, env: Env): string {
       </div>
     </form>`;
 
-  return layout({ title: isNew ? "Nuevo documento" : "Editar documento", activeTab: "kb", body, pro: true });
+  return layout({ title: isNew ? "Nuevo documento" : "Editar documento", activeTab: "kb", body, pro: true, visibleNavIds });
 }

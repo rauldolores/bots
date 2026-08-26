@@ -1,9 +1,9 @@
 // Tipos del canal Voice (F7, fase 1 — solo arquitectura interna, sin Twilio
 // ni OpenAI Realtime todavía). Ver channel.ts/session.ts para el
 // comportamiento; este archivo es solo la forma de los datos.
-import type { VoiceProvider, VoiceSessionStatus, VoiceSessionRow } from "../../db/voiceSessions";
+import type { VoiceProvider, VoiceSessionStatus, VoiceTransferStatus, VoiceTranscriptTurn, VoiceSessionRow } from "../../db/voiceSessions";
 
-export type { VoiceProvider, VoiceSessionStatus };
+export type { VoiceProvider, VoiceSessionStatus, VoiceTransferStatus, VoiceTranscriptTurn };
 
 /**
  * Identidad + metadatos de una llamada — lo que pediste como VoiceCallContext.
@@ -32,6 +32,8 @@ export interface VoiceCallContext {
   provider: VoiceProvider;
   /** CallSid de Twilio (u homólogo). Null hasta que la fase de integración telefónica lo conecte. */
   providerCallId: string | null;
+  /** Número de quien llama (F7 fase 10 — antes solo vivía en la fila cruda, nunca expuesto aquí). */
+  callerNumber: string;
   /** Número que el cliente marcó — el mismo que resolvió el tenant vía voice_numbers (F7 fase 7). */
   calledNumber: string | null;
   /** StreamSid de Twilio Media Streams — null hasta que llega el evento "start" del WebSocket. */
@@ -45,8 +47,24 @@ export interface VoiceCallContext {
    */
   conversationId: string;
   startedAt: number;
+  /** F7 fase 10: cuándo el agente quedó listo para conversar — no cuándo Twilio conectó el socket. */
+  answeredAt: number | null;
   endedAt: number | null;
+  /** ended_at - started_at — null hasta que la llamada termina. */
+  durationMs: number | null;
   status: VoiceSessionStatus;
+  transferStatus: VoiceTransferStatus;
+  toolCallCount: number;
+  ragQueryCount: number;
+  mcpCallCount: number;
+  interruptionCount: number;
+  timeToFirstAudioMs: number | null;
+  totalResponseLatencyMs: number;
+  /** Estimados, no facturación real — ver channels/voice/callCost.ts. */
+  estimatedAiCostUsd: number | null;
+  estimatedTelephonyCostUsd: number | null;
+  /** Solo si el tenant habilitó SETTING_KEYS.voiceStoreTranscript — null si no. */
+  transcript: VoiceTranscriptTurn[] | null;
 }
 
 /** Lo que ya se conoce ANTES de que exista integración real de telefonía — de dónde sale una VoiceCallContext. */
@@ -76,11 +94,24 @@ export function toVoiceCallContext(row: VoiceSessionRow): VoiceCallContext {
     callId: row.id,
     provider: row.provider,
     providerCallId: row.provider_call_id,
+    callerNumber: row.caller_id,
     calledNumber: row.called_number,
     streamSid: row.stream_sid,
     conversationId: row.conversation_id,
     startedAt: row.started_at,
+    answeredAt: row.answered_at,
     endedAt: row.ended_at,
+    durationMs: row.duration_ms,
     status: row.status,
+    transferStatus: row.transfer_status,
+    toolCallCount: row.tool_call_count,
+    ragQueryCount: row.rag_query_count,
+    mcpCallCount: row.mcp_call_count,
+    interruptionCount: row.interruption_count,
+    timeToFirstAudioMs: row.time_to_first_audio_ms,
+    totalResponseLatencyMs: row.total_response_latency_ms,
+    estimatedAiCostUsd: row.estimated_ai_cost_usd,
+    estimatedTelephonyCostUsd: row.estimated_telephony_cost_usd,
+    transcript: row.transcript,
   };
 }

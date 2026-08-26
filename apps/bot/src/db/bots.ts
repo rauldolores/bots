@@ -30,6 +30,12 @@ export interface BotConfig {
   /** Cualquier dato extra que el dueño quiera que el bot sepa. */
   customFields?: Record<string, string>;
   catalog?: BotCatalogItem[];
+  /** País donde opera el negocio — ej. "México". Ver system-prompt.ts <contexto_regional>. */
+  country?: string;
+  /** Moneda en la que cobra el negocio — ej. "MXN". Ver system-prompt.ts <contexto_regional>. */
+  currency?: string;
+  /** "mcp" = el catálogo vive en un sistema externo consultado por un conector MCP (ver settings-loader.ts); "manual"/ausente = usa `catalog` de arriba. */
+  catalogSource?: "manual" | "mcp";
 }
 
 export interface Bot {
@@ -137,6 +143,34 @@ export class BotsRepo {
       Date.now(),
       id,
     ]);
+  }
+
+  /**
+   * Actualiza SOLO las llaves de `patch`, conservando el resto de `config`
+   * — a diferencia de updateConfig() (reemplazo total). El merge se hace en
+   * JS, no con `config || ?::jsonb` en SQL: postgres.js serializa un string
+   * ya JSON.stringify'd como un jsonb ESCALAR, no como objeto, y `escalar ||
+   * escalar` concatena en array en vez de mezclar llaves (mismo patrón que
+   * BotConnectorsRepo.mergeConfig, db/botConnectors.ts).
+   */
+  async mergeConfig(id: string, patch: Partial<BotConfig>): Promise<void> {
+    const current = await this.getById(id);
+    const merged = { ...(current?.config ?? {}), ...patch };
+    await this.db.run("UPDATE bots SET config = ?::jsonb, updated_at = ? WHERE id = ?", [
+      JSON.stringify(merged),
+      Date.now(),
+      id,
+    ]);
+  }
+
+  /** Angosto a propósito (no reusar updateIdentity): así el panel no tiene que resuministrar name/businessName/tier solo para tocar el giro. */
+  async updateNiche(id: string, niche: string): Promise<void> {
+    await this.db.run("UPDATE bots SET niche = ?, updated_at = ? WHERE id = ?", [niche.trim() || null, Date.now(), id]);
+  }
+
+  /** Igual de angosto que updateNiche — el idioma ahora es editable desde /admin/config → Personalidad. */
+  async updateLanguage(id: string, language: string): Promise<void> {
+    await this.db.run("UPDATE bots SET language = ?, updated_at = ? WHERE id = ?", [language.trim(), Date.now(), id]);
   }
 
   /** Los bots de una organización, para el selector del panel (F5). Más viejo primero. */

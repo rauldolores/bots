@@ -34,6 +34,17 @@ export function createPostgresDriver(opts: PostgresOptions): SqlDriver {
         serialize: (v: number | bigint) => v.toString(),
         parse: (v: string) => Number(v),
       },
+      // Igual que bigint arriba: sin esto, NUMERIC/DECIMAL (columnas de
+      // costo, y cualquier AVG()/SUM() sobre bigint/integer) llega como
+      // string — rompe la aritmética normal (`0 += "0.01"` concatena en vez
+      // de sumar) y tumba `.toFixed()`. F7 fase 10 lo expuso (costos/latencia
+      // de Voice), pero la config aplica a CUALQUIER columna numeric del bot.
+      numeric: {
+        to: 1700,
+        from: [1700],
+        serialize: (v: number | string) => String(v),
+        parse: (v: string) => Number(v),
+      },
     },
     onnotice: () => {}, // silencia los NOTICE de Postgres (ruido en los tests)
   });

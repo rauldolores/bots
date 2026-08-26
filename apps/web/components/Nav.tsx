@@ -5,6 +5,7 @@ import { Hammer, Menu, X, ArrowRight } from "lucide-react";
 
 const links = [
   { href: "#caracteristicas", label: "Características" },
+  { href: "#voz", label: "Llamadas" },
   { href: "#como-funciona", label: "Cómo funciona" },
   { href: "#panel", label: "Panel" },
   { href: "#ecosistema", label: "Ecosistema" },

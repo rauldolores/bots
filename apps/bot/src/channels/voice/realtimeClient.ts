@@ -3,10 +3,10 @@
 // eventos del protocolo a callbacks simples. No sabe nada de Twilio, de
 // VoiceSession ni del Agent Core — eso es responsabilidad de realtimeBridge.ts.
 //
-// input_audio_format/output_audio_format = "g711_ulaw": es EXACTAMENTE lo
-// que entrega/espera Twilio Media Streams (audio/x-mulaw, 8kHz, mono) — por
-// eso no hace falta transcodificar el audio en ningún punto del puente, solo
-// reempacar el mismo base64 entre los dos protocolos JSON.
+// audio.input/output.format = { type: "audio/pcmu" }: es EXACTAMENTE lo que
+// entrega/espera Twilio Media Streams (audio/x-mulaw = G.711 μ-law, 8kHz,
+// mono) — por eso no hace falta transcodificar el audio en ningún punto del
+// puente, solo reempacar el mismo base64 entre los dos protocolos JSON.
 import { WebSocket, type RawData } from "ws";
 import type { RealtimeToolSchema } from "./realtimeTools";
 
@@ -26,8 +26,8 @@ export interface RealtimeSessionConfig {
 }
 
 export interface RealtimeClientHandlers {
-  /** responseId viaja en cada delta (response_id del evento) — así el puente puede descartar audio de una respuesta que ya canceló, aunque el delta haya salido de OpenAI antes de que el cancel le llegara (F7 fase 6). */
-  onAudioDelta: (base64: string, responseId: string | undefined) => void;
+  /** responseId viaja en cada delta (response_id del evento) — así el puente puede descartar audio de una respuesta que ya canceló, aunque el delta haya salido de OpenAI antes de que el cancel le llegara (F7 fase 6). itemId identifica el conversation item de OpenAI que representa "lo que el bot está diciendo" — se necesita para truncateResponse() en un barge-in (ver handleSpeechStarted en realtimeBridge.ts). */
+  onAudioDelta: (base64: string, responseId: string | undefined, itemId: string | undefined) => void;
   onAudioDone: (responseId: string | undefined) => void;
   onSpeechStarted: () => void;
   onSpeechStopped: () => void;
@@ -57,10 +57,13 @@ export class RealtimeClient {
       const model = this.config.model ?? DEFAULT_MODEL;
       const base = this.config.baseUrl || REALTIME_URL_BASE;
       const url = `${base}?model=${encodeURIComponent(model)}`;
+      // Sin "OpenAI-Beta: realtime=v1" a propósito: ese header fuerza el
+      // formato beta, que OpenAI desactivó ("beta_api_shape_disabled" — ver
+      // incidente de producción, 2026-08-23). /v1/realtime ya es la API GA;
+      // no hace falta ningún header extra para usarla.
       const ws = new WebSocket(url, {
         headers: {
           Authorization: `Bearer ${this.config.apiKey}`,
-          "OpenAI-Beta": "realtime=v1",
         },
       });
       this.ws = ws;
@@ -99,23 +102,63 @@ export class RealtimeClient {
     });
   }
 
+  /**
+   * Shape de la API GA (post-beta) de Realtime — distinta de la beta con la
+   * que se escribió esta fase originalmente (ver incidente de producción,
+   * 2026-08-23: OpenAI apagó la beta de golpe). Cambios confirmados contra la
+   * documentación real de OpenAI, uno por uno según el error que devolvía:
+   *   - `session.type: "realtime"` ahora es obligatorio.
+   *   - `modalities` ya no existe (ambas modalidades vienen implícitas).
+   *   - Todo lo de audio se movió bajo `session.audio.input`/`.output` — antes
+   *     eran campos sueltos (`input_audio_format`, `voice`, etc.).
+   *   - El formato de audio ahora es un OBJETO (`{ type: "audio/pcmu" }`),
+   *     no el string `"g711_ulaw"` de la beta — μ-law/G.711 (lo que manda
+   *     Twilio) es siempre 8kHz, así que no lleva `rate` (a diferencia de
+   *     "audio/pcm", que si lo necesita).
+   *   - `temperature` no aparece en el schema documentado de la GA — se deja
+   *     de mandar (antes se leía de la config del bot; si OpenAI lo vuelve a
+   *     soportar, aquí es donde se reintroduce).
+   */
   private sendSessionUpdate(): void {
+    const g711UlawFormat = { type: "audio/pcmu" };
     this.send({
       type: "session.update",
       session: {
-        modalities: ["audio", "text"],
+        type: "realtime",
         instructions: this.config.instructions,
-        voice: this.config.voice ?? "alloy",
-        input_audio_format: "g711_ulaw",
-        output_audio_format: "g711_ulaw",
-        turn_detection: { type: "server_vad" },
-        // Sin esto Realtime nunca transcribe lo que dice el LLAMANTE (solo
-        // "oye" el audio para pensar) — lo necesitamos para persistir el
-        // turno del cliente en messages, igual que cualquier otro canal.
-        input_audio_transcription: { model: "whisper-1" },
+        audio: {
+          input: {
+            format: g711UlawFormat,
+            // Tuneado para barge-in rápido — con los defaults de OpenAI (más
+            // pensados para no cortar al usuario por ruido de fondo que para
+            // colgar de una IA que puede estar hablando de más) el cliente
+            // tenía que insistir varias palabras antes de que el bot se
+            // callara. interrupt_response:true (además del cancelResponse()
+            // manual de realtimeBridge.ts — son dos capas, no una carrera:
+            // la que "gana" corta, la otra simplemente confirma con
+            // response_cancel_not_active, que no es un error real) y
+            // silence_duration_ms más corto detectan el fin del turno del
+            // cliente más rápido.
+            turn_detection: {
+              type: "server_vad",
+              threshold: 0.5,
+              prefix_padding_ms: 200,
+              silence_duration_ms: 400,
+              create_response: true,
+              interrupt_response: true,
+            },
+            // Sin esto Realtime nunca transcribe lo que dice el LLAMANTE (solo
+            // "oye" el audio para pensar) — lo necesitamos para persistir el
+            // turno del cliente en messages, igual que cualquier otro canal.
+            transcription: { model: "whisper-1" },
+          },
+          output: {
+            format: g711UlawFormat,
+            voice: this.config.voice ?? "alloy",
+          },
+        },
         tools: this.config.tools,
         tool_choice: this.config.tools.length > 0 ? "auto" : "none",
-        ...(this.config.temperature !== undefined ? { temperature: this.config.temperature } : {}),
       },
     });
   }
@@ -128,6 +171,27 @@ export class RealtimeClient {
   /** Interrumpe la respuesta en curso — se manda cuando el llamante empieza a hablar encima del bot (barge-in). */
   cancelResponse(): void {
     this.send({ type: "response.cancel" });
+  }
+
+  /**
+   * Le dice a OpenAI hasta qué punto (en ms) de audio el llamante REALMENTE
+   * alcanzó a escuchar antes de interrumpir. Sin esto, response.cancel() solo
+   * detiene la GENERACIÓN futura — el conversation item que ya se creó en el
+   * servidor sigue representando la frase COMPLETA que el bot iba a decir, no
+   * la que de verdad se escuchó. En el turno siguiente el modelo puede sonar
+   * como si retomara esa idea a medias (el síntoma exacto de un barge-in que
+   * "no funciona": la IA sigue la frase interrumpida en vez de reaccionar a lo
+   * nuevo). audio_end_ms debe ser <= la duración real ya emitida — si se pasa,
+   * OpenAI responde con error (ver contentIndex fijo en 0: la respuesta de voz
+   * solo tiene un content part de audio).
+   */
+  truncateResponse(itemId: string, contentIndex: number, audioEndMs: number): void {
+    this.send({
+      type: "conversation.item.truncate",
+      item_id: itemId,
+      content_index: contentIndex,
+      audio_end_ms: Math.max(0, Math.round(audioEndMs)),
+    });
   }
 
   /** Solo el resultado de una tool — NO pide una respuesta nueva. Separado de requestResponse() a propósito: con varias tool calls en el mismo turno, pedir response.create una vez por cada una duplica la respuesta (F7 fase 6) — el puente decide UNA sola vez, cuando ya no quedan tools pendientes. */
@@ -165,10 +229,13 @@ export class RealtimeClient {
       return;
     }
     switch (evt.type) {
-      case "response.audio.delta":
-        this.handlers.onAudioDelta(evt.delta, evt.response_id);
+      // GA renombró los eventos de audio de salida (antes "response.audio.*"
+      // — ver nota de sendSessionUpdate). Los de ciclo de vida/función/
+      // transcripción de ENTRADA no cambiaron de nombre.
+      case "response.output_audio.delta":
+        this.handlers.onAudioDelta(evt.delta, evt.response_id, evt.item_id);
         return;
-      case "response.audio.done":
+      case "response.output_audio.done":
         this.handlers.onAudioDone(evt.response_id);
         return;
       case "input_audio_buffer.speech_started":
@@ -189,7 +256,7 @@ export class RealtimeClient {
       case "conversation.item.input_audio_transcription.completed":
         if (evt.transcript) this.handlers.onUserTranscript(evt.transcript);
         return;
-      case "response.audio_transcript.done":
+      case "response.output_audio_transcript.done":
         if (evt.transcript) this.handlers.onAssistantTranscript(evt.transcript);
         return;
       case "error":

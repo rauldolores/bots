@@ -41,12 +41,19 @@ export function buildStreamConnectResponse(
     const tokenPayload = { botId: input.botId, callSid: input.callSid, from: input.from, to: input.to, exp: String(exp) };
     const token = await signStreamToken(authToken, tokenPayload);
 
-    const streamUrl =
-      `${toWsUrl(base)}/webhooks/voice/${input.botId}/stream` +
-      `?callSid=${encodeURIComponent(input.callSid)}&from=${encodeURIComponent(input.from)}&to=${encodeURIComponent(input.to)}` +
-      `&exp=${exp}&t=${token}`;
+    // El query string NO va en la URL: Twilio no lo preserva al abrir el
+    // WebSocket del Media Stream (ver twiml.ts). Todo lo que necesita
+    // sobrevivir hasta el gateway viaja como <Parameter>.
+    const streamUrl = `${toWsUrl(base)}/webhooks/voice/${input.botId}/stream`;
+    const twiml = buildConnectStreamTwiml(streamUrl, {
+      callSid: input.callSid,
+      from: input.from,
+      to: input.to,
+      exp: String(exp),
+      t: token,
+    });
 
-    return new Response(buildConnectStreamTwiml(streamUrl), { status: 200, headers: { "Content-Type": "text/xml" } });
+    return new Response(twiml, { status: 200, headers: { "Content-Type": "text/xml" } });
   })();
 }
 

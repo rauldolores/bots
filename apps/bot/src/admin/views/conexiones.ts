@@ -908,6 +908,7 @@ export async function renderConexiones(
   botId: string,
   category: string = "canales",
   notice?: { ok?: boolean; err?: string },
+  visibleNavIds: Set<string> | null = null,
 ): Promise<string> {
   const cat = ["crm", "tickets", "calendar", "mcp"].includes(category) ? (category as ConnectorCategory) : "canales";
   const tabs = renderTabs(cat);
@@ -948,7 +949,7 @@ export async function renderConexiones(
       </div>
     </div>`;
 
-  return layout({ title: "Conexiones", activeTab: "conexiones", body, pro: true });
+  return layout({ title: "Conexiones", activeTab: "conexiones", body, pro: true, visibleNavIds });
 }
 
 /** Resumen corto para el badge de salud del Resumen. */

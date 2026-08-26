@@ -81,6 +81,7 @@ export async function renderMejoras(
   env: Env,
   botId: string,
   flash?: { found?: string; applied?: boolean; dismissed?: boolean },
+  visibleNavIds: Set<string> | null = null,
 ): Promise<string> {
   const db = new Db(env.DB);
   const repo = new SuggestionsRepo(db, botId);
@@ -197,5 +198,5 @@ export async function renderMejoras(
       </div>
     </div>`;
 
-  return layout({ title: "Mejoras", activeTab: "mejoras", body, pro: true });
+  return layout({ title: "Mejoras", activeTab: "mejoras", body, pro: true, visibleNavIds });
 }

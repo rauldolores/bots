@@ -39,6 +39,11 @@ export interface Env {
   BOT_NICHE?: string;
   BUFFER_SECONDS: string;
   DASHBOARD_BASE_URL: string;
+  // Solo para despliegues divididos (p.ej. Voice en Fly.io, el resto en
+  // Vercel): dónde vive el panel REAL para los links que se le mandan al
+  // dueño (ticket por correo, etc.) cuando este proceso no es el que sirve
+  // /admin. Vacío = usa DASHBOARD_BASE_URL, como siempre.
+  ADMIN_BASE_URL?: string;
 
   // Secrets (member-set via wrangler secret put)
   // Qué proveedor/modelo de IA usa el bot se decide SOLO desde /admin/config

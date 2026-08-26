@@ -21,7 +21,7 @@ import { buildAgentContext } from "../../agent/context";
 import { resolveChannelEnv } from "../effectiveEnv";
 import { RealtimeClient, DEFAULT_MODEL as DEFAULT_REALTIME_MODEL } from "./realtimeClient";
 import { toolsToRealtimeSchemas } from "./realtimeTools";
-import { buildMediaMessage, buildMarkMessage, buildClearMessage } from "./mediaStreamProtocol";
+import { buildMediaMessage, buildMarkMessage, buildClearMessage, base64ToBytes } from "./mediaStreamProtocol";
 import { createCallMetrics, beginTurn, timeToFirstAudioMs, turnLatencyMs, responseDurationMs, type CallMetrics } from "./metrics";
 import { resolveVoiceOpenAiApiKey } from "./openaiKey";
 import { logVoiceEvent, maskId } from "./log";
@@ -82,6 +82,10 @@ export class RealtimeCallBridge {
   private responseRequested = false;
   /** El id de la respuesta que Realtime confirmó más recientemente (response.created) — se usa para descartar audio/eventos tardíos de una respuesta que YA se canceló, aunque hayan salido de OpenAI antes de que el cancel le llegara. */
   private activeResponseId: string | null = null;
+  /** El conversation item (item_id) de la respuesta activa — llega con su primer audio delta, no con response.created. Necesario para truncateResponse() en un barge-in: sin el item_id correcto, OpenAI no sabe QUÉ truncar. */
+  private activeResponseItemId: string | null = null;
+  /** Cuánto audio (ms) de la respuesta activa ya se le mandó a Twilio — μ-law 8kHz = 8 bytes/ms. Es el audio_end_ms que se le manda a truncateResponse() en un barge-in: sin trackear esto, no hay forma de saber hasta dónde el llamante alcanzó a escuchar antes de interrumpir. */
+  private audioMsSentForActiveResponse = 0;
   /** Respuesta que se le pidió cancelar a Realtime y de la que todavía se espera confirmación — para calcular interruption_latency cuando llegue su response.done. */
   private pendingCancel: { responseId: string | null; at: number } | null = null;
   private closed = false;
@@ -201,9 +205,10 @@ export class RealtimeCallBridge {
         instructions,
         tools: toolSchemas,
         temperature: ctx.cfg.temperature,
+        voice: ctx.cfg.voiceName,
       },
       {
-        onAudioDelta: (base64, responseId) => this.handleAudioDelta(base64, responseId),
+        onAudioDelta: (base64, responseId, itemId) => this.handleAudioDelta(base64, responseId, itemId),
         onAudioDone: (responseId) => this.handleAudioDone(responseId),
         onSpeechStarted: () => this.handleSpeechStarted(),
         onSpeechStopped: () => this.handleSpeechStopped(),
@@ -223,6 +228,15 @@ export class RealtimeCallBridge {
     // F7 fase 10 — call.answered: el agente quedó listo para conversar.
     await this.sessionsRepo().markAnswered(this.callRowId);
     await recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.answered", { model: this.realtimeModel });
+
+    // El bot SALUDA PRIMERO — nunca espera a que el cliente hable. Si
+    // <cliente_conocido> ya está en `instructions` (viene de
+    // ctx.memoryBlocks, ver connectRealtime arriba), el modelo tiene el
+    // nombre disponible ahí mismo y lo usa en el saludo sin que se lo
+    // pidamos aparte cada vez.
+    this.requestResponse(
+      `${this.instructions}\n\n<saludo_inicial>\nAcabas de contestar la llamada — el cliente todavía no ha dicho nada. Saluda TÚ primero, breve y natural, preséntate y pregunta en qué puedes ayudar. Si ya conoces el nombre del cliente (ver <cliente_conocido> arriba, si está presente), salúdalo por su nombre. Nunca te quedes esperando en silencio a que hable primero.\n</saludo_inicial>`,
+    );
   }
 
   /** Audio del llamante, tal cual llegó de Twilio — g711 μ-law 8kHz, sin decodificar (Realtime acepta ese formato directo). */
@@ -266,6 +280,14 @@ export class RealtimeCallBridge {
       });
       this.responseActive = false;
       this.responseRequested = false;
+      // ANTES de cancelar: si ya salió audio de esta respuesta, hay que
+      // decirle a OpenAI hasta dónde llegó lo que el llamante REALMENTE
+      // escuchó (ver truncateResponse() en realtimeClient.ts) — si no, el
+      // conversation item del servidor sigue representando la frase COMPLETA
+      // y el siguiente turno puede sonar como si la retomara a medias.
+      if (this.activeResponseItemId && this.audioMsSentForActiveResponse > 0) {
+        this.client?.truncateResponse(this.activeResponseItemId, 0, this.audioMsSentForActiveResponse);
+      }
       this.client?.cancelResponse();
       this.deps.sendToTwilio(buildClearMessage(this.deps.streamSid));
 
@@ -289,6 +311,8 @@ export class RealtimeCallBridge {
     this.responseActive = true;
     this.responseRequested = false;
     this.activeResponseId = responseId ?? null;
+    this.activeResponseItemId = null;
+    this.audioMsSentForActiveResponse = 0;
     this.toolCallsThisResponse = [];
     logVoiceEvent("response_started", {
       botId: this.deps.botId,
@@ -306,9 +330,22 @@ export class RealtimeCallBridge {
    * reaccionar al cancel. No depende de la red: depende de nuestro propio
    * estado local (responseActive + activeResponseId).
    */
-  private handleAudioDelta(base64: string, responseId: string | undefined): void {
+  private handleAudioDelta(base64: string, responseId: string | undefined, itemId: string | undefined): void {
     if (!this.responseActive) return;
     if (responseId && this.activeResponseId && responseId !== this.activeResponseId) return;
+    // item_id llega en CADA delta (no en response.created) — se fija con el
+    // primero y se acumulan los ms de audio ya mandados: es lo que
+    // truncateResponse() necesita si el llamante interrumpe a medio decir
+    // esta respuesta (ver handleSpeechStarted). μ-law 8kHz = 8 bytes/ms.
+    if (itemId) this.activeResponseItemId = itemId;
+    try {
+      this.audioMsSentForActiveResponse += base64ToBytes(base64).length / 8;
+    } catch {
+      // base64 inválido no debería pasar nunca con audio real de OpenAI —
+      // truncateResponse() simplemente usará un audio_end_ms algo corto si
+      // esto llegara a pasar; nunca vale la pena tronar el puente de la
+      // llamada por esto.
+    }
     if (this.metrics.currentTurn.firstAudioDeltaAt == null) {
       this.metrics.currentTurn.firstAudioDeltaAt = Date.now();
       const ttfa = timeToFirstAudioMs(this.metrics);
@@ -356,6 +393,7 @@ export class RealtimeCallBridge {
           callSid: maskId(this.deps.callSid),
           interruptionLatencyMs,
         });
+        void this.sessionsRepo().addInterruptionLatency(this.callRowId, interruptionLatencyMs);
       } else {
         // Carrera rara: la respuesta terminó sola justo cuando se pidió cancelarla.
         logVoiceEvent("interruption_race_no_cancel", { botId: this.deps.botId, callSid: maskId(this.deps.callSid), status });
@@ -384,10 +422,16 @@ export class RealtimeCallBridge {
     // turn_latency de todos los turnos de la llamada, no un promedio.
     const latencyMs = turnLatencyMs(this.metrics);
     if (latencyMs != null) void this.sessionsRepo().addResponseLatency(this.callRowId, latencyMs);
+    // agent_turn_count/response_duration_total_ms SIEMPRE se registran (a
+    // diferencia de addResponseLatency de arriba, que se salta turnos sin
+    // turn_latency válido) — así el promedio de response_duration no
+    // subcuenta turnos, y agent_turn_count sirve de divisor para ambos.
+    const durationMs = responseDurationMs(this.metrics);
+    if (durationMs != null) void this.sessionsRepo().recordAgentTurn(this.callRowId, durationMs);
     void recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.agent_turn", {
       status,
       turnLatencyMs: latencyMs,
-      responseDurationMs: responseDurationMs(this.metrics),
+      responseDurationMs: durationMs,
     });
 
     // F7 fase 9: la respuesta que ACABA de terminar es la que le avisó al
@@ -654,6 +698,18 @@ export class RealtimeCallBridge {
   }
 
   private handleRealtimeError(err: unknown): void {
+    // "response_cancel_not_active" es una carrera ESPERADA, no un fallo: con
+    // interrupt_response:true (realtimeClient.ts), el barge-in lo puede
+    // cancelar el SERVIDOR solo, y nuestro cancelResponse() manual de
+    // handleSpeechStarted() llega de todos modos por si acaso — cuando el
+    // servidor ya se adelantó, esta es la respuesta a nuestro intento
+    // redundante. El corte de audio hacia Twilio nunca dependió de esto (ver
+    // handleAudioDelta), así que no es un error real de la llamada.
+    const code = (err as { code?: string } | null)?.code;
+    if (code === "response_cancel_not_active") {
+      logVoiceEvent("realtime_redundant_cancel", { botId: this.deps.botId, callSid: maskId(this.deps.callSid) });
+      return;
+    }
     console.error("[voice-realtime] error de Realtime:", err);
     logVoiceEvent("realtime_error", { botId: this.deps.botId, callSid: maskId(this.deps.callSid) });
   }

@@ -37,7 +37,14 @@ function req(path: string, init?: RequestInit): Request {
   return new Request(`https://bot.test${path}`, init);
 }
 
-/** Claims mínimas de una sesión de KontrolIA válida para la organización dada. */
+/**
+ * Claims mínimas de una sesión de KontrolIA válida para la organización dada.
+ * is_platform_admin:true (no un permiso real de nodia-agents.*) a propósito
+ * — este archivo prueba el ROUTING de login/selector de organización, no el
+ * gate de permisos de admin/permissions.ts (ver permissionGate.test.ts para
+ * eso); platform_admin bypasea ambos guards sin tener que inventar un
+ * catálogo de permisos aquí que no viene al caso.
+ */
 function claimsFor(organizationId: string | null) {
   return {
     sub: "u1",
@@ -45,6 +52,7 @@ function claimsFor(organizationId: string | null) {
     organization_id: organizationId,
     roles: [],
     permissions: [],
+    is_platform_admin: true,
     exp: Math.floor(Date.now() / 1000) + 3600,
   };
 }
@@ -175,6 +183,68 @@ describe("guard del panel con sesión de KontrolIA", () => {
     );
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/admin/bots/new");
+  });
+});
+
+describe("guard de acceso a la app — sesión de KontrolIA sin ningún permiso de nodia-agents.*", () => {
+  it("claims.permissions vacío y sin is_platform_admin: redirige a /admin/access-denied", async () => {
+    verifyAccessTokenMock.mockResolvedValue({
+      claims: { ...claimsFor(TEST_BOT_ID), is_platform_admin: undefined, permissions: [] },
+      user: { id: "u1" },
+    });
+    const res = await adminApp.fetch(
+      req("/overview", { headers: { cookie: `${SESSION_COOKIE}=${encodeURIComponent(SESSION)}` } }),
+      KONTROLIA_ENV,
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/admin/access-denied");
+  });
+
+  it("con al menos un permiso nodia-agents.*: pasa (no redirige a access-denied)", async () => {
+    verifyAccessTokenMock.mockResolvedValue({
+      claims: { ...claimsFor(TEST_BOT_ID), is_platform_admin: undefined, permissions: ["nodia-agents.resumen.ver"] },
+      user: { id: "u1" },
+    });
+    const res = await adminApp.fetch(
+      req("/overview", { headers: { cookie: `${SESSION_COOKIE}=${encodeURIComponent(SESSION)}` } }),
+      KONTROLIA_ENV,
+    );
+    expect(res.status).not.toBe(302);
+  });
+
+  it("/admin/access-denied en sí mismo es alcanzable sin loop (no vuelve a redirigir a sí mismo)", async () => {
+    verifyAccessTokenMock.mockResolvedValue({
+      claims: { ...claimsFor(TEST_BOT_ID), is_platform_admin: undefined, permissions: [] },
+      user: { id: "u1" },
+    });
+    const res = await adminApp.fetch(
+      req("/access-denied", { headers: { cookie: `${SESSION_COOKIE}=${encodeURIComponent(SESSION)}` } }),
+      KONTROLIA_ENV,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("Acceso restringido");
+  });
+
+  it("switch-org sigue alcanzable aunque no haya ningún permiso todavía — para poder cambiarse a una organización donde sí lo haya", async () => {
+    verifyAccessTokenMock.mockResolvedValue({
+      claims: { ...claimsFor(TEST_BOT_ID), is_platform_admin: undefined, permissions: [] },
+      user: { id: "u1" },
+    });
+    switchActiveOrganizationMock.mockResolvedValue(true);
+    refreshSessionMock.mockResolvedValue({ accessToken: "at2", refreshToken: "rt2", expiresAt: Date.now() + 3600_000 });
+    const res = await adminApp.fetch(
+      req("/switch-org", {
+        method: "POST",
+        headers: {
+          cookie: `${SESSION_COOKIE}=${encodeURIComponent(SESSION)}`,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: "organization_id=org-2",
+      }),
+      KONTROLIA_ENV,
+    );
+    // Nunca /admin/access-denied — el guard de acceso a la app no se aplica a esta ruta.
+    expect(res.headers.get("location")).not.toBe("/admin/access-denied");
   });
 });
 

@@ -255,6 +255,7 @@ export async function renderCalendario(
   botId: string,
   monthParam?: string,
   dayParam?: string,
+  visibleNavIds: Set<string> | null = null,
 ): Promise<string> {
   const db = new Db(env.DB);
   const timezone = resolveTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
@@ -290,7 +291,7 @@ export async function renderCalendario(
           <a href="/admin/conexiones?cat=calendar" class="text-[12px]" style="color:var(--muted)">gestionar conexión</a>
         </div>
         ${renderCalendarLayout(year, month, timezone, monthItems, upcoming, selectedKey)}`;
-      return layout({ title: "Calendario", activeTab: "calendario", body, pro: true });
+      return layout({ title: "Calendario", activeTab: "calendario", body, pro: true, visibleNavIds });
     }
     const errorBanner = `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px;margin-bottom:14px">No se pudo consultar ${esc(providerLabel)} (${esc(result?.error ?? "sin credenciales")}) — mostrando la copia local mientras tanto.</div>`;
     const appts = new AppointmentsRepo(db, botId);
@@ -303,7 +304,7 @@ export async function renderCalendario(
     ).map(fromLocal);
     const upcoming = (await appts.listUpcoming(8)).map(fromLocal);
     const body = `${errorBanner}${renderCalendarLayout(year, month, timezone, monthItems, upcoming, selectedKey)}`;
-    return layout({ title: "Calendario", activeTab: "calendario", body, pro: true });
+    return layout({ title: "Calendario", activeTab: "calendario", body, pro: true, visibleNavIds });
   }
 
   const appts = new AppointmentsRepo(db, botId);
@@ -316,7 +317,7 @@ export async function renderCalendario(
   ).map(fromLocal);
   const upcoming = (await appts.listUpcoming(8)).map(fromLocal);
   const body = renderCalendarLayout(year, month, timezone, monthItems, upcoming, selectedKey);
-  return layout({ title: "Calendario", activeTab: "calendario", body, pro: true });
+  return layout({ title: "Calendario", activeTab: "calendario", body, pro: true, visibleNavIds });
 }
 
 export async function cancelAppointment(env: Env, botId: string, id: string): Promise<void> {

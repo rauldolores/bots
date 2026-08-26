@@ -2,12 +2,15 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Nodia Agents — Agentes de IA para WhatsApp, Instagram y Telegram | Kontrolia",
+  title: "Nodia Agents — Agentes de IA que atienden llamadas y chats 24/7 | Kontrolia",
   description:
-    "Agentes de IA multicanal que atienden a tus clientes 24/7, capturan leads y resuelven desde tu base de conocimiento. Un proyecto de Kontrolia. Solicita una demo.",
+    "Agentes de IA multicanal que contestan las llamadas de tu número y atienden WhatsApp, Instagram y Telegram 24/7: capturan leads, resuelven desde tu base de conocimiento y transfieren a un humano. Un proyecto de Kontrolia. Solicita una demo.",
   keywords: [
     "chatbot IA",
     "agente de IA",
+    "contestar llamadas con IA",
+    "asistente de voz IA",
+    "bot de llamadas",
     "WhatsApp bot",
     "Telegram bot",
     "Instagram bot",
@@ -18,7 +21,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Nodia Agents — Agentes de IA para tu negocio",
     description:
-      "Atiende 24/7 en WhatsApp, Instagram, Messenger y Telegram. Un proyecto de Kontrolia. Solicita una demo.",
+      "Contesta las llamadas de tu número y atiende 24/7 en WhatsApp, Instagram, Messenger y Telegram. Un proyecto de Kontrolia. Solicita una demo.",
     type: "website",
     locale: "es_MX",
   },

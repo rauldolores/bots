@@ -44,6 +44,10 @@ const { SuggestionsRepo } = await import("../../src/db/suggestions");
 
 const SESSION = JSON.stringify({ accessToken: "at", refreshToken: "rt", expiresAt: Date.now() + 3600_000 });
 
+// is_platform_admin:true a propósito — este archivo prueba bot-scoping (el
+// bug real de 2+ bots en una organización), no el gate de permisos de
+// admin/permissions.ts; platform_admin bypasea ambos guards nuevos sin que
+// cada acción de aquí necesite su propio permiso inventado.
 function claimsFor(organizationId: string) {
   return {
     sub: "u1",
@@ -51,6 +55,7 @@ function claimsFor(organizationId: string) {
     organization_id: organizationId,
     roles: [],
     permissions: [],
+    is_platform_admin: true,
     exp: Math.floor(Date.now() / 1000) + 3600,
   };
 }

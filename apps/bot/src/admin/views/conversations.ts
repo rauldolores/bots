@@ -384,7 +384,7 @@ export function renderSuggestionBox(text: string): string {
 
 // --- Full page -----------------------------------------------------------------
 
-export async function renderInbox(env: Env, botId: string, p: InboxParams): Promise<string> {
+export async function renderInbox(env: Env, botId: string, p: InboxParams, visibleNavIds: Set<string> | null = null): Promise<string> {
   const db = new Db(env.DB);
   const now = Date.now();
 
@@ -472,5 +472,5 @@ export async function renderInbox(env: Env, botId: string, p: InboxParams): Prom
       </div>
     </div>`;
 
-  return layout({ title: "Conversaciones", activeTab: "conversations", body, pro: true });
+  return layout({ title: "Conversaciones", activeTab: "conversations", body, pro: true, visibleNavIds });
 }

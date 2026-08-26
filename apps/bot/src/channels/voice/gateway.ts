@@ -36,6 +36,8 @@ interface GatewayCallState {
   to: string;
   streamSid: string | null;
   bridge: RealtimeCallBridge | null;
+  /** Recién en `true` tras verificar el token del evento "start" — ver authorizeStreamStart(). */
+  authorized: boolean;
 }
 
 export interface VoiceGatewayHandle {
@@ -61,41 +63,31 @@ export function attachVoiceGateway(httpServer: UpgradeCapableServer, env: Env): 
     const match = STREAM_PATH_RE.exec(url.pathname);
     if (!match) return; // no es la ruta del Voice Gateway — no la tocamos
 
+    // Twilio no manda el query string al abrir el WebSocket (confirmado en
+    // producción), así que aquí ya no hay nada que autorizar todavía — el
+    // token viaja en <Parameter> y llega recién con el evento "start" (ver
+    // handleMessage). El upgrade se acepta para CUALQUIER ruta con forma
+    // válida; quien no mande un "start" con token válido nunca consigue que
+    // se cree una sesión ni un bridge, y se cierra de inmediato.
     const botId = match[1];
-    const callSid = url.searchParams.get("callSid") ?? "";
-    const from = url.searchParams.get("from") ?? "";
-    const to = url.searchParams.get("to") ?? "";
-    const exp = url.searchParams.get("exp") ?? "";
-    const token = url.searchParams.get("t") ?? "";
-
-    void authorizeUpgrade(env, { botId, callSid, from, to, exp }, token)
-      .then((ok) => {
-        if (!ok) {
-          logVoiceEvent("gateway_reject", { botId, callSid: maskId(callSid), reason: "invalid_or_expired_token" });
-          socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-          socket.destroy();
-          return;
-        }
-        wss.handleUpgrade(req, socket, head, (ws) => {
-          const state: GatewayCallState = { botId, callSid, from, to, streamSid: null, bridge: null };
-          activeCalls.set(ws, state);
-          logVoiceEvent("gateway_connected", { botId, callSid: maskId(callSid), activeCalls: activeCalls.size });
-          // F7 fase 8: el Media Stream de Twilio ya conectó con nosotros.
-          void recordOnboardingMilestones(env, botId, ["twilio_connected"]);
-          wireConnection(ws, state, env, activeCalls);
-        });
-      })
-      .catch((e) => {
-        console.error("[voice-gateway] upgrade authorization failed:", e);
-        socket.destroy();
-      });
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      const state: GatewayCallState = { botId, callSid: "", from: "", to: "", streamSid: null, bridge: null, authorized: false };
+      activeCalls.set(ws, state);
+      logVoiceEvent("gateway_connected", { botId, callSid: maskId(null), activeCalls: activeCalls.size });
+      wireConnection(ws, state, env, activeCalls);
+    });
   });
 
   return { activeCallCount: () => activeCalls.size };
 }
 
-/** Twilio no firma el WebSocket (solo el webhook HTTP) — este token de streamToken.ts es lo único que impide que cualquiera se conecte directo. */
-async function authorizeUpgrade(
+/**
+ * Twilio no firma el WebSocket (solo el webhook HTTP) — este token de
+ * streamToken.ts es lo único que impide que cualquiera se conecte directo.
+ * Se llama con los `customParameters` del evento "start", que es lo único
+ * que Twilio sí entrega (ver nota en el `upgrade` handler más arriba).
+ */
+async function authorizeStreamStart(
   rawEnv: Env,
   payload: { botId: string; callSid: string; from: string; to: string; exp: string },
   token: string,
@@ -152,6 +144,31 @@ async function handleMessage(ws: WebSocket, state: GatewayCallState, env: Env, r
       return;
 
     case "start": {
+      // El token/callSid/from/to firmados viajan en customParameters (ver
+      // twiml.ts) — el query string de la URL nunca le llega al gateway
+      // (Twilio no lo preserva). Sin un "start" autorizado no hay sesión ni
+      // bridge: se cierra la conexión aquí mismo.
+      const custom = msg.start.customParameters ?? {};
+      const authPayload = {
+        botId: state.botId,
+        callSid: custom.callSid ?? "",
+        from: custom.from ?? "",
+        to: custom.to ?? "",
+        exp: custom.exp ?? "",
+      };
+      const ok = await authorizeStreamStart(env, authPayload, custom.t ?? "");
+      if (!ok) {
+        logVoiceEvent("gateway_reject", { botId: state.botId, callSid: maskId(null), reason: "invalid_or_expired_token" });
+        ws.close(1008, "unauthorized");
+        return;
+      }
+      state.authorized = true;
+      state.callSid = authPayload.callSid;
+      state.from = authPayload.from;
+      state.to = authPayload.to;
+      // F7 fase 8: el Media Stream de Twilio ya conectó Y quedó autorizado.
+      void recordOnboardingMilestones(env, state.botId, ["twilio_connected"]);
+
       // Local, no state.streamSid: la propiedad es string|null y TS no la
       // estrecha de forma confiable a través de los await de abajo.
       const streamSid = msg.start.streamSid;

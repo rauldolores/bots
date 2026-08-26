@@ -1,6 +1,7 @@
 import {
   LayoutDashboard,
   MessagesSquare,
+  PhoneCall,
   UserPlus,
   LifeBuoy,
   Workflow,
@@ -18,6 +19,7 @@ import { Container, SectionHeading } from "./ui";
 const tabs = [
   { icon: LayoutDashboard, label: "Resumen" },
   { icon: MessagesSquare, label: "Bandeja" },
+  { icon: PhoneCall, label: "Llamadas" },
   { icon: UserPlus, label: "Leads" },
   { icon: LifeBuoy, label: "Tickets" },
   { icon: Workflow, label: "Mi Agente" },
@@ -35,7 +37,7 @@ const stats = [
   { label: "Conversaciones", value: "1,248", delta: "+18%" },
   { label: "Leads captados", value: "312", delta: "+24%" },
   { label: "Resueltas por el bot", value: "78%", delta: "+6 pts" },
-  { label: "Costo IA del mes", value: "$1.84", delta: "" },
+  { label: "Llamadas contestadas", value: "43", delta: "+12%" },
 ];
 
 export default function Panel() {
@@ -140,6 +142,7 @@ export default function Panel() {
                   { name: "Ana Pérez", msg: "¿Tienen mesa para 4 hoy a las 8?", tag: "Lead", color: "text-amber-700 border-amber-500/40" },
                   { name: "Carlos Ruiz", msg: "¿El menú tiene opciones veganas?", tag: "Resuelta", color: "text-emerald-600 border-emerald-500/40" },
                   { name: "Lucía Gómez", msg: "Quiero cancelar mi reserva…", tag: "Handoff", color: "text-red-600 border-red-500/40" },
+                  { name: "Cita telefónica", msg: "Llamada #7314 · Dra. Mendoza · Jueves 10 am", tag: "Voz", color: "text-sky-700 border-sky-500/40" },
                 ].map((row) => (
                   <div
                     key={row.name}

@@ -78,6 +78,22 @@ describe("renderSystemPrompt", () => {
     const withoutPlaybook = renderSystemPrompt(input);
     expect(withoutPlaybook).not.toContain("{{NICHO_PLAYBOOK}}");
   });
+
+  // Bug real reportado en producción: el bot asumía dólares al hablar de
+  // precios aunque el negocio cobrara en pesos mexicanos.
+  it("con país/moneda, agrega <contexto_regional> con la directiva anti-dólares", () => {
+    const prompt = renderSystemPrompt({ ...input, country: "México", currency: "MXN" });
+    expect(prompt).toContain("<contexto_regional>");
+    expect(prompt).toContain("México");
+    expect(prompt).toContain("MXN");
+    expect(prompt).toContain("Nunca asumas dólares");
+    expect(prompt).toContain("estadounidenses por default");
+  });
+
+  it("sin país ni moneda, omite el bloque completo (no una sección vacía/confusa)", () => {
+    const prompt = renderSystemPrompt(input);
+    expect(prompt).not.toContain("<contexto_regional>");
+  });
 });
 
 describe("systemPromptFromEnv", () => {

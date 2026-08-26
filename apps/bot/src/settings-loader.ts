@@ -2,6 +2,7 @@ import type { Env } from "./env";
 import { Db } from "./db/client";
 import { SettingsRepo, SETTING_KEYS } from "./db/settings";
 import { BotsRepo } from "./db/bots";
+import { BotConnectorsRepo } from "./db/botConnectors";
 import { resolveBotId } from "./tenant";
 import { systemPromptFromEnv } from "./system-prompt";
 import { renderBusinessContext } from "./businessContext";
@@ -27,6 +28,8 @@ export interface AgentConfig {
   monthlyBudgetUsd?: number;
   /** BYO-LLM del dashboard (proveedor / API key / modelo). */
   llm: LlmOverrides;
+  /** Voz de OpenAI Realtime para llamadas — undefined = default de realtimeClient.ts ("alloy"). */
+  voiceName?: string;
 }
 
 /** Extract the BYO-LLM overrides from a settings snapshot. */
@@ -123,11 +126,49 @@ export async function resolveAgentConfig(
   };
 
   const systemPromptOverride = get(SETTING_KEYS.systemPromptOverride);
-  const businessContext = get(SETTING_KEYS.businessContext) ?? renderBusinessContext(botConfig);
+  // Se COMBINAN, no se reemplazan: businessContext (setting) ahora es solo
+  // "notas adicionales" en el panel (/admin/config → Información del
+  // negocio) — el bot siempre ve lo estructurado (bots.config) MÁS lo que el
+  // dueño haya escrito a mano encima. Antes un textarea pre-llenado con
+  // renderBusinessContext(botConfig) se grababa como override permanente en
+  // el primer guardado de CUALQUIER pestaña (mismo <form>) y tapaba para
+  // siempre cualquier cambio futuro a bots.config — ver Sección 0 del plan.
+  const businessContext = [renderBusinessContext(botConfig), get(SETTING_KEYS.businessContext)]
+    .filter(Boolean)
+    .join("\n\n");
   const botName = get(SETTING_KEYS.botName) ?? identity.name;
   // Tono elegido en el panel gana; si no hay, el tono por defecto del nicho.
   const tone = get(SETTING_KEYS.tone) ?? (niche.defaultTone || undefined);
   const escalationKeywords = parseCsvList(get(SETTING_KEYS.escalationKeywords));
+  const voiceName = get(SETTING_KEYS.voiceName);
+  const country = botConfig.country?.trim() || undefined;
+  const currency = botConfig.currency?.trim() || undefined;
+
+  // Instrucciones de venta/trato del dueño (nuevo, /admin/config →
+  // Instrucciones avanzadas) ganan sobre el playbook del niche pack — no se
+  // concatenan: si algún día hay niche packs reales con playbook propio,
+  // mezclar dos guiones potencialmente contradictorios en un slot sin tag
+  // propio ({{NICHO_PLAYBOOK}}) es más riesgoso que "gana lo que el dueño
+  // escribió a mano".
+  const ownerPlaybook = get(SETTING_KEYS.salesPlaybook);
+  const nichoPlaybookBase = ownerPlaybook ?? (niche.playbook || undefined);
+
+  // Si el catálogo vive en un sistema externo (MCP) en vez de bots.config.catalog,
+  // el modelo necesita saberlo explícitamente — si no, puede asumir que un
+  // catálogo vacío significa "no tengo esa información" en vez de "consúltala
+  // con la tool". Se genera solo, no depende de que el dueño lo redacte.
+  let mcpNote: string | undefined;
+  if (botConfig.catalogSource === "mcp") {
+    const mcpConnectors = (await new BotConnectorsRepo(db).listByBot(botId)).filter(
+      (c) => c.category === "mcp" && c.enabled,
+    );
+    if (mcpConnectors.length > 0) {
+      mcpNote = `<catalogo_mcp>\nEl catálogo y los precios de este negocio se consultan EN VIVO vía: ${mcpConnectors
+        .map((c) => c.name ?? c.provider)
+        .join(", ")}. No inventes precios ni digas que no tienes esa información sin antes intentar la herramienta correspondiente.\n</catalogo_mcp>`;
+    }
+  }
+  const nichoPlaybook = [nichoPlaybookBase, mcpNote].filter(Boolean).join("\n\n") || undefined;
 
   // Flywheel lessons (JSON array). Only injected into the GENERATED prompt —
   // a manual override replaces the whole prompt, lessons included.
@@ -146,12 +187,14 @@ export async function resolveAgentConfig(
 
   const systemPrompt =
     systemPromptOverride ??
-    systemPromptFromEnv(identity, enabledToolNames, businessContext, niche.playbook || undefined, {
+    systemPromptFromEnv(identity, enabledToolNames, businessContext, nichoPlaybook, {
       tone,
       extraEscalationKeywords: escalationKeywords,
       botName,
       lessons,
       timezone,
+      country,
+      currency,
     });
 
   const bufferSecondsRaw = get(SETTING_KEYS.bufferSeconds);
@@ -190,5 +233,6 @@ export async function resolveAgentConfig(
     temperature,
     monthlyBudgetUsd,
     llm: llmOverridesFrom(settings),
+    voiceName,
   };
 }

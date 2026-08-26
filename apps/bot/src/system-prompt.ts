@@ -18,6 +18,11 @@ export interface SystemPromptInput {
    *  src/datetime.ts. "Hoy" y toda hora que el modelo use (ej. al agendar
    *  citas) es en ESTA zona, no UTC. */
   timezone?: string;
+  /** País donde opera el negocio (ej. "México") — ver <contexto_regional>. */
+  country?: string;
+  /** Moneda en la que cobra el negocio (ej. "MXN") — sin esto el modelo
+   *  puede asumir dólares por default. Ver <contexto_regional>. */
+  currency?: string;
 }
 
 const TEMPLATE = `<output_language>
@@ -52,6 +57,8 @@ Toda hora que menciones o mandes a una herramienta (ej. agendar una cita) es
 en la zona horaria LOCAL del negocio ({{TIMEZONE}}), no UTC — el sistema ya
 convierte, tú solo usas la hora tal cual la dice el cliente.
 </fecha_actual>
+
+{{CONTEXTO_REGIONAL}}
 
 <business_context>
 {{BUSINESS_CONTEXT}}
@@ -142,6 +149,23 @@ ${lessons.map((l) => `- ${l}`).join("\n")}
 </lecciones_aprendidas>`
       : "";
 
+  // Sin esto el modelo asume dólares por default (su entrenamiento es
+  // mayormente en inglés/USD) aunque el negocio cobre en pesos — el mismo
+  // tipo de ambigüedad que <fecha_actual> resuelve para las fechas. Si el
+  // dueño no capturó ninguno de los dos, se omite el bloque completo (igual
+  // que lecciones_aprendidas) en vez de mostrar una sección vacía/confusa.
+  const country = input.country?.trim();
+  const currency = input.currency?.trim();
+  const contextoRegional =
+    country || currency
+      ? `<contexto_regional>
+Este negocio opera en ${country || "un país que no se especificó"}. TODOS los
+precios que menciones están en ${currency || "la moneda local del negocio"}
+salvo que el cliente indique explícitamente otra. Nunca asumas dólares
+estadounidenses por default.
+</contexto_regional>`
+      : "";
+
   // Sin esto el modelo no tiene forma de saber qué día es "hoy" y adivina —
   // vimos un caso real donde agendó una cita para "mañana" usando 2023 (año
   // de su entrenamiento) en vez del año real, y la cita quedó invisible en
@@ -161,6 +185,7 @@ ${lessons.map((l) => `- ${l}`).join("\n")}
     .replaceAll("{{TIMEZONE}}", timezone)
     .replaceAll("{{NICHO_PLAYBOOK}}", input.nichoPlaybook ?? "")
     .replaceAll("{{LECCIONES}}", lessonsBlock)
+    .replaceAll("{{CONTEXTO_REGIONAL}}", contextoRegional)
     .replaceAll("{{TONE_LINE}}", toneLine)
     .replaceAll("{{EXTRA_ESCALATION}}", extraEscalation)
     .replaceAll("{{FECHA_HOY}}", fechaHoy);
@@ -172,6 +197,8 @@ export interface SystemPromptOverrides {
   botName?: string;
   lessons?: string[];
   timezone?: string;
+  country?: string;
+  currency?: string;
 }
 
 /** F3 de docs/multitenancy.md: identidad ya no es env, es la fila del bot. */
@@ -199,5 +226,7 @@ export function systemPromptFromEnv(
     extraEscalationKeywords: overrides?.extraEscalationKeywords,
     lessons: overrides?.lessons,
     timezone: overrides?.timezone,
+    country: overrides?.country,
+    currency: overrides?.currency,
   });
 }

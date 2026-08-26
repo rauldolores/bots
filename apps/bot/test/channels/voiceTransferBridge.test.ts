@@ -74,6 +74,17 @@ async function startBridge(callerId: string) {
   bridges.push(bridge);
   const ws = await fakeRealtime.waitForConnection(connIndex);
   const sessionUpdate = await fakeRealtime.waitForMessageType(ws, "session.update");
+
+  // El bot saluda primero al conectar (ver realtimeBridge.ts) — se simula que
+  // ESE turno ya se completó (como pasaría en la realidad, segundos antes de
+  // que el cliente diga algo que dispare transfer_to_human) para que el
+  // guard de "nunca pedir una respuesta duplicada" no bloquee para siempre
+  // la respuesta de confirmación que estos tests sí necesitan esperar.
+  await fakeRealtime.waitForMessageType(ws, "response.create");
+  fakeRealtime.send(ws, { type: "response.created", response: { id: "greeting" } });
+  fakeRealtime.send(ws, { type: "response.done", response: { id: "greeting", status: "completed" } });
+  await waitUntil(() => (bridge as any).responseActive === false && (bridge as any).responseRequested === false);
+
   return { bridge, ws, sendToTwilio, sessionUpdate, callSid };
 }
 
@@ -119,12 +130,12 @@ describe("Flujo completo: Agent Core pide transferir → Voice Gateway → Twili
     // La tool ya dejó su resultado — todavía NO se llamó a Twilio: falta que
     // el agente termine de decir "te comunico con un asesor".
     expect(global.fetch).not.toHaveBeenCalled();
-    await fakeRealtime.waitForMessageType(ws, "response.create");
+    await fakeRealtime.waitForMessageType(ws, "response.create", 2000, { after: 1 }); // {after:1}: salta el response.create del saludo inicial (ver realtimeBridge.ts)
 
     // El agente responde ("Claro, te comunico con un asesor...") y su
     // respuesta se completa normalmente.
     fakeRealtime.send(ws, { type: "response.created", response: { id: "r_confirm" } });
-    fakeRealtime.send(ws, { type: "response.audio.delta", response_id: "r_confirm", delta: "AAAA" });
+    fakeRealtime.send(ws, { type: "response.output_audio.delta", response_id: "r_confirm", delta: "AAAA" });
     fakeRealtime.send(ws, { type: "response.done", response: { id: "r_confirm", status: "completed" } });
 
     // AHORA sí se transfiere de verdad.
@@ -151,7 +162,7 @@ describe("Flujo completo: Agent Core pide transferir → Voice Gateway → Twili
       argumentsJson: JSON.stringify({ destination: "ventas", reason: "x", summary: "y" }),
     });
     await pending;
-    await fakeRealtime.waitForMessageType(ws, "response.create");
+    await fakeRealtime.waitForMessageType(ws, "response.create", 2000, { after: 1 }); // {after:1}: salta el response.create del saludo inicial (ver realtimeBridge.ts)
 
     fakeRealtime.send(ws, { type: "response.created", response: { id: "r_confirm2" } });
     // El cliente interrumpe a media frase — la respuesta se cancela.
@@ -175,7 +186,7 @@ describe("Flujo completo: Agent Core pide transferir → Voice Gateway → Twili
       argumentsJson: JSON.stringify({ destination: "soporte", reason: "x", summary: "y" }),
     });
     await pending;
-    await fakeRealtime.waitForMessageType(ws, "response.create");
+    await fakeRealtime.waitForMessageType(ws, "response.create", 2000, { after: 1 }); // {after:1}: salta el response.create del saludo inicial (ver realtimeBridge.ts)
 
     fakeRealtime.send(ws, { type: "response.created", response: { id: "r_confirm3" } });
     fakeRealtime.send(ws, { type: "response.done", response: { id: "r_confirm3", status: "completed" } });

@@ -121,7 +121,7 @@ function renderTicketsExternalList(
     : `<div class="bg-panel border border-line" style="padding:40px 18px;text-align:center"><p class="text-dim text-[12.5px]">Aún no hay tickets abiertos en ${esc(providerLabel)}.</p></div>`;
 }
 
-export async function renderTickets(env: Env, botId: string): Promise<string> {
+export async function renderTickets(env: Env, botId: string, visibleNavIds: Set<string> | null = null): Promise<string> {
   const db = new Db(env.DB);
   const timezone = resolveTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
 
@@ -152,7 +152,7 @@ export async function renderTickets(env: Env, botId: string): Promise<string> {
           <a href="/admin/conexiones?cat=tickets" class="text-[12px]" style="color:var(--muted)">gestionar conexión</a>
         </div>
         ${renderTicketsExternalList(providerLabel, result.items, timezone, localByExternalId)}`;
-      return layout({ title: "Tickets", activeTab: "tickets", body, pro: true });
+      return layout({ title: "Tickets", activeTab: "tickets", body, pro: true, visibleNavIds });
     }
     ticketsErrorBanner = `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px;margin-bottom:14px">No se pudo consultar ${esc(providerLabel)} (${esc(result?.error ?? "sin credenciales")}) — mostrando la copia local mientras tanto.</div>`;
   }
@@ -213,7 +213,7 @@ export async function renderTickets(env: Env, botId: string): Promise<string> {
          </div>`
       : list);
 
-  return layout({ title: "Tickets", activeTab: "tickets", body, pro: true });
+  return layout({ title: "Tickets", activeTab: "tickets", body, pro: true, visibleNavIds });
 }
 
 const VALID_PRIORITIES = ["low", "normal", "high", "urgent"] as const;

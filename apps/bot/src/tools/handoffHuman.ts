@@ -82,7 +82,7 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
             subject: `[Bot] Ticket ${reason}: ${summary.slice(0, 60)}`,
             html: `<p><strong>Categoría:</strong> ${category}</p>
                    <p><strong>Resumen:</strong> ${summary}</p>
-                   <p><a href="${env.DASHBOARD_BASE_URL}/admin/tickets/${ticketId}">Ver ticket</a></p>`,
+                   <p><a href="${env.ADMIN_BASE_URL ?? env.DASHBOARD_BASE_URL}/admin/tickets/${ticketId}">Ver ticket</a></p>`,
           });
         } catch (e) {
           console.error("[handoffHuman] resend failed:", e);
@@ -177,7 +177,7 @@ export async function notifyOwner(rawEnv: Env, notice: HandoffNotice, botIdOverr
     notifyBotId,
     "twilio",
   );
-  const ticketUrl = `${env.DASHBOARD_BASE_URL}/admin/tickets`;
+  const ticketUrl = `${env.ADMIN_BASE_URL ?? env.DASHBOARD_BASE_URL}/admin/tickets`;
   const tier = (await new BotsRepo(notifyDb).getById(notifyBotId))?.tier;
 
   // El SID de la plantilla puede venir del secret O del setting que escribe el

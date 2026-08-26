@@ -51,14 +51,24 @@ export interface VoiceSessionRow {
   interruption_count: number;
   time_to_first_audio_ms: number | null;
   total_response_latency_ms: number;
+  /** Cuántos turnos del agente se completaron — divisor para promediar total_response_latency_ms/response_duration_total_ms al reportar. */
+  agent_turn_count: number;
+  /** Suma de response_duration (responseStartedAt → responseCompletedAt) de todos los turnos — avg = response_duration_total_ms / agent_turn_count. */
+  response_duration_total_ms: number;
+  /** Suma de interruption_latency (cuánto tardó Realtime en confirmar cada cancelación) — avg = interruption_latency_total_ms / interruption_count. */
+  interruption_latency_total_ms: number;
   estimated_ai_cost_usd: number | null;
   estimated_telephony_cost_usd: number | null;
   transcript: VoiceTranscriptTurn[] | null;
   created_at: number;
 }
 
-interface VoiceSessionRowRaw extends Omit<VoiceSessionRow, "transcript"> {
+interface VoiceSessionRowRaw extends Omit<VoiceSessionRow, "transcript" | "estimated_ai_cost_usd" | "estimated_telephony_cost_usd"> {
   transcript: unknown;
+  // El driver de Postgres devuelve NUMERIC(10,4) como string (evita perder
+  // precisión) — nunca como number crudo.
+  estimated_ai_cost_usd: string | number | null;
+  estimated_telephony_cost_usd: string | number | null;
 }
 
 function parseTranscript(raw: unknown): VoiceTranscriptTurn[] | null {
@@ -73,8 +83,19 @@ function parseTranscript(raw: unknown): VoiceTranscriptTurn[] | null {
   return null;
 }
 
+function parseNumeric(raw: string | number | null): number | null {
+  if (raw == null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 function toRow(raw: VoiceSessionRowRaw): VoiceSessionRow {
-  return { ...raw, transcript: parseTranscript(raw.transcript) };
+  return {
+    ...raw,
+    transcript: parseTranscript(raw.transcript),
+    estimated_ai_cost_usd: parseNumeric(raw.estimated_ai_cost_usd),
+    estimated_telephony_cost_usd: parseNumeric(raw.estimated_telephony_cost_usd),
+  };
 }
 
 export interface CreateVoiceSessionInput {
@@ -216,6 +237,23 @@ export class VoiceSessionsRepo {
     if (ms <= 0) return;
     await this.db.run(
       "UPDATE voice_sessions SET total_response_latency_ms = total_response_latency_ms + ? WHERE id = ? AND bot_id = ?",
+      [ms, id, this.botId],
+    );
+  }
+
+  /** Un turno del agente más — SIEMPRE se llama en cada response_completed (a diferencia de addResponseLatency, que se salta turnos sin turn_latency válido), porque response_duration_total_ms sí necesita contar ese turno para promediar bien. */
+  async recordAgentTurn(id: string, responseDurationMs: number): Promise<void> {
+    await this.db.run(
+      "UPDATE voice_sessions SET agent_turn_count = agent_turn_count + 1, response_duration_total_ms = response_duration_total_ms + ? WHERE id = ? AND bot_id = ?",
+      [Math.max(0, responseDurationMs), id, this.botId],
+    );
+  }
+
+  /** Se suma al acumulado de latencia de interrupciones (una fila por llamada, no por interrupción) — avg = interruption_latency_total_ms / interruption_count al reportar. */
+  async addInterruptionLatency(id: string, ms: number): Promise<void> {
+    if (ms <= 0) return;
+    await this.db.run(
+      "UPDATE voice_sessions SET interruption_latency_total_ms = interruption_latency_total_ms + ? WHERE id = ? AND bot_id = ?",
       [ms, id, this.botId],
     );
   }

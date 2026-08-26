@@ -4,13 +4,13 @@ import { Container, SectionHeading } from "./ui";
 const steps = [
   {
     icon: Inbox,
-    title: "El cliente escribe",
-    desc: "Llega un mensaje por WhatsApp, Instagram, Messenger o Telegram.",
+    title: "El cliente escribe o llama",
+    desc: "Llega un mensaje por WhatsApp, Instagram, Messenger o Telegram — o una llamada a tu número.",
   },
   {
     icon: Timer,
-    title: "El bot escucha un momento",
-    desc: "Espera unos segundos por si sigues escribiendo y junta todo en una sola pregunta. Por eso no se siente robot.",
+    title: "Escucha un momento",
+    desc: "Espera unos segundos por si sigues escribiendo (o hablando) y junta todo en una sola pregunta. Por eso no se siente robot.",
   },
   {
     icon: Search,
@@ -20,12 +20,12 @@ const steps = [
   {
     icon: Send,
     title: "Responde y guarda",
-    desc: "Contesta con la voz de tu negocio y guarda la conversación y los leads en tu base.",
+    desc: "Contesta con la voz de tu negocio — por chat o por teléfono — y guarda la conversación y los leads en tu base.",
   },
   {
     icon: BrainCircuit,
     title: "Escala si hace falta",
-    desc: "Si es delicado, crea un ticket y te avisa a ti para que tomes el control.",
+    desc: "Si es delicado, transfiere la llamada en vivo o crea un ticket y te avisa a ti para que tomes el control.",
   },
 ];
 

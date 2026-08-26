@@ -46,3 +46,25 @@ body {
     color: transparent;
   }
 }
+
+/* Cursor parpadeante del simulador de conversación */
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Waveform del reproductor de llamada */
+@keyframes wave {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}

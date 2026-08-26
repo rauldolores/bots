@@ -111,7 +111,7 @@ function actionButton(action: string, label: string, kind: "primary" | "danger" 
   </form>`;
 }
 
-export async function renderTelefono(env: Env, botId: string, notice?: { ok?: boolean; err?: string }): Promise<string> {
+export async function renderTelefono(env: Env, botId: string, notice?: { ok?: boolean; err?: string }, visibleNavIds: Set<string> | null = null): Promise<string> {
   const db = new Db(env.DB);
   const numbers = await new VoiceNumbersRepo(db).listByBot(botId);
   const hasDestination = numbers.some((n) => n.enabled);
@@ -210,5 +210,5 @@ export async function renderTelefono(env: Env, botId: string, notice?: { ok?: bo
       ${voiceChannelRow ? transferNumberSection(voiceChannelRow.config.transferNumber ?? null) : ""}
     </div>`;
 
-  return layout({ title: "Tu número", activeTab: "telefono", body, pro: true });
+  return layout({ title: "Tu número", activeTab: "telefono", body, pro: true, visibleNavIds });
 }

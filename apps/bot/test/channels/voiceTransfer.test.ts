@@ -105,7 +105,9 @@ describe("handleTransferStatusCallback — la transferencia falló: la IA recupe
       const body = await res.text();
       expect(body).toContain("<Connect><Stream");
       expect(body).toContain(`/webhooks/voice/${TEST_BOT_ID}/stream`);
-      expect(body).toContain("callSid=CAxxx");
+      // El callSid viaja como <Parameter>, no en la URL — ver nota en
+      // voiceWebhook.test.ts.
+      expect(body).toContain('<Parameter name="callSid" value="CAxxx"/>');
     },
   );
 });

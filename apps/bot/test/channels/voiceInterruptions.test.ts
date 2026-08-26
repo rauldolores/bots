@@ -86,10 +86,11 @@ describe("Voice — interrupciones y conversación humana (F7 fase 6)", () => {
     const { bridge, ws, sendToTwilio } = await startBridge("+5215500000101");
 
     // La IA está a media respuesta ("Claro, puedo ayudarte con la
-    // reservación..."): varios deltas de audio de la respuesta resp_1.
+    // reservación..."): varios deltas de audio de la respuesta resp_1 (con su
+    // item_id — llega en CADA delta, no en response.created, ver realtimeClient.ts).
     fakeRealtime.send(ws, { type: "response.created", response: { id: "resp_1" } });
-    fakeRealtime.send(ws, { type: "response.audio.delta", response_id: "resp_1", delta: "AAAA" });
-    fakeRealtime.send(ws, { type: "response.audio.delta", response_id: "resp_1", delta: "BBBB" });
+    fakeRealtime.send(ws, { type: "response.output_audio.delta", response_id: "resp_1", item_id: "item_resp_1", delta: "AAAA" });
+    fakeRealtime.send(ws, { type: "response.output_audio.delta", response_id: "resp_1", item_id: "item_resp_1", delta: "BBBB" });
     await waitUntil(() => twilioEventCount(sendToTwilio, "media") === 2);
 
     // El cliente interrumpe: "Para mañana."
@@ -98,12 +99,20 @@ describe("Voice — interrupciones y conversación humana (F7 fase 6)", () => {
     expect(await fakeRealtime.waitForMessageType(ws, "response.cancel")).toBeTruthy();
     expect((bridge as any).metrics.interruptionCount).toBe(1);
 
+    // conversation.item.truncate: le dice a OpenAI hasta dónde el llamante
+    // REALMENTE escuchó (sin esto, el servidor cree que el bot dijo la frase
+    // COMPLETA, y el turno siguiente puede sonar como si la retomara).
+    const truncate = await fakeRealtime.waitForMessageType(ws, "conversation.item.truncate");
+    expect(truncate.item_id).toBe("item_resp_1");
+    expect(truncate.content_index).toBe(0);
+    expect(truncate.audio_end_ms).toBeGreaterThan(0);
+
     // Deltas TARDÍOS de la respuesta YA cancelada (resp_1) — Realtime los
     // pudo haber generado antes de que el cancel le llegara. NUNCA deben
     // llegar a Twilio: si llegaran, sería EXACTAMENTE el fallo que describe
     // el enunciado ("...y también tenemos...").
-    fakeRealtime.send(ws, { type: "response.audio.delta", response_id: "resp_1", delta: "CCCC-TARDÍO" });
-    fakeRealtime.send(ws, { type: "response.audio.delta", response_id: "resp_1", delta: "DDDD-TARDÍO" });
+    fakeRealtime.send(ws, { type: "response.output_audio.delta", response_id: "resp_1", delta: "CCCC-TARDÍO" });
+    fakeRealtime.send(ws, { type: "response.output_audio.delta", response_id: "resp_1", delta: "DDDD-TARDÍO" });
     await new Promise((r) => setTimeout(r, 150));
     expect(twilioEventCount(sendToTwilio, "media")).toBe(2); // sigue en 2 — nada nuevo pasó
 
@@ -114,7 +123,7 @@ describe("Voice — interrupciones y conversación humana (F7 fase 6)", () => {
 
     // "Perfecto. ¿A qué hora?" — la respuesta NUEVA sí debe sonar normal.
     fakeRealtime.send(ws, { type: "response.created", response: { id: "resp_2" } });
-    fakeRealtime.send(ws, { type: "response.audio.delta", response_id: "resp_2", delta: "EEEE-NUEVA" });
+    fakeRealtime.send(ws, { type: "response.output_audio.delta", response_id: "resp_2", delta: "EEEE-NUEVA" });
     await waitUntil(() => twilioEventCount(sendToTwilio, "media") === 3);
 
     // Ninguno de los deltas que llegaron a Twilio, en ningún momento, fue de la respuesta tardía cancelada.
@@ -142,6 +151,12 @@ describe("Voice — interrupciones y conversación humana (F7 fase 6)", () => {
 
   it("7) evitar respuestas duplicadas: dos tool calls del MISMO turno solo piden UNA respuesta nueva, no una por tool", async () => {
     const { bridge, ws } = await startBridge("+5215500000103");
+    // El bot saluda primero al conectar (ver realtimeBridge.ts) — ese
+    // response.create llega async (frame de WS aparte), así que se espera
+    // explícitamente antes de tomar la foto base; si no, la carrera puede
+    // hacer que "llegue" recién durante las aserciones de más abajo.
+    await fakeRealtime.waitForMessageType(ws, "response.create");
+    const baselineResponseCreates = fakeRealtime.messagesFrom(ws).filter((m) => m.type === "response.create").length;
 
     fakeRealtime.send(ws, { type: "response.created", response: { id: "resp_tools" } });
     await waitUntil(() => (bridge as any).responseActive === true);
@@ -162,10 +177,10 @@ describe("Voice — interrupciones y conversación humana (F7 fase 6)", () => {
     fakeRealtime.send(ws, { type: "response.done", response: { id: "resp_tools", status: "completed" } });
     await Promise.all([p1, p2]);
 
-    await fakeRealtime.waitForMessageType(ws, "response.create");
+    await waitUntil(() => fakeRealtime.messagesFrom(ws).filter((m) => m.type === "response.create").length > baselineResponseCreates);
     await new Promise((r) => setTimeout(r, 150)); // margen para que un eventual segundo response.create (bug) alcance a llegar
     const responseCreateCount = fakeRealtime.messagesFrom(ws).filter((m) => m.type === "response.create").length;
-    expect(responseCreateCount).toBe(1);
+    expect(responseCreateCount - baselineResponseCreates).toBe(1);
 
     const outputs = fakeRealtime
       .messagesFrom(ws)
@@ -185,7 +200,7 @@ describe("Voice — interrupciones y conversación humana (F7 fase 6)", () => {
     await waitUntil(() => (bridge as any).metrics.currentTurn.responseStartedAt != null);
     await new Promise((r) => setTimeout(r, 40));
 
-    fakeRealtime.send(ws, { type: "response.audio.delta", response_id: "r_metrics", delta: "X" });
+    fakeRealtime.send(ws, { type: "response.output_audio.delta", response_id: "r_metrics", delta: "X" });
     await waitUntil(() => (bridge as any).metrics.currentTurn.firstAudioDeltaAt != null);
     await new Promise((r) => setTimeout(r, 40));
 
@@ -261,6 +276,11 @@ describe("Voice — interrupciones y conversación humana (F7 fase 6)", () => {
       }),
     });
     const { bridge, ws } = await startBridge("+5215500000106");
+    // El bot saluda primero al conectar (ver realtimeBridge.ts) — ese
+    // response.create llega async (frame de WS aparte), así que se espera
+    // explícitamente antes de tomar la foto base.
+    await fakeRealtime.waitForMessageType(ws, "response.create");
+    const baselineResponseCreates = fakeRealtime.messagesFrom(ws).filter((m) => m.type === "response.create").length;
     fakeRealtime.send(ws, { type: "response.created", response: { id: "r_epoch" } });
     await waitUntil(() => (bridge as any).responseActive === true);
 
@@ -284,6 +304,6 @@ describe("Voice — interrupciones y conversación humana (F7 fase 6)", () => {
     );
     await new Promise((r) => setTimeout(r, 150));
     const responseCreates = fakeRealtime.messagesFrom(ws).filter((m) => m.type === "response.create");
-    expect(responseCreates).toHaveLength(0);
+    expect(responseCreates.length - baselineResponseCreates).toBe(0);
   });
 });

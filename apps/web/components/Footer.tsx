@@ -22,7 +22,8 @@ export default function Footer() {
           </div>
 
           <p className="max-w-xl text-[13px] leading-relaxed text-stone-500">
-            Agentes de IA para WhatsApp, Instagram y Telegram. Un proyecto de{" "}
+            Agentes de IA que atienden llamadas y chats 24/7 en WhatsApp,
+            Instagram y Telegram. Un proyecto de{" "}
             <a
               href="https://www.kontrolia.io"
               target="_blank"

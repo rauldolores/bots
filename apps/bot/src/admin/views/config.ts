@@ -4,7 +4,7 @@
 // label + one-line plain-Spanish description). Text settings are plain inputs /
 // textareas with clear labels (no jargon). The form POSTs to /admin/config.
 import { SETTING_KEYS } from "../../db/settings";
-import type { BotConfig } from "../../db/bots";
+import type { BotConfig, BotCatalogItem } from "../../db/bots";
 import { renderBusinessContext } from "../../businessContext";
 import { CURATED_MODELS } from "../../llm/provider";
 import { TIMEZONE_OPTIONS, resolveTimezone } from "../../datetime";
@@ -108,6 +108,16 @@ function renderTextArea(opts: {
 
 const SELECT_STYLE =
   "background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%";
+
+/** Voces de OpenAI Realtime disponibles hoy (API GA) — el acento no cambia por idioma, solo probando se sabe cuál suena mejor en español. */
+const VOICE_OPTIONS = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"];
+
+/** Curado, no exhaustivo — LATAM es el mercado principal de este starter (ver CLAUDE.md). */
+const LANGUAGE_OPTIONS = [
+  { value: "es", label: "Español" },
+  { value: "en", label: "Inglés" },
+  { value: "pt", label: "Portugués" },
+];
 
 /** Sección "Modelo de IA": proveedor + API key propia + modelo concreto. */
 function renderLlmSection(settings: Record<string, string>, llmTest?: string): string {
@@ -241,6 +251,38 @@ function renderVoiceSection(settings: Record<string, string>, hasEnvOpenAiKey: b
                placeholder="${hasVoiceKey ? "••••••••••••" : "sk-…"}" style="${INPUT_STYLE}">
         ${hasVoiceKey ? `<label class="text-dim text-[11.5px]" style="display:flex;align-items:center;gap:7px;cursor:pointer"><input type="checkbox" name="voice_openai_api_key_clear" value="1"> Quitar esta key y volver a detectar automáticamente</label>` : ""}
       </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="font-display font-semibold text-[12.5px] text-cream">Voz</label>
+        <p class="text-dim text-[11px]">El acento de la voz NO cambia aunque hable español — solo probando con una llamada real se sabe cuál suena mejor para tu negocio.</p>
+        <select name="${SETTING_KEYS.voiceName}" style="${SELECT_STYLE}">
+          ${VOICE_OPTIONS.map(
+            (v) => `<option value="${v}" ${(settings[SETTING_KEYS.voiceName] || "alloy") === v ? "selected" : ""}>${v}</option>`,
+          ).join("")}
+        </select>
+      </div>
+    </div>`;
+}
+
+/** Una fila de "campo dinámico" (label + valor) — usada tanto para las que ya
+ * están guardadas en botConfig.customFields como para las que agrega el JS. */
+function renderCustomFieldRow(key: string, value: string): string {
+  return `
+    <div class="custom-field-row" style="display:flex;gap:8px;align-items:center">
+      <input type="text" class="cf-key" placeholder="Nombre del dato (ej. Especialidad)" value="${esc(key)}" style="${INPUT_STYLE};flex:1">
+      <input type="text" class="cf-value" placeholder="Valor" value="${esc(value)}" style="${INPUT_STYLE};flex:1">
+      <button type="button" class="cf-remove-row" style="background:transparent;border:1px solid var(--line);color:var(--muted);width:34px;height:34px;flex:none;cursor:pointer">×</button>
+    </div>`;
+}
+
+/** Una fila del catálogo manual (nombre/precio/descripción/sku). */
+function renderCatalogRow(item: BotCatalogItem): string {
+  return `
+    <div class="catalog-row" style="display:grid;grid-template-columns:2fr 1fr 2fr 1fr auto;gap:8px;align-items:center">
+      <input type="text" class="cat-name" placeholder="Producto/servicio" value="${esc(item.name ?? "")}" style="${INPUT_STYLE}">
+      <input type="text" class="cat-price" placeholder="Precio" value="${item.price != null ? esc(String(item.price)) : ""}" style="${INPUT_STYLE}">
+      <input type="text" class="cat-desc" placeholder="Descripción (opcional)" value="${esc(item.description ?? "")}" style="${INPUT_STYLE}">
+      <input type="text" class="cat-sku" placeholder="SKU (opcional)" value="${esc(item.sku ?? "")}" style="${INPUT_STYLE}">
+      <button type="button" class="cat-remove-row" style="background:transparent;border:1px solid var(--line);color:var(--muted);width:34px;height:34px;flex:none;cursor:pointer">×</button>
     </div>`;
 }
 
@@ -275,6 +317,9 @@ export function renderConfig(
   saved = false,
   llmTest?: string,
   hasEnvOpenAiKey = false,
+  bot: { niche: string | null; language: string } = { niche: null, language: "es" },
+  mcpConnectors: { name: string | null; provider: string }[] = [],
+  visibleNavIds: Set<string> | null = null,
 ): string {
   const personalidadCards = CONTROL_LIST.filter((c) => c.key !== SETTING_KEYS.modelOverride)
     .map((c) => renderCardGroup(c, settings))
@@ -314,6 +359,15 @@ export function renderConfig(
         <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:24px">
           <div class="cfg-pane" data-pane="personalidad" style="display:flex;flex-direction:column;gap:24px">
             <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:22px">
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <label class="font-display font-semibold text-[12.5px] text-cream">Idioma</label>
+                <p class="text-dim text-[11px]">En qué idioma responde tu bot por default (el cliente puede escribir en otro y el bot lo detecta, pero este es el que usa para iniciar y por defecto).</p>
+                <select name="bot_language" style="${SELECT_STYLE}">
+                  ${LANGUAGE_OPTIONS.map(
+                    (o) => `<option value="${o.value}" ${bot.language === o.value ? "selected" : ""}>${esc(o.label)}</option>`,
+                  ).join("")}
+                </select>
+              </div>
               ${personalidadCards}
             </div>
           </div>
@@ -336,41 +390,120 @@ export function renderConfig(
                 placeholder: identity.name ?? "Mi asistente",
               })}
 
-              <div style="display:flex;flex-direction:column;gap:6px">
-                <label class="font-display font-semibold text-[12.5px] text-cream">Zona horaria</label>
-                <p class="text-dim text-[11px]">En qué hora local opera el negocio. Las citas que agenda el bot y las fechas del panel se muestran en esta zona.</p>
-                <select name="${SETTING_KEYS.timezone}" style="${SELECT_STYLE}">
-                  ${TIMEZONE_OPTIONS.map(
-                    (o) =>
-                      `<option value="${esc(o.value)}" ${resolveTimezone(settings[SETTING_KEYS.timezone]) === o.value ? "selected" : ""}>${esc(o.label)}</option>`,
-                  ).join("")}
-                </select>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <label class="font-display font-semibold text-[12.5px] text-cream">Zona horaria</label>
+                  <p class="text-dim text-[11px]">En qué hora local opera el negocio.</p>
+                  <select name="${SETTING_KEYS.timezone}" style="${SELECT_STYLE}">
+                    ${TIMEZONE_OPTIONS.map(
+                      (o) =>
+                        `<option value="${esc(o.value)}" ${resolveTimezone(settings[SETTING_KEYS.timezone]) === o.value ? "selected" : ""}>${esc(o.label)}</option>`,
+                    ).join("")}
+                  </select>
+                </div>
+                <div></div>
+              </div>
+
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                ${renderTextField({
+                  name: "country",
+                  label: "País",
+                  help: "Sin esto tu bot puede confundir de dónde eres al hablar de precios/horarios.",
+                  value: botConfig.country ?? "",
+                  placeholder: "Ej. México",
+                })}
+                ${renderTextField({
+                  name: "currency",
+                  label: "Moneda",
+                  help: "Muy importante: sin esto tu bot puede asumir dólares aunque cobres en otra moneda.",
+                  value: botConfig.currency ?? "",
+                  placeholder: "Ej. MXN — pesos mexicanos",
+                })}
+              </div>
+
+              <div style="display:flex;align-items:flex-start;gap:9px;background:var(--accent-soft);border:1px solid rgba(245,197,24,.35);border-radius:var(--radius-sm);padding:13px 15px">
+                <span style="color:var(--accent-2);flex:none;line-height:1">◆</span>
+                <p class="text-[12px]" style="color:var(--muted);margin:0">No siempre es fácil saber qué información capturar. Dinos el giro de tu negocio y la IA te sugiere qué preguntas suele hacer un cliente — tú solo llenas las respuestas.</p>
+              </div>
+
+              <div style="display:flex;gap:10px;align-items:flex-end">
+                <div style="flex:1">
+                  ${renderTextField({
+                    name: "niche",
+                    label: "Giro de tu negocio",
+                    help: "Ej. taquería, escuela de manejo, consultorio dental, tienda de ropa…",
+                    value: bot.niche ?? "",
+                    placeholder: "Ej. barbería",
+                  })}
+                </div>
+                <button type="button" id="suggest-fields-btn" class="font-display font-semibold text-[12px]"
+                        style="flex:none;border:1px solid var(--line);background:var(--panel2);color:var(--cream);padding:10px 14px;cursor:pointer;height:38px">
+                  ✦ Sugerir campos
+                </button>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <label class="font-display font-semibold text-[12.5px] text-cream">Datos específicos de tu negocio</label>
+                <p class="text-dim text-[11px]">Lo que un cliente típicamente pregunta y no está en horario/precio/ubicación.</p>
+                <div id="custom-fields-list" style="display:flex;flex-direction:column;gap:8px">
+                  ${Object.entries(botConfig.customFields ?? {})
+                    .map(([k, v]) => renderCustomFieldRow(k, v))
+                    .join("")}
+                </div>
+                <button type="button" id="add-custom-field-btn" class="text-dim text-[11.5px]"
+                        style="width:fit-content;background:transparent;border:1px dashed var(--line);color:var(--muted);padding:7px 12px;cursor:pointer">+ agregar campo</button>
+                <input type="hidden" name="custom_fields_json" id="custom-fields-json">
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:16px">
+                <label class="font-display font-semibold text-[12.5px] text-cream">Catálogo / lista de precios</label>
+                <div style="display:flex;gap:16px">
+                  <label class="text-[12px] text-cream" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                    <input type="radio" name="catalog_source" value="manual" id="catalog-source-manual" ${botConfig.catalogSource !== "mcp" ? "checked" : ""}> Escribo mis precios aquí
+                  </label>
+                  <label class="text-[12px] text-cream" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                    <input type="radio" name="catalog_source" value="mcp" id="catalog-source-mcp" ${botConfig.catalogSource === "mcp" ? "checked" : ""}> Ya tengo mi sistema de ventas conectado
+                  </label>
+                </div>
+
+                <div id="catalog-manual-block" style="display:${botConfig.catalogSource === "mcp" ? "none" : "flex"};flex-direction:column;gap:8px">
+                  <div id="catalog-list" style="display:flex;flex-direction:column;gap:8px">
+                    ${(botConfig.catalog ?? []).map((item) => renderCatalogRow(item)).join("")}
+                  </div>
+                  <button type="button" id="add-catalog-row-btn" class="text-dim text-[11.5px]"
+                          style="width:fit-content;background:transparent;border:1px dashed var(--line);color:var(--muted);padding:7px 12px;cursor:pointer">+ agregar producto/servicio</button>
+                </div>
+                <div id="catalog-mcp-block" style="display:${botConfig.catalogSource === "mcp" ? "flex" : "none"};flex-direction:column;gap:6px;background:var(--panel2);border:1px solid var(--line);padding:13px 15px">
+                  <p class="text-[12px]" style="color:var(--muted);margin:0">Tu bot va a consultar precios y disponibilidad en vivo desde tu sistema conectado. Conéctalo (o revísalo) en <a href="/admin/conexiones" style="color:var(--accent-2)">Conexiones → MCP</a>.</p>
+                </div>
+                <input type="hidden" name="catalog_json" id="catalog-json">
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:16px">
+                <label class="font-display font-semibold text-[12.5px] text-cream">Vista previa de lo que ve tu bot ahora</label>
+                <p class="text-dim text-[11px]" style="margin:0;white-space:pre-wrap;background:var(--panel2);border:1px solid var(--line);padding:12px;font-family:monospace">${esc(renderBusinessContext(botConfig) || "(vacío — llena los campos de arriba)")}</p>
               </div>
 
               ${renderTextArea({
                 name: SETTING_KEYS.businessContext,
-                label: "Información del negocio",
-                help: "Horarios, servicios, precios, ubicación. El bot responde con esto. Editable en vivo — se aplica al guardar, sin re-desplegar.",
-                // Pre-llenado: si el panel aún no tiene override, muestra lo que ya
-                // hay en bots.config (F3) para que el dueño VEA y edite sus
-                // horarios aquí desde el día 1.
-                value: settings[SETTING_KEYS.businessContext] || renderBusinessContext(botConfig),
-                placeholder: "Ej. Abrimos lunes a sábado de 9 a 7. Corte $150, barba $100. Estamos en Av. Reforma 123.",
-                rows: 8,
+                label: "Notas adicionales (opcional)",
+                help: "Cualquier otra cosa que quieras agregar a mano, además de lo capturado arriba. Si lo llenas, se agrega tal cual al contexto del bot.",
+                value: settings[SETTING_KEYS.businessContext] ?? "",
+                placeholder: "Ej. Los martes solo atendemos con cita previa.",
+                rows: 4,
               })}
             </div>
           </div>
 
           <div class="cfg-pane" data-pane="instrucciones" style="display:none;flex-direction:column;gap:24px">
             <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:18px">
-              <p class="text-dim text-[11.5px]" style="margin:0">⚠ Esto reemplaza cómo piensa tu bot — guarda una copia antes de modificar mucho.</p>
               ${renderTextArea({
-                name: SETTING_KEYS.systemPromptOverride,
-                label: "Instrucciones personalizadas",
-                help: "Personalidad o reglas especiales. Déjalo vacío para usar la configuración automática.",
-                value: settings[SETTING_KEYS.systemPromptOverride] ?? "",
-                placeholder: "Ej. Siempre ofrece agendar una cita al final.",
-                rows: 8,
+                name: SETTING_KEYS.salesPlaybook,
+                label: "Cómo vende / atiende tu negocio",
+                help: "Se AGREGA a las instrucciones automáticas del bot (personalidad, negocio, herramientas) — no las reemplaza. Ej. cómo recomendar entre opciones, cuándo ofrecer agendar una cita, qué nunca prometer.",
+                value: settings[SETTING_KEYS.salesPlaybook] ?? "",
+                placeholder: "Ej. Si preguntan qué curso tomar, primero pregunta su nivel actual antes de recomendar uno.",
+                rows: 6,
               })}
 
               ${renderTextField({
@@ -380,6 +513,27 @@ export function renderConfig(
                 value: settings[SETTING_KEYS.escalationKeywords] ?? "",
                 placeholder: "queja, reembolso, hablar con alguien",
               })}
+
+              <div style="display:flex;align-items:flex-start;gap:9px;background:var(--accent-soft);border:1px solid rgba(245,197,24,.35);border-radius:var(--radius-sm);padding:13px 15px">
+                <span style="color:var(--accent-2);flex:none;line-height:1">◆</span>
+                <p class="text-[12px]" style="color:var(--muted);margin:0">${
+                  mcpConnectors.length > 0
+                    ? `Tienes conectado: <strong>${mcpConnectors.map((c) => esc(c.name ?? c.provider)).join(", ")}</strong>. Usa el campo de arriba para aclararle a tu bot qué SÍ puede consultar ahí (ej. "puedes ver disponibilidad de citas") y qué NO (ej. "nunca compartas datos de otro cliente").`
+                    : `Si conectas un sistema externo (MCP) en <a href="/admin/conexiones" style="color:var(--accent-2)">Conexiones</a>, tu bot podrá consultarlo en vivo — usa el campo de arriba para decirle qué SÍ y qué NO puede consultar ahí.`
+                }</p>
+              </div>
+
+              <div style="border-top:1px solid var(--line);padding-top:16px;display:flex;flex-direction:column;gap:10px">
+                <p class="text-dim text-[11.5px]" style="margin:0">⚠ Modo experto — la casilla de abajo REEMPLAZA POR COMPLETO el prompt de tu bot: se pierde la información del negocio, el giro, el tono, las palabras de escalamiento, lo aprendido de conversaciones pasadas Y la guía de MCP de arriba. Guarda una copia de tu configuración actual antes de usarla.</p>
+                ${renderTextArea({
+                  name: SETTING_KEYS.systemPromptOverride,
+                  label: "Instrucciones personalizadas (reemplazo total)",
+                  help: "Déjalo vacío para usar la configuración automática (recomendado).",
+                  value: settings[SETTING_KEYS.systemPromptOverride] ?? "",
+                  placeholder: "Ej. Siempre ofrece agendar una cita al final.",
+                  rows: 8,
+                })}
+              </div>
             </div>
           </div>
         </div>
@@ -420,6 +574,125 @@ export function renderConfig(
       form.addEventListener("change", markDirty);
       discardBtn.addEventListener("click", function () { window.location.reload(); });
 
+      // --- Campos dinámicos de "Información del negocio" -------------------
+      var cfList = document.getElementById("custom-fields-list");
+      var catList = document.getElementById("catalog-list");
+
+      // Construye filas por DOM (no innerHTML con texto interpolado) para no
+      // tener que escapar nada — las sugerencias de IA son texto ajeno.
+      function addCustomFieldRow(key, valuePlaceholder) {
+        var row = document.createElement("div");
+        row.className = "custom-field-row";
+        row.style.cssText = "display:flex;gap:8px;align-items:center";
+        var keyInput = document.createElement("input");
+        keyInput.type = "text"; keyInput.className = "cf-key";
+        keyInput.placeholder = "Nombre del dato (ej. Especialidad)";
+        keyInput.value = key || "";
+        keyInput.style.cssText = "${INPUT_STYLE};flex:1";
+        var valInput = document.createElement("input");
+        valInput.type = "text"; valInput.className = "cf-value";
+        valInput.placeholder = valuePlaceholder || "Valor";
+        valInput.style.cssText = "${INPUT_STYLE};flex:1";
+        var rmBtn = document.createElement("button");
+        rmBtn.type = "button"; rmBtn.className = "cf-remove-row";
+        rmBtn.textContent = "×";
+        rmBtn.style.cssText = "background:transparent;border:1px solid var(--line);color:var(--muted);width:34px;height:34px;flex:none;cursor:pointer";
+        row.appendChild(keyInput); row.appendChild(valInput); row.appendChild(rmBtn);
+        cfList.appendChild(row);
+        markDirty();
+      }
+
+      function addCatalogRow() {
+        var row = document.createElement("div");
+        row.className = "catalog-row";
+        row.style.cssText = "display:grid;grid-template-columns:2fr 1fr 2fr 1fr auto;gap:8px;align-items:center";
+        [["cat-name", "Producto/servicio"], ["cat-price", "Precio"], ["cat-desc", "Descripción (opcional)"], ["cat-sku", "SKU (opcional)"]].forEach(function (spec) {
+          var input = document.createElement("input");
+          input.type = "text"; input.className = spec[0]; input.placeholder = spec[1];
+          input.style.cssText = "${INPUT_STYLE}";
+          row.appendChild(input);
+        });
+        var rmBtn = document.createElement("button");
+        rmBtn.type = "button"; rmBtn.className = "cat-remove-row"; rmBtn.textContent = "×";
+        rmBtn.style.cssText = "background:transparent;border:1px solid var(--line);color:var(--muted);width:34px;height:34px;flex:none;cursor:pointer";
+        row.appendChild(rmBtn);
+        catList.appendChild(row);
+        markDirty();
+      }
+
+      document.getElementById("add-custom-field-btn").addEventListener("click", function () { addCustomFieldRow("", ""); });
+      document.getElementById("add-catalog-row-btn").addEventListener("click", addCatalogRow);
+
+      // Quitar fila — delegado en el contenedor, cubre también las filas
+      // agregadas después de la carga inicial.
+      cfList.addEventListener("click", function (e) {
+        if (e.target.classList.contains("cf-remove-row")) { e.target.closest(".custom-field-row").remove(); markDirty(); }
+      });
+      catList.addEventListener("click", function (e) {
+        if (e.target.classList.contains("cat-remove-row")) { e.target.closest(".catalog-row").remove(); markDirty(); }
+      });
+
+      // Catálogo manual vs MCP — mutuamente excluyente; ocultar, no borrar,
+      // para no perder lo ya escrito si el dueño va y viene entre opciones.
+      var catalogManualBlock = document.getElementById("catalog-manual-block");
+      var catalogMcpBlock = document.getElementById("catalog-mcp-block");
+      function syncCatalogSource() {
+        var isMcp = document.getElementById("catalog-source-mcp").checked;
+        catalogManualBlock.style.display = isMcp ? "none" : "flex";
+        catalogMcpBlock.style.display = isMcp ? "flex" : "none";
+      }
+      document.getElementById("catalog-source-manual").addEventListener("change", syncCatalogSource);
+      document.getElementById("catalog-source-mcp").addEventListener("change", syncCatalogSource);
+
+      // "Sugerir campos" — un click, una llamada a la IA; nunca bloquea al
+      // dueño (el endpoint siempre responde algo, hasta si falla el LLM).
+      var suggestBtn = document.getElementById("suggest-fields-btn");
+      suggestBtn.addEventListener("click", function () {
+        var nicheInput = document.querySelector('input[name="niche"]');
+        var niche = nicheInput ? nicheInput.value.trim() : "";
+        suggestBtn.disabled = true;
+        suggestBtn.textContent = "Pensando…";
+        var fd = new FormData();
+        fd.append("niche", niche);
+        fetch("/admin/config/suggest-fields", { method: "POST", body: fd })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            (data.fields || []).forEach(function (f) { addCustomFieldRow(f.key, f.placeholder || ""); });
+          })
+          .catch(function () { /* silencioso — no hay nada que hacer del lado del dueño si esto falla */ })
+          .finally(function () {
+            suggestBtn.disabled = false;
+            suggestBtn.textContent = "✦ Sugerir campos";
+          });
+      });
+
+      // Serializa las filas dinámicas a los inputs ocultos justo antes de
+      // enviar — es la ÚNICA forma en que este estado llega al servidor.
+      form.addEventListener("submit", function () {
+        var customFields = {};
+        cfList.querySelectorAll(".custom-field-row").forEach(function (row) {
+          var k = row.querySelector(".cf-key").value.trim();
+          var v = row.querySelector(".cf-value").value.trim();
+          if (k) customFields[k] = v;
+        });
+        document.getElementById("custom-fields-json").value = JSON.stringify(customFields);
+
+        var catalog = [];
+        catList.querySelectorAll(".catalog-row").forEach(function (row) {
+          var name = row.querySelector(".cat-name").value.trim();
+          if (!name) return;
+          var priceRaw = row.querySelector(".cat-price").value.trim();
+          var price = parseFloat(priceRaw.replace(/[^0-9.]/g, ""));
+          var item = { name: name, price: isNaN(price) ? 0 : price };
+          var desc = row.querySelector(".cat-desc").value.trim();
+          var sku = row.querySelector(".cat-sku").value.trim();
+          if (desc) item.description = desc;
+          if (sku) item.sku = sku;
+          catalog.push(item);
+        });
+        document.getElementById("catalog-json").value = JSON.stringify(catalog);
+      });
+
       if (bar.getAttribute("data-saved") === "1") {
         dot.style.background = "var(--ok)";
         label.textContent = "Guardado ✓";
@@ -428,5 +701,5 @@ export function renderConfig(
     })();
     </script>`;
 
-  return layout({ title: "Config", activeTab: "config", body, pro: true });
+  return layout({ title: "Config", activeTab: "config", body, pro: true, visibleNavIds });
 }

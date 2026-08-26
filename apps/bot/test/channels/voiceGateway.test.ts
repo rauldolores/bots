@@ -58,14 +58,12 @@ afterEach(async () => {
   await fakeRealtime.close();
 });
 
-async function streamUrl(callSid: string, from = "+5215500000000", to = "+5215599999999"): Promise<string> {
-  const exp = String(Date.now() + 60_000);
-  const payload = { botId: TEST_BOT_ID, callSid, from, to, exp };
-  const token = await signStreamToken(TWILIO_AUTH_TOKEN, payload);
-  return (
-    `${baseWsUrl}/webhooks/voice/${TEST_BOT_ID}/stream` +
-    `?callSid=${callSid}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&exp=${exp}&t=${token}`
-  );
+// Twilio NO preserva el query string del <Stream url> al abrir el WebSocket
+// (confirmado en producción) — la URL del stream siempre es esta, sin nada
+// después. Lo que antes era query string ahora viaja como customParameters
+// del evento "start" (ver startMessage), que es donde el gateway autoriza.
+function streamUrl(): string {
+  return `${baseWsUrl}/webhooks/voice/${TEST_BOT_ID}/stream`;
 }
 
 function once(ws: WebSocket, event: "open" | "message" | "close"): Promise<any> {
@@ -78,7 +76,15 @@ function connect(url: string): WebSocket {
   return ws;
 }
 
-function startMessage(streamSid: string, callSid: string): string {
+async function startMessage(
+  streamSid: string,
+  callSid: string,
+  from = "+5215500000000",
+  to = "+5215599999999",
+): Promise<string> {
+  const exp = String(Date.now() + 60_000);
+  const payload = { botId: TEST_BOT_ID, callSid, from, to, exp };
+  const token = await signStreamToken(TWILIO_AUTH_TOKEN, payload);
   return JSON.stringify({
     event: "start",
     sequenceNumber: "1",
@@ -89,14 +95,28 @@ function startMessage(streamSid: string, callSid: string): string {
       callSid,
       tracks: ["inbound"],
       mediaFormat: { encoding: "audio/x-mulaw", sampleRate: 8000, channels: 1 },
+      customParameters: { callSid, from, to, exp, t: token },
     },
   });
 }
 
-describe("Voice Gateway — rechazo de conexión (sin cambios respecto a fase 2)", () => {
-  it("rechaza la conexión sin un token válido", async () => {
-    const ws = connect(
-      `${baseWsUrl}/webhooks/voice/${TEST_BOT_ID}/stream?callSid=CA1&from=x&to=y&exp=${Date.now() + 60_000}&t=basura`,
+describe("Voice Gateway — rechazo de conexión", () => {
+  it("el upgrade siempre se acepta (Twilio no manda token ahí) pero un 'start' sin token válido cierra la conexión", async () => {
+    const ws = connect(streamUrl());
+    await once(ws, "open"); // el upgrade en sí ya no rechaza nada — ver gateway.ts
+    ws.send(
+      JSON.stringify({
+        event: "start",
+        sequenceNumber: "1",
+        streamSid: "MZbad",
+        start: {
+          accountSid: "ACxxxx",
+          streamSid: "MZbad",
+          callSid: "CA1",
+          mediaFormat: { encoding: "audio/x-mulaw", sampleRate: 8000, channels: 1 },
+          customParameters: { callSid: "CA1", from: "x", to: "y", exp: String(Date.now() + 60_000), t: "basura" },
+        },
+      }),
     );
     await once(ws, "close");
   });
@@ -104,16 +124,15 @@ describe("Voice Gateway — rechazo de conexión (sin cambios respecto a fase 2)
 
 describe("Voice Gateway — puente con OpenAI Realtime", () => {
   it("al recibir 'start', conecta a Realtime con las tools y el formato de audio del Agent Core existente", async () => {
-    const url = await streamUrl("CAaaaa1111");
-    const twilioWs = connect(url);
+    const twilioWs = connect(streamUrl());
     await once(twilioWs, "open");
-    twilioWs.send(startMessage("MZ0001", "CAaaaa1111"));
+    twilioWs.send(await startMessage("MZ0001", "CAaaaa1111"));
 
     const openaiWs = await fakeRealtime.waitForConnection();
     const sessionUpdate = await fakeRealtime.waitForMessageType(openaiWs, "session.update");
 
-    expect(sessionUpdate.session.input_audio_format).toBe("g711_ulaw");
-    expect(sessionUpdate.session.output_audio_format).toBe("g711_ulaw");
+    expect(sessionUpdate.session.audio.input.format).toEqual({ type: "audio/pcmu" });
+    expect(sessionUpdate.session.audio.output.format).toEqual({ type: "audio/pcmu" });
     expect(typeof sessionUpdate.session.instructions).toBe("string");
     expect(sessionUpdate.session.instructions.length).toBeGreaterThan(0);
     // Las MISMAS tools que usa el camino de texto (buildTools()) — no una
@@ -129,10 +148,9 @@ describe("Voice Gateway — puente con OpenAI Realtime", () => {
   });
 
   it("F7 fase 7: registra caller number, called number, CallSid y StreamSid en voice_sessions — no solo en memoria del gateway", async () => {
-    const url = await streamUrl("CAaaaa1212", "+5215500001212", "+5215599991212");
-    const twilioWs = connect(url);
+    const twilioWs = connect(streamUrl());
     await once(twilioWs, "open");
-    twilioWs.send(startMessage("MZ1212", "CAaaaa1212"));
+    twilioWs.send(await startMessage("MZ1212", "CAaaaa1212", "+5215500001212", "+5215599991212"));
     await fakeRealtime.waitForConnection();
     await new Promise((r) => setTimeout(r, 80)); // startSession()/setStreamSid() son async, sin evento de confirmación al cliente
 
@@ -156,23 +174,22 @@ describe("Voice Gateway — puente con OpenAI Realtime", () => {
   });
 
   it("transmite el audio de Realtime a Twilio EN STREAMING — cada delta llega por separado, no se acumula la respuesta", async () => {
-    const url = await streamUrl("CAaaaa2222");
-    const twilioWs = connect(url);
+    const twilioWs = connect(streamUrl());
     await once(twilioWs, "open");
-    twilioWs.send(startMessage("MZ0002", "CAaaaa2222"));
+    twilioWs.send(await startMessage("MZ0002", "CAaaaa2222"));
     const openaiWs = await fakeRealtime.waitForConnection();
     await fakeRealtime.waitForMessageType(openaiWs, "session.update");
 
     const firstDelta = once(twilioWs, "message");
     fakeRealtime.send(openaiWs, { type: "response.created" });
-    fakeRealtime.send(openaiWs, { type: "response.audio.delta", delta: "AAAA" });
+    fakeRealtime.send(openaiWs, { type: "response.output_audio.delta", delta: "AAAA" });
     const first = JSON.parse((await firstDelta).toString());
     expect(first.event).toBe("media");
     expect(first.streamSid).toBe("MZ0002");
     expect(first.media.payload).toBe("AAAA");
 
     const secondDelta = once(twilioWs, "message");
-    fakeRealtime.send(openaiWs, { type: "response.audio.delta", delta: "BBBB" });
+    fakeRealtime.send(openaiWs, { type: "response.output_audio.delta", delta: "BBBB" });
     const second = JSON.parse((await secondDelta).toString());
     expect(second.event).toBe("media");
     expect(second.media.payload).toBe("BBBB"); // un segundo mensaje, no la suma de los dos
@@ -182,10 +199,9 @@ describe("Voice Gateway — puente con OpenAI Realtime", () => {
   });
 
   it("barge-in: si el llamante habla mientras el bot responde, cancela la respuesta en Realtime y vacía el buffer de Twilio", async () => {
-    const url = await streamUrl("CAaaaa3333");
-    const twilioWs = connect(url);
+    const twilioWs = connect(streamUrl());
     await once(twilioWs, "open");
-    twilioWs.send(startMessage("MZ0003", "CAaaaa3333"));
+    twilioWs.send(await startMessage("MZ0003", "CAaaaa3333"));
     const openaiWs = await fakeRealtime.waitForConnection();
     await fakeRealtime.waitForMessageType(openaiWs, "session.update");
 
@@ -206,10 +222,9 @@ describe("Voice Gateway — puente con OpenAI Realtime", () => {
   });
 
   it("tool calls: ejecuta la tool REAL del Agent Core (captureLead) — el lead queda en la base, no es una simulación", async () => {
-    const url = await streamUrl("CAaaaa4444");
-    const twilioWs = connect(url);
+    const twilioWs = connect(streamUrl());
     await once(twilioWs, "open");
-    twilioWs.send(startMessage("MZ0004", "CAaaaa4444"));
+    twilioWs.send(await startMessage("MZ0004", "CAaaaa4444"));
     const openaiWs = await fakeRealtime.waitForConnection();
     await fakeRealtime.waitForMessageType(openaiWs, "session.update");
 
@@ -225,7 +240,12 @@ describe("Voice Gateway — puente con OpenAI Realtime", () => {
     expect(output.item.call_id).toBe("call_abc");
     const parsedOutput = JSON.parse(output.item.output);
     expect(parsedOutput.leadId).toBeTruthy();
-    await fakeRealtime.waitForMessageType(openaiWs, "response.create");
+    // Sin esperar un response.create aparte: ya se esperó conversation.item.create
+    // arriba, que es lo que de verdad confirma que la tool (y su escritura en
+    // BD) terminó — un response.create nuevo NI SIQUIERA se manda aquí, porque
+    // el saludo inicial (ver realtimeBridge.ts) sigue "pendiente" en este flujo
+    // (nunca se simuló su response.created/response.done) y el guard de
+    // requestResponse() bloquea pedir uno encima.
 
     const leads = await new LeadsRepo(db, TEST_BOT_ID).list(10);
     expect(leads.some((l) => l.name === "Ana Voz" && l.intent === "quiere cotización por teléfono")).toBe(true);
@@ -235,22 +255,20 @@ describe("Voice Gateway — puente con OpenAI Realtime", () => {
   });
 
   it("session.update pide transcripción del audio entrante — sin esto no hay session context que persistir", async () => {
-    const url = await streamUrl("CAaaaa9000");
-    const twilioWs = connect(url);
+    const twilioWs = connect(streamUrl());
     await once(twilioWs, "open");
-    twilioWs.send(startMessage("MZ9000", "CAaaaa9000"));
+    twilioWs.send(await startMessage("MZ9000", "CAaaaa9000"));
     const openaiWs = await fakeRealtime.waitForConnection();
     const sessionUpdate = await fakeRealtime.waitForMessageType(openaiWs, "session.update");
-    expect(sessionUpdate.session.input_audio_transcription).toEqual({ model: "whisper-1" });
+    expect(sessionUpdate.session.audio.input.transcription).toEqual({ model: "whisper-1" });
     twilioWs.close();
     await once(twilioWs, "close"); // espera el cierre real del lado del servidor (bridge.close()) — si no, el bridge queda vivo (silenceWatchdog corriendo) hasta después de que el siguiente test truncó/tiró el schema.
   });
 
   it("persiste el turno del CLIENTE en messages (MessagesRepo) cuando Realtime transcribe lo que dijo", async () => {
-    const url = await streamUrl("CAaaaa9111");
-    const twilioWs = connect(url);
+    const twilioWs = connect(streamUrl());
     await once(twilioWs, "open");
-    twilioWs.send(startMessage("MZ9111", "CAaaaa9111"));
+    twilioWs.send(await startMessage("MZ9111", "CAaaaa9111"));
     const openaiWs = await fakeRealtime.waitForConnection();
     await fakeRealtime.waitForMessageType(openaiWs, "session.update");
 
@@ -270,10 +288,9 @@ describe("Voice Gateway — puente con OpenAI Realtime", () => {
   });
 
   it("persiste el turno del BOT con las tool calls que hizo en esa respuesta — mismo formato que Telegram/WhatsApp", async () => {
-    const url = await streamUrl("CAaaaa9222");
-    const twilioWs = connect(url);
+    const twilioWs = connect(streamUrl());
     await once(twilioWs, "open");
-    twilioWs.send(startMessage("MZ9222", "CAaaaa9222"));
+    twilioWs.send(await startMessage("MZ9222", "CAaaaa9222"));
     const openaiWs = await fakeRealtime.waitForConnection();
     await fakeRealtime.waitForMessageType(openaiWs, "session.update");
 
@@ -291,8 +308,17 @@ describe("Voice Gateway — puente con OpenAI Realtime", () => {
     // "activa" para siempre y (a propósito, F7 fase 6) nunca pide una
     // segunda encima para evitar una respuesta duplicada.
     fakeRealtime.send(openaiWs, { type: "response.done", response: { status: "completed" } });
-    await fakeRealtime.waitForMessageType(openaiWs, "response.create");
-    fakeRealtime.send(openaiWs, { type: "response.audio_transcript.done", transcript: "listo, ya te anoté" });
+    // {after:1}: el índice 0 es el response.create del saludo inicial (ver
+    // realtimeBridge.ts) — sin esto, este wait resuelve contra ESE mensaje
+    // viejo en vez de esperar al de verdad que pide finishToolCall(), y la
+    // prueba manda audio_transcript.done antes de que toolCallsThisResponse
+    // se haya llenado (carrera real que se vio al agregar el saludo).
+    // Timeout más holgado que el default (2s): esta espera depende de que
+    // captureLead termine su escritura real en Postgres, que bajo la suite
+    // completa (un solo proceso, un solo pool compartido entre 130+
+    // archivos) puede tardar más que en aislado.
+    await fakeRealtime.waitForMessageType(openaiWs, "response.create", 8000, { after: 1 });
+    fakeRealtime.send(openaiWs, { type: "response.output_audio_transcript.done", transcript: "listo, ya te anoté" });
     await new Promise((r) => setTimeout(r, 60));
 
     const conv = await new ConversationsRepo(db, TEST_BOT_ID).findByChannelUserId("voice", "+5215500000000");
@@ -306,13 +332,12 @@ describe("Voice Gateway — puente con OpenAI Realtime", () => {
   });
 
   it("dos llamadas simultáneas se conectan a Realtime por separado y no se cruzan entre sí", async () => {
-    const [urlA, urlB] = await Promise.all([streamUrl("CAaaaa5555"), streamUrl("CAaaaa6666", "+5215511111111")]);
-    const wsA = connect(urlA);
-    const wsB = connect(urlB);
+    const wsA = connect(streamUrl());
+    const wsB = connect(streamUrl());
     await Promise.all([once(wsA, "open"), once(wsB, "open")]);
 
-    wsA.send(startMessage("MZaaa", "CAaaaa5555"));
-    wsB.send(startMessage("MZbbb", "CAaaaa6666"));
+    wsA.send(await startMessage("MZaaa", "CAaaaa5555"));
+    wsB.send(await startMessage("MZbbb", "CAaaaa6666", "+5215511111111"));
 
     // No importa cuál de las dos llegue primero — solo que sean DOS
     // conexiones de Realtime distintas para dos llamadas distintas.
@@ -327,9 +352,9 @@ describe("Voice Gateway — puente con OpenAI Realtime", () => {
     const msgA = once(wsA, "message");
     const msgB = once(wsB, "message");
     fakeRealtime.send(connFirst, { type: "response.created" });
-    fakeRealtime.send(connFirst, { type: "response.audio.delta", delta: "FIRST" });
+    fakeRealtime.send(connFirst, { type: "response.output_audio.delta", delta: "FIRST" });
     fakeRealtime.send(connSecond, { type: "response.created" });
-    fakeRealtime.send(connSecond, { type: "response.audio.delta", delta: "SECOND" });
+    fakeRealtime.send(connSecond, { type: "response.output_audio.delta", delta: "SECOND" });
 
     const [a, b] = await Promise.all([msgA, msgB]);
     const aParsed = JSON.parse(a.toString());
@@ -348,10 +373,9 @@ describe("Voice Gateway — puente con OpenAI Realtime", () => {
   });
 
   it("dtmf y mark no truenan la conexión", async () => {
-    const url = await streamUrl("CAaaaa7777");
-    const ws = connect(url);
+    const ws = connect(streamUrl());
     await once(ws, "open");
-    ws.send(startMessage("MZ0007", "CAaaaa7777"));
+    ws.send(await startMessage("MZ0007", "CAaaaa7777"));
     await fakeRealtime.waitForConnection();
 
     ws.send(JSON.stringify({ event: "dtmf", streamSid: "MZ0007", dtmf: { digit: "5" } }));
@@ -364,10 +388,9 @@ describe("Voice Gateway — puente con OpenAI Realtime", () => {
   });
 
   it("'stop' cierra la conexión con Realtime también (cierre limpio)", async () => {
-    const url = await streamUrl("CAaaaa8888");
-    const ws = connect(url);
+    const ws = connect(streamUrl());
     await once(ws, "open");
-    ws.send(startMessage("MZ0008", "CAaaaa8888"));
+    ws.send(await startMessage("MZ0008", "CAaaaa8888"));
     const openaiWs = await fakeRealtime.waitForConnection();
     await fakeRealtime.waitForMessageType(openaiWs, "session.update");
 

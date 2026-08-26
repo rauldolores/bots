@@ -119,7 +119,7 @@ function renderCrmTable(
     </div>`;
 }
 
-export async function renderLeads(env: Env, botId: string): Promise<string> {
+export async function renderLeads(env: Env, botId: string, visibleNavIds: Set<string> | null = null): Promise<string> {
   const db = new Db(env.DB);
   const bot = await new BotsRepo(db).getById(botId);
   const niche = getNiche(bot?.niche);
@@ -152,7 +152,7 @@ export async function renderLeads(env: Env, botId: string): Promise<string> {
           <a href="/admin/conexiones?cat=crm" class="text-[12px]" style="color:var(--muted)">gestionar conexión</a>
         </div>
         ${renderCrmTable(providerLabel, result.items, timezone, localByExternalId, niche)}`;
-      return layout({ title: "Leads", activeTab: "leads", body, pro: isProTier(bot?.tier) });
+      return layout({ title: "Leads", activeTab: "leads", body, pro: isProTier(bot?.tier), visibleNavIds });
     }
     // Cayó a local — se avisa arriba de la tabla de siempre.
     crmErrorBanner = `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px;margin-bottom:14px">No se pudo consultar ${esc(providerLabel)} (${esc(result?.error ?? "sin credenciales")}) — mostrando la copia local mientras tanto.</div>`;
@@ -253,7 +253,7 @@ export async function renderLeads(env: Env, botId: string): Promise<string> {
         ${list.length ? rows : empty}
       </div>
     </div>`;
-  return layout({ title: niche.recordPlural, activeTab: "leads", body, pro: isProTier(bot?.tier) });
+  return layout({ title: niche.recordPlural, activeTab: "leads", body, pro: isProTier(bot?.tier), visibleNavIds });
 }
 
 export async function exportLeadsCsv(env: Env, botId: string): Promise<string> {

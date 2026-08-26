@@ -1,24 +1,27 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createTestDb, TEST_BOT_ID } from "./helpers/pgSetup";
 import { SettingsRepo, SETTING_KEYS } from "../src/db/settings";
+import { BotsRepo } from "../src/db/bots";
+import { BotConnectorsRepo } from "../src/db/botConnectors";
 import { resolveAgentConfig } from "../src/settings-loader";
 
 const TOOLS = ["searchKb", "handoffHuman"];
 
 let env: any;
 let repo: SettingsRepo;
+let db: Awaited<ReturnType<typeof createTestDb>>;
 
 beforeEach(async () => {
-  const d1 = await createTestDb();
+  db = await createTestDb();
   env = {
-    DB: d1.driver,
+    DB: db.driver,
     BOT_NAME: "Asistente",
     BUSINESS_NAME: "Test Business",
     BOT_LANGUAGE: "es",
     BOT_TIER: "pro",
     BUFFER_SECONDS: "12",
   };
-  repo = new SettingsRepo(d1, TEST_BOT_ID);
+  repo = new SettingsRepo(db, TEST_BOT_ID);
 });
 
 describe("resolveAgentConfig", () => {
@@ -159,5 +162,80 @@ describe("resolveAgentConfig — learned lessons (flywheel)", () => {
     await repo.set(SETTING_KEYS.learnedLessons, "{no es json");
     cfg = await resolveAgentConfig(env, TOOLS);
     expect(cfg.systemPrompt).not.toContain("<lecciones_aprendidas>");
+  });
+});
+
+describe("resolveAgentConfig — sales_playbook (llena {{NICHO_PLAYBOOK}})", () => {
+  it("el playbook del dueño llega al prompt generado", async () => {
+    await repo.set(SETTING_KEYS.salesPlaybook, "Ofrece siempre la promoción de temporada.");
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).toContain("Ofrece siempre la promoción de temporada.");
+  });
+
+  it("sin playbook del dueño, no aparece nada raro (niche 'generico' tiene playbook vacío)", async () => {
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).not.toContain("undefined");
+  });
+});
+
+describe("resolveAgentConfig — voice_name", () => {
+  it("undefined cuando no está configurado", async () => {
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.voiceName).toBeUndefined();
+  });
+
+  it("se lee tal cual del setting", async () => {
+    await repo.set(SETTING_KEYS.voiceName, "shimmer");
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.voiceName).toBe("shimmer");
+  });
+});
+
+describe("resolveAgentConfig — país/moneda (<contexto_regional>)", () => {
+  it("con ambos capturados, aparecen en el prompt", async () => {
+    await new BotsRepo(db).mergeConfig(TEST_BOT_ID, { country: "México", currency: "MXN" });
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).toContain("<contexto_regional>");
+    expect(cfg.systemPrompt).toContain("México");
+    expect(cfg.systemPrompt).toContain("MXN");
+  });
+
+  it("sin ninguno de los dos, se omite el bloque completo", async () => {
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).not.toContain("<contexto_regional>");
+  });
+});
+
+describe("resolveAgentConfig — catálogo vía MCP", () => {
+  it("catalogSource:'mcp' + un conector MCP habilitado produce <catalogo_mcp>", async () => {
+    await new BotsRepo(db).mergeConfig(TEST_BOT_ID, { catalogSource: "mcp" });
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "mcp-ventas",
+      name: "Sistema de ventas",
+      config: { url: "https://mcp.example.com/ventas" },
+    });
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).toContain("<catalogo_mcp>");
+    expect(cfg.systemPrompt).toContain("Sistema de ventas");
+  });
+
+  it("catalogSource:'mcp' sin ningún conector conectado no produce la nota (nada de qué hablar)", async () => {
+    await new BotsRepo(db).mergeConfig(TEST_BOT_ID, { catalogSource: "mcp" });
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).not.toContain("<catalogo_mcp>");
+  });
+
+  it("catalogSource:'manual' (o ausente) nunca produce la nota, aunque haya un MCP conectado", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "mcp-otro",
+      name: "Otro sistema",
+      config: { url: "https://mcp.example.com/otro" },
+    });
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).not.toContain("<catalogo_mcp>");
   });
 });

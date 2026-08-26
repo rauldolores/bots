@@ -1,4 +1,4 @@
-import { ShieldCheck, ShieldAlert, Wallet, RefreshCcw } from "lucide-react";
+import { ShieldCheck, ShieldAlert, Wallet, RefreshCcw, Timer, Receipt } from "lucide-react";
 import { Container, SectionHeading } from "./ui";
 
 const items = [
@@ -21,6 +21,16 @@ const items = [
     icon: RefreshCcw,
     title: "Failover entre proveedores",
     desc: "Si tu IA principal falla, reintenta con backoff y cambia al proveedor alterno. El día del evento no te deja colgado.",
+  },
+  {
+    icon: Timer,
+    title: "Control de minutos por llamada",
+    desc: "Cada llamada tiene duración máxima y detección de silencio: si nadie habla, el agente pregunta y cuelga. Nada de minutos abiertos.",
+  },
+  {
+    icon: Receipt,
+    title: "Costo visible de cada llamada",
+    desc: "Costo de IA calculado con el uso real de cada llamada más la tarifa de telefonía — todo desglosado en tu panel, sin sorpresas.",
   },
 ];
 

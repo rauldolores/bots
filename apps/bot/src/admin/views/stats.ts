@@ -97,7 +97,7 @@ function funnel(stages: { label: string; value: number }[]): string {
 
 // --- Page -------------------------------------------------------------------------
 
-export async function renderStats(env: Env, botId: string): Promise<string> {
+export async function renderStats(env: Env, botId: string, visibleNavIds: Set<string> | null = null): Promise<string> {
   const db = new Db(env.DB);
   const thirtyDays = Date.now() - 30 * 86_400_000;
 
@@ -175,6 +175,9 @@ export async function renderStats(env: Env, botId: string): Promise<string> {
       avg_ttfa_ms: number | null;
       avg_response_latency_ms: number | null;
       avg_interruptions: number | null;
+      avg_turn_latency_ms: number | null;
+      avg_response_duration_ms: number | null;
+      avg_interruption_latency_ms: number | null;
     }>(
       `SELECT COUNT(*) as calls,
               COUNT(*) FILTER (WHERE status = 'failed') as failed,
@@ -182,7 +185,10 @@ export async function renderStats(env: Env, botId: string): Promise<string> {
               AVG(duration_ms) as avg_duration_ms,
               AVG(time_to_first_audio_ms) as avg_ttfa_ms,
               AVG(NULLIF(total_response_latency_ms, 0)) as avg_response_latency_ms,
-              AVG(interruption_count) as avg_interruptions
+              AVG(interruption_count) as avg_interruptions,
+              AVG(NULLIF(total_response_latency_ms, 0)::float8 / NULLIF(agent_turn_count, 0)) as avg_turn_latency_ms,
+              AVG(NULLIF(response_duration_total_ms, 0)::float8 / NULLIF(agent_turn_count, 0)) as avg_response_duration_ms,
+              AVG(NULLIF(interruption_latency_total_ms, 0)::float8 / NULLIF(interruption_count, 0)) as avg_interruption_latency_ms
        FROM voice_sessions
        WHERE bot_id = ? AND started_at > ?`,
       [botId, thirtyDays],
@@ -246,8 +252,11 @@ export async function renderStats(env: Env, botId: string): Promise<string> {
           <div class="font-display font-semibold text-[14px] mb-2.5">⚡ Latencia de voz <span class="text-[10px] text-dim font-normal">(promedio, 30 días)</span></div>
           <table class="w-full text-[12.5px]"><tbody>
             <tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">Tiempo a primer audio</td><td class="text-right text-muted text-[11px]">${fmtMs(voiceSummary?.avg_ttfa_ms ?? null)}</td></tr>
+            <tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">Latencia de turno (promedio)</td><td class="text-right text-muted text-[11px]">${fmtMs(voiceSummary?.avg_turn_latency_ms ?? null)}</td></tr>
+            <tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">Duración de respuesta (promedio)</td><td class="text-right text-muted text-[11px]">${fmtMs(voiceSummary?.avg_response_duration_ms ?? null)}</td></tr>
             <tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">Latencia de respuesta (total/llamada)</td><td class="text-right text-muted text-[11px]">${fmtMs(voiceSummary?.avg_response_latency_ms ?? null)}</td></tr>
             <tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">Interrupciones por llamada</td><td class="text-right text-muted text-[11px]">${(voiceSummary?.avg_interruptions ?? 0).toFixed(1)}</td></tr>
+            <tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">Latencia de interrupción (promedio)</td><td class="text-right text-muted text-[11px]">${fmtMs(voiceSummary?.avg_interruption_latency_ms ?? null)}</td></tr>
           </tbody></table>
         </div>
         <div class="card bg-panel border border-line p-[18px]">
@@ -310,5 +319,5 @@ export async function renderStats(env: Env, botId: string): Promise<string> {
       </div>
     </div>`;
 
-  return layout({ title: "Estadísticas", activeTab: "stats", body, pro: true });
+  return layout({ title: "Estadísticas", activeTab: "stats", body, pro: true, visibleNavIds });
 }

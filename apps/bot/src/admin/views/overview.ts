@@ -50,7 +50,7 @@ function agentModelLabel(env: Env, cfg: AgentConfig): string {
 // Single-letter Spanish day-of-week labels, indexed like Date#getUTCDay() (0 = Dom).
 const DOW_LETTER = ["D", "L", "M", "M", "J", "V", "S"];
 
-export async function renderOverview(env: Env, botId: string): Promise<string> {
+export async function renderOverview(env: Env, botId: string, visibleNavIds: Set<string> | null = null): Promise<string> {
   const db = new Db(env.DB);
   const bot = await new BotsRepo(db).getById(botId);
   const tier = bot?.tier ?? "free";
@@ -358,5 +358,5 @@ export async function renderOverview(env: Env, botId: string): Promise<string> {
       </section>
     </div>`;
 
-  return layout({ title: "Overview", activeTab: "overview", body, pro: isProTier(tier) });
+  return layout({ title: "Overview", activeTab: "overview", body, pro: isProTier(tier), visibleNavIds });
 }

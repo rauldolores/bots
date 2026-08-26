@@ -21,7 +21,7 @@ function esc(s: string): string {
   );
 }
 
-export async function renderCosts(env: Env, botId: string, saved = false): Promise<string> {
+export async function renderCosts(env: Env, botId: string, saved = false, visibleNavIds: Set<string> | null = null): Promise<string> {
   const db = new Db(env.DB);
   const thirtyDays = Date.now() - 30 * 86_400_000;
   const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
@@ -261,5 +261,5 @@ export async function renderCosts(env: Env, botId: string, saved = false): Promi
       ${note}
     </div>`;
 
-  return layout({ title: "Costos", activeTab: "costs", body, pro: true });
+  return layout({ title: "Costos", activeTab: "costs", body, pro: true, visibleNavIds });
 }

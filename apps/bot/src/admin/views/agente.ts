@@ -461,7 +461,7 @@ export async function renderAgenteCanvas(env: Env, botId: string): Promise<strin
 
 // --- Page ---------------------------------------------------------------------
 
-export async function renderAgentePage(env: Env, botId: string): Promise<string> {
+export async function renderAgentePage(env: Env, botId: string, visibleNavIds: Set<string> | null = null): Promise<string> {
   const canvas = await renderAgenteCanvas(env, botId);
   const pageDb = new Db(env.DB);
   const pageTier = (await new BotsRepo(pageDb).getById(botId))?.tier ?? "free";
@@ -480,7 +480,7 @@ export async function renderAgentePage(env: Env, botId: string): Promise<string>
       </div>
       <p class="text-[10.5px]" style="color:var(--dim)">El flujo es fijo — es una radiografía honesta, no un editor. Los cambios de cada nodo aplican desde el siguiente mensaje.</p>
     </div>`;
-  return layout({ title: "Mi Agente", activeTab: "agente", body, pro: isProTier(pageTier) });
+  return layout({ title: "Mi Agente", activeTab: "agente", body, pro: isProTier(pageTier), visibleNavIds });
 }
 
 // --- Node modal (pop-up, editable) ---------------------------------------------

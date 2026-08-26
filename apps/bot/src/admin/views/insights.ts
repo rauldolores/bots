@@ -70,7 +70,7 @@ function channelChip(channel: string | null): string {
   return `<span class="text-[9px] tracking-wide border px-1.5 ${cls}">${esc(channelLabel(channel))}</span>`;
 }
 
-export async function renderInsights(env: Env, botId: string, analyzedParam?: string): Promise<string> {
+export async function renderInsights(env: Env, botId: string, analyzedParam?: string, visibleNavIds: Set<string> | null = null): Promise<string> {
   const db = new Db(env.DB);
   const repo = new InsightsRepo(db, botId);
   const sevenDays = Date.now() - 7 * 86_400_000;
@@ -213,5 +213,5 @@ export async function renderInsights(env: Env, botId: string, analyzedParam?: st
       ${recentCard}
     </div>`;
 
-  return layout({ title: "Insights", activeTab: "insights", body, pro: true });
+  return layout({ title: "Insights", activeTab: "insights", body, pro: true, visibleNavIds });
 }

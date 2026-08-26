@@ -181,9 +181,10 @@ describe("Agent Core — comparativa de punta a punta: Voice captura, Twilio (te
     const token = await signStreamToken(TWILIO_AUTH_TOKEN, payload);
     env.TWILIO_AUTH_TOKEN = TWILIO_AUTH_TOKEN;
 
-    const twilioWs = new WebSocket(
-      `${baseWsUrl}/webhooks/voice/${TEST_BOT_ID}/stream?callSid=CAparidad1&from=${encodeURIComponent(phone)}&to=${encodeURIComponent(to)}&exp=${exp}&t=${token}`,
-    );
+    // Twilio no manda el query string del <Stream url> al abrir el
+    // WebSocket (confirmado en producción) — la URL va pelona y el token
+    // viaja en customParameters del "start", como en gateway.ts real.
+    const twilioWs = new WebSocket(`${baseWsUrl}/webhooks/voice/${TEST_BOT_ID}/stream`);
     twilioWs.on("error", () => {});
     await new Promise<void>((resolve) => twilioWs.once("open", resolve));
     twilioWs.send(
@@ -195,6 +196,7 @@ describe("Agent Core — comparativa de punta a punta: Voice captura, Twilio (te
           streamSid: "MZparidad",
           callSid: "CAparidad1",
           mediaFormat: { encoding: "audio/x-mulaw", sampleRate: 8000, channels: 1 },
+          customParameters: { callSid: "CAparidad1", from: phone, to, exp, t: token },
         },
       }),
     );

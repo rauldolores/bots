@@ -119,6 +119,34 @@ describe("VoiceSessionsRepo — F7 fase 10: observabilidad y analytics", () => {
     expect((await repo.getById(id))?.total_response_latency_ms).toBe(800);
   });
 
+  it("recordAgentTurn cuenta turnos y suma response_duration — SIEMPRE, sin el guard de ms<=0 que sí tiene addResponseLatency", async () => {
+    const id = await repo.create({ conversationId: convId, provider: "twilio", callerId: "+5215500000000" });
+    await repo.recordAgentTurn(id, 900);
+    await repo.recordAgentTurn(id, 0); // turno con duración inválida/0 — SÍ debe contar como turno
+    await repo.recordAgentTurn(id, 600);
+    const row = await repo.getById(id);
+    expect(row?.agent_turn_count).toBe(3);
+    expect(row?.response_duration_total_ms).toBe(1500);
+  });
+
+  it("addInterruptionLatency SUMA — avg se deriva dividiendo entre interruption_count al reportar (stats.ts)", async () => {
+    const id = await repo.create({ conversationId: convId, provider: "twilio", callerId: "+5215500000000" });
+    await repo.incrementInterruption(id);
+    await repo.incrementInterruption(id);
+    await repo.addInterruptionLatency(id, 120);
+    await repo.addInterruptionLatency(id, 80);
+    const row = await repo.getById(id);
+    expect(row?.interruption_count).toBe(2);
+    expect(row?.interruption_latency_total_ms).toBe(200); // avg = 100ms
+  });
+
+  it("addInterruptionLatency ignora valores <= 0 (igual que addResponseLatency)", async () => {
+    const id = await repo.create({ conversationId: convId, provider: "twilio", callerId: "+5215500000000" });
+    await repo.addInterruptionLatency(id, 0);
+    await repo.addInterruptionLatency(id, -5);
+    expect((await repo.getById(id))?.interruption_latency_total_ms).toBe(0);
+  });
+
   it("setTranscript / finalize guardan el transcript estructurado y los agregados finales", async () => {
     const id = await repo.create({ conversationId: convId, provider: "twilio", callerId: "+5215500000000" });
     await repo.setTranscript(id, [

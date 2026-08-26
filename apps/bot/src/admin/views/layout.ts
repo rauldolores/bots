@@ -13,6 +13,12 @@
 
 import { PRO_ONLY_TABS } from "../../config";
 import type { NichePack } from "../../niches";
+import { NAV_PERMISSIONS } from "../permissions";
+
+// Ids de NAV que SÍ requieren un permiso — "overview" (Resumen) a propósito
+// no está en NAV_PERMISSIONS (es el destino del guard de acceso base cuando
+// una cuenta no tiene ningún permiso todavía) y por eso nunca se oculta.
+const GATED_NAV_IDS = new Set(Object.keys(NAV_PERMISSIONS));
 
 const UPGRADE_URL = "/admin/upgrade";
 
@@ -294,12 +300,20 @@ function applyNiche(item: Item, niche: NichePack | null): Item {
   return { ...item, label: niche.navLabel, icon: niche.navIcon };
 }
 
-function sidebar(activeTab: string, pro: boolean, niche: NichePack | null): string {
+function sidebar(activeTab: string, pro: boolean, niche: NichePack | null, visibleIds: Set<string> | null): string {
   const locked = (id: string) => !pro && (PRO_ONLY_TABS as readonly string[]).includes(id);
+  // null = sin sesión de KontrolIA (Basic Auth / DASHBOARD_PUBLIC / no
+  // configurado) — sin filtro, todo visible, cero cambio de comportamiento.
+  // Con sesión, un ítem sin el permiso correspondiente se OMITE por completo
+  // (no se bloquea con candado como el tier Pro): no tiene sentido invitar a
+  // un clic que sabemos que va a rebotar a /admin/access-denied.
+  const visible = (id: string) => visibleIds === null || !GATED_NAV_IDS.has(id) || visibleIds.has(id);
   const sections = NAV.map((sec) => {
-    const hasActive = sec.items.some((i) => i.id === activeTab);
+    const shown = sec.items.filter((i) => visible(i.id));
+    if (shown.length === 0) return "";
+    const hasActive = shown.some((i) => i.id === activeTab);
     const labelColor = hasActive ? "var(--accent)" : "var(--sb-dim)";
-    const items = sec.items
+    const items = shown
       .map((raw) => {
         const i = applyNiche(raw, niche);
         return locked(i.id) ? navItemLocked(i) : navItem(i, i.id === activeTab);
@@ -342,9 +356,12 @@ export function layout(opts: {
   /** bots.tier ya resuelto (F3). Sin dato (ej. notFound) se asume Pro para no ocultar nada por accidente. */
   pro?: boolean;
   niche?: NichePack | null;
+  /** visibleNavIds(claims) de admin/permissions.ts — null (default) = sin sesión de KontrolIA, todo visible. */
+  visibleNavIds?: Set<string> | null;
 }): string {
   const pro = opts.pro ?? true;
   const niche = opts.niche ?? null;
+  const visibleNavIds = opts.visibleNavIds ?? null;
   const section = NAV.find((s) => s.items.some((i) => i.id === opts.activeTab)) ?? NAV[0];
   const item = applyNiche(section.items.find((i) => i.id === opts.activeTab) ?? section.items[0], niche);
 
@@ -359,7 +376,7 @@ export function layout(opts: {
 </head>
 <body>
   <div class="shell">
-    ${sidebar(opts.activeTab, pro, niche)}
+    ${sidebar(opts.activeTab, pro, niche, visibleNavIds)}
     <div style="display:flex;flex-direction:column;min-width:0">
       <header style="position:sticky;top:0;z-index:30;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:14px 28px;display:flex;align-items:center;gap:20px">
         <div style="min-width:0">
@@ -636,6 +653,38 @@ export function renderUpgrade(feature?: string): string {
       </div>
     </div>`;
   return layout({ title: "Pro", activeTab: "overview", body, pro: false });
+}
+
+// Se muestra cuando una cuenta de KontrolIA Auth válida no tiene ningún
+// permiso de Nodia Agents (guard base en routes.ts) o le falta el permiso
+// específico de la pantalla que pidió (PERMISSION_GATE). Nunca aparece para
+// Basic Auth / DASHBOARD_PUBLIC / KontrolIA sin configurar — ver
+// admin/permissions.ts::hasPermission (sin claims, siempre true).
+export function renderAccessDenied(feature?: string, visibleNavIds: Set<string> | null = new Set()): string {
+  const body = `
+    <div class="card" style="max-width:560px">
+      <div style="border:1px solid var(--linelit);background:var(--panel);box-shadow:var(--shadow-md);padding:28px">
+        <div style="display:inline-flex;align-items:center;gap:8px;border:1px solid var(--bad);color:var(--bad);font-size:10px;letter-spacing:.16em;padding:4px 10px;text-transform:uppercase">
+          <i data-lucide="shield-alert" width="13" height="13"></i> Acceso restringido
+        </div>
+        <h2 style="font-family:'Archivo';font-weight:700;font-size:22px;letter-spacing:-.02em;margin:14px 0 6px">
+          ${feature ? `No tienes acceso a "${feature}"` : "Tu cuenta no tiene acceso a Nodia Agents"}
+        </h2>
+        <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0 0 20px;max-width:480px">
+          Tu cuenta de KontrolIA inició sesión correctamente, pero no tiene ningún rol con
+          permiso ${feature ? `para esta pantalla` : "de Nodia Agents"} en esta organización.
+          Pídele a quien administra tu organización que te asigne uno desde
+          <b style="color:var(--cream)">panel.kontrolia.io</b> → Aplicaciones → Nodia Agents.
+        </p>
+        <form method="POST" action="/admin/logout">
+          <button type="submit" class="ghostbtn"
+            style="display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);color:var(--muted);padding:10px 16px;font-size:13px;background:none;cursor:pointer;font-family:inherit">
+            <i data-lucide="log-out" width="15" height="15"></i> Cerrar sesión / probar otra cuenta
+          </button>
+        </form>
+      </div>
+    </div>`;
+  return layout({ title: "Acceso restringido", activeTab: "overview", body, pro: false, visibleNavIds });
 }
 
 export function loginPage(error?: string): string {

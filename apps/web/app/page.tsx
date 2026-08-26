@@ -2,6 +2,7 @@ import Nav from "@/components/Nav";
 import Hero from "@/components/Hero";
 import Features from "@/components/Features";
 import HowItWorks from "@/components/HowItWorks";
+import Voice from "@/components/Voice";
 import Panel from "@/components/Panel";
 import SelfImproving from "@/components/SelfImproving";
 import Protections from "@/components/Protections";
@@ -18,6 +19,7 @@ export default function Home() {
       <Hero />
       <Features />
       <HowItWorks />
+      <Voice />
       <Panel />
       <SelfImproving />
       <Protections />

@@ -72,8 +72,12 @@ describe("handleIncomingVoiceCall — webhook TwiML de la llamada entrante", () 
     const body = await res.text();
     expect(body).toContain("<Connect><Stream url=\"wss://");
     expect(body).toContain(`/webhooks/voice/${TEST_BOT_ID}/stream`);
-    expect(body).toContain("callSid=CA1234567890ABCDE");
-    expect(body).toContain("from=%2B14158675310");
+    // El callSid/from ya NO van en la URL (Twilio no preserva el query
+    // string del <Stream> al abrir el WebSocket) — viajan como <Parameter>
+    // hijos, que sí llegan en el evento "start" (ver gateway.ts).
+    expect(body).not.toContain(`/stream?`);
+    expect(body).toContain('<Parameter name="callSid" value="CA1234567890ABCDE"/>');
+    expect(body).toContain('<Parameter name="from" value="+14158675310"/>');
   });
 
   it("con firma inválida, responde 403 y no revela el TwiML", async () => {

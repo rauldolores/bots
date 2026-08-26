@@ -8,10 +8,28 @@ import {
   CalendarClock,
   PackageSearch,
   Brain,
+  PhoneCall,
+  AudioLines,
+  PhoneForwarded,
 } from "lucide-react";
 import { Container, SectionHeading } from "./ui";
 
 const features = [
+  {
+    icon: PhoneCall,
+    title: "Contesta llamadas en tu número",
+    desc: "Desvío desde tu operador: el agente responde en tu línea actual, 24/7 y a varias llamadas a la vez. Ninguna se pierde.",
+  },
+  {
+    icon: AudioLines,
+    title: "Voz natural con interrupciones",
+    desc: "El cliente habla y el agente responde al instante, con voz humana. Puede interrumpir como en una charla real — sin menús de opciones.",
+  },
+  {
+    icon: PhoneForwarded,
+    title: "Transfiere en vivo a un humano",
+    desc: "Cuando hace falta, pasa la llamada a tu equipo. Si no contestan, el agente retoma con la misma memoria de la conversación.",
+  },
   {
     icon: MessagesSquare,
     title: "Multicanal, un solo cerebro",
@@ -24,8 +42,8 @@ const features = [
   },
   {
     icon: Mic,
-    title: "Entiende notas de voz",
-    desc: "Transcribe los audios de tus clientes automáticamente para que nada se quede sin responder.",
+    title: "Escucha audios y llamadas",
+    desc: "Transcribe notas de voz del chat y cada llamada, para que nada se quede sin responder ni documentar.",
   },
   {
     icon: UserPlus,
@@ -45,7 +63,7 @@ const features = [
   {
     icon: CalendarClock,
     title: "Agenda citas",
-    desc: "Consulta disponibilidad real y reserva en tu calendario de Cal.com, sin salir del chat.",
+    desc: "Consulta disponibilidad real y reserva en tu calendario de Cal.com, sin salir del chat ni de la llamada.",
   },
   {
     icon: PackageSearch,
@@ -66,7 +84,7 @@ export default function Features() {
         <SectionHeading
           eyebrow="Características"
           title="Un vendedor que no duerme, no se enferma y no cobra comisión"
-          description="Todo lo que un buen agente de atención haría por tu negocio, automatizado y disponible a cualquier hora."
+          description="Todo lo que un buen agente de atención haría por tu negocio — por chat y por teléfono — automatizado y disponible a cualquier hora."
         />
 
         <div className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

@@ -13,12 +13,13 @@
  */
 import { parsePeerBots } from "./projects";
 import { Hono, type Context } from "hono";
-import { generateText } from "ai";
+import { generateText, generateObject } from "ai";
+import { z } from "zod";
 import { createModel } from "../llm/provider";
 import { loadLlmOverrides } from "../settings-loader";
 import type { Env } from "../env";
 import { adminAuth } from "./auth";
-import { layout, renderUpgrade } from "./views/layout";
+import { layout, renderUpgrade, renderAccessDenied } from "./views/layout";
 import { isProTier } from "../config";
 import { renderOverview } from "./views/overview";
 import { renderStats } from "./views/stats";
@@ -74,7 +75,8 @@ import { LeadsRepo, type Lead } from "../db/leads";
 import { TicketsRepo } from "../db/tickets";
 import { pushToTicketsIfConnected } from "../tools/handoffHuman";
 import { ConversationsRepo } from "../db/conversations";
-import { BotsRepo } from "../db/bots";
+import { BotsRepo, type BotConfig, type BotCatalogItem } from "../db/bots";
+import { BotConnectorsRepo } from "../db/botConnectors";
 import { MessagesRepo } from "../db/messages";
 import { SettingsRepo, SETTING_KEYS, type SettingKey } from "../db/settings";
 import { CONTROLS, levelToValue } from "./control-levels";
@@ -94,6 +96,7 @@ import {
   type KontroliaSession,
 } from "./kontroliaAuth";
 import { resolveAdminTenant, BOT_COOKIE, NoBotsInOrganizationError, type AdminBindings } from "./tenantContext";
+import { PERMISSION_GATE, hasAnyAppAccess, hasPermission, requirePermission, visibleNavIds } from "./permissions";
 import type { KontroliaTokenClaims } from "@kontrolia/shared";
 import { renderCreateBotPage } from "./views/onboarding";
 
@@ -121,7 +124,12 @@ function isAuthExempt(path: string): boolean {
 // necesita el botId resuelto normal (para "current"); solo cuando la
 // organización está vacía se salta el redirect (ver el catch de abajo) — si no,
 // /projects también tenía botId=undefined SIEMPRE, rompiendo el caso normal.
-const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots"];
+// /access-denied también va aquí: es el destino del guard de acceso de la
+// Sección 3 de abajo — si no se eximiera de setTenantContext, alguien en una
+// organización sin bots (o sin acceso a ninguno) rebotaría a /bots/new antes
+// de que este guard alcance a redirigirlo a /access-denied, o directamente
+// no podría renderizar la página que le explica por qué no tiene acceso.
+const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots", "/access-denied"];
 function isTenantExempt(path: string): boolean {
   return TENANT_EXEMPT_SUFFIXES.some((s) => path.endsWith(s));
 }
@@ -220,6 +228,15 @@ adminApp.use("*", async (c, next) => {
       // para validar que el bot elegido le pertenece.
       c.set("kontroliaOrgId", result.claims.organization_id);
       return next();
+    }
+    // Sesión válida en KontrolIA no es lo mismo que tener acceso a Nodia
+    // Agents — una cuenta puede estar autenticada en el ecosistema pero
+    // nunca haber sido asignada a ningún rol de esta app en su organización
+    // activa (claims.permissions sin ningún "nodia-agents.*"). Sin esto,
+    // cualquier cuenta de KontrolIA podía navegar el panel completo. Mismo
+    // principio que ya usa Faqturia (hasFaqturiaAccess en su middleware).
+    if (!hasAnyAppAccess(result.claims)) {
+      return c.redirect("/admin/access-denied", 302);
     }
     try {
       await setTenantContext(c, result.claims.organization_id);
@@ -325,8 +342,34 @@ adminApp.use("*", async (c, next) => {
   return next();
 });
 
+// Gate de permisos de KontrolIA Auth (ver admin/permissions.ts): mismo
+// idioma que PRO_GATE de arriba — prefijo de URL → permiso requerido. Solo
+// corre para sesiones de KontrolIA (Basic Auth / DASHBOARD_PUBLIC no tienen
+// kontroliaClaims, así que pasan sin cambio); un platform admin nunca se
+// bloquea.
+adminApp.use("*", async (c, next) => {
+  if (isAuthExempt(c.req.path) || isTenantExempt(c.req.path)) return next();
+  const claims = c.get("kontroliaClaims");
+  if (!claims || claims.is_platform_admin) return next();
+  // c.req.path trae "/admin" puesto en producción (montado bajo la app
+  // principal) pero NO cuando se prueba adminApp.fetch() directo — se
+  // recorta aquí para que PERMISSION_GATE (definido sin ese prefijo, ver
+  // admin/permissions.ts) compare lo mismo en los dos casos.
+  const path = c.req.path.replace(/^\/admin(?=\/|$)/, "") || "/";
+  const hit = PERMISSION_GATE.find(([pre]) => path === pre || path.startsWith(pre + "/"));
+  if (hit && !hasPermission(claims, hit[1])) return c.html(renderAccessDenied(hit[2], visibleNavIds(claims)));
+  return next();
+});
+
 // Página de upgrade (item bloqueado del nav apunta aquí).
 adminApp.get("/upgrade", (c) => c.html(renderUpgrade()));
+
+// Destino del guard de acceso base (Sección 3) y del gate de permisos de
+// arriba — se llega aquí ya AUTENTICADO pero sin el permiso necesario.
+adminApp.get("/access-denied", (c) => {
+  const claims = c.get("kontroliaClaims");
+  return c.html(renderAccessDenied(undefined, visibleNavIds(claims)));
+});
 
 // Root → default tab.
 adminApp.get("/", (c) => c.redirect("/admin/overview"));
@@ -520,11 +563,13 @@ adminApp.post("/bots", async (c) => {
 
 // --- Read-only tabs ---------------------------------------------------------
 
-adminApp.get("/overview", async (c) => c.html(await renderOverview(c.env, c.get("botId"))));
+adminApp.get("/overview", async (c) => c.html(await renderOverview(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")))));
 
-adminApp.get("/stats", async (c) => c.html(await renderStats(c.env, c.get("botId"))));
+adminApp.get("/stats", async (c) => c.html(await renderStats(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")))));
 
-adminApp.get("/costs", async (c) => c.html(await renderCosts(c.env, c.get("botId"), c.req.query("saved") === "1")));
+adminApp.get("/costs", async (c) =>
+  c.html(await renderCosts(c.env, c.get("botId"), c.req.query("saved") === "1", visibleNavIds(c.get("kontroliaClaims")))),
+);
 
 // Monthly AI budget (Costos tab). Empty value clears the cap.
 adminApp.post("/costs/budget", async (c) => {
@@ -540,21 +585,26 @@ adminApp.post("/costs/budget", async (c) => {
 
 adminApp.get("/kb", async (c) =>
   c.html(
-    await renderKbList(c.env, c.get("botId"), {
-      saved: c.req.query("saved") === "1",
-      deleted: c.req.query("deleted") === "1",
-      reindexed: c.req.query("reindexed") ?? undefined,
-    }),
+    await renderKbList(
+      c.env,
+      c.get("botId"),
+      {
+        saved: c.req.query("saved") === "1",
+        deleted: c.req.query("deleted") === "1",
+        reindexed: c.req.query("reindexed") ?? undefined,
+      },
+      visibleNavIds(c.get("kontroliaClaims")),
+    ),
   ),
 );
 
-adminApp.get("/kb/new", (c) => c.html(renderKbEditor(null, c.env)));
+adminApp.get("/kb/new", (c) => c.html(renderKbEditor(null, c.env, visibleNavIds(c.get("kontroliaClaims")))));
 
 adminApp.get("/kb/:id/edit", async (c) => {
   const db = new Db(c.env.DB);
   const doc = await new KbDocsRepo(db, c.get("botId")).getById(c.req.param("id"));
   if (!doc) return c.redirect("/admin/kb");
-  return c.html(renderKbEditor(doc, c.env));
+  return c.html(renderKbEditor(doc, c.env, visibleNavIds(c.get("kontroliaClaims"))));
 });
 
 // Save = persist in Postgres + index into pgvector immediately (stale vectors for
@@ -614,26 +664,37 @@ adminApp.get("/handoff/template/status", async (c) => {
 
 adminApp.get("/mejoras", async (c) =>
   c.html(
-    await renderMejoras(c.env, c.get("botId"), {
-      found: c.req.query("found") ?? undefined,
-      applied: c.req.query("applied") === "1",
-      dismissed: c.req.query("dismissed") === "1",
-    }),
+    await renderMejoras(
+      c.env,
+      c.get("botId"),
+      {
+        found: c.req.query("found") ?? undefined,
+        applied: c.req.query("applied") === "1",
+        dismissed: c.req.query("dismissed") === "1",
+      },
+      visibleNavIds(c.get("kontroliaClaims")),
+    ),
   ),
 );
 
 // Run the detectors on demand (they also run nightly from scheduled()).
 adminApp.post("/mejoras/run", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.mejoras.administrar");
+  if (denied) return denied;
   const r = await runFlywheel(c.env, c.get("botId"));
   return c.redirect(`/admin/mejoras?found=${r.created}`);
 });
 
 adminApp.post("/mejoras/:id/apply", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.mejoras.administrar");
+  if (denied) return denied;
   const ok = await applySuggestion(c.env, c.req.param("id"), c.get("botId"));
   return c.redirect(ok ? "/admin/mejoras?applied=1" : "/admin/mejoras");
 });
 
 adminApp.post("/mejoras/:id/dismiss", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.mejoras.administrar");
+  if (denied) return denied;
   const ok = await dismissSuggestion(c.env, c.req.param("id"), c.get("botId"));
   return c.redirect(ok ? "/admin/mejoras?dismissed=1" : "/admin/mejoras");
 });
@@ -641,6 +702,8 @@ adminApp.post("/mejoras/:id/dismiss", async (c) => {
 // Autonomía del flywheel: manual (default) o copiloto (auto-aplica lo seguro
 // en el cron nocturno — KB sin huecos y lecciones; lo delicado sigue en cola).
 adminApp.post("/mejoras/autonomy", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.mejoras.administrar");
+  if (denied) return denied;
   const form = await c.req.formData();
   const level = String(form.get("level") ?? "manual") === "copilot" ? "copilot" : "manual";
   await (await settingsFor(c)).set(SETTING_KEYS.autonomyLevel, level);
@@ -649,6 +712,8 @@ adminApp.post("/mejoras/autonomy", async (c) => {
 
 // Remove one lesson from the prompt (the ✕ next to each active lesson).
 adminApp.post("/mejoras/lessons/remove", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.mejoras.administrar");
+  if (denied) return denied;
   const form = await c.req.formData();
   const lesson = String(form.get("lesson") ?? "");
   const lessons = (await getLessons(c.env, c.get("botId"))).filter((l) => l !== lesson);
@@ -659,11 +724,16 @@ adminApp.post("/mejoras/lessons/remove", async (c) => {
 // Inbox (F1): two-pane view. ?c=<id> selects the thread; ?f/?q filter the list.
 adminApp.get("/conversations", async (c) =>
   c.html(
-    await renderInbox(c.env, c.get("botId"), {
-      search: c.req.query("q"),
-      filter: c.req.query("f"),
-      selectedId: c.req.query("c"),
-    }),
+    await renderInbox(
+      c.env,
+      c.get("botId"),
+      {
+        search: c.req.query("q"),
+        filter: c.req.query("f"),
+        selectedId: c.req.query("c"),
+      },
+      visibleNavIds(c.get("kontroliaClaims")),
+    ),
   ),
 );
 
@@ -703,7 +773,7 @@ adminApp.get("/insights", async (c) => {
   } catch {
     // no executionCtx (tests) — render without background catch-up
   }
-  return c.html(await renderInsights(c.env, botId, c.req.query("analyzed") ?? undefined));
+  return c.html(await renderInsights(c.env, botId, c.req.query("analyzed") ?? undefined, visibleNavIds(c.get("kontroliaClaims"))));
 });
 
 // "Analizar ahora": grade up to 10 pending conversations inline, then redirect
@@ -715,7 +785,7 @@ adminApp.post("/insights/analyze", async (c) => {
 
 // "Mi Agente": n8n-style canvas of how the bot works. The canvas fragment is
 // polled by HTMX every 15s (live activity pulse); node panels load on click.
-adminApp.get("/agente", async (c) => c.html(await renderAgentePage(c.env, c.get("botId"))));
+adminApp.get("/agente", async (c) => c.html(await renderAgentePage(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")))));
 
 adminApp.get("/agente/canvas", async (c) => c.html(await renderAgenteCanvas(c.env, c.get("botId"))));
 
@@ -727,6 +797,8 @@ adminApp.get("/agente/node/:id", async (c) =>
 // clamps), re-renders the modal with a saved banner + toast, and fires the
 // `canvas-refresh` event so the diagram updates immediately.
 adminApp.post("/agente/node/:id/save", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.agente.editar");
+  if (denied) return denied;
   const id = c.req.param("id");
   const form = await c.req.formData();
   const repo = await settingsFor(c);
@@ -774,6 +846,8 @@ adminApp.post("/agente/node/:id/save", async (c) => {
 // Toggle a tool on/off (settings.disabled_tools). Returns the refreshed modal;
 // the canvas badge updates via the canvas-refresh event.
 adminApp.post("/agente/tools/:name/toggle", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.agente.editar");
+  if (denied) return denied;
   const name = c.req.param("name");
   const ok = await toggleTool(c.env, c.get("botId"), name);
   if (!ok) return c.text("Tool no encontrada", 404);
@@ -781,16 +855,26 @@ adminApp.post("/agente/tools/:name/toggle", async (c) => {
   return c.html((await renderNodeModal(c.env, c.get("botId"), `tool:${name}`, true)) + toastOob("✓ Guardado"));
 });
 
-adminApp.get("/leads", async (c) => c.html(await renderLeads(c.env, c.get("botId"))));
+adminApp.get("/leads", async (c) => c.html(await renderLeads(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")))));
 
-adminApp.get("/tickets", async (c) => c.html(await renderTickets(c.env, c.get("botId"))));
+adminApp.get("/tickets", async (c) => c.html(await renderTickets(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")))));
 
 // Calendario (F5 Fase 2): agenda del bot — local, o el calendario conectado si hay uno.
 adminApp.get("/calendario", async (c) =>
-  c.html(await renderCalendario(c.env, c.get("botId"), c.req.query("month"), c.req.query("day"))),
+  c.html(
+    await renderCalendario(
+      c.env,
+      c.get("botId"),
+      c.req.query("month"),
+      c.req.query("day"),
+      visibleNavIds(c.get("kontroliaClaims")),
+    ),
+  ),
 );
 
 adminApp.post("/calendario/:id/cancel", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.calendario.administrar");
+  if (denied) return denied;
   await cancelAppointment(c.env, c.get("botId"), c.req.param("id"));
   // Vuelve al mes/día que se estaba viendo (el panel del día seleccionado lo
   // manda como campo oculto) en vez de perder el lugar y saltar al mes actual.
@@ -803,7 +887,14 @@ adminApp.post("/calendario/:id/cancel", async (c) => {
 // cliente vía desvío de llamadas — máquina de estados propia (ver
 // channels/voice/onboarding/), independiente de Conexiones.
 adminApp.get("/telefono", async (c) =>
-  c.html(await renderTelefono(c.env, c.get("botId"), { ok: c.req.query("ok") === "1", err: c.req.query("err") })),
+  c.html(
+    await renderTelefono(
+      c.env,
+      c.get("botId"),
+      { ok: c.req.query("ok") === "1", err: c.req.query("err") },
+      visibleNavIds(c.get("kontroliaClaims")),
+    ),
+  ),
 );
 
 adminApp.post("/telefono/start", async (c) => {
@@ -847,10 +938,16 @@ adminApp.post("/telefono/transfer-number", async (c) => {
 // más las pestañas de conectores salientes (CRM, tickets, calendario, MCP).
 adminApp.get("/conexiones", async (c) =>
   c.html(
-    await renderConexiones(c.env, c.get("botId"), c.req.query("cat") ?? "canales", {
-      ok: c.req.query("ok") === "1",
-      err: c.req.query("err"),
-    }),
+    await renderConexiones(
+      c.env,
+      c.get("botId"),
+      c.req.query("cat") ?? "canales",
+      {
+        ok: c.req.query("ok") === "1",
+        err: c.req.query("err"),
+      },
+      visibleNavIds(c.get("kontroliaClaims")),
+    ),
   ),
 );
 
@@ -981,7 +1078,7 @@ adminApp.get("/campanas", async (c) => {
     enqueued: c.req.query("enqueued"),
     skipped: c.req.query("skipped"),
   };
-  return c.html(await renderCampanas(c.env, c.get("botId"), q));
+  return c.html(await renderCampanas(c.env, c.get("botId"), q, visibleNavIds(c.get("kontroliaClaims"))));
 });
 
 // Vista previa en vivo del conteo de audiencia — se llama con htmx cada vez
@@ -1009,6 +1106,8 @@ adminApp.post("/campanas/preview", async (c) => {
 });
 
 adminApp.post("/campanas/send", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.campanas.enviar");
+  if (denied) return denied;
   const form = await c.req.formData();
   const filters = parseCampaignFilters(form);
   const campaignKey = String(form.get("campaign_key") ?? "").trim();
@@ -1057,6 +1156,9 @@ adminApp.get("/config", async (c) => {
   const configBotId = c.get("botId");
   const settings = await new SettingsRepo(configDb, configBotId).all();
   const bot = await new BotsRepo(configDb).getById(configBotId);
+  const mcpConnectors = (await new BotConnectorsRepo(configDb).listByBot(configBotId)).filter(
+    (conn) => conn.category === "mcp" && conn.enabled,
+  );
   const saved = c.req.query("saved") === "1";
   return c.html(
     renderConfig(
@@ -1066,8 +1168,47 @@ adminApp.get("/config", async (c) => {
       saved,
       c.req.query("llmtest"),
       Boolean(c.env.OPENAI_API_KEY),
+      { niche: bot?.niche ?? null, language: bot?.language ?? c.env.BOT_LANGUAGE },
+      mcpConnectors.map((conn) => ({ name: conn.name, provider: conn.provider })),
+      visibleNavIds(c.get("kontroliaClaims")),
     ),
   );
+});
+
+const SUGGEST_FIELDS_SCHEMA = z.object({
+  fields: z
+    .array(z.object({ key: z.string().min(1).max(60), placeholder: z.string().max(120).optional() }))
+    .min(3)
+    .max(8),
+});
+
+/** Sin niche, LLM no configurado, o falla la llamada: siempre hay algo que mostrar, nunca deja al dueño sin nada. */
+const FALLBACK_SUGGEST_FIELDS = [
+  { key: "Especialidad", placeholder: "Ej. lo que más te distingue de otros negocios similares" },
+  { key: "Garantía o política de devolución", placeholder: "" },
+  { key: "Requisitos previos", placeholder: "Ej. qué necesita traer o saber el cliente antes de venir" },
+];
+
+// Sugiere campos de "Información del negocio" según el giro que el dueño
+// escribió — un click, una llamada corta al LLM ya configurado del bot
+// (mismo patrón que /config/llm-test), nunca bloquea el flujo si falla.
+adminApp.post("/config/suggest-fields", async (c) => {
+  const form = await c.req.formData();
+  const niche = String(form.get("niche") ?? "").trim().slice(0, 200);
+  if (!niche) return c.json({ fields: FALLBACK_SUGGEST_FIELDS });
+  try {
+    const ov = await loadLlmOverrides(c.env, c.get("botId"));
+    const { model } = createModel(c.env, "fast", ov);
+    const result = await generateObject({
+      model,
+      schema: SUGGEST_FIELDS_SCHEMA,
+      prompt: `Un dueño de un negocio de giro "${niche}" está configurando un chatbot de atención al cliente. Sugiere entre 4 y 8 datos ESPECÍFICOS de ese giro que un cliente típicamente preguntaría y que el dueño debería capturar — cada uno como un campo corto "nombre del dato" + un placeholder de ejemplo para el valor. NO sugieras horario, precios/catálogo, ubicación, métodos de pago ni teléfono — esos ya se capturan aparte. Responde en español, campos concretos y accionables para ESTE giro, no genéricos.`,
+    });
+    return c.json(result.object);
+  } catch (err) {
+    console.error("[config] suggest-fields falló:", err);
+    return c.json({ fields: FALLBACK_SUGGEST_FIELDS });
+  }
 });
 
 // Prueba de la config BYO-LLM guardada: un generateText mínimo con el modelo
@@ -1093,6 +1234,36 @@ adminApp.get("/config/llm-test", async (c) => {
   }
 });
 
+const CUSTOM_FIELDS_SCHEMA = z.record(z.string(), z.string());
+const CATALOG_SCHEMA = z.array(
+  z.object({ name: z.string().min(1), price: z.number(), description: z.string().optional(), sku: z.string().optional() }),
+);
+
+/** JSON malformado no debe tumbar el guardado completo — se ignora esa llave del patch (log + skip), como el resto de parseos defensivos de este archivo. */
+function parseCustomFieldsJson(raw: string): Record<string, string> | undefined {
+  try {
+    const parsed = CUSTOM_FIELDS_SCHEMA.parse(JSON.parse(raw));
+    const cleaned: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      const key = k.trim();
+      if (key) cleaned[key] = v.trim();
+    }
+    return cleaned;
+  } catch (err) {
+    console.error("[config] custom_fields_json inválido, se ignora:", err);
+    return undefined;
+  }
+}
+
+function parseCatalogJson(raw: string): BotCatalogItem[] | undefined {
+  try {
+    return CATALOG_SCHEMA.parse(JSON.parse(raw));
+  } catch (err) {
+    console.error("[config] catalog_json inválido, se ignora:", err);
+    return undefined;
+  }
+}
+
 // Save the control panel. Card selections are mapped from the picked option
 // (value or label) back to the value we persist via `levelToValue`; free-text
 // fields are stored verbatim (trimmed). Empty/absent => default at load time.
@@ -1114,12 +1285,52 @@ adminApp.post("/config", async (c) => {
     SETTING_KEYS.businessContext,
     SETTING_KEYS.systemPromptOverride,
     SETTING_KEYS.escalationKeywords,
+    SETTING_KEYS.salesPlaybook,
+    SETTING_KEYS.voiceName,
   ];
   for (const key of textKeys) {
     const raw = form.get(key);
     if (raw === null) continue;
     await repo.set(key, String(raw).trim());
   }
+
+  // Giro e idioma viven en columnas de `bots`, no en `settings` — angostos a
+  // propósito (BotsRepo.updateNiche/updateLanguage), así no hace falta
+  // resuministrar name/businessName/tier en cada guardado del panel.
+  const configBotId = c.get("botId");
+  const botsRepo = new BotsRepo(new Db(c.env.DB));
+  const nicheRaw = form.get("niche");
+  if (nicheRaw !== null) await botsRepo.updateNiche(configBotId, String(nicheRaw));
+  const languageRaw = form.get("bot_language");
+  if (languageRaw !== null && String(languageRaw).trim() !== "") {
+    await botsRepo.updateLanguage(configBotId, String(languageRaw));
+  }
+
+  // Todo lo demás de "Información del negocio" vive en bots.config (JSONB) —
+  // un solo mergeConfig() al final para no pisar lo que otras llaves ya
+  // tengan guardado (catalog, customFields, etc. son objetos completos, no
+  // se mezclan entre sí, pero SÍ se preservan las llaves del patch que este
+  // guardado no tocó).
+  const configPatch: Partial<BotConfig> = {};
+  const countryRaw = form.get("country");
+  if (countryRaw !== null) configPatch.country = String(countryRaw).trim().slice(0, 80);
+  const currencyRaw = form.get("currency");
+  if (currencyRaw !== null) configPatch.currency = String(currencyRaw).trim().slice(0, 40);
+
+  const customFieldsRaw = form.get("custom_fields_json");
+  if (customFieldsRaw !== null) {
+    const parsed = parseCustomFieldsJson(String(customFieldsRaw));
+    if (parsed) configPatch.customFields = parsed;
+  }
+  const catalogRaw = form.get("catalog_json");
+  if (catalogRaw !== null) {
+    const parsed = parseCatalogJson(String(catalogRaw));
+    if (parsed) configPatch.catalog = parsed;
+  }
+  const catalogSourceRaw = form.get("catalog_source");
+  if (catalogSourceRaw !== null) configPatch.catalogSource = catalogSourceRaw === "mcp" ? "mcp" : "manual";
+
+  if (Object.keys(configPatch).length > 0) await botsRepo.mergeConfig(configBotId, configPatch);
 
   // Zona horaria: allow-list contra TIMEZONE_OPTIONS — nunca texto libre.
   const tzRaw = form.get(SETTING_KEYS.timezone);
@@ -1170,6 +1381,8 @@ adminApp.post("/config", async (c) => {
 // --- CSV export -------------------------------------------------------------
 
 adminApp.get("/leads/export.csv", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.leads.administrar");
+  if (denied) return denied;
   const csv = await exportLeadsCsv(c.env, c.get("botId"));
   return new Response(csv, {
     headers: {
@@ -1185,6 +1398,8 @@ const LEAD_STATUSES: ReadonlyArray<Lead["status"]> = ["new", "contacted", "sold"
 
 // Mark a lead's status (nuevo / contactado / vendido / perdido).
 adminApp.post("/leads/:id/status", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.leads.administrar");
+  if (denied) return denied;
   const form = await c.req.formData();
   const raw = String(form.get("status") ?? "new");
   const status: Lead["status"] = (LEAD_STATUSES as readonly string[]).includes(raw)
@@ -1198,6 +1413,8 @@ adminApp.post("/leads/:id/status", async (c) => {
 
 // Resolve a support ticket.
 adminApp.post("/tickets/:id/resolve", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.tickets.administrar");
+  if (denied) return denied;
   const form = await c.req.formData();
   const resolvedBy = String(form.get("resolved_by") ?? c.env.OWNER_EMAIL ?? "admin").trim() || "admin";
   const db = new Db(c.env.DB);
@@ -1207,6 +1424,8 @@ adminApp.post("/tickets/:id/resolve", async (c) => {
 });
 
 adminApp.post("/tickets/:id/priority", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.tickets.administrar");
+  if (denied) return denied;
   const form = await c.req.formData();
   await updateTicketPriority(c.env, c.get("botId"), c.req.param("id"), String(form.get("priority") ?? ""));
   return c.redirect("/admin/tickets");
@@ -1223,6 +1442,8 @@ const TAKEOVER_MS = 60 * 60 * 1000;
 // agent). Returns a status line for #send-status plus an out-of-band swap that
 // refreshes #thread-live instantly. X-Sent: 1 tells the composer to reset.
 adminApp.post("/conversations/:id/reply", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.conversaciones.responder");
+  if (denied) return denied;
   const id = c.req.param("id");
   const form = await c.req.formData().catch(() => null);
   const text = String(form?.get("text") ?? "").trim();
@@ -1269,6 +1490,8 @@ adminApp.post("/conversations/:id/reply", async (c) => {
 // Pause the bot in this conversation without sending anything (owner wants the
 // customer for themselves). Returns the refreshed thread fragment.
 adminApp.post("/conversations/:id/pause", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.conversaciones.responder");
+  if (denied) return denied;
   const id = c.req.param("id");
   const db = new Db(c.env.DB);
   const convs = new ConversationsRepo(db, c.get("botId"));
@@ -1280,6 +1503,8 @@ adminApp.post("/conversations/:id/pause", async (c) => {
 // an owner-authored summary of the human handoff to the message history, so the
 // bot resumes with context about what the owner already resolved.
 adminApp.post("/conversations/:id/resume", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.conversaciones.responder");
+  if (denied) return denied;
   const id = c.req.param("id");
   const db = new Db(c.env.DB);
   const botId = c.get("botId");
@@ -1304,6 +1529,8 @@ adminApp.post("/conversations/:id/resume", async (c) => {
 // notify who isn't already here. It still pushes to an external tickets
 // platform if one is connected, same as the agent-created path.
 adminApp.post("/conversations/:id/create-ticket", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.conversaciones.responder");
+  if (denied) return denied;
   const id = c.req.param("id");
   const db = new Db(c.env.DB);
   const botId = c.get("botId");
