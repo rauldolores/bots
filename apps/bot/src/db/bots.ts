@@ -168,6 +168,21 @@ export class BotsRepo {
     await this.db.run("UPDATE bots SET niche = ?, updated_at = ? WHERE id = ?", [niche.trim() || null, Date.now(), id]);
   }
 
+  /**
+   * Igual de angosto que updateNiche. El nombre se edita desde
+   * /admin/config → Personalidad, que ADEMÁS lo guarda en settings.bot_name
+   * (lo que lee el agente, ver settings-loader.ts). Los dos tienen que
+   * moverse juntos: `bots.name` es lo que pinta el selector del panel,
+   * /admin/projects, leads y overview — si solo se grababa el setting, el
+   * panel seguía mostrando el nombre viejo para siempre.
+   *
+   * El slug NO se recalcula a propósito: es identidad estable del bot y
+   * cambiarlo rompería cualquier referencia existente.
+   */
+  async updateName(id: string, name: string): Promise<void> {
+    await this.db.run("UPDATE bots SET name = ?, updated_at = ? WHERE id = ?", [name.trim(), Date.now(), id]);
+  }
+
   /** Igual de angosto que updateNiche — el idioma ahora es editable desde /admin/config → Personalidad. */
   async updateLanguage(id: string, language: string): Promise<void> {
     await this.db.run("UPDATE bots SET language = ?, updated_at = ? WHERE id = ?", [language.trim(), Date.now(), id]);
