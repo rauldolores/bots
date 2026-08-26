@@ -161,22 +161,40 @@ export async function resolveAgentConfig(
   const ownerPlaybook = get(SETTING_KEYS.salesPlaybook);
   const nichoPlaybookBase = ownerPlaybook ?? (niche.playbook || undefined);
 
+  const activeMcpConnectors = (await new BotConnectorsRepo(db).listByBot(botId)).filter(
+    (c) => c.category === "mcp" && c.enabled,
+  );
+
   // Si el catálogo vive en un sistema externo (MCP) en vez de bots.config.catalog,
   // el modelo necesita saberlo explícitamente — si no, puede asumir que un
   // catálogo vacío significa "no tengo esa información" en vez de "consúltala
   // con la tool". Se genera solo, no depende de que el dueño lo redacte.
   let mcpNote: string | undefined;
-  if (botConfig.catalogSource === "mcp") {
-    const mcpConnectors = (await new BotConnectorsRepo(db).listByBot(botId)).filter(
-      (c) => c.category === "mcp" && c.enabled,
-    );
-    if (mcpConnectors.length > 0) {
-      mcpNote = `<catalogo_mcp>\nEl catálogo y los precios de este negocio se consultan EN VIVO vía: ${mcpConnectors
-        .map((c) => c.name ?? c.provider)
-        .join(", ")}. No inventes precios ni digas que no tienes esa información sin antes intentar la herramienta correspondiente.\n</catalogo_mcp>`;
-    }
+  if (botConfig.catalogSource === "mcp" && activeMcpConnectors.length > 0) {
+    mcpNote = `<catalogo_mcp>\nEl catálogo y los precios de este negocio se consultan EN VIVO vía: ${activeMcpConnectors
+      .map((c) => c.name ?? c.provider)
+      .join(", ")}. No inventes precios ni digas que no tienes esa información sin antes intentar la herramienta correspondiente.\n</catalogo_mcp>`;
   }
-  const nichoPlaybook = [nichoPlaybookBase, mcpNote].filter(Boolean).join("\n\n") || undefined;
+
+  // Bug real: captureLead/handoffHuman SÍ empujan a un CRM/plataforma de
+  // tickets externa automáticamente — pero SOLO reconocen un catálogo fijo
+  // de proveedores nativos (hubspot/pipedrive, zendesk/jira, ver
+  // connectors/registry.ts). Un MCP genérico conectado (ej. un CRM propio)
+  // es INVISIBLE para ese empuje automático — sin este aviso, el modelo
+  // nunca se entera de que tiene que llamar la tool MCP él mismo, y el
+  // dato solo queda guardado localmente en Nodia Agents, nunca en el
+  // sistema externo del negocio. Se genera solo, para CUALQUIER MCP
+  // conectado (no solo el de catálogo — ver mcpNote arriba, que es un
+  // caso más específico y puede convivir con este).
+  let mcpToolsNote: string | undefined;
+  if (activeMcpConnectors.length > 0) {
+    mcpToolsNote = `<herramientas_mcp>\nTienes herramientas conectadas (nombradas mcp_...) a los sistemas propios de este negocio: ${activeMcpConnectors
+      .map((c) => c.name ?? c.provider)
+      .join(
+        ", ",
+      )}. Tus herramientas internas (captureLead, crear ticket, agendar cita) SOLO guardan la información dentro de Nodia Agents — NO la registran automáticamente en esos sistemas externos salvo que además llames la herramienta MCP correspondiente. Cuando lo que estás haciendo tenga sentido en uno de esos sistemas (ej. registrar un lead o un cliente en un CRM, abrir un ticket en una plataforma de soporte), usa la herramienta MCP que más se parezca a esa acción, ADEMÁS de tu herramienta interna — nunca asumas que una ya cubre a la otra.\n</herramientas_mcp>`;
+  }
+  const nichoPlaybook = [nichoPlaybookBase, mcpNote, mcpToolsNote].filter(Boolean).join("\n\n") || undefined;
 
   // Flywheel lessons (JSON array). Only injected into the GENERATED prompt —
   // a manual override replaces the whole prompt, lessons included.

@@ -98,8 +98,6 @@ export class RealtimeCallBridge {
   /** Última vez que hubo actividad conversacional real (el cliente habló, o el bot terminó de hablar) — la base de "silencio largo". Los bytes de audio crudo de Twilio NO cuentan: llegan sin parar aunque el cliente esté callado. */
   private lastActivityAt = Date.now();
   private silenceNudgedAt: number | null = null;
-  /** Se incrementa en cada speech_started (el cliente pide la palabra) — invalida trabajo asíncrono en vuelo de turnos anteriores (ver requestResponse() al terminar una tool call: si el epoch ya cambió, no contesta algo que el cliente ya dejó atrás). */
-  private turnEpoch = 0;
   /** Tools todavía ejecutándose para el turno actual — solo se pide response.create cuando llega a 0 (una vez, no una por tool). */
   private pendingToolCalls = 0;
   /** instructions completas (Agent Core + <modo_voz>) — se reutilizan tal cual para el sondeo de silencio largo, así esa única respuesta también respeta idioma/personalidad/negocio en vez de inventar un texto aparte. */
@@ -268,7 +266,6 @@ export class RealtimeCallBridge {
    * status "cancelled") es solo para la métrica interruption_latency.
    */
   private handleSpeechStarted(): void {
-    this.turnEpoch++;
     this.lastActivityAt = Date.now();
     this.silenceNudgedAt = null;
     logVoiceEvent("user_turn_started", { botId: this.deps.botId, callSid: maskId(this.deps.callSid) });
@@ -472,15 +469,33 @@ export class RealtimeCallBridge {
     this.client?.requestResponse(instructions);
   }
 
-  /** Entrega el resultado de una tool y, si ya no queda ninguna pendiente de ESTE turno, pide la respuesta que lo retoma — UNA sola vez, sin importar cuántas tools haya habido. */
-  private finishToolCall(callId: string, output: unknown, epochAtCallStart: number): void {
+  /**
+   * Entrega el resultado de una tool y, si ya no queda ninguna pendiente de
+   * ESTE turno, pide la respuesta que lo retoma — UNA sola vez, sin importar
+   * cuántas tools haya habido.
+   *
+   * Bug real de producción: esto usaba `turnEpoch` (sube con CUALQUIER
+   * speech_started, incluido ruido de línea/respiración/estática — no solo
+   * interrupciones reales) para decidir si abstenerse. En una llamada real,
+   * ruido ambiental durante una tool "guardando tu cita" bastaba para que
+   * ESTE código decidiera, a propósito, no pedir la confirmación — y como
+   * nada más la pedía tampoco, el cliente se quedaba en silencio indefinido
+   * hasta que él mismo volvía a hablar; recién ahí el modelo mencionaba la
+   * cita ya agendada, mezclado con lo que el cliente acababa de decir (la
+   * sensación de "se encimaron dos respuestas"). `metrics.interruptionCount`
+   * es la señal correcta: SOLO sube cuando `handleSpeechStarted()` de verdad
+   * interrumpió una respuesta activa/pedida (ver ese método) — el mismo
+   * escenario que este guard quiere respetar, sin el falso positivo del ruido.
+   */
+  private finishToolCall(callId: string, output: unknown, interruptionCountAtCallStart: number): void {
     this.client?.submitFunctionCallOutput(callId, output);
     this.pendingToolCalls = Math.max(0, this.pendingToolCalls - 1);
-    // Si el cliente ya interrumpió (nueva utterance) desde que esta tool
-    // arrancó, no se pide una respuesta por nuestra cuenta: el propio
-    // turn-detection ya va a generar la respuesta correcta para lo que el
-    // cliente dijo después — evita "contestar tarde" algo que ya quedó atrás.
-    if (this.pendingToolCalls === 0 && epochAtCallStart === this.turnEpoch) {
+    // Si hubo una interrupción REAL (una respuesta activa que sí se cortó)
+    // desde que esta tool arrancó, no se pide una respuesta por nuestra
+    // cuenta: el propio turn-detection ya va a generar la respuesta correcta
+    // para lo que el cliente dijo después — evita "contestar tarde" algo que
+    // ya quedó atrás.
+    if (this.pendingToolCalls === 0 && interruptionCountAtCallStart === this.metrics.interruptionCount) {
       this.requestResponse();
     }
   }
@@ -503,13 +518,13 @@ export class RealtimeCallBridge {
    * Ninguno de los tres toca la tool en sí.
    */
   private async handleFunctionCall(call: { callId: string; name: string; argumentsJson: string }): Promise<void> {
-    const epochAtCallStart = this.turnEpoch;
+    const interruptionCountAtCallStart = this.metrics.interruptionCount;
     this.pendingToolCalls++;
     logVoiceEvent("realtime_tool_call", { botId: this.deps.botId, callSid: maskId(this.deps.callSid), tool: call.name });
     const toolDef = this.tools[call.name];
     if (!toolDef?.execute) {
       logVoiceEvent("realtime_tool_missing", { botId: this.deps.botId, tool: call.name });
-      this.finishToolCall(call.callId, { error: "tool_not_available" }, epochAtCallStart);
+      this.finishToolCall(call.callId, { error: "tool_not_available" }, interruptionCountAtCallStart);
       return;
     }
 
@@ -519,7 +534,7 @@ export class RealtimeCallBridge {
     } catch (e) {
       console.error(`[voice-realtime] JSON de argumentos inválido para "${call.name}":`, e);
       logVoiceEvent("realtime_tool_invalid_args", { botId: this.deps.botId, tool: call.name });
-      this.finishToolCall(call.callId, { error: "invalid_arguments" }, epochAtCallStart);
+      this.finishToolCall(call.callId, { error: "invalid_arguments" }, interruptionCountAtCallStart);
       return;
     }
 
@@ -529,7 +544,7 @@ export class RealtimeCallBridge {
       const parsed = toolDef.inputSchema.safeParse(rawArgs);
       if (!parsed.success) {
         logVoiceEvent("realtime_tool_invalid_args", { botId: this.deps.botId, tool: call.name });
-        this.finishToolCall(call.callId, { error: "invalid_arguments" }, epochAtCallStart);
+        this.finishToolCall(call.callId, { error: "invalid_arguments" }, interruptionCountAtCallStart);
         return;
       }
       args = parsed.data;
@@ -563,7 +578,7 @@ export class RealtimeCallBridge {
         void this.sessionsRepo().setTransferStatus(this.callRowId, "requested");
         void recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.transferred", { phase: "requested", destination });
       }
-      this.finishToolCall(call.callId, result, epochAtCallStart);
+      this.finishToolCall(call.callId, result, interruptionCountAtCallStart);
     } catch (e) {
       const timedOut = e instanceof Error && e.message === "tool_timeout";
       logVoiceEvent(timedOut ? "realtime_tool_timeout" : "realtime_tool_failed", {
@@ -573,7 +588,7 @@ export class RealtimeCallBridge {
       if (!timedOut) console.error(`[voice-realtime] tool "${call.name}" falló:`, e);
       // Nunca el mensaje/stack real: solo un motivo corto que <modo_voz> ya
       // sabe cómo manejar sin exponerlo al cliente.
-      this.finishToolCall(call.callId, { error: timedOut ? "timeout" : "tool_execution_failed" }, epochAtCallStart);
+      this.finishToolCall(call.callId, { error: timedOut ? "timeout" : "tool_execution_failed" }, interruptionCountAtCallStart);
     }
   }
 

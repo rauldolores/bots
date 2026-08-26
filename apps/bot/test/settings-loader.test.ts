@@ -273,3 +273,38 @@ describe("resolveAgentConfig — catálogo vía MCP", () => {
     expect(cfg.systemPrompt).not.toContain("<catalogo_mcp>");
   });
 });
+
+describe("resolveAgentConfig — <herramientas_mcp> (bug real: captureLead/handoffHuman solo empujan a hubspot/pipedrive/zendesk/jira, un MCP genérico queda invisible sin este aviso)", () => {
+  it("con CUALQUIER MCP conectado (sin importar catalogSource): avisa que las tools internas no lo registran solas ahí", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "mi-crm",
+      name: "Mi CRM",
+      config: { url: "https://mcp.example.com/crm" },
+    });
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).toContain("<herramientas_mcp>");
+    expect(cfg.systemPrompt).toContain("Mi CRM");
+    expect(cfg.systemPrompt).toContain("captureLead");
+  });
+
+  it("sin ningún MCP conectado: no aparece la nota", async () => {
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).not.toContain("<herramientas_mcp>");
+  });
+
+  it("convive con <catalogo_mcp> cuando ambas aplican (mismo o distinto conector)", async () => {
+    await new BotsRepo(db).mergeConfig(TEST_BOT_ID, { catalogSource: "mcp" });
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "mcp-ventas2",
+      name: "Sistema de ventas",
+      config: { url: "https://mcp.example.com/ventas2" },
+    });
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).toContain("<catalogo_mcp>");
+    expect(cfg.systemPrompt).toContain("<herramientas_mcp>");
+  });
+});

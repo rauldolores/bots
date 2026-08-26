@@ -306,4 +306,63 @@ describe("Voice — interrupciones y conversación humana (F7 fase 6)", () => {
     const responseCreates = fakeRealtime.messagesFrom(ws).filter((m) => m.type === "response.create");
     expect(responseCreates.length - baselineResponseCreates).toBe(0);
   });
+
+  it("bug real: ruido de línea DURANTE una tool (sin ninguna respuesta activa que interrumpir) ya NO deja la confirmación en silencio para siempre", async () => {
+    // Reproduce el bug reportado: el bot terminó de hablar (sin respuesta
+    // activa), la tool sigue ejecutándose, y algo dispara speech_started sin
+    // que haya nada que interrumpir de verdad (ruido, respiración, estática
+    // de línea) — antes esto bastaba para que finishToolCall() se abstuviera
+    // de pedir la confirmación, y como nada más la pedía, el cliente se
+    // quedaba en silencio indefinido. Ahora el guard usa
+    // metrics.interruptionCount (solo sube en una interrupción REAL, ver
+    // handleSpeechStarted) en vez de un contador que sube con cualquier ruido.
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "lenta2",
+      name: "Lenta2",
+      config: { url: "https://mcp.lenta2.example.com/mcp" },
+    });
+    createMCPClientMock.mockResolvedValue({
+      tools: async () => ({
+        guardar: {
+          description: "Tarda un poco en contestar",
+          execute: vi.fn(() => new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 200))),
+        },
+      }),
+    });
+    const { bridge, ws } = await startBridge("+5215500000107");
+    await fakeRealtime.waitForMessageType(ws, "response.create");
+    const baselineResponseCreates = fakeRealtime.messagesFrom(ws).filter((m) => m.type === "response.create").length;
+
+    // Simula que el saludo inicial (el response.create de arriba) ya se
+    // completó — sin esto responseRequested seguiría en true y el escenario
+    // que este test quiere probar ("el bot ya terminó de hablar, sin
+    // respuesta activa ni pedida, cuando llega el ruido") nunca se da.
+    fakeRealtime.send(ws, { type: "response.created", response: { id: "greeting" } });
+    fakeRealtime.send(ws, { type: "response.done", response: { id: "greeting", status: "completed" } });
+    await waitUntil(() => (bridge as any).responseActive === false && (bridge as any).responseRequested === false);
+
+    // El bot YA terminó de hablar ("voy a guardar tu cita") — sin respuesta
+    // activa ni pedida — antes de que la tool termine.
+    expect((bridge as any).responseActive).toBe(false);
+    expect((bridge as any).responseRequested).toBe(false);
+
+    const pending = (bridge as any).handleFunctionCall({
+      callId: "call_noise",
+      name: "mcp_lenta2_guardar",
+      argumentsJson: "{}",
+    });
+
+    // Ruido/estática mientras la tool sigue en vuelo — NO hay respuesta activa
+    // que cortar, así que handleSpeechStarted no cuenta esto como interrupción.
+    fakeRealtime.send(ws, { type: "input_audio_buffer.speech_started" });
+    await pending;
+    expect((bridge as any).metrics.interruptionCount).toBe(0);
+
+    // La confirmación SÍ se pide — ya no se queda en silencio para siempre.
+    await waitUntil(
+      () => fakeRealtime.messagesFrom(ws).filter((m) => m.type === "response.create").length - baselineResponseCreates === 1,
+    );
+  });
 });
