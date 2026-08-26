@@ -13,6 +13,15 @@ import { createSecret } from "../db/vault";
 import { McpOAuthState, snapshotToConnectorConfig, mcpOAuthRedirectUrl, type McpOAuthSnapshot } from "../connectors/mcpOAuth";
 
 export interface McpOAuthStateData {
+  /**
+   * `/conexiones/connectors/mcp/oauth/callback` termina en `/oauth/callback`
+   * — el mismo sufijo que exime de auth a la ruta de Google Calendar/Jira
+   * (AUTH_EXEMPT_SUFFIXES en routes.ts), así que también corre SIN el
+   * middleware de tenant y `c.get("botId")` ahí es undefined. Por eso viaja
+   * aquí, tomado en /start (donde el request SÍ pasó por ese middleware) —
+   * igual que ya hace botId en OAuthStateData de oauthConnect.ts.
+   */
+  botId: string;
   mcpName: string;
   snapshot: McpOAuthSnapshot;
 }
@@ -28,7 +37,13 @@ export type StartMcpOAuthResult = { url: string; state: McpOAuthStateData } | { 
  * del servidor y pega aquí el client_id que le dieron, saltando el registro
  * automático (ver McpOAuthState.fresh en connectors/mcpOAuth.ts).
  */
-export async function startMcpOAuth(env: Env, name: string, url: string, fixedClientId?: string): Promise<StartMcpOAuthResult> {
+export async function startMcpOAuth(
+  env: Env,
+  botId: string,
+  name: string,
+  url: string,
+  fixedClientId?: string,
+): Promise<StartMcpOAuthResult> {
   const trimmedName = name.trim();
   if (!trimmedName) return { error: "Falta el nombre." };
   let parsed: URL;
@@ -51,7 +66,7 @@ export async function startMcpOAuth(env: Env, name: string, url: string, fixedCl
     return { error: `No se pudo iniciar OAuth: ${(e as Error)?.message ?? String(e)}` };
   }
 
-  return { url: provider.snapshot.authorizationUrl, state: { mcpName: trimmedName, snapshot: provider.snapshot } };
+  return { url: provider.snapshot.authorizationUrl, state: { botId, mcpName: trimmedName, snapshot: provider.snapshot } };
 }
 
 export interface McpOAuthCallbackQuery {
@@ -63,7 +78,6 @@ export interface McpOAuthCallbackQuery {
 /** Valida el callback, canjea el código (vía @ai-sdk/mcp) y guarda el conector. Nunca lanza — siempre devuelve a dónde redirigir. */
 export async function handleMcpOAuthCallback(
   env: Env,
-  botId: string,
   query: McpOAuthCallbackQuery,
   cookieStateRaw: string | undefined,
 ): Promise<{ redirectTo: string }> {
@@ -97,9 +111,9 @@ export async function handleMcpOAuthCallback(
   }
 
   const db = new Db(env.DB);
-  const secretRef = await createSecret(db, JSON.stringify(provider.snapshot.tokens), `mcp-oauth:${botId}:${stored.mcpName}`);
+  const secretRef = await createSecret(db, JSON.stringify(provider.snapshot.tokens), `mcp-oauth:${stored.botId}:${stored.mcpName}`);
   await new BotConnectorsRepo(db).upsert({
-    botId,
+    botId: stored.botId,
     category: "mcp",
     provider: `mcp-${crypto.randomUUID()}`,
     name: stored.mcpName,

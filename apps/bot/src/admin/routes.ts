@@ -1208,7 +1208,7 @@ adminApp.get("/conexiones/connectors/mcp/oauth/start", async (c) => {
   const name = c.req.query("name") ?? "";
   const url = c.req.query("url") ?? "";
   const clientId = c.req.query("client_id") ?? "";
-  const result = await startMcpOAuth(c.env, name, url, clientId);
+  const result = await startMcpOAuth(c.env, c.get("botId"), name, url, clientId);
   if ("error" in result) return c.redirect(`/admin/conexiones?cat=mcp&err=${encodeURIComponent(result.error)}`, 302);
   setCookie(c, MCP_OAUTH_STATE_COOKIE, JSON.stringify(result.state), {
     httpOnly: true,
@@ -1219,11 +1219,14 @@ adminApp.get("/conexiones/connectors/mcp/oauth/start", async (c) => {
   return c.redirect(result.url, 302);
 });
 
+// Termina en "/oauth/callback" — cae en AUTH_EXEMPT_SUFFIXES (pensado para
+// /conexiones/oauth/:provider/callback de arriba) y por eso corre SIN el
+// middleware de tenant: c.get("botId") es undefined aquí. El botId real
+// viaja en la cookie de state (guardado en /start) — ver mcpOAuthConnect.ts.
 adminApp.get("/conexiones/connectors/mcp/oauth/callback", async (c) => {
   const cookieRaw = getCookie(c, MCP_OAUTH_STATE_COOKIE);
   const { redirectTo } = await handleMcpOAuthCallback(
     c.env,
-    c.get("botId"),
     { code: c.req.query("code"), state: c.req.query("state"), error: c.req.query("error") },
     cookieRaw,
   );

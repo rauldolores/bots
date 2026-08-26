@@ -34,32 +34,33 @@ beforeEach(async () => {
 
 describe("startMcpOAuth", () => {
   it("nombre vacío: error, nunca llama a auth()", async () => {
-    const result = await startMcpOAuth(env, "  ", "https://mcp.example.com");
+    const result = await startMcpOAuth(env, TEST_BOT_ID, "  ", "https://mcp.example.com");
     expect("error" in result).toBe(true);
     expect(mcpAuthMock).not.toHaveBeenCalled();
   });
 
   it("URL inválida: error", async () => {
-    const result = await startMcpOAuth(env, "Mi CRM", "no-es-una-url");
+    const result = await startMcpOAuth(env, TEST_BOT_ID, "Mi CRM", "no-es-una-url");
     expect("error" in result).toBe(true);
   });
 
   it("URL con protocolo no http(s): error", async () => {
-    const result = await startMcpOAuth(env, "Mi CRM", "ftp://mcp.example.com");
+    const result = await startMcpOAuth(env, TEST_BOT_ID, "Mi CRM", "ftp://mcp.example.com");
     expect("error" in result).toBe(true);
   });
 
-  it("auth() devuelve REDIRECT: arma la URL de autorización y el state para la cookie", async () => {
+  it("auth() devuelve REDIRECT: arma la URL de autorización y el state para la cookie — incluido el botId del request actual", async () => {
     mcpAuthMock.mockImplementation(async (provider: any) => {
       provider.saveClientInformation({ client_id: "dcr-abc" });
       provider.saveCodeVerifier("verifier-xyz");
       provider.redirectToAuthorization(new URL("https://mcp.example.com/authorize?client_id=dcr-abc"));
       return "REDIRECT";
     });
-    const result = await startMcpOAuth(env, "Mi CRM", "https://mcp.example.com");
+    const result = await startMcpOAuth(env, TEST_BOT_ID, "Mi CRM", "https://mcp.example.com");
     expect("url" in result).toBe(true);
     if ("url" in result) {
       expect(result.url).toBe("https://mcp.example.com/authorize?client_id=dcr-abc");
+      expect(result.state.botId).toBe(TEST_BOT_ID);
       expect(result.state.mcpName).toBe("Mi CRM");
       expect(result.state.snapshot.codeVerifier).toBe("verifier-xyz");
       expect(result.state.snapshot.clientInformation).toEqual({ client_id: "dcr-abc" });
@@ -74,7 +75,7 @@ describe("startMcpOAuth", () => {
       provider.redirectToAuthorization(new URL("https://crm.kontrolia.io/api/mcp/authorize?client_id=nodia-fijo"));
       return "REDIRECT";
     });
-    const result = await startMcpOAuth(env, "Vinqulia", "https://crm.kontrolia.io/api/mcp", "nodia-fijo");
+    const result = await startMcpOAuth(env, TEST_BOT_ID, "Vinqulia", "https://crm.kontrolia.io/api/mcp", "nodia-fijo");
     expect(clientInformationSeenByAuth).toEqual({ client_id: "nodia-fijo" });
     expect("url" in result).toBe(true);
     if ("url" in result) expect(result.state.snapshot.clientInformation).toEqual({ client_id: "nodia-fijo" });
@@ -82,34 +83,42 @@ describe("startMcpOAuth", () => {
 
   it("auth() devuelve AUTHORIZED sin redirect (no debería pasar al arrancar): error defensivo", async () => {
     mcpAuthMock.mockResolvedValue("AUTHORIZED");
-    const result = await startMcpOAuth(env, "Mi CRM", "https://mcp.example.com");
+    const result = await startMcpOAuth(env, TEST_BOT_ID, "Mi CRM", "https://mcp.example.com");
     expect("error" in result).toBe(true);
   });
 
   it("auth() lanza (servidor sin soporte OAuth / caído): error explicativo, no truena", async () => {
     mcpAuthMock.mockRejectedValue(new Error("No se encontró metadata de OAuth"));
-    const result = await startMcpOAuth(env, "Mi CRM", "https://mcp.example.com");
+    const result = await startMcpOAuth(env, TEST_BOT_ID, "Mi CRM", "https://mcp.example.com");
     expect("error" in result).toBe(true);
     if ("error" in result) expect(result.error).toContain("No se encontró metadata de OAuth");
   });
 });
 
 describe("handleMcpOAuthCallback", () => {
+  // Regresión: /callback termina en "/oauth/callback" y por eso corre exento
+  // del middleware de tenant (mismo sufijo que /conexiones/oauth/:provider/
+  // callback) — c.get("botId") es undefined ahí. handleMcpOAuthCallback ya
+  // NO recibe botId como parámetro: tiene que sacarlo de `stored.botId`
+  // (guardado en /start, donde el tenant sí estaba resuelto). Por eso estos
+  // tests nunca pasan TEST_BOT_ID a handleMcpOAuthCallback — solo dentro de
+  // fakeStartState(), simulando la cookie.
   function fakeStartState(mcpUrl = "https://mcp.example.com") {
     return {
+      botId: TEST_BOT_ID,
       mcpName: "Mi CRM",
       snapshot: { mcpUrl, redirectUrl: "https://bot.test/admin/conexiones/connectors/mcp/oauth/callback", codeVerifier: "v", sdkState: "s" },
     };
   }
 
-  it("con code y cookie válidos, canjea vía auth() y guarda el conector con authMode:oauth", async () => {
+  it("con code y cookie válidos, canjea vía auth() y guarda el conector con authMode:oauth — usando el botId de la cookie, no del contexto", async () => {
     mcpAuthMock.mockImplementation(async (provider: any) => {
       provider.saveTokens({ access_token: "at", token_type: "Bearer", refresh_token: "rt" });
       return "AUTHORIZED";
     });
     const cookieRaw = JSON.stringify(fakeStartState());
 
-    const { redirectTo } = await handleMcpOAuthCallback(env, TEST_BOT_ID, { code: "the-code", state: "s" }, cookieRaw);
+    const { redirectTo } = await handleMcpOAuthCallback(env, { code: "the-code", state: "s" }, cookieRaw);
     expect(redirectTo).toBe("/admin/conexiones?cat=mcp&ok=1");
 
     const rows = await new BotConnectorsRepo(db).listByBot(TEST_BOT_ID);
@@ -121,34 +130,34 @@ describe("handleMcpOAuthCallback", () => {
   });
 
   it("?error= (el dueño canceló en el proveedor): no intenta canjear nada", async () => {
-    const { redirectTo } = await handleMcpOAuthCallback(env, TEST_BOT_ID, { error: "access_denied" }, JSON.stringify(fakeStartState()));
+    const { redirectTo } = await handleMcpOAuthCallback(env, { error: "access_denied" }, JSON.stringify(fakeStartState()));
     expect(redirectTo).toContain("err=");
     expect(mcpAuthMock).not.toHaveBeenCalled();
   });
 
   it("sin code o sin cookie: rechaza sin canjear", async () => {
-    const r1 = await handleMcpOAuthCallback(env, TEST_BOT_ID, { state: "s" }, JSON.stringify(fakeStartState()));
+    const r1 = await handleMcpOAuthCallback(env, { state: "s" }, JSON.stringify(fakeStartState()));
     expect(r1.redirectTo).toContain("err=");
-    const r2 = await handleMcpOAuthCallback(env, TEST_BOT_ID, { code: "c", state: "s" }, undefined);
+    const r2 = await handleMcpOAuthCallback(env, { code: "c", state: "s" }, undefined);
     expect(r2.redirectTo).toContain("err=");
     expect(mcpAuthMock).not.toHaveBeenCalled();
   });
 
   it("cookie corrupta (JSON inválido): rechaza limpio", async () => {
-    const { redirectTo } = await handleMcpOAuthCallback(env, TEST_BOT_ID, { code: "c", state: "s" }, "{esto no es json");
+    const { redirectTo } = await handleMcpOAuthCallback(env, { code: "c", state: "s" }, "{esto no es json");
     expect(redirectTo).toContain("err=");
   });
 
   it("auth() lanza en el canje (state no coincide, código inválido, etc.): rechaza y nunca crea el conector", async () => {
     mcpAuthMock.mockRejectedValue(new Error("state parameter mismatch"));
-    const { redirectTo } = await handleMcpOAuthCallback(env, TEST_BOT_ID, { code: "the-code", state: "otro" }, JSON.stringify(fakeStartState()));
+    const { redirectTo } = await handleMcpOAuthCallback(env, { code: "the-code", state: "otro" }, JSON.stringify(fakeStartState()));
     expect(redirectTo).toContain(encodeURIComponent("state parameter mismatch"));
     expect(await new BotConnectorsRepo(db).listByBot(TEST_BOT_ID)).toHaveLength(0);
   });
 
   it("auth() devuelve REDIRECT en el callback (no debería pasar): trata como fallo, no guarda a medias", async () => {
     mcpAuthMock.mockResolvedValue("REDIRECT");
-    const { redirectTo } = await handleMcpOAuthCallback(env, TEST_BOT_ID, { code: "the-code", state: "s" }, JSON.stringify(fakeStartState()));
+    const { redirectTo } = await handleMcpOAuthCallback(env, { code: "the-code", state: "s" }, JSON.stringify(fakeStartState()));
     expect(redirectTo).toContain("err=");
     expect(await new BotConnectorsRepo(db).listByBot(TEST_BOT_ID)).toHaveLength(0);
   });
