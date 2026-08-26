@@ -68,6 +68,11 @@ export const SETTING_KEYS = {
   // texto fijo que el dueño controla; placeholders {{negocio}} y {{nombre}}
   // — ver channels/voice/voiceGreeting.ts. Vacío = DEFAULT_VOICE_GREETING_TEMPLATE.
   voiceGreeting: "voice_greeting",
+  // Modo operativo del agente (agentModes.ts) — guarda el SLUG del catálogo
+  // (ej. "vendedor", "soporte_tecnico"), nunca texto libre. Vacío = sin modo
+  // elegido, <modo_operativo> se omite del prompt. Se inyecta a TODOS los
+  // canales (system-prompt.ts es compartido) — voz incluida, vía ctx.basePrompt.
+  agentMode: "agent_mode",
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

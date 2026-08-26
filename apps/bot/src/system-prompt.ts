@@ -23,6 +23,10 @@ export interface SystemPromptInput {
   /** Moneda en la que cobra el negocio (ej. "MXN") — sin esto el modelo
    *  puede asumir dólares por default. Ver <contexto_regional>. */
   currency?: string;
+  /** Modo operativo del agente (ver agentModes.ts) — de qué TRABAJO hace el
+   *  agente (vendedor, soporte, recepcionista...), independiente del giro
+   *  del negocio. undefined = sin modo elegido, se omite <modo_operativo>. */
+  operatingMode?: { rol: string; estilo: string; objetivo: string; iniciativa: string; escalamiento: string };
 }
 
 const TEMPLATE = `<output_language>
@@ -49,6 +53,8 @@ Eres {{BOT_NAME}}, el asistente de {{BUSINESS_NAME}}. Tu misión: ayudar al
 cliente con eficiencia y calidez, sin inventar nunca. Conoces este negocio.
 Si una pregunta no tiene respuesta en lo que sabes, escalas a un humano.
 </role>
+
+{{MODO_OPERATIVO}}
 
 <fecha_actual>
 Hoy es {{FECHA_HOY}}. Úsala para calcular cualquier fecha relativa que
@@ -170,6 +176,26 @@ estadounidenses por default.
 </contexto_regional>`
       : "";
 
+  // Modo operativo (agentModes.ts): de qué TRABAJO hace el agente, no de qué
+  // negocio es — el mismo formato que ya usa el dueño para definirlo a mano
+  // (Agente/Rol/Estilo/Objetivo/Nivel de iniciativa/Escalamiento). Sin modo
+  // elegido se omite el bloque completo, igual que contexto_regional/lecciones.
+  const om = input.operatingMode;
+  const modoOperativo = om
+    ? `<modo_operativo>
+Agente: {{BOT_NAME}}
+Rol: ${om.rol}
+Estilo: ${om.estilo}
+Objetivo: ${om.objetivo}
+Nivel de iniciativa: ${om.iniciativa}
+Escalamiento: ${om.escalamiento}
+
+Actúa de forma consistente con este modo operativo durante TODA la
+conversación — es tu marco de referencia para decidir qué tan proactivo ser,
+cuándo tomar la iniciativa, y a quién/cuándo escalar.
+</modo_operativo>`
+    : "";
+
   // Sin esto el modelo no tiene forma de saber qué día es "hoy" y adivina —
   // vimos un caso real donde agendó una cita para "mañana" usando 2023 (año
   // de su entrenamiento) en vez del año real, y la cita quedó invisible en
@@ -182,6 +208,7 @@ estadounidenses por default.
 
   return TEMPLATE
     .replaceAll("{{LANGUAGE}}", input.language)
+    .replaceAll("{{MODO_OPERATIVO}}", modoOperativo)
     .replaceAll("{{BOT_NAME}}", input.botName)
     .replaceAll("{{BUSINESS_NAME}}", input.businessName)
     .replaceAll("{{BUSINESS_CONTEXT}}", input.businessContext)
@@ -203,6 +230,7 @@ export interface SystemPromptOverrides {
   timezone?: string;
   country?: string;
   currency?: string;
+  operatingMode?: { rol: string; estilo: string; objetivo: string; iniciativa: string; escalamiento: string };
 }
 
 /** F3 de docs/multitenancy.md: identidad ya no es env, es la fila del bot. */
@@ -232,5 +260,6 @@ export function systemPromptFromEnv(
     timezone: overrides?.timezone,
     country: overrides?.country,
     currency: overrides?.currency,
+    operatingMode: overrides?.operatingMode,
   });
 }

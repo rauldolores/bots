@@ -10,6 +10,7 @@ import { CURATED_MODELS } from "../../llm/provider";
 import { TIMEZONE_OPTIONS, resolveTimezone } from "../../datetime";
 import { resolveKeySource } from "../../channels/voice/openaiKey";
 import { DEFAULT_VOICE_GREETING_TEMPLATE } from "../../channels/voice/voiceGreeting";
+import { AGENT_MODES } from "../../agentModes";
 import {
   CONTROL_LIST,
   valueToLevel,
@@ -377,6 +378,24 @@ export function renderConfig(
                     (o) => `<option value="${o.value}" ${bot.language === o.value ? "selected" : ""}>${esc(o.label)}</option>`,
                   ).join("")}
                 </select>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <label class="font-display font-semibold text-[12.5px] text-cream">Modo operativo</label>
+                <p class="text-dim text-[11px]">De qué TRABAJO se encarga tu agente — independiente de tu giro de negocio. Define su rol, estilo, objetivo, qué tan proactivo es y a quién escala; se aplica en llamadas y en cualquier otro canal por igual.</p>
+                <select name="${SETTING_KEYS.agentMode}" style="${SELECT_STYLE}">
+                  <option value="" ${!settings[SETTING_KEYS.agentMode] ? "selected" : ""}>Ninguno (genérico)</option>
+                  ${Object.entries(AGENT_MODES)
+                    .map(
+                      ([slug, m]) =>
+                        `<option value="${slug}" ${settings[SETTING_KEYS.agentMode] === slug ? "selected" : ""}>${esc(m.label)}</option>`,
+                    )
+                    .join("")}
+                </select>
+                ${
+                  settings[SETTING_KEYS.agentMode] && AGENT_MODES[settings[SETTING_KEYS.agentMode]]
+                    ? `<p class="text-dim text-[11px]" style="font-style:italic">${esc(AGENT_MODES[settings[SETTING_KEYS.agentMode]].description)}</p>`
+                    : ""
+                }
               </div>
               ${personalidadCards}
             </div>

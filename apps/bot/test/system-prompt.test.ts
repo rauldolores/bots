@@ -94,6 +94,25 @@ describe("renderSystemPrompt", () => {
     const prompt = renderSystemPrompt(input);
     expect(prompt).not.toContain("<contexto_regional>");
   });
+
+  it("con modo operativo, agrega <modo_operativo> con los 5 campos y el nombre del bot", () => {
+    const prompt = renderSystemPrompt({
+      ...input,
+      operatingMode: { rol: "Vendedor", estilo: "Consultivo", objetivo: "Generar demostraciones", iniciativa: "Alto", escalamiento: "Ejecutivo humano" },
+    });
+    expect(prompt).toContain("<modo_operativo>");
+    expect(prompt).toContain("Agente: Asistente"); // input.botName
+    expect(prompt).toContain("Rol: Vendedor");
+    expect(prompt).toContain("Estilo: Consultivo");
+    expect(prompt).toContain("Objetivo: Generar demostraciones");
+    expect(prompt).toContain("Nivel de iniciativa: Alto");
+    expect(prompt).toContain("Escalamiento: Ejecutivo humano");
+  });
+
+  it("sin modo operativo, omite el bloque completo", () => {
+    const prompt = renderSystemPrompt(input);
+    expect(prompt).not.toContain("<modo_operativo>");
+  });
 });
 
 describe("systemPromptFromEnv", () => {

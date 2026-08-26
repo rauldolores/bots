@@ -204,6 +204,27 @@ describe("resolveAgentConfig — voice_greeting", () => {
   });
 });
 
+describe("resolveAgentConfig — agent_mode (modo operativo, agentModes.ts)", () => {
+  it("sin setting: el prompt final no trae <modo_operativo>", async () => {
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).not.toContain("<modo_operativo>");
+  });
+
+  it("con un slug válido del catálogo: el prompt final trae el perfil completo del modo", async () => {
+    await repo.set(SETTING_KEYS.agentMode, "vendedor");
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).toContain("<modo_operativo>");
+    expect(cfg.systemPrompt).toContain("Rol: Vendedor");
+    expect(cfg.systemPrompt).toContain("Escalamiento: Ejecutivo humano");
+  });
+
+  it("slug inválido/de un catálogo viejo: se ignora, nunca un <modo_operativo> a medias", async () => {
+    await repo.set(SETTING_KEYS.agentMode, "modo-que-ya-no-existe");
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).not.toContain("<modo_operativo>");
+  });
+});
+
 describe("resolveAgentConfig — país/moneda (<contexto_regional>)", () => {
   it("con ambos capturados, aparecen en el prompt", async () => {
     await new BotsRepo(db).mergeConfig(TEST_BOT_ID, { country: "México", currency: "MXN" });

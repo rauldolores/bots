@@ -90,16 +90,25 @@ describe("POST /admin/config — negocio (giro, idioma, país, moneda, campos di
     expect(bot?.config.catalogSource).toBe("manual");
   });
 
-  it("guarda sales_playbook, voice_name y voice_greeting como settings de texto plano", async () => {
+  it("guarda sales_playbook, voice_name, voice_greeting y agent_mode como settings de texto plano", async () => {
     await postConfig({
       [SETTING_KEYS.salesPlaybook]: "Ofrece siempre agendar al final.",
       [SETTING_KEYS.voiceName]: "shimmer",
       [SETTING_KEYS.voiceGreeting]: "Hola, {{negocio}} al habla{{nombre}}.",
+      [SETTING_KEYS.agentMode]: "soporte_tecnico",
     });
     const settings = await new SettingsRepo(db, TEST_BOT_ID).all();
     expect(settings[SETTING_KEYS.salesPlaybook]).toBe("Ofrece siempre agendar al final.");
     expect(settings[SETTING_KEYS.voiceName]).toBe("shimmer");
     expect(settings[SETTING_KEYS.voiceGreeting]).toBe("Hola, {{negocio}} al habla{{nombre}}.");
+    expect(settings[SETTING_KEYS.agentMode]).toBe("soporte_tecnico");
+  });
+
+  it("GET /config renderiza el <select> de modo operativo con la opción guardada seleccionada", async () => {
+    await new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.agentMode, "recepcionista");
+    const res = await adminApp.request("/config", { headers: AUTH }, env);
+    const html = await res.text();
+    expect(html).toContain(`<option value="recepcionista" selected>`);
   });
 
   it("GET /config renderiza el giro, los campos dinámicos y el catálogo ya guardados", async () => {

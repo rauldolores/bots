@@ -1288,6 +1288,7 @@ adminApp.post("/config", async (c) => {
     SETTING_KEYS.salesPlaybook,
     SETTING_KEYS.voiceName,
     SETTING_KEYS.voiceGreeting,
+    SETTING_KEYS.agentMode,
   ];
   for (const key of textKeys) {
     const raw = form.get(key);

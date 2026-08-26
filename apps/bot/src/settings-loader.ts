@@ -8,6 +8,7 @@ import { systemPromptFromEnv } from "./system-prompt";
 import { renderBusinessContext } from "./businessContext";
 import { getBufferMs } from "./config";
 import { getNiche } from "./niches";
+import { AGENT_MODES, isAgentModeSlug } from "./agentModes";
 import type { LlmOverrides } from "./llm/provider";
 import { resolveTimezone } from "./datetime";
 
@@ -146,6 +147,10 @@ export async function resolveAgentConfig(
   const voiceGreeting = get(SETTING_KEYS.voiceGreeting);
   const country = botConfig.country?.trim() || undefined;
   const currency = botConfig.currency?.trim() || undefined;
+  // Slug inválido/de una versión vieja del catálogo (agentModes.ts pudo
+  // haber cambiado) → undefined, nunca un <modo_operativo> a medias.
+  const agentModeSlug = get(SETTING_KEYS.agentMode);
+  const operatingMode = isAgentModeSlug(agentModeSlug) ? AGENT_MODES[agentModeSlug] : undefined;
 
   // Instrucciones de venta/trato del dueño (nuevo, /admin/config →
   // Instrucciones avanzadas) ganan sobre el playbook del niche pack — no se
@@ -198,6 +203,7 @@ export async function resolveAgentConfig(
       timezone,
       country,
       currency,
+      operatingMode,
     });
 
   const bufferSecondsRaw = get(SETTING_KEYS.bufferSeconds);
