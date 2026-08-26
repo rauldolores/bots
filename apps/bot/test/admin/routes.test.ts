@@ -161,6 +161,31 @@ describe("admin routes — mutations", () => {
     expect(update!.params).toContain("lead-1");
   });
 
+  it("con un CRM conectado, rechaza el cambio de status — se administra desde allá", async () => {
+    const runLog: Array<{ sql: string; params: unknown[] }> = [];
+    const env = makeEnv(
+      makeStubDriver(
+        [
+          {
+            frag: "FROM bot_connectors",
+            first: { id: "conn-1", bot_id: TEST_BOT_ID, category: "crm", provider: "hubspot", name: null, secret_ref: "s", config: {}, enabled: true, created_at: 0 },
+          },
+        ],
+        runLog,
+      ),
+    );
+    const res = await adminApp.fetch(
+      req("/leads/lead-1/status", {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ status: "sold" }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(409);
+    expect(runLog.some((r) => r.sql.includes("UPDATE leads SET status"))).toBe(false);
+  });
+
   it("falls back to status 'new' for an invalid status", async () => {
     const runLog: Array<{ sql: string; params: unknown[] }> = [];
     const env = makeEnv(makeStubDriver([], runLog));

@@ -171,11 +171,10 @@ skillsApp.post("/skills/:slug", async (c) => {
 export async function processSkillJobs(env: Env, limit: number): Promise<{ done: number }> {
   const db = new Db(env.DB);
   const jobs = new WorkJobsRepo(db);
-  const claimed = await jobs.claimDue(limit);
+  const claimed = await jobs.claimDue(limit, "skill_run");
   let done = 0;
 
   for (const job of claimed) {
-    if (job.kind !== "skill_run") continue;
     const { runId, skillId, input, callbackUrl } = job.payload as {
       runId: string;
       skillId: string;

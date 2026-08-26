@@ -236,4 +236,4 @@ export function parseCampaignFilters(form: FormData): CampaignFilters {
   return filters;
 }
 
-export { WINDOW_MS, WINDOW_SAFE_MS };
+export { WINDOW_MS, WINDOW_SAFE_MS, WHATSAPP_WINDOW_CHANNELS };

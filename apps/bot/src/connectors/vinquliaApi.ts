@@ -36,8 +36,20 @@ export function vinquliaRecordUrl(site: string | null, resource: string, id: str
   return site ? `${site}/#/${resource}/${id}/show` : undefined;
 }
 
+/**
+ * Todo Vinqulia vive en el esquema `crm`, no en `public` (el que PostgREST
+ * usa si no se le indica otro). Sin Accept-Profile/Content-Profile, su
+ * puente /api/datos reenvía bien la petición pero PostgREST busca las
+ * tablas en el esquema equivocado y responde 404 (PGRST205,
+ * "Could not find the table 'public.<recurso>'").
+ */
 export function vinquliaHeaders(creds: ConnectorCreds, extra: Record<string, string> = {}): Record<string, string> {
-  return { Authorization: `Bearer ${creds.apiKey}`, ...extra };
+  return {
+    Authorization: `Bearer ${creds.apiKey}`,
+    "Accept-Profile": "crm",
+    "Content-Profile": "crm",
+    ...extra,
+  };
 }
 
 /** `sales_id` es el vendedor dueño del registro; el dueño lo configura una vez. Solo se manda si es un número. */

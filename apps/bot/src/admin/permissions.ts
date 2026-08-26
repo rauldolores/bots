@@ -41,6 +41,7 @@ export const NODIA_AGENTS_PERMISSIONS: PermissionCatalogEntry[] = [
   { resource: "conocimiento", action: "ver", description: "Ver base de conocimiento" },
   { resource: "conocimiento", action: "administrar", description: "Crear/editar/borrar/reindexar documentos" },
   { resource: "habilidades", action: "administrar", description: "Definir habilidades del agente y emitir/revocar llaves de la API (expone credenciales)" },
+  { resource: "seguimientos", action: "administrar", description: "Definir secuencias de seguimiento e inscribir/detener leads en ellas" },
   { resource: "mejoras", action: "ver", description: "Ver sugerencias de mejora (flywheel)" },
   { resource: "mejoras", action: "administrar", description: "Aplicar/descartar sugerencias, correr análisis, cambiar autonomía" },
   { resource: "conexiones", action: "administrar", description: "Conectar/desconectar canales y conectores (expone credenciales)" },
@@ -68,6 +69,7 @@ export const NAV_PERMISSIONS: Record<string, string> = {
   // Las habilidades exponen el agente por API y emiten credenciales — se
   // administran, no solo se ven, igual que Conexiones.
   habilidades: "nodia-agents.habilidades.administrar",
+  seguimientos: "nodia-agents.seguimientos.administrar",
   mejoras: "nodia-agents.mejoras.ver",
   conexiones: "nodia-agents.conexiones.administrar",
   telefono: "nodia-agents.telefono.administrar",
@@ -98,6 +100,7 @@ export const PERMISSION_GATE: Array<[string, string, string]> = [
   ["/agente", NAV_PERMISSIONS.agente, "Flujo del agente"],
   ["/kb", NAV_PERMISSIONS.kb, "Conocimiento"],
   ["/habilidades", NAV_PERMISSIONS.habilidades, "Habilidades"],
+  ["/seguimientos", NAV_PERMISSIONS.seguimientos, "Seguimientos"],
   ["/mejoras", NAV_PERMISSIONS.mejoras, "Mejoras"],
   ["/conexiones", NAV_PERMISSIONS.conexiones, "Conexiones"],
   ["/telefono", NAV_PERMISSIONS.telefono, "Tu número"],

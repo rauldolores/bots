@@ -16,7 +16,7 @@ export const WORK_JOB_LEASE_MS = 5 * 60_000;
 /** epoch ms según el reloj de POSTGRES — mismo criterio que la cola de turnos. */
 const NOW_MS = "(EXTRACT(EPOCH FROM now()) * 1000)::bigint";
 
-export type WorkJobKind = "skill_run";
+export type WorkJobKind = "skill_run" | "nurture_touch";
 
 export interface WorkJob {
   id: string;
@@ -61,14 +61,24 @@ export class WorkJobsRepo {
     return id;
   }
 
-  /** FOR UPDATE SKIP LOCKED: dos ticks a la vez no se pisan ni duplican trabajo. */
-  async claimDue(limit: number): Promise<WorkJob[]> {
+  /**
+   * FOR UPDATE SKIP LOCKED: dos ticks a la vez no se pisan ni duplican trabajo.
+   *
+   * `kind` filtra qué tipo reclama esta llamada. Sin esto, dos consumidores
+   * distintos del mismo `work_jobs` (habilidades y seguimiento, hoy) se
+   * robarían trabajo entre sí: `processSkillJobs` reclamaría un
+   * `nurture_touch` due, no sabría qué hacer con él, y lo dejaría con
+   * `attempts` ya incrementado sin haberlo intentado de verdad — gastando
+   * lease y reintentos de otro proceso sin razón.
+   */
+  async claimDue(limit: number, kind?: WorkJobKind): Promise<WorkJob[]> {
     const rows = await this.db.all<WorkJobRow>(
       `WITH claimed AS (
          SELECT id
            FROM work_jobs
           WHERE run_after <= ${NOW_MS}
             AND (locked_at IS NULL OR locked_at < ${NOW_MS} - ?)
+            ${kind ? "AND kind = ?" : ""}
           ORDER BY run_after
           FOR UPDATE SKIP LOCKED
           LIMIT ?
@@ -78,7 +88,7 @@ export class WorkJobsRepo {
          FROM claimed c
         WHERE w.id = c.id
        RETURNING w.id, w.bot_id, w.kind, w.payload, w.run_after, w.attempts`,
-      [WORK_JOB_LEASE_MS, limit],
+      kind ? [WORK_JOB_LEASE_MS, kind, limit] : [WORK_JOB_LEASE_MS, limit],
     );
     return rows.map((r) => ({ ...r, payload: parsePayload(r.payload) }));
   }
@@ -94,6 +104,19 @@ export class WorkJobsRepo {
           SET locked_at = NULL, last_error = ?, run_after = ${NOW_MS} + ?
         WHERE id = ?`,
       [error.slice(0, 500), retryInMs, id],
+    );
+  }
+
+  /**
+   * Para cuando el dueño detiene un seguimiento a mano: sin esto, el próximo
+   * toque igual se procesaría y solo hasta ahí (dentro del motor) se daría
+   * cuenta de que el lead ya no apunta a esa secuencia — funciona, pero deja
+   * un intento fallido innecesario en los logs cada vez.
+   */
+  async cancelNurtureTouchesForLead(botId: string, leadId: string): Promise<void> {
+    await this.db.run(
+      `DELETE FROM work_jobs WHERE bot_id = ? AND kind = 'nurture_touch' AND payload->>'leadId' = ?`,
+      [botId, leadId],
     );
   }
 }

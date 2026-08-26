@@ -10,6 +10,7 @@ import type { CrmRecord } from "../../connectors/types";
 import { getNiche, type NichePack } from "../../niches";
 import { isProTier } from "../../config";
 import { resolveTimezone } from "../../datetime";
+import { NurtureSequencesRepo, type NurtureSequence } from "../../db/nurtureSequences";
 import { layout } from "./layout";
 
 // Escapa texto del LLM/cliente antes de meterlo en HTML (el intent y las notas
@@ -18,11 +19,42 @@ function esc(v: string | null | undefined): string {
   return (v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-interface Col {
-  h: string;
-  w: string;
-  align?: "right";
-  cell: (l: Lead, meta: Record<string, string>) => string;
+const STOPPED_REASON_LABEL: Record<string, string> = {
+  respondio: "se detuvo porque el lead respondió",
+  convertido: "se detuvo porque el lead se marcó como vendido/perdido",
+  opt_out: "se detuvo porque el lead pidió no recibir más mensajes",
+  secuencia_desactivada: "se detuvo porque la secuencia se apagó",
+  completado: "terminó todos sus pasos",
+  detenido_manual: "se detuvo a mano",
+};
+
+/** Bloque de "Seguimiento" en el detalle de un lead — inscribir, ver estado, o detener. */
+function nurtureBlock(lead: Lead, sequences: NurtureSequence[], timezone: string): string {
+  if (lead.sequence_id) {
+    const seq = sequences.find((s) => s.id === lead.sequence_id);
+    const next = lead.next_touch_at
+      ? new Date(lead.next_touch_at).toLocaleString("es-MX", { timeZone: timezone })
+      : "—";
+    return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span class="text-[11.5px]" style="color:var(--ok);border:1px solid var(--ok);padding:3px 9px">En seguimiento: ${esc(seq?.name ?? "secuencia borrada")}</span>
+      <span class="text-dim text-[11.5px]">próximo toque: ${next}</span>
+      <form method="POST" action="/admin/leads/${lead.id}/seguimiento/detener" onclick="event.stopPropagation()">
+        <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);background:none;padding:4px 10px;cursor:pointer">Detener</button>
+      </form>
+    </div>`;
+  }
+  const opciones = sequences.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join("");
+  const previo = lead.stopped_reason
+    ? `<span class="text-dim text-[11px]">(${esc(STOPPED_REASON_LABEL[lead.stopped_reason] ?? lead.stopped_reason)})</span>`
+    : "";
+  if (sequences.length === 0) {
+    return `<span class="text-dim text-[11.5px]">Sin secuencias activas — créalas en <a href="/admin/seguimientos" class="text-accent">Seguimientos</a>.</span>`;
+  }
+  return `<form method="POST" action="/admin/leads/${lead.id}/seguimiento/iniciar" onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <select name="sequence_id" style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:6px 8px;font-size:11.5px;outline:none">${opciones}</select>
+    <button type="submit" class="text-[11px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:5px 10px;cursor:pointer;font-weight:600">Iniciar seguimiento</button>
+    ${previo}
+  </form>`;
 }
 
 const LEAD_STATUS_COLOR: Record<Lead["status"], string> = {
@@ -33,140 +65,85 @@ const LEAD_STATUS_COLOR: Record<Lead["status"], string> = {
 };
 
 /**
- * Tabla para cuando hay un CRM conectado. El CRM solo trae nombre/contacto/fecha
- * (CrmRecord), pero el lead SIEMPRE se crea local primero (captureLead.ts) y, al
- * exportarse, guarda exported_to+external_id (leads.ts:setExported) — ese
- * external_id es el mismo id que trae el CRM. Cruzando por ahí recuperamos las
- * columnas del nicho, el resumen/notas, el estado y el link a la conversación
- * para cada fila que el bot sí capturó (las creadas directo en el CRM se quedan
- * con la fila simple, no hay nada local que mostrar).
+ * Lo que una fila de la tabla necesita para pintarse — sin importar si salió
+ * de `leads` local o de un registro del CRM. Cuando el CRM está conectado y
+ * responde en vivo, name/contact/created_at/crmUrl vienen del CRM (es la
+ * fuente de verdad mientras está conectado); todo lo demás (metadata, resumen
+ * de la IA, notas, secuencia) sigue viviendo solo en la copia local, así que
+ * un registro creado directo en el CRM (sin lead local que le corresponda)
+ * simplemente no tiene nada de eso que mostrar.
  */
-function renderCrmTable(
-  providerLabel: string,
-  items: CrmRecord[],
-  timezone: string,
-  localByExternalId: Map<string, Lead>,
-  niche: NichePack,
-): string {
-  const rows = items
-    .map((r) => {
-      const dateCell = `<span class="text-dim">${new Date(r.createdAt).toLocaleDateString("es-MX", { timeZone: timezone })}</span>`;
-      const nameLink = r.url
-        ? `<a href="${esc(r.url)}" target="_blank" rel="noopener" class="text-accent" style="text-decoration:none">${esc(r.name)} ↗</a>`
-        : `<span class="text-cream">${esc(r.name)}</span>`;
-      const contactCell = `<span class="text-muted">${esc(r.contact)}</span>`;
-      const local = localByExternalId.get(r.id);
-      if (!local) {
-        return `<div style="display:grid;grid-template-columns:94px minmax(120px,1.1fr) minmax(110px,1fr);gap:12px;padding:13px 18px;font-size:12.5px;align-items:center;border-top:1px solid var(--line)">
-          ${dateCell}${nameLink}${contactCell}
-        </div>`;
-      }
-      const meta = leadMetadata(local);
-      const metaRows = Object.entries(meta)
-        .map(([k, v]) => `<span class="text-muted" style="font-size:12px"><span class="text-dim">${esc(k)}:</span> ${esc(v)}</span>`)
-        .join("");
-      const convLink = local.conversation_id
-        ? `<a href="/admin/conversations?c=${encodeURIComponent(local.conversation_id)}" class="text-accent" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;text-decoration:none">
-             <i data-lucide="messages-square" width="13" height="13"></i> Ver conversación completa
-           </a>`
-        : `<span class="text-dim" style="font-size:11.5px">Sin conversación ligada</span>`;
-      const statusForm = `<form method="POST" action="/admin/leads/${local.id}/status" onclick="event.stopPropagation()" style="display:inline-flex">
-        <select name="status" onchange="this.form.submit()"
-                style="background:var(--bg);border:1px solid var(--line);color:${LEAD_STATUS_COLOR[local.status]};font-weight:600;padding:6px 8px;font-size:11px;outline:none;cursor:pointer">
-          ${(["new", "contacted", "sold", "lost"] as const)
-            .map((s) => `<option ${local.status === s ? "selected" : ""} value="${s}">${esc(niche.statusLabels[s])}</option>`)
-            .join("")}
-        </select>
-      </form>`;
-      return `<div class="lead" style="border-top:1px solid var(--line)">
-        <div class="leadrow" onclick="var d=this.parentNode.querySelector('.lead-detail');var open=d.style.display==='block';d.style.display=open?'none':'block';this.querySelector('.chev').style.transform=open?'rotate(0deg)':'rotate(90deg)'"
-             style="display:grid;grid-template-columns:94px minmax(120px,1.1fr) minmax(110px,1fr);gap:12px;padding:13px 18px;font-size:12.5px;align-items:center;cursor:pointer">
-          ${dateCell}
-          <span style="display:flex;align-items:center;gap:7px">
-            <i data-lucide="chevron-right" width="13" height="13" class="chev" style="flex:none;transition:transform .12s ease"></i>${nameLink}
-          </span>
-          ${contactCell}
-        </div>
-        <div class="lead-detail" style="display:none;padding:4px 18px 20px 18px;background:var(--bg)">
-          <div style="max-width:760px;display:flex;flex-direction:column;gap:14px;padding-top:14px">
-            ${metaRows ? `<div><div style="font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Datos</div><div style="display:flex;flex-wrap:wrap;gap:6px 18px">${metaRows}</div></div>` : ""}
-            <div>
-              <div style="font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Resumen de la IA</div>
-              <div class="text-cream" style="font-size:13px;line-height:1.55;white-space:pre-wrap">${esc(local.intent)}</div>
-            </div>
-            ${local.notes ? `<div>
-              <div style="font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Notas</div>
-              <div class="text-muted" style="font-size:12.5px;line-height:1.5;white-space:pre-wrap">${esc(local.notes)}</div>
-            </div>` : ""}
-            <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding-top:2px">
-              ${convLink}
-              ${statusForm}
-            </div>
-          </div>
-        </div>
-      </div>`;
-    })
-    .join("");
-  const empty = `<div style="padding:40px 18px;text-align:center" class="text-dim text-[12.5px]">Aún no hay registros en ${esc(providerLabel)}.</div>`;
-  return `
-    <div class="bg-panel border border-line" style="overflow-x:auto">
-      <div style="min-width:400px">
-        <div style="display:grid;grid-template-columns:94px minmax(120px,1.1fr) minmax(110px,1fr);gap:12px;padding:10px 18px;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)">
-          <span>Fecha</span><span>Nombre</span><span>Contacto</span>
-        </div>
-        ${items.length ? rows : empty}
-      </div>
-    </div>`;
+type DisplayLead = Omit<Lead, "status"> & { status: Lead["status"] | null; crmUrl?: string };
+
+function displayFromLocal(l: Lead): DisplayLead {
+  return { ...l };
 }
 
-export async function renderLeads(env: Env, botId: string, visibleNavIds: Set<string> | null = null): Promise<string> {
-  const db = new Db(env.DB);
-  const bot = await new BotsRepo(db).getById(botId);
-  const niche = getNiche(bot?.niche);
-  const timezone = resolveTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
+/** Un lead local que además ya se exportó a este CRM — se prioriza el nombre/contacto que el CRM tiene HOY (alguien pudo corregirlo allá). */
+function displayFromCrmMatch(r: CrmRecord, local: Lead): DisplayLead {
+  return { ...local, name: r.name, contact: r.contact, created_at: r.createdAt, crmUrl: r.url };
+}
 
-  // Si hay un CRM conectado, esta pantalla consulta ahí en vivo en vez de la
-  // tabla local — el CRM es donde el equipo humano de ventas ya vive. El bot
-  // sigue guardando local siempre (ver captureLead.ts), así que si el CRM
-  // falla, avisamos y caemos a la tabla local en vez de dejar la pantalla en blanco.
-  const leads = new LeadsRepo(db, botId);
+/** Un registro que solo existe en el CRM (nunca pasó por captureLead.ts) — no hay metadata/resumen/secuencia que mostrar, ni estado local que conocer. */
+function displayFromCrmOnly(r: CrmRecord, botId: string, provider: string): DisplayLead {
+  return {
+    id: r.id,
+    bot_id: botId,
+    conversation_id: null,
+    name: r.name,
+    contact: r.contact,
+    channel_user_id: null,
+    intent: "",
+    notes: null,
+    status: null,
+    exported_to: provider,
+    external_id: r.id,
+    metadata: null,
+    sequence_id: null,
+    next_touch_at: null,
+    stopped_reason: null,
+    created_at: r.createdAt,
+    updated_at: r.createdAt,
+    crmUrl: r.url,
+  };
+}
 
-  let crmErrorBanner = "";
-  const crmConnector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "crm");
-  if (crmConnector) {
-    const providerMeta = CRM_PROVIDERS[crmConnector.provider];
-    const providerLabel = providerMeta?.name ?? crmConnector.provider;
-    const adapter = CRM_ADAPTERS[crmConnector.provider];
-    const creds = adapter ? await resolveConnectorCreds(db, crmConnector, env) : null;
-    const result = adapter && creds ? await adapter.listRecent(creds, 100) : null;
-    if (result?.ok) {
-      const localLeads = await leads.list(200);
-      const localByExternalId = new Map(
-        localLeads
-          .filter((l) => l.exported_to === crmConnector.provider && l.external_id)
-          .map((l) => [l.external_id as string, l] as const),
-      );
-      const body = `
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <h2 class="font-display font-semibold text-[15px] text-cream">Leads — ${esc(providerLabel)}</h2>
-          <a href="/admin/conexiones?cat=crm" class="text-[12px]" style="color:var(--muted)">gestionar conexión</a>
-        </div>
-        ${renderCrmTable(providerLabel, result.items, timezone, localByExternalId, niche)}`;
-      return layout({ title: "Leads", activeTab: "leads", body, pro: isProTier(bot?.tier), visibleNavIds });
-    }
-    // Cayó a local — se avisa arriba de la tabla de siempre.
-    crmErrorBanner = `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px;margin-bottom:14px">No se pudo consultar ${esc(providerLabel)} (${esc(result?.error ?? "sin credenciales")}) — mostrando la copia local mientras tanto.</div>`;
-  }
+interface Col {
+  h: string;
+  w: string;
+  align?: "right";
+  cell: (l: DisplayLead, meta: Record<string, string>) => string;
+}
 
-  const list = await leads.list(100);
-
-  const statusLabel = (s: Lead["status"]) => niche.statusLabels[s];
-
-  // Columnas: núcleo (fecha, nombre, contacto) + o bien las columnas del nicho
-  // (leídas de metadata) o bien el "Resumen" genérico + estado (re-etiquetado).
+/**
+ * Las columnas son LAS MISMAS estén los datos viniendo de la copia local o de
+ * un CRM conectado — la única diferencia real es el Estado: con un CRM
+ * conectado, ES la fuente de verdad del pipeline de ventas, así que aquí se
+ * muestra de solo lectura (con candado) en vez del selector editable. Cambiar
+ * eso desde dos lugares a la vez es justo lo que se quiere evitar.
+ */
+function buildLeadColumns(
+  niche: NichePack,
+  timezone: string,
+  opts: { statusEditable: boolean; providerLabel?: string },
+): Col[] {
   const cols: Col[] = [
-    { h: "Fecha", w: "94px", cell: (l) => `<span class="text-dim">${new Date(l.created_at).toLocaleDateString("es-MX", { timeZone: timezone })}</span>` },
-    { h: "Nombre", w: "minmax(120px,1.1fr)", cell: (l) => `<span class="text-cream" style="display:flex;align-items:center;gap:7px"><i data-lucide="chevron-right" width="13" height="13" class="chev" style="flex:none;transition:transform .12s ease"></i>${esc(l.name) || "(sin nombre)"}</span>` },
+    {
+      h: "Fecha",
+      w: "94px",
+      cell: (l) => `<span class="text-dim">${new Date(l.created_at).toLocaleDateString("es-MX", { timeZone: timezone })}</span>`,
+    },
+    {
+      h: "Nombre",
+      w: "minmax(120px,1.1fr)",
+      cell: (l) => {
+        const label = esc(l.name) || "(sin nombre)";
+        const inner = l.crmUrl
+          ? `<a href="${esc(l.crmUrl)}" target="_blank" rel="noopener" class="text-accent" style="text-decoration:none" onclick="event.stopPropagation()">${label} ↗</a>`
+          : `<span class="text-cream">${label}</span>`;
+        return `<span style="display:flex;align-items:center;gap:7px"><i data-lucide="chevron-right" width="13" height="13" class="chev" style="flex:none;transition:transform .12s ease"></i>${inner}</span>`;
+      },
+    },
     { h: "Contacto", w: "minmax(110px,1fr)", cell: (l) => `<span class="text-muted">${esc(l.contact) || "—"}</span>` },
   ];
   if (niche.columns.length) {
@@ -174,65 +151,163 @@ export async function renderLeads(env: Env, botId: string, visibleNavIds: Set<st
       cols.push({ h: c.label, w: "minmax(78px,.85fr)", cell: (_l, meta) => `<span class="text-muted truncate">${esc(meta[c.key]) || "—"}</span>` });
     }
   } else {
-    cols.push({ h: "Resumen · click para ver detalle", w: "minmax(200px,1.8fr)", cell: (l) => `<span class="text-muted truncate">${esc(l.intent)}</span>` });
+    cols.push({ h: "Resumen · click para ver detalle", w: "minmax(200px,1.8fr)", cell: (l) => `<span class="text-muted truncate">${esc(l.intent) || "—"}</span>` });
   }
   cols.push({
     h: "Estado",
     w: "132px",
     align: "right",
-    cell: (l) => `<form method="POST" action="/admin/leads/${l.id}/status" onclick="event.stopPropagation()" style="display:flex;justify-content:flex-end">
-      <select name="status" onchange="this.form.submit()"
-              style="background:var(--bg);border:1px solid var(--line);color:${LEAD_STATUS_COLOR[l.status]};font-weight:600;padding:6px 8px;font-size:11px;outline:none;cursor:pointer">
-        ${(["new", "contacted", "sold", "lost"] as const)
-          .map((s) => `<option ${l.status === s ? "selected" : ""} value="${s}">${esc(statusLabel(s))}</option>`)
-          .join("")}
-      </select>
-    </form>`,
+    cell: (l) => {
+      if (!opts.statusEditable) {
+        if (l.status == null) return `<span class="text-dim" style="font-size:11.5px">—</span>`;
+        return `<span style="display:inline-flex;align-items:center;gap:5px;justify-content:flex-end;width:100%;color:${LEAD_STATUS_COLOR[l.status]};font-weight:600;font-size:11.5px" title="El estado se administra desde ${esc(opts.providerLabel ?? "el CRM conectado")} — aquí es de solo lectura.">
+          <i data-lucide="lock" width="11" height="11"></i>${esc(niche.statusLabels[l.status])}
+        </span>`;
+      }
+      return `<form method="POST" action="/admin/leads/${l.id}/status" onclick="event.stopPropagation()" style="display:flex;justify-content:flex-end">
+        <select name="status" onchange="this.form.submit()"
+                style="background:var(--bg);border:1px solid var(--line);color:${LEAD_STATUS_COLOR[l.status!]};font-weight:600;padding:6px 8px;font-size:11px;outline:none;cursor:pointer">
+          ${(["new", "contacted", "sold", "lost"] as const)
+            .map((s) => `<option ${l.status === s ? "selected" : ""} value="${s}">${esc(niche.statusLabels[s])}</option>`)
+            .join("")}
+        </select>
+      </form>`;
+    },
   });
+  return cols;
+}
 
+/**
+ * Una fila + su detalle expandible. `matchedLocal` es el lead local de
+ * verdad (metadata, resumen de la IA, notas, secuencia) — null solo para un
+ * registro que vive nada más en el CRM y nunca pasó por captureLead.ts, cuyo
+ * detalle entonces es solo una nota + el link de vuelta al CRM.
+ */
+function renderLeadRow(
+  display: DisplayLead,
+  matchedLocal: Lead | null,
+  cols: Col[],
+  gridCols: string,
+  timezone: string,
+  sequences: NurtureSequence[],
+): string {
+  const meta = leadMetadata(display);
+  const cellsHtml = cols.map((c) => c.cell(display, meta)).join("");
+
+  let detail: string;
+  if (matchedLocal) {
+    const fullDate = new Date(matchedLocal.created_at).toLocaleString("es-MX", { timeZone: timezone });
+    const convLink = matchedLocal.conversation_id
+      ? `<a href="/admin/conversations?c=${encodeURIComponent(matchedLocal.conversation_id)}" class="text-accent" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;text-decoration:none">
+           <i data-lucide="messages-square" width="13" height="13"></i> Ver conversación completa
+         </a>`
+      : `<span class="text-dim" style="font-size:11.5px">Sin conversación ligada</span>`;
+    const metaRows = Object.entries(leadMetadata(matchedLocal))
+      .map(([k, v]) => `<span class="text-muted" style="font-size:12px"><span class="text-dim">${esc(k)}:</span> ${esc(v)}</span>`)
+      .join("");
+    detail = `
+      ${metaRows ? `<div><div style="font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Datos</div><div style="display:flex;flex-wrap:wrap;gap:6px 18px">${metaRows}</div></div>` : ""}
+      <div>
+        <div style="font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Resumen de la IA</div>
+        <div class="text-cream" style="font-size:13px;line-height:1.55;white-space:pre-wrap">${esc(matchedLocal.intent)}</div>
+      </div>
+      ${matchedLocal.notes ? `<div>
+        <div style="font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Notas</div>
+        <div class="text-muted" style="font-size:12.5px;line-height:1.5;white-space:pre-wrap">${esc(matchedLocal.notes)}</div>
+      </div>` : ""}
+      <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding-top:2px">
+        ${convLink}
+        <span class="text-dim" style="font-size:11.5px;display:inline-flex;align-items:center;gap:6px"><i data-lucide="clock" width="12" height="12"></i>${fullDate}</span>
+      </div>
+      ${nurtureBlock(matchedLocal, sequences, timezone)}
+    `;
+  } else {
+    const crmLink = display.crmUrl
+      ? ` <a href="${esc(display.crmUrl)}" target="_blank" rel="noopener" class="text-accent">Abrir en el CRM ↗</a>`
+      : "";
+    detail = `<div class="text-dim text-[12.5px]">Este contacto se creó directamente en el CRM — no hay conversación del bot que mostrar.${crmLink}</div>`;
+  }
+
+  return `<div class="lead" style="border-top:1px solid var(--line)">
+    <div class="leadrow" onclick="var d=this.parentNode.querySelector('.lead-detail');var open=d.style.display==='block';d.style.display=open?'none':'block';this.querySelector('.chev').style.transform=open?'rotate(0deg)':'rotate(90deg)'"
+         style="display:grid;grid-template-columns:${gridCols};gap:12px;padding:13px 18px;font-size:12.5px;align-items:center;cursor:pointer">
+      ${cellsHtml}
+    </div>
+    <div class="lead-detail" style="display:none;padding:4px 18px 20px 18px;background:var(--bg)">
+      <div style="max-width:760px;display:flex;flex-direction:column;gap:14px;padding-top:14px">
+        ${detail}
+      </div>
+    </div>
+  </div>`;
+}
+
+export async function renderLeads(env: Env, botId: string, visibleNavIds: Set<string> | null = null): Promise<string> {
+  const db = new Db(env.DB);
+  const bot = await new BotsRepo(db).getById(botId);
+  const niche = getNiche(bot?.niche);
+  const timezone = resolveTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
+  const leads = new LeadsRepo(db, botId);
+  const sequences = await new NurtureSequencesRepo(db, botId).listEnabled();
+
+  const crmConnector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "crm");
+  const providerLabel = crmConnector ? CRM_PROVIDERS[crmConnector.provider]?.name ?? crmConnector.provider : undefined;
+
+  // Si hay un CRM conectado, ES la fuente de verdad del pipeline de ventas —
+  // el estado se cambia ALLÁ, nunca aquí, o las dos partes se desincronizan
+  // en cuanto alguien lo toque desde el lado equivocado. Aplica aunque el CRM
+  // esté momentáneamente inalcanzable (fallback a la copia local, más abajo):
+  // sigue conectado, solo no se pudo consultar en vivo justo ahora.
+  const statusEditable = !crmConnector;
+  const cols = buildLeadColumns(niche, timezone, { statusEditable, providerLabel });
   const gridCols = cols.map((c) => c.w).join(" ");
   const minWidth = 640 + niche.columns.length * 90; // asegura el scroll horizontal cuando hay muchas columnas
 
-  const rows = list
-    .map((l) => {
-      const meta = leadMetadata(l);
-      const fullDate = new Date(l.created_at).toLocaleString("es-MX", { timeZone: timezone });
-      const convLink = l.conversation_id
-        ? `<a href="/admin/conversations?c=${encodeURIComponent(l.conversation_id)}" class="text-accent" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;text-decoration:none">
-             <i data-lucide="messages-square" width="13" height="13"></i> Ver conversación completa
-           </a>`
-        : `<span class="text-dim" style="font-size:11.5px">Sin conversación ligada</span>`;
-      // Detalle: todos los campos del nicho (metadata) + resumen IA + notas.
-      const metaRows = Object.entries(meta)
-        .map(([k, v]) => `<span class="text-muted" style="font-size:12px"><span class="text-dim">${esc(k)}:</span> ${esc(v)}</span>`)
-        .join("");
-      return `<div class="lead" style="border-top:1px solid var(--line)">
-        <div class="leadrow" onclick="var d=this.parentNode.querySelector('.lead-detail');var open=d.style.display==='block';d.style.display=open?'none':'block';this.querySelector('.chev').style.transform=open?'rotate(0deg)':'rotate(90deg)'"
-             style="display:grid;grid-template-columns:${gridCols};gap:12px;padding:13px 18px;font-size:12.5px;align-items:center;cursor:pointer">
-          ${cols.map((c) => c.cell(l, meta)).join("")}
-        </div>
-        <div class="lead-detail" style="display:none;padding:4px 18px 20px 18px;background:var(--bg)">
-          <div style="max-width:760px;display:flex;flex-direction:column;gap:14px;padding-top:14px">
-            ${metaRows ? `<div><div style="font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Datos</div><div style="display:flex;flex-wrap:wrap;gap:6px 18px">${metaRows}</div></div>` : ""}
-            <div>
-              <div style="font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Resumen de la IA</div>
-              <div class="text-cream" style="font-size:13px;line-height:1.55;white-space:pre-wrap">${esc(l.intent)}</div>
-            </div>
-            ${l.notes ? `<div>
-              <div style="font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Notas</div>
-              <div class="text-muted" style="font-size:12.5px;line-height:1.5;white-space:pre-wrap">${esc(l.notes)}</div>
-            </div>` : ""}
-            <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding-top:2px">
-              ${convLink}
-              <span class="text-dim" style="font-size:11.5px;display:inline-flex;align-items:center;gap:6px"><i data-lucide="clock" width="12" height="12"></i>${fullDate}</span>
-            </div>
-          </div>
-        </div>
-      </div>`;
-    })
-    .join("");
+  let crmErrorBanner = "";
+  let crmLiveNote = "";
+  let rowsHtml = "";
+  let emptyMessage = `Aún no hay ${esc(niche.recordPlural.toLowerCase())}.`;
 
-  const empty = `<div style="padding:40px 18px;text-align:center" class="text-dim text-[12.5px]">Aún no hay ${esc(niche.recordPlural.toLowerCase())}.</div>`;
+  if (crmConnector) {
+    const adapter = CRM_ADAPTERS[crmConnector.provider];
+    const creds = adapter ? await resolveConnectorCreds(db, crmConnector, env) : null;
+    const result = adapter && creds ? await adapter.listRecent(creds, 100) : null;
+
+    if (result?.ok) {
+      // El lead SIEMPRE se crea local primero (captureLead.ts) y, al
+      // exportarse, guarda exported_to+external_id — ese external_id es el
+      // mismo id que trae el CRM. Cruzando por ahí se recupera la metadata
+      // del nicho, el resumen/notas y la secuencia para cada registro que el
+      // bot sí capturó; los creados directo en el CRM se quedan con la fila
+      // simple (ver displayFromCrmOnly).
+      const localLeads = await leads.list(200);
+      const localByExternalId = new Map(
+        localLeads
+          .filter((l) => l.exported_to === crmConnector.provider && l.external_id)
+          .map((l) => [l.external_id as string, l] as const),
+      );
+      rowsHtml = result.items
+        .map((r) => {
+          const local = localByExternalId.get(r.id) ?? null;
+          const display = local ? displayFromCrmMatch(r, local) : displayFromCrmOnly(r, botId, crmConnector.provider);
+          return renderLeadRow(display, local, cols, gridCols, timezone, sequences);
+        })
+        .join("");
+      emptyMessage = `Aún no hay registros en ${esc(providerLabel!)}.`;
+      crmLiveNote = ` <span class="text-dim text-[11px]" style="font-weight:400">· vía ${esc(providerLabel!)}</span>`;
+    } else {
+      // Cayó a local — se avisa arriba de la tabla de siempre. El estado
+      // SIGUE siendo de solo lectura: el CRM conectado no dejó de ser la
+      // fuente de verdad solo porque ahora mismo no responde.
+      crmErrorBanner = `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px;margin-bottom:14px">No se pudo consultar ${esc(providerLabel!)} (${esc(result?.error ?? "sin credenciales")}) — mostrando la copia local mientras tanto.</div>`;
+      const list = await leads.list(100);
+      rowsHtml = list.map((l) => renderLeadRow(displayFromLocal(l), l, cols, gridCols, timezone, sequences)).join("");
+    }
+  } else {
+    const list = await leads.list(100);
+    rowsHtml = list.map((l) => renderLeadRow(displayFromLocal(l), l, cols, gridCols, timezone, sequences)).join("");
+  }
+
+  const empty = `<div style="padding:40px 18px;text-align:center" class="text-dim text-[12.5px]">${emptyMessage}</div>`;
   const header = cols
     .map((c) => `<span${c.align === "right" ? ' style="text-align:right"' : ""}>${esc(c.h)}</span>`)
     .join("");
@@ -240,17 +315,20 @@ export async function renderLeads(env: Env, botId: string, visibleNavIds: Set<st
   const body = `
     ${crmErrorBanner}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-      <h2 class="font-display font-semibold text-[15px] text-cream">${esc(niche.recordPlural)} de ${esc(bot?.name ?? "tu bot")}</h2>
-      <a href="/admin/leads/export.csv" class="ghostbtn" style="display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:9px 14px;font-size:12.5px;transition:all .12s ease">
-        <i data-lucide="download" width="14" height="14"></i> Exportar CSV
-      </a>
+      <h2 class="font-display font-semibold text-[15px] text-cream">${esc(niche.recordPlural)} de ${esc(bot?.name ?? "tu bot")}${crmLiveNote}</h2>
+      <div style="display:flex;align-items:center;gap:14px">
+        ${crmConnector ? `<a href="/admin/conexiones?cat=crm" class="text-[12px]" style="color:var(--muted)">gestionar conexión</a>` : ""}
+        <a href="/admin/leads/export.csv" class="ghostbtn" style="display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:9px 14px;font-size:12.5px;transition:all .12s ease">
+          <i data-lucide="download" width="14" height="14"></i> Exportar CSV
+        </a>
+      </div>
     </div>
     <div class="bg-panel border border-line" style="overflow-x:auto">
       <div style="min-width:${minWidth}px">
         <div style="display:grid;grid-template-columns:${gridCols};gap:12px;padding:10px 18px;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)">
           ${header}
         </div>
-        ${list.length ? rows : empty}
+        ${rowsHtml || empty}
       </div>
     </div>`;
   return layout({ title: niche.recordPlural, activeTab: "leads", body, pro: isProTier(bot?.tier), visibleNavIds });

@@ -45,6 +45,9 @@ import {
 } from "./views/habilidades";
 import { BotSkillsRepo, slugify } from "../db/skills";
 import { BotApiKeysRepo } from "../db/apiKeys";
+import { renderSeguimientos, renderSequenceForm, parseSteps } from "./views/seguimientos";
+import { NurtureSequencesRepo } from "../db/nurtureSequences";
+import { enrollLeadInSequence, stopSequenceForLead } from "../nurture/run";
 import { KbDocsRepo, indexDoc, removeDocVectors, reindexAll, MAX_DOC_CHARS } from "../kb/docs";
 import { renderMejoras } from "./views/mejoras";
 import { runFlywheel, getLessons, saveLessons } from "../flywheel/detect";
@@ -706,6 +709,63 @@ adminApp.post("/habilidades/:id", async (c) => {
 adminApp.post("/habilidades/:id/borrar", async (c) => {
   await new BotSkillsRepo(new Db(c.env.DB), c.get("botId")).remove(c.req.param("id"));
   return c.redirect("/admin/habilidades", 302);
+});
+
+// --- Seguimientos (F8 fase C: perseguir la venta durante días) ---------------
+
+adminApp.get("/seguimientos", async (c) =>
+  c.html(await renderSeguimientos(c.env, c.get("botId"), { error: c.req.query("err") ?? undefined })),
+);
+
+adminApp.get("/seguimientos/nueva", async (c) =>
+  c.html(await renderSequenceForm(c.env, c.get("botId"), null)),
+);
+
+adminApp.get("/seguimientos/:id/editar", async (c) =>
+  c.html(await renderSequenceForm(c.env, c.get("botId"), c.req.param("id"))),
+);
+
+adminApp.post("/seguimientos/nueva", async (c) => {
+  const botId = c.get("botId");
+  const form = await c.req.formData();
+  const name = String(form.get("name") ?? "").trim();
+  const goal = String(form.get("goal") ?? "").trim();
+  const steps = parseSteps(form);
+
+  if (!name || !goal || steps.length === 0) {
+    return c.html(
+      await renderSequenceForm(c.env, botId, null, "Falta el nombre, el objetivo, o al menos un paso."),
+    );
+  }
+  await new NurtureSequencesRepo(new Db(c.env.DB), botId).create({ name, goal, steps });
+  return c.redirect("/admin/seguimientos", 302);
+});
+
+adminApp.post("/seguimientos/:id", async (c) => {
+  const botId = c.get("botId");
+  const id = c.req.param("id");
+  const form = await c.req.formData();
+  const name = String(form.get("name") ?? "").trim();
+  const goal = String(form.get("goal") ?? "").trim();
+  const steps = parseSteps(form);
+
+  if (!name || !goal || steps.length === 0) {
+    return c.html(
+      await renderSequenceForm(c.env, botId, id, "Falta el nombre, el objetivo, o al menos un paso."),
+    );
+  }
+  await new NurtureSequencesRepo(new Db(c.env.DB), botId).update(id, {
+    name,
+    goal,
+    steps,
+    enabled: String(form.get("enabled") ?? "1") === "1",
+  });
+  return c.redirect("/admin/seguimientos", 302);
+});
+
+adminApp.post("/seguimientos/:id/borrar", async (c) => {
+  await new NurtureSequencesRepo(new Db(c.env.DB), c.get("botId")).remove(c.req.param("id"));
+  return c.redirect("/admin/seguimientos", 302);
 });
 
 // --- Conocimiento (KB editable, F4) -------------------------------------------
@@ -1598,14 +1658,43 @@ const LEAD_STATUSES: ReadonlyArray<Lead["status"]> = ["new", "contacted", "sold"
 adminApp.post("/leads/:id/status", async (c) => {
   const denied = requirePermission(c, "nodia-agents.leads.administrar");
   if (denied) return denied;
+  const db = new Db(c.env.DB);
+  const botId = c.get("botId");
+  // Con un CRM conectado, ESE es la fuente de verdad del pipeline de ventas
+  // — /admin/leads ya no ofrece el selector (ver admin/views/leads.ts), pero
+  // el bloqueo real tiene que estar aquí: sin esto, un POST directo a esta
+  // ruta seguiría pudiendo desincronizar el estado local del que vive en el
+  // CRM.
+  const crmConnector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "crm");
+  if (crmConnector) {
+    return c.text("El estado de este lead se administra desde el CRM conectado.", 409);
+  }
   const form = await c.req.formData();
   const raw = String(form.get("status") ?? "new");
   const status: Lead["status"] = (LEAD_STATUSES as readonly string[]).includes(raw)
     ? (raw as Lead["status"])
     : "new";
-  const db = new Db(c.env.DB);
-  const leads = new LeadsRepo(db, c.get("botId"));
+  const leads = new LeadsRepo(db, botId);
   await leads.setStatus(c.req.param("id"), status);
+  return c.redirect("/admin/leads");
+});
+
+// Inscribir/detener a un lead en una secuencia de seguimiento (F8 fase C).
+adminApp.post("/leads/:id/seguimiento/iniciar", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.seguimientos.administrar");
+  if (denied) return denied;
+  const form = await c.req.formData();
+  const sequenceId = String(form.get("sequence_id") ?? "").trim();
+  if (sequenceId) {
+    await enrollLeadInSequence(c.env, c.get("botId"), c.req.param("id"), sequenceId);
+  }
+  return c.redirect("/admin/leads");
+});
+
+adminApp.post("/leads/:id/seguimiento/detener", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.seguimientos.administrar");
+  if (denied) return denied;
+  await stopSequenceForLead(c.env, c.get("botId"), c.req.param("id"));
   return c.redirect("/admin/leads");
 });
 

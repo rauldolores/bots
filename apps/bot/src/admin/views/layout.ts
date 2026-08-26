@@ -49,6 +49,7 @@ const NAV: Section[] = [
       { id: "tickets", label: "Tickets", href: "/admin/tickets", icon: "life-buoy" },
       { id: "calendario", label: "Calendario", href: "/admin/calendario", icon: "calendar-clock" },
       { id: "campanas", label: "Campañas", href: "/admin/campanas", icon: "megaphone" },
+      { id: "seguimientos", label: "Seguimientos", href: "/admin/seguimientos", icon: "route" },
     ],
   },
   {

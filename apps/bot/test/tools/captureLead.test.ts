@@ -142,3 +142,107 @@ describe("captureLeadTool — contactos tipados (F8 fase B)", () => {
     expect(filas).toHaveLength(0);
   });
 });
+
+// El teléfono/correo es OBLIGATORIO: sin uno real, nadie puede contactar al
+// lead después. Un canal opaco (Telegram) no trae ese dato solo — hay que
+// pedirlo; uno telefónico (WhatsApp, voz) ya lo trae en channel_user_id.
+describe("captureLeadTool — el contacto es obligatorio", () => {
+  it("sin contact explícito y por un canal opaco (Telegram), se rechaza y NO crea el lead", async () => {
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    const result = (await tool.execute!({ name: "Ana", intent: "quiere el curso" }, {} as any)) as {
+      leadId: string | null;
+      captured: boolean;
+    };
+
+    expect(result.captured).toBe(false);
+    expect(result.leadId).toBeNull();
+    expect(await leads.list(10)).toHaveLength(0);
+  });
+
+  it("un contacto dictado que no es ni teléfono ni correo tampoco crea el lead", async () => {
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    const result = (await tool.execute!({ contact: "me llamo Ana", intent: "x" }, {} as any)) as {
+      captured: boolean;
+    };
+    expect(result.captured).toBe(false);
+    expect(await leads.list(10)).toHaveLength(0);
+  });
+
+  it("por un canal telefónico (WhatsApp/Twilio) NO hace falta contact explícito — el número del canal ya sirve", async () => {
+    const db = new Db(env.DB);
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("twilio", "+5215512345678");
+    const tool = captureLeadTool(env, () => conv.id, TEST_BOT_ID);
+
+    const result = (await tool.execute!({ name: "Beto", intent: "quiere cotización" }, {} as any)) as {
+      captured: boolean;
+      leadId: string;
+    };
+
+    expect(result.captured).toBe(true);
+    const rows = await leads.list(10);
+    expect(rows).toHaveLength(1);
+    // El dueño lee leads.contact en /admin/leads y en el CSV exportado — sin
+    // este relleno, un lead perfectamente contactable aparecería con "—".
+    // normalizePhone quita el "1" móvil legacy de México (ver contacts/normalize.ts)
+    expect(rows[0].contact).toBe("+525512345678");
+  });
+});
+
+// "a veces inserta 2 veces lo mismo" — el mismo cliente insistiendo, o el
+// modelo llamando la tool dos veces, no debe dejar dos filas en `leads`.
+describe("captureLeadTool — evita duplicados", () => {
+  it("el mismo teléfono capturado dos veces actualiza el lead existente en vez de duplicarlo", async () => {
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    const first = (await tool.execute!(
+      { name: "Carla", contact: "+5215512345678", intent: "quiere el curso básico" },
+      {} as any,
+    )) as { leadId: string; captured: boolean };
+    const second = (await tool.execute!(
+      { contact: "+5215512345678", intent: "también pregunta por el curso avanzado" },
+      {} as any,
+    )) as { leadId: string; captured: boolean };
+
+    expect(second.leadId).toBe(first.leadId);
+    const rows = await leads.list(10);
+    expect(rows).toHaveLength(1);
+    // El nombre ya capturado no se pierde, y el intent nuevo se ACUMULA.
+    expect(rows[0].name).toBe("Carla");
+    expect(rows[0].intent).toContain("quiere el curso básico");
+    expect(rows[0].intent).toContain("también pregunta por el curso avanzado");
+  });
+
+  it("un lead 'sold'/cerrado no se reutiliza — el mismo contacto crea uno nuevo", async () => {
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    const first = (await tool.execute!(
+      { contact: "+5215512345678", intent: "compró el curso" },
+      {} as any,
+    )) as { leadId: string };
+    await leads.setStatus(first.leadId, "sold");
+
+    const second = (await tool.execute!(
+      { contact: "+5215512345678", intent: "quiere otro curso, meses después" },
+      {} as any,
+    )) as { leadId: string };
+
+    expect(second.leadId).not.toBe(first.leadId);
+    expect(await leads.list(10)).toHaveLength(2);
+  });
+
+  it("un correo capturado dos veces desde canales opacos distintos también se deduplica", async () => {
+    const db = new Db(env.DB);
+    const conv2 = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("messenger", "psid-2");
+    const tool1 = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    const tool2 = captureLeadTool(env, () => conv2.id, TEST_BOT_ID);
+
+    const first = (await tool1.execute!({ contact: "ana@ejemplo.com", intent: "quiere info" }, {} as any)) as {
+      leadId: string;
+    };
+    const second = (await tool2.execute!(
+      { contact: "Ana@Ejemplo.com", intent: "escribió otra vez por Messenger" },
+      {} as any,
+    )) as { leadId: string };
+
+    expect(second.leadId).toBe(first.leadId);
+    expect(await leads.list(10)).toHaveLength(1);
+  });
+});

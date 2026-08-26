@@ -31,6 +31,8 @@ const VISTAS = [
   "/kb/new",
   "/habilidades",
   "/habilidades/nueva",
+  "/seguimientos",
+  "/seguimientos/nueva",
   "/mejoras",
   "/conversations",
   "/insights",

@@ -64,6 +64,20 @@ export class ConversationsRepo {
     );
   }
 
+  /**
+   * Todas las conversaciones telefónicas (twilio/whatsapp) cuyo channel_user_id
+   * coincide con alguna variante del mismo número — F8 fase C: para saber si ya
+   * existe con quién seguir un lead antes de intentar contactarlo.
+   */
+  async findByPhoneVariants(variants: string[]): Promise<Conversation[]> {
+    if (variants.length === 0) return [];
+    const marcas = variants.map(() => "?").join(", ");
+    return this.db.all<Conversation>(
+      `SELECT * FROM conversations WHERE bot_id = ? AND channel IN ('twilio', 'whatsapp') AND channel_user_id IN (${marcas})`,
+      [this.botId, ...variants],
+    );
+  }
+
   async getById(id: string): Promise<Conversation | null> {
     return this.db.first<Conversation>(
       "SELECT * FROM conversations WHERE id = ? AND bot_id = ?",

@@ -12,6 +12,7 @@ import { AgentJobsRepo } from "./jobs";
 import { runTurn } from "../agent/runner";
 import { processCampaignJobs } from "../campaigns";
 import { processSkillJobs } from "../skills/routes";
+import { processNurtureJobs } from "../nurture/run";
 
 /** Cuántas conversaciones atiende un tick. */
 const DEFAULT_LIMIT = 10;
@@ -21,6 +22,9 @@ const CAMPAIGN_BATCH_LIMIT = 20;
 
 /** Cuántas habilidades asíncronas procesa un tick (F8) — cada una es una llamada al LLM, así que el lote va chico. */
 const SKILL_BATCH_LIMIT = 5;
+
+/** Cuántos toques de seguimiento procesa un tick (F8 fase C) — mismo criterio que las habilidades. */
+const NURTURE_BATCH_LIMIT = 5;
 
 /** Tras este número de intentos fallidos, el trabajo se abandona. */
 const MAX_ATTEMPTS = 5;
@@ -36,6 +40,8 @@ export interface TickResult {
   campaignsSent: number;
   /** Habilidades asíncronas (F8) terminadas en esta corrida — ver src/skills/routes.ts. */
   skillsRun: number;
+  /** Toques de seguimiento (F8 fase C) mandados en esta corrida — ver src/nurture/run.ts. */
+  nurtureSent: number;
 }
 
 export async function tick(
@@ -46,7 +52,7 @@ export async function tick(
   const jobs = new AgentJobsRepo(db);
 
   const keys = await jobs.claimDue(opts.limit ?? DEFAULT_LIMIT);
-  const result: TickResult = { claimed: keys.length, answered: 0, failed: 0, campaignsSent: 0, skillsRun: 0 };
+  const result: TickResult = { claimed: keys.length, answered: 0, failed: 0, campaignsSent: 0, skillsRun: 0, nurtureSent: 0 };
 
   for (const key of keys) {
     try {
@@ -88,6 +94,14 @@ export async function tick(
     result.skillsRun = skills.done;
   } catch (e) {
     console.error("[tick] processSkillJobs:", e);
+  }
+
+  // Seguimiento de leads (F8 fase C): mismo criterio — lote chico y aislado.
+  try {
+    const nurture = await processNurtureJobs(env, NURTURE_BATCH_LIMIT);
+    result.nurtureSent = nurture.sent;
+  } catch (e) {
+    console.error("[tick] processNurtureJobs:", e);
   }
 
   return result;

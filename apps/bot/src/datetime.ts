@@ -75,6 +75,12 @@ export function formatDate(ms: number, timeZone: string): string {
   return new Date(ms).toLocaleDateString("es-MX", { timeZone });
 }
 
+/** La hora (0-23) que marca el reloj del negocio en este instante — para no mandar seguimiento a las 3am. */
+export function localHour(ms: number, timeZone: string): number {
+  const s = new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", hour: "2-digit" }).format(new Date(ms));
+  return Number.parseInt(s, 10);
+}
+
 /** "hoy" en la zona del negocio, en un formato largo para el prompt del sistema. */
 export function formatTodayLong(now: Date, timeZone: string): string {
   const long = now.toLocaleDateString("es-MX", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone });
