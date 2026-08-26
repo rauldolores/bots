@@ -89,6 +89,43 @@ export async function ingestMessage(
     return { acknowledged: true, scheduledInMs: null };
   }
 
+  // Baja ("STOP", "no me escriban"): se registra y se contesta UNA vez, sin
+  // gastar LLM. Va antes que las demás guardas porque es cumplimiento, no
+  // heurística — y deliberadamente NO pausa la conversación: darse de baja de
+  // un seguimiento no es dejar de ser cliente. Si esta persona escribe mañana,
+  // el bot le contesta normal; lo que queda cerrado es escribirle nosotros.
+  if (payload.text && !payload.audioUrl && !payload.imageUrl) {
+    try {
+      const { esPeticionDeBaja, MENSAJE_DE_BAJA } = await import("../contacts/optOutDetect");
+      if (esPeticionDeBaja(payload.text)) {
+        const { optOutKeysFor, regionForTimezone } = await import("../contacts/normalize");
+        const { OptOutsRepo } = await import("../db/optOuts");
+        const { SettingsRepo, SETTING_KEYS } = await import("../db/settings");
+        const tz = await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone);
+        const claves = optOutKeysFor(
+          payload.channel,
+          payload.channelUserId,
+          regionForTimezone(tz),
+        );
+        const optOuts = new OptOutsRepo(db, botId);
+        for (const clave of claves) await optOuts.add(clave, `mensaje: ${payload.text.slice(0, 80)}`);
+
+        await new MessagesRepo(db, botId).append(conv.id, "assistant", MENSAJE_DE_BAJA);
+        const channel = payload.channel as ChannelId;
+        await pickAdapter(channel).sendReply(
+          { channel, channelUserId: payload.channelUserId, chunks: [MENSAJE_DE_BAJA] },
+          env,
+        );
+        console.warn(`[opt-out] conv ${conv.id} pidió baja — registrada`);
+        return { acknowledged: true, scheduledInMs: null };
+      }
+    } catch (e) {
+      // Nunca debe tumbar el turno: si el registro falla, el mensaje sigue su
+      // camino normal y el dueño ve la petición en la bandeja.
+      console.error("[opt-out] no se pudo registrar la baja:", e);
+    }
+  }
+
   // Guardia anti-spam: el mismo mensaje por 3ª vez entre los últimos 5 → la
   // conversación descansa 1 hora, sin responder y sin gastar LLM.
   if (payload.text && !payload.audioUrl && !payload.imageUrl) {

@@ -87,3 +87,58 @@ describe("captureLeadTool — con un CRM conectado", () => {
     expect(row[0].exported_to).toBeNull();
   });
 });
+
+// F8 fase B: además del texto libre de `leads.contact`, el contacto queda
+// tipado y normalizado en lead_contacts — es lo único que después permite
+// cruzarlo y saber si se le puede escribir.
+describe("captureLeadTool — contactos tipados (F8 fase B)", () => {
+  it("guarda el teléfono dictado en E.164, y el canal por el que escribe", async () => {
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    await tool.execute!(
+      { name: "Ana", contact: "55 1234 5678", intent: "quiere el curso" },
+      {} as any,
+    );
+
+    const filas = await new Db(env.DB).all<{ kind: string; channel: string | null; address_norm: string; consent: string }>(
+      "SELECT kind, channel, address_norm, consent FROM lead_contacts WHERE bot_id = ? ORDER BY kind",
+      [TEST_BOT_ID],
+    );
+
+    // "55 1234 5678" dictado -> +525512345678
+    expect(filas).toContainEqual({
+      kind: "phone",
+      channel: null,
+      address_norm: "+525512345678",
+      consent: "inbound",
+    });
+    // Telegram: identificador opaco, solo sirve sobre esta conversación.
+    expect(filas).toContainEqual({
+      kind: "channel",
+      channel: "telegram",
+      address_norm: "telegram:u1",
+      consent: "inbound",
+    });
+  });
+
+  it("un correo dictado se guarda como correo, en minúsculas", async () => {
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    await tool.execute!({ contact: "  Ana@Ejemplo.COM ", intent: "cotización" }, {} as any);
+
+    const filas = await new Db(env.DB).all<{ kind: string; address_norm: string }>(
+      "SELECT kind, address_norm FROM lead_contacts WHERE bot_id = ? AND kind = 'email'",
+      [TEST_BOT_ID],
+    );
+    expect(filas).toEqual([{ kind: "email", address_norm: "ana@ejemplo.com" }]);
+  });
+
+  it("un contacto que no se puede usar NO se guarda — mejor nada que basura", async () => {
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    await tool.execute!({ contact: "me llamo Ana", intent: "x" }, {} as any);
+
+    const filas = await new Db(env.DB).all(
+      "SELECT id FROM lead_contacts WHERE bot_id = ? AND kind != 'channel'",
+      [TEST_BOT_ID],
+    );
+    expect(filas).toHaveLength(0);
+  });
+});

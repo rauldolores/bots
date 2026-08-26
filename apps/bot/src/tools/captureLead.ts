@@ -7,6 +7,7 @@ import { ConversationsRepo } from "../db/conversations";
 import { BotConnectorsRepo } from "../db/botConnectors";
 import { resolveConnectorCreds } from "../connectors/creds";
 import { CRM_ADAPTERS } from "../connectors/registry";
+import { registerLeadContacts } from "../contacts/register";
 
 export function captureLeadTool(env: Env, getConversationId: () => string | null, botId: string) {
   return tool({
@@ -34,6 +35,14 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
         intent,
         notes,
       });
+
+      // F8 fase B: además del texto libre de arriba, el contacto queda TIPADO
+      // y normalizado en lead_contacts — es lo único que después permite
+      // cruzarlo, consultarlo y saber si se le puede escribir. `contact` se
+      // conserva tal cual: es lo que ve el dueño y lo que se empuja al CRM.
+      await registerLeadContacts(db, botId, leadId, contact, conv).catch((e) =>
+        console.error("[captureLead] no se pudieron registrar los contactos tipados:", e),
+      );
 
       // El lead SIEMPRE queda local primero (es la fuente interna — conserva
       // el link a la conversación y no depende de que el CRM esté disponible).
