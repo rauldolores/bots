@@ -6,7 +6,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { vinquliaConnector } from "../../src/connectors/crm/vinqulia";
-import { CRM_ADAPTERS, CRM_PROVIDERS } from "../../src/connectors/registry";
+import { vinquliaTicketConnector } from "../../src/connectors/tickets/vinqulia";
+import { CRM_ADAPTERS, CRM_PROVIDERS, TICKET_ADAPTERS, TICKET_PROVIDERS } from "../../src/connectors/registry";
 import type { ConnectorCreds } from "../../src/connectors/types";
 
 const fetchMock = vi.fn();
@@ -53,6 +54,113 @@ describe("está dado de alta en el catálogo", () => {
     const salesId = (CRM_PROVIDERS.vinqulia?.fields ?? []).find((f) => f.name === "salesId");
     expect(salesId?.optional).toBe(true);
   });
+
+  it("tickets es un conector aparte, con adaptador propio", () => {
+    expect(TICKET_PROVIDERS["vinqulia-tickets"]?.category).toBe("tickets");
+    expect(TICKET_ADAPTERS["vinqulia-tickets"]).toBe(vinquliaTicketConnector);
+  });
+
+  it("CRM y tickets NO comparten id: bot_connectors es único por (bot_id, provider) — conectar uno borraría el otro", () => {
+    const crmIds = Object.keys(CRM_PROVIDERS);
+    const ticketIds = Object.keys(TICKET_PROVIDERS);
+    expect(crmIds.filter((id) => ticketIds.includes(id))).toEqual([]);
+  });
+});
+
+describe("tickets — pushTicket", () => {
+  const TICKET = {
+    category: "queja",
+    summary: "No puedo iniciar sesión",
+    priority: "high" as const,
+    requesterName: "Ana García",
+    requesterContact: "ana@empresa.com",
+  };
+
+  it("crea el ticket abierto, con el asunto etiquetado por categoría", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ id: 3 }]));
+    const result = await vinquliaTicketConnector.pushTicket(creds({ salesId: "1" }), TICKET);
+    expect(result).toEqual({ ok: true, externalId: "3" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://crm.miempresa.com/api/datos/rest/v1/tickets");
+    const body = JSON.parse(init.body);
+    expect(body.subject).toBe("[queja] No puedo iniciar sesión");
+    expect(body.status).toBe("open");
+    expect(body.sales_id).toBe(1);
+  });
+
+  it("la prioridad y quién reporta se conservan en la descripción — el ticket de Vinqulia no tiene esos campos", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ id: 3 }]));
+    await vinquliaTicketConnector.pushTicket(creds(), TICKET);
+    const { description } = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(description).toContain("No puedo iniciar sesión");
+    expect(description).toContain("Ana García");
+    expect(description).toContain("ana@empresa.com");
+    expect(description).toContain("high");
+  });
+
+  it("un asunto larguísimo se corta en vez de que el CRM lo rechace", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ id: 3 }]));
+    await vinquliaTicketConnector.pushTicket(creds(), { ...TICKET, summary: "x".repeat(400) });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).subject.length).toBeLessThanOrEqual(150);
+  });
+
+  it("sin datos de quien reporta, no deja una línea 'Reporta:' vacía", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ id: 3 }]));
+    await vinquliaTicketConnector.pushTicket(creds(), {
+      category: "duda",
+      summary: "Pregunta general",
+      requesterName: null,
+      requesterContact: null,
+    });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).description).not.toContain("Reporta:");
+  });
+
+  it("error del CRM: se reporta, no se traga en silencio", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401, text: async () => "clave inválida" } as unknown as Response);
+    const result = await vinquliaTicketConnector.pushTicket(creds(), TICKET);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("401");
+  });
+
+  it("sin URL configurada: error claro, sin salir a la red", async () => {
+    const result = await vinquliaTicketConnector.pushTicket({ apiKey: "k", config: {} }, TICKET);
+    expect(result.ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("tickets — listOpen", () => {
+  it("pide solo los abiertos AL CRM (no filtra después) y arma el enlace al ticket", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse([{ id: 3, subject: "No puedo iniciar sesión", status: "open", created_at: "2026-08-20T10:00:00Z" }]),
+    );
+    const result = await vinquliaTicketConnector.listOpen(creds(), 25);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://crm.miempresa.com/api/datos/rest/v1/tickets?status=eq.open&order=id.desc&limit=25",
+    );
+    expect(result.items[0]).toEqual({
+      id: "3",
+      subject: "No puedo iniciar sesión",
+      status: "open",
+      createdAt: new Date("2026-08-20T10:00:00Z").getTime(),
+      url: "https://crm.miempresa.com/#/tickets/3/show",
+    });
+  });
+
+  it("filas incompletas no rompen el listado", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ id: 9 }]));
+    const result = await vinquliaTicketConnector.listOpen(creds(), 10);
+    expect(result.ok).toBe(true);
+    expect(result.items[0]).toMatchObject({ id: "9", subject: "(sin asunto)", status: "open" });
+  });
+
+  it("error del CRM: se reporta con items vacío", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 500, text: async () => "boom" } as unknown as Response);
+    const result = await vinquliaTicketConnector.listOpen(creds(), 10);
+    expect(result.ok).toBe(false);
+    expect(result.items).toEqual([]);
+  });
 });
 
 describe("pushLead", () => {
@@ -83,11 +191,16 @@ describe("pushLead", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const [url, init] = fetchMock.mock.calls[1];
     expect(url).toBe("https://crm.miempresa.com/api/datos/rest/v1/contact_notes");
-    expect(JSON.parse(init.body)).toEqual({
+    const body = JSON.parse(init.body);
+    expect(body).toMatchObject({
       contact_id: 42,
+      type: "note",
       text: "Quiere facturación\n\nPresupuesto 200 mil",
       sales_id: 1,
     });
+    // `date` es parte del registro de contact_notes — se manda explícito, no
+    // se deja a que la base tenga default.
+    expect(Number.isFinite(new Date(body.date).getTime())).toBe(true);
   });
 
   it("si la nota falla, el lead YA quedó creado — sigue siendo un push exitoso", async () => {
@@ -146,6 +259,15 @@ describe("pushLead", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("https://crm.miempresa.com/api/datos/rest/v1/contacts");
   });
 
+  it("con la URL REST completa, el enlace al registro NO se arma sobre la ruta de la API", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ id: 42, first_name: "Ana" }]));
+    const result = await vinquliaConnector.listRecent(
+      { apiKey: "k", config: { url: "https://crm.miempresa.com/api/datos/rest/v1" } },
+      10,
+    );
+    expect(result.items[0].url).toBe("https://crm.miempresa.com/#/contacts/42/show");
+  });
+
   it("sin URL configurada: error claro, sin salir a la red", async () => {
     const result = await vinquliaConnector.pushLead({ apiKey: "k", config: {} }, LEAD);
     expect(result.ok).toBe(false);
@@ -192,6 +314,7 @@ describe("listRecent", () => {
       name: "Ana García",
       contact: "ana@empresa.com",
       createdAt: new Date("2026-08-20T10:00:00Z").getTime(),
+      url: "https://crm.miempresa.com/#/contacts/42/show",
     });
     expect(fetchMock.mock.calls[0][0]).toBe(
       "https://crm.miempresa.com/api/datos/rest/v1/contacts?order=id.desc&limit=25",

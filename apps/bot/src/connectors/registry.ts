@@ -7,6 +7,7 @@ import type { CrmConnector, TicketConnector, CalendarConnector } from "./types";
 import { hubspotConnector } from "./crm/hubspot";
 import { pipedriveConnector } from "./crm/pipedrive";
 import { vinquliaConnector } from "./crm/vinqulia";
+import { vinquliaTicketConnector } from "./tickets/vinqulia";
 import { zendeskConnector } from "./tickets/zendesk";
 import { jiraConnector } from "./tickets/jira";
 import { calcomConnector } from "./calendar/calcom";
@@ -99,6 +100,27 @@ export const CRM_PROVIDERS: Record<string, ConnectorMeta> = {
 };
 
 export const TICKET_PROVIDERS: Record<string, ConnectorMeta> = {
+  // Id distinto al del CRM a propósito: bot_connectors es único por
+  // (bot_id, provider) y categoryOfProvider() resuelve la categoría por el id
+  // — con el mismo "vinqulia" en ambas, conectar una borraría la otra.
+  "vinqulia-tickets": {
+    id: "vinqulia-tickets",
+    category: "tickets",
+    name: "Vinqulia",
+    icon: "life-buoy",
+    desc: "Los handoffs del bot se abren como tickets en tu Vinqulia.",
+    steps: [
+      'En Vinqulia: <span class="font-mono">Ajustes → API</span>, crea una clave de API y cópiala.',
+      "Pega la dirección de tu Vinqulia — solo el dominio, sin rutas (ej. <span class=\"font-mono\">https://crm.miempresa.com</span>).",
+      "Si ya conectaste Vinqulia como CRM, aquí van los mismos datos: son conexiones separadas (una para leads, otra para tickets).",
+    ],
+    apiKeyLabel: "Clave de API",
+    apiKeyPlaceholder: "········",
+    fields: [
+      { name: "url", label: "Dirección de tu Vinqulia", placeholder: "https://crm.miempresa.com", isConfig: true },
+      { name: "salesId", label: "ID del vendedor (opcional)", placeholder: "1", isConfig: true, optional: true },
+    ],
+  },
   zendesk: {
     id: "zendesk",
     category: "tickets",
@@ -170,7 +192,11 @@ export const CRM_ADAPTERS: Record<string, CrmConnector> = {
   hubspot: hubspotConnector,
   pipedrive: pipedriveConnector,
 };
-export const TICKET_ADAPTERS: Record<string, TicketConnector> = { zendesk: zendeskConnector, jira: jiraConnector };
+export const TICKET_ADAPTERS: Record<string, TicketConnector> = {
+  "vinqulia-tickets": vinquliaTicketConnector,
+  zendesk: zendeskConnector,
+  jira: jiraConnector,
+};
 export const CALENDAR_ADAPTERS: Record<string, CalendarConnector> = { calcom: calcomConnector, "google-calendar": googleCalendarConnector };
 
 export const CATEGORY_LABELS: Record<ConnectorCategory, string> = {
