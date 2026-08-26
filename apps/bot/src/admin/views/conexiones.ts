@@ -672,7 +672,8 @@ export function renderMcpConnectModal(opts?: { error?: string }): string {
           autorizar con el proveedor real.</p>
       </div>
       <div style="display:flex;gap:8px">
-        <button type="submit" formmethod="get" formaction="/admin/conexiones/connectors/mcp/oauth/start"
+        <button type="button"
+                onclick="var f=this.closest('form');var n=f.querySelector('[name=name]').value.trim();var u=f.querySelector('[name=url]').value.trim();if(!n||!u){alert('Completa nombre y URL primero.');return;}location.href='/admin/conexiones/connectors/mcp/oauth/start?name='+encodeURIComponent(n)+'&url='+encodeURIComponent(u);"
                 class="ghostbtn font-display font-bold text-[12.5px] cursor-pointer"
                 style="flex:1;border:1px solid var(--line);color:var(--cream);padding:10px">Conectar con OAuth</button>
         <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
@@ -717,7 +718,9 @@ export async function connectMcp(env: Env, botId: string, form: FormData): Promi
 
 async function renderMcpCategoryBody(env: Env, botId: string): Promise<{ summary: string; cards: string }> {
   const db = new Db(env.DB);
-  const connectors = (await new BotConnectorsRepo(db).listByBot(botId)).filter((c) => c.category === "mcp");
+  const connectors = (await new BotConnectorsRepo(db).listByBot(botId)).filter(
+    (c) => c.category === "mcp" && c.enabled,
+  );
   const cards = connectors.map(renderMcpConnectedCard).join("") + renderMcpAddCard();
   return { summary: `Conectores MCP: ${connectors.length} conectado${connectors.length === 1 ? "" : "s"}`, cards };
 }

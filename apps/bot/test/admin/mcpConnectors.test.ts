@@ -16,9 +16,8 @@ vi.mock("../../src/db/vault", () => ({
   deleteSecret: (...args: unknown[]) => deleteSecretMock(...args),
 }));
 
-const { connectMcp, disconnectConnector, renderConnectorsGrid, categoryOfProvider } = await import(
-  "../../src/admin/views/conexiones"
-);
+const { connectMcp, disconnectConnector, renderConnectorsGrid, categoryOfProvider, renderMcpConnectModal } =
+  await import("../../src/admin/views/conexiones");
 
 let db: Db;
 let env: Env;
@@ -79,6 +78,29 @@ describe("disconnectConnector (genérico) sobre un conector MCP", () => {
     await disconnectConnector(env, TEST_BOT_ID, row.provider);
     expect(deleteSecretMock).toHaveBeenCalledWith(expect.anything(), "11111111-1111-1111-1111-111111111111");
     expect(await new BotConnectorsRepo(db).getByBotAndProvider(TEST_BOT_ID, row.provider)).toBeNull();
+  });
+
+  it("tras desconectar, la grilla ya no muestra la tarjeta (bug: listByBot() no filtraba enabled)", async () => {
+    await connectMcp(env, TEST_BOT_ID, form({ name: "Notion", url: "https://mcp.example.com", token: "tok123" }));
+    const [row] = await new BotConnectorsRepo(db).listByBot(TEST_BOT_ID);
+    await disconnectConnector(env, TEST_BOT_ID, row.provider);
+
+    const grid = await renderConnectorsGrid(env, TEST_BOT_ID, "mcp");
+    expect(grid).toContain("Conectores MCP: 0 conectados");
+    expect(grid).not.toContain("Notion");
+  });
+});
+
+describe("renderMcpConnectModal — botón de OAuth", () => {
+  it("no depende de formmethod/formaction (htmx del <form> los ignora) — usa un botón type=button con su propio onclick", () => {
+    const html = renderMcpConnectModal();
+    expect(html).not.toContain("formmethod");
+    expect(html).not.toContain("formaction");
+    const oauthButtonMatch = html.match(/<button[^>]*>Conectar con OAuth<\/button>/);
+    expect(oauthButtonMatch).not.toBeNull();
+    const oauthButton = oauthButtonMatch![0];
+    expect(oauthButton).toContain('type="button"');
+    expect(oauthButton).toContain("/admin/conexiones/connectors/mcp/oauth/start");
   });
 });
 
