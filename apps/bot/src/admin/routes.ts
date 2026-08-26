@@ -72,6 +72,7 @@ import {
   saveWidgetConfig,
 } from "./views/conexiones";
 import { startOAuth, handleOAuthCallback } from "./oauthConnect";
+import { startMcpOAuth, handleMcpOAuthCallback } from "./mcpOAuthConnect";
 import type { ConnectorCategory } from "../connectors/registry";
 import { renderCampanas, renderLivePreview } from "./views/campanas";
 import { enqueueCampaign, createHandoffTemplate, contentApprovalStatus, listContentTemplates } from "../campaigns";
@@ -1190,6 +1191,41 @@ adminApp.get("/conexiones/oauth/:provider/callback", async (c) => {
     cookieRaw,
   );
   deleteCookie(c, OAUTH_STATE_COOKIE);
+  return c.redirect(redirectTo, 302);
+});
+
+// Conectores MCP genéricos por OAuth 2.1 (F-MCP-OAuth): a diferencia de
+// google-calendar/jira de arriba (proveedor fijo, client_id de ENV), aquí
+// el "proveedor" es CUALQUIER URL que el dueño pegue — el client_id sale de
+// registro dinámico (RFC7591), no de una env var, así que ese registro +
+// el code_verifier de PKCE también tienen que viajar en la cookie de state
+// (ver connectors/mcpOAuth.ts). El protocolo en sí (discovery, DCR, PKCE,
+// intercambio de tokens) lo resuelve @ai-sdk/mcp — auth() — no se reimplementa.
+const MCP_OAUTH_STATE_COOKIE = "nodia_mcp_oauth_state";
+
+adminApp.get("/conexiones/connectors/mcp/oauth/start", async (c) => {
+  const name = c.req.query("name") ?? "";
+  const url = c.req.query("url") ?? "";
+  const result = await startMcpOAuth(c.env, name, url);
+  if ("error" in result) return c.redirect(`/admin/conexiones?cat=mcp&err=${encodeURIComponent(result.error)}`, 302);
+  setCookie(c, MCP_OAUTH_STATE_COOKIE, JSON.stringify(result.state), {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    maxAge: 600,
+  });
+  return c.redirect(result.url, 302);
+});
+
+adminApp.get("/conexiones/connectors/mcp/oauth/callback", async (c) => {
+  const cookieRaw = getCookie(c, MCP_OAUTH_STATE_COOKIE);
+  const { redirectTo } = await handleMcpOAuthCallback(
+    c.env,
+    c.get("botId"),
+    { code: c.req.query("code"), state: c.req.query("state"), error: c.req.query("error") },
+    cookieRaw,
+  );
+  deleteCookie(c, MCP_OAUTH_STATE_COOKIE);
   return c.redirect(redirectTo, 302);
 });
 

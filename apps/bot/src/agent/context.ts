@@ -59,7 +59,7 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
   const enabledTools = Object.fromEntries(
     Object.entries(tools).filter(([name]) => cfg.enabledToolNames.includes(name)),
   );
-  const mcpTools = await loadMcpTools(db, botId);
+  const mcpTools = await loadMcpTools(env, db, botId);
   Object.assign(enabledTools, mcpTools);
 
   // Sin conversación (modo habilidad/API) no hay estado que leer: el turno no
