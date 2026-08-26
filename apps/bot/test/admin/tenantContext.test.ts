@@ -1,7 +1,8 @@
 /**
  * resolveAdminTenant (F5): a qué bot pertenece un request del panel.
- *   - Sin organización (Basic Auth / KontrolIA sin configurar): el fallback
- *     de siempre, resolveBotId() — exige exactamente un bot en toda la tabla.
+ *   - Sin organización (Basic Auth / KontrolIA sin configurar): con UN bot,
+ *     el de siempre. Con 2+, la cookie manda y si no hay se usa el más
+ *     antiguo — antes esto lanzaba y tumbaba TODO el panel con 500.
  *   - Con organización: el bot debe pertenecer a ella; cookie inválida o
  *     ausente cae al primero (por antigüedad) y la deja apuntando ahí.
  */
@@ -27,10 +28,62 @@ function appReturning(organizationId: string | null) {
 }
 
 describe("resolveAdminTenant — sin organización (Basic Auth)", () => {
-  it("cae a resolveBotId(): el único bot de la tabla", async () => {
+  it("con un solo bot: ese, y sin ensuciar con cookie", async () => {
     const res = await appReturning(null).request("/t");
     const body = await res.json();
     expect(body).toEqual({ organizationId: null, botId: TEST_BOT_ID });
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  // El caso que rompía el panel entero: quien entra por Basic Auth tiene la
+  // contraseña del despliegue, así que ya ve todos los bots — no hay frontera
+  // de datos que cuidar, solo la de no mostrar el equivocado en silencio (de
+  // eso se encarga el selector del header).
+  describe("con 2+ bots en el despliegue", () => {
+    let otherBotId: string;
+    beforeEach(async () => {
+      otherBotId = await createSecondTestBot(db);
+    });
+
+    it("ya no lanza: usa el más antiguo y deja la cookie puesta", async () => {
+      const res = await appReturning(null).request("/t");
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toEqual({ organizationId: null, botId: TEST_BOT_ID });
+      expect(res.headers.get("set-cookie") ?? "").toContain(`${BOT_COOKIE}=${TEST_BOT_ID}`);
+    });
+
+    it("respeta la cookie del bot elegido, aunque sea de otra organización", async () => {
+      // Sin sesión de KontrolIA la organización no acota nada: el dueño del
+      // despliegue puede pararse en cualquiera de sus bots.
+      const res = await appReturning(null).request("/t", {
+        headers: { cookie: `${BOT_COOKIE}=${otherBotId}` },
+      });
+      const body = await res.json();
+      expect(body).toEqual({ organizationId: null, botId: otherBotId });
+      expect(res.headers.get("set-cookie")).toBeNull(); // ya era válida
+    });
+
+    it("una cookie que apunta a un bot inexistente cae al más antiguo y se corrige sola", async () => {
+      const res = await appReturning(null).request("/t", {
+        headers: { cookie: `${BOT_COOKIE}=00000000-0000-0000-0000-0000000009xx` },
+      });
+      const body = await res.json();
+      expect(body).toEqual({ organizationId: null, botId: TEST_BOT_ID });
+      expect(res.headers.get("set-cookie") ?? "").toContain(`${BOT_COOKIE}=${TEST_BOT_ID}`);
+    });
+
+    it("la elección es estable entre requests: sin cookie siempre da el mismo", async () => {
+      const a = await (await appReturning(null).request("/t")).json();
+      const b = await (await appReturning(null).request("/t")).json();
+      expect(a).toEqual(b);
+    });
+  });
+
+  it("con CERO bots sigue siendo un error de instalación, no una ambigüedad", async () => {
+    await db.run("DELETE FROM bots");
+    const res = await appReturning(null).request("/t");
+    expect(res.status).toBe(500);
   });
 });
 

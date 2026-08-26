@@ -11,7 +11,7 @@
  * específicos). Solo que su SQL corre en el motor real.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
+import { createTestDb, createSecondTestBot, TEST_BOT_ID } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { MessagesRepo } from "../../src/db/messages";
@@ -29,6 +29,8 @@ const VISTAS = [
   "/costs",
   "/kb",
   "/kb/new",
+  "/habilidades",
+  "/habilidades/nueva",
   "/mejoras",
   "/conversations",
   "/insights",
@@ -111,5 +113,55 @@ describe("el panel renderiza con datos", () => {
     const res = await adminApp.request("/leads/export.csv", { headers: AUTH }, env);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/csv");
+  });
+});
+
+// Regresión: con 2+ bots y Basic Auth, resolveAdminTenant lanzaba y TODAS las
+// pantallas respondían 500 — no solo alguna. Desde que el panel puede crear
+// bots, ese estado deja de ser raro.
+describe("el panel sobrevive con más de un bot (Basic Auth)", () => {
+  beforeEach(async () => {
+    await createSecondTestBot(db);
+  });
+
+  for (const ruta of VISTAS) {
+    it(`GET ${ruta}`, async () => {
+      const res = await adminApp.request(ruta, { headers: AUTH }, env);
+      expect(res.status).toBe(200);
+    });
+  }
+
+  it("/projects ofrece los dos bots, marcando el activo", async () => {
+    const res = await adminApp.request("/projects", { headers: AUTH }, env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { localBots?: { id: string; current: boolean }[] };
+    expect(body.localBots).toHaveLength(2);
+    expect(body.localBots!.filter((b) => b.current)).toHaveLength(1);
+  });
+
+  it("cambiar de bot deja la cookie puesta; un bot inventado se rechaza", async () => {
+    const otro = (await db.all<{ id: string }>("SELECT id FROM bots WHERE id != ?", [TEST_BOT_ID]))[0];
+    const ok = await adminApp.request(
+      "/switch-bot",
+      {
+        method: "POST",
+        headers: { ...AUTH, "Content-Type": "application/x-www-form-urlencoded" },
+        body: `bot_id=${otro.id}`,
+      },
+      env,
+    );
+    expect(ok.status).toBe(302);
+    expect(ok.headers.get("set-cookie") ?? "").toContain(otro.id);
+
+    const malo = await adminApp.request(
+      "/switch-bot",
+      {
+        method: "POST",
+        headers: { ...AUTH, "Content-Type": "application/x-www-form-urlencoded" },
+        body: "bot_id=00000000-0000-0000-0000-000000000999",
+      },
+      env,
+    );
+    expect(malo.status).toBe(400);
   });
 });

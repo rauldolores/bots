@@ -117,7 +117,14 @@ describe("otras rutas sin ExecutionContext", () => {
       conToken,
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, claimed: 0, answered: 0, failed: 0, campaignsSent: 0 });
+    expect(await res.json()).toEqual({
+      ok: true,
+      claimed: 0,
+      answered: 0,
+      failed: 0,
+      campaignsSent: 0,
+      skillsRun: 0,
+    });
   });
 
   it("/cron/tick acepta el token por Authorization (así lo manda Vercel Cron)", async () => {

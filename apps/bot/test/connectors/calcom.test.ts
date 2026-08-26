@@ -46,14 +46,19 @@ describe("calcomConnector.pushAppointment", () => {
 
 describe("calcomConnector.listUpcoming", () => {
   it("filtra canceladas y pasadas, ordena por fecha", async () => {
+    // Fechas RELATIVAS a propósito: con fechas fijas este test se volvía una
+    // bomba de tiempo — el día que "hoy" alcanzaba al fixture, las dos citas
+    // futuras pasaban a ser pasadas y el filtro las descartaba (mismo problema
+    // que ya documenta test/admin/calendarioView.test.ts).
+    const enDias = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString();
     global.fetch = vi.fn(async () =>
       new Response(
         JSON.stringify({
           bookings: [
-            { id: 1, uid: "abc", startTime: "2026-08-25T00:00:00Z", status: "ACCEPTED", attendees: [{ name: "Ana", email: "ana@x.com" }] },
-            { id: 2, startTime: "2020-01-01T00:00:00Z", status: "ACCEPTED", attendees: [{ name: "Vieja" }] },
-            { id: 3, startTime: "2026-08-24T00:00:00Z", status: "CANCELLED", attendees: [{ name: "Cancelada" }] },
-            { id: 4, uid: "def", startTime: "2026-08-24T00:00:00Z", status: "ACCEPTED", attendees: [{ name: "Beto", email: "beto@x.com" }] },
+            { id: 1, uid: "abc", startTime: enDias(2), status: "ACCEPTED", attendees: [{ name: "Ana", email: "ana@x.com" }] },
+            { id: 2, startTime: enDias(-500), status: "ACCEPTED", attendees: [{ name: "Vieja" }] },
+            { id: 3, startTime: enDias(1), status: "CANCELLED", attendees: [{ name: "Cancelada" }] },
+            { id: 4, uid: "def", startTime: enDias(1), status: "ACCEPTED", attendees: [{ name: "Beto", email: "beto@x.com" }] },
           ],
         }),
         { status: 200 },

@@ -22,8 +22,13 @@ import { AgentStateRepo, type AgentState } from "./state";
 export interface AgentContextInput {
   env: Env;
   botId: string;
-  conversationId: string;
-  conversationKey: string;
+  /**
+   * null cuando el agente trabaja SIN conversación (F8: una habilidad
+   * invocada por API). En ese modo no hay bandeja, ni historial, ni cliente
+   * del otro lado — solo el cerebro (prompt del negocio + RAG + tools).
+   */
+  conversationId: string | null;
+  conversationKey: string | null;
 }
 
 export interface AgentContext {
@@ -57,14 +62,19 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
   const mcpTools = await loadMcpTools(db, botId);
   Object.assign(enabledTools, mcpTools);
 
-  const state = await new AgentStateRepo(db).get(conversationKey);
+  // Sin conversación (modo habilidad/API) no hay estado que leer: el turno no
+  // viene de nadie y no hay contadores previos. Todo lo que consume `state`
+  // más abajo ya lo trataba como opcional.
+  const state = conversationKey ? await new AgentStateRepo(db).get(conversationKey) : null;
 
   const memoryBlocks: string[] = [];
   let knownCustomerName: string | undefined;
 
   // Memoria del cliente (flywheel): los hechos que extrajo el analizador.
   try {
-    const facts = await new CustomerFactsRepo(db, botId).forConversation(conversationId, 8);
+    const facts = conversationId
+      ? await new CustomerFactsRepo(db, botId).forConversation(conversationId, 8)
+      : [];
     if (facts.length > 0) {
       memoryBlocks.push(
         `<cliente>\nLo que ya sabes de este cliente (de conversaciones pasadas):\n${facts

@@ -56,6 +56,7 @@ const NAV: Section[] = [
     items: [
       { id: "agente", label: "Flujo", href: "/admin/agente", icon: "workflow" },
       { id: "kb", label: "Conocimiento", href: "/admin/kb", icon: "book-open" },
+      { id: "habilidades", label: "Habilidades", href: "/admin/habilidades", icon: "square-function" },
       { id: "mejoras", label: "Mejoras", href: "/admin/mejoras", icon: "sparkles" },
       { id: "conexiones", label: "Conexiones", href: "/admin/conexiones", icon: "plug-zap" },
       { id: "telefono", label: "Tu número", href: "/admin/telefono", icon: "phone-forwarded" },
@@ -591,6 +592,26 @@ export function layout(opts: {
               if (accOpen && path.indexOf(accWrap) === -1) { accOpen = false; document.getElementById('account-panel').innerHTML = ''; }
             });
           }
+        }
+      }
+
+      // Selector de bot LOCAL (sin KontrolIA Auth): el despliegue tiene varios
+      // bots en la misma base. Antes esto ni se podía llegar a ver — el panel
+      // entero respondía 500 con 2+ bots. Es un <select> simple a propósito:
+      // sin organizaciones que elegir, el panel de dos columnas sobra.
+      if (d.localBots && d.localBots.length > 1) {
+        var localEl = document.getElementById('ctx-switcher');
+        if (localEl) {
+          var lopts = d.localBots.map(function (b) {
+            return '<option value="' + esc(b.id) + '"' + (b.current ? ' selected' : '') + '>' + esc(b.name) + '</option>';
+          }).join('');
+          localEl.innerHTML =
+            '<form method="POST" action="/admin/switch-bot" style="display:flex;align-items:center;gap:7px">' +
+            '<span style="font-size:11px;color:var(--dim)">Bot</span>' +
+            '<select name="bot_id" onchange="this.form.submit()" title="Cambiar de bot" ' +
+            'style="background:var(--panel);color:var(--cream);border:1px solid var(--line);border-radius:10px;' +
+            'padding:6px 10px;font-size:12px;cursor:pointer;box-shadow:var(--shadow-sm)">' + lopts + '</select>' +
+            '</form>';
         }
       }
 

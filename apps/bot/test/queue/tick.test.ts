@@ -87,7 +87,7 @@ describe("tres mensajes seguidos = una sola respuesta", () => {
     await vencerTurnos();
     const r = await tick(env);
 
-    expect(r).toEqual({ claimed: 1, answered: 1, failed: 0, campaignsSent: 0 });
+    expect(r).toEqual({ claimed: 1, answered: 1, failed: 0, campaignsSent: 0, skillsRun: 0 });
     expect(streamTextMock).toHaveBeenCalledTimes(1);
     expect(sendReply).toHaveBeenCalledTimes(1);
 
@@ -105,7 +105,7 @@ describe("tres mensajes seguidos = una sola respuesta", () => {
     await tick(env);
     const segundo = await tick(env);
 
-    expect(segundo).toEqual({ claimed: 0, answered: 0, failed: 0, campaignsSent: 0 });
+    expect(segundo).toEqual({ claimed: 0, answered: 0, failed: 0, campaignsSent: 0, skillsRun: 0 });
     expect(sendReply).toHaveBeenCalledTimes(1);
   });
 
@@ -138,14 +138,14 @@ describe("tres mensajes seguidos = una sola respuesta", () => {
 
 describe("tick — sin trabajo y con fallos", () => {
   it("no hace nada cuando la cola está vacía", async () => {
-    expect(await tick(env)).toEqual({ claimed: 0, answered: 0, failed: 0, campaignsSent: 0 });
+    expect(await tick(env)).toEqual({ claimed: 0, answered: 0, failed: 0, campaignsSent: 0, skillsRun: 0 });
     expect(streamTextMock).not.toHaveBeenCalled();
   });
 
   it("no toma trabajos que todavía no vencen", async () => {
     await ingestMessage(env, { channel: "telegram", channelUserId: "u1", text: "hola" });
     // Sin vencerTurnos(): el buffer de 8s sigue corriendo.
-    expect(await tick(env)).toEqual({ claimed: 0, answered: 0, failed: 0, campaignsSent: 0 });
+    expect(await tick(env)).toEqual({ claimed: 0, answered: 0, failed: 0, campaignsSent: 0, skillsRun: 0 });
     expect(sendReply).not.toHaveBeenCalled();
   });
 
@@ -241,7 +241,7 @@ describe("tick — sin trabajo y con fallos", () => {
 
     const r = await tick(env);
 
-    expect(r).toEqual({ claimed: 1, answered: 0, failed: 0, campaignsSent: 0 });
+    expect(r).toEqual({ claimed: 1, answered: 0, failed: 0, campaignsSent: 0, skillsRun: 0 });
     // Si no se cerrara, reintentaría para siempre sobre un buffer vacío.
     expect(await db.all("SELECT conversation_key FROM agent_jobs")).toHaveLength(0);
   });
@@ -288,7 +288,7 @@ describe("con 2+ bots en la tabla (F5): el webhook trae su propio botId, no debe
     );
 
     const r = await tick(env);
-    expect(r).toEqual({ claimed: 1, answered: 1, failed: 0, campaignsSent: 0 });
+    expect(r).toEqual({ claimed: 1, answered: 1, failed: 0, campaignsSent: 0, skillsRun: 0 });
     expect(sendReply).toHaveBeenCalledTimes(1);
   });
 });

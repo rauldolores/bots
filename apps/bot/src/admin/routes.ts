@@ -37,6 +37,14 @@ import { renderInsights } from "./views/insights";
 import { analyzeConversations } from "../insights/analyzer";
 import { renderAgentePage, renderAgenteCanvas, renderNodeModal, toggleTool, toastOob } from "./views/agente";
 import { renderKbList, renderKbEditor } from "./views/kb";
+import {
+  renderHabilidades,
+  renderSkillForm,
+  parseOutputFields,
+  validateFields,
+} from "./views/habilidades";
+import { BotSkillsRepo, slugify } from "../db/skills";
+import { BotApiKeysRepo } from "../db/apiKeys";
 import { KbDocsRepo, indexDoc, removeDocVectors, reindexAll, MAX_DOC_CHARS } from "../kb/docs";
 import { renderMejoras } from "./views/mejoras";
 import { runFlywheel, getLessons, saveLessons } from "../flywheel/detect";
@@ -95,7 +103,13 @@ import {
   VERIFIER_COOKIE,
   type KontroliaSession,
 } from "./kontroliaAuth";
-import { resolveAdminTenant, BOT_COOKIE, NoBotsInOrganizationError, type AdminBindings } from "./tenantContext";
+import {
+  resolveAdminTenant,
+  setBotCookie,
+  BOT_COOKIE,
+  NoBotsInOrganizationError,
+  type AdminBindings,
+} from "./tenantContext";
 import { PERMISSION_GATE, hasAnyAppAccess, hasPermission, requirePermission, visibleNavIds } from "./permissions";
 import type { KontroliaTokenClaims } from "@kontrolia/shared";
 import { renderCreateBotPage } from "./views/onboarding";
@@ -403,13 +417,26 @@ function orgInitials(name: string): string {
 adminApp.get("/projects", async (c) => {
   const db = new Db(c.env.DB);
   const botId = c.get("botId");
-  const bot = await new BotsRepo(db).getById(botId);
+  const botsRepoLocal = new BotsRepo(db);
+  const bot = await botsRepoLocal.getById(botId);
   const base = { current: bot?.name ?? c.env.BOT_NAME ?? "Mi bot", peers: parsePeerBots(c.env) };
 
   const cfg = kontroliaConfig(c.env);
   const claims = c.get("kontroliaClaims");
   const raw = getCookie(c, SESSION_COOKIE);
-  if (!cfg || !claims || !raw) return c.json(base);
+  if (!cfg || !claims || !raw) {
+    // Sin sesión de KontrolIA el selector de organizaciones no aplica, pero el
+    // despliegue sí puede tener varios bots — el header necesita saberlo para
+    // ofrecer el cambio en vez de dejar al dueño viendo uno sin decírselo.
+    const locales = await botsRepoLocal.listAll();
+    return c.json({
+      ...base,
+      localBots:
+        locales.length > 1
+          ? locales.map((b) => ({ id: b.id, name: b.name, current: b.id === botId }))
+          : [],
+    });
+  }
 
   const session = JSON.parse(raw) as KontroliaSession;
   const memberships = await listMemberships(cfg, session.accessToken);
@@ -497,6 +524,17 @@ adminApp.post("/switch-bot", async (c) => {
   const requestedOrgId = String(form.get("organization_id") ?? "").trim();
   let orgId = c.get("kontroliaOrgId");
 
+  // Basic Auth: no hay organización que validar (quien entró tiene la
+  // contraseña del despliegue y ya ve todos los bots). Solo se comprueba que
+  // el bot exista, para no dejar la cookie apuntando a un id inventado.
+  if (!orgId && !requestedOrgId) {
+    const db = new Db(c.env.DB);
+    const existe = await new BotsRepo(db).getById(botId);
+    if (!existe) return c.text("Ese bot no existe.", 400);
+    setBotCookie(c, botId);
+    return c.redirect(c.req.header("referer") ?? "/admin/overview", 302);
+  }
+
   if (requestedOrgId && requestedOrgId !== orgId) {
     const cfg = kontroliaConfig(c.env);
     const claims = c.get("kontroliaClaims");
@@ -579,6 +617,91 @@ adminApp.post("/costs/budget", async (c) => {
   const value = raw !== "" && Number.isFinite(n) && n > 0 ? String(n) : "";
   await (await settingsFor(c)).set(SETTING_KEYS.monthlyBudget, value);
   return c.redirect("/admin/costs?saved=1");
+});
+
+// --- Habilidades (F8: el agente como servicio) --------------------------------
+
+adminApp.get("/habilidades", async (c) =>
+  c.html(
+    await renderHabilidades(c.env, c.get("botId"), {
+      newKey: c.req.query("key") ?? undefined,
+      error: c.req.query("err") ?? undefined,
+    }),
+  ),
+);
+
+adminApp.get("/habilidades/nueva", async (c) =>
+  c.html(await renderSkillForm(c.env, c.get("botId"), null)),
+);
+
+adminApp.get("/habilidades/:id/editar", async (c) =>
+  c.html(await renderSkillForm(c.env, c.get("botId"), c.req.param("id"))),
+);
+
+adminApp.post("/habilidades/nueva", async (c) => {
+  const botId = c.get("botId");
+  const form = await c.req.formData();
+  const name = String(form.get("name") ?? "").trim();
+  const instructions = String(form.get("instructions") ?? "").trim();
+  const fields = parseOutputFields(form);
+
+  const invalid = validateFields(fields);
+  if (!name || !instructions || invalid) {
+    return c.html(
+      await renderSkillForm(c.env, botId, null, invalid ?? "Falta el nombre o las instrucciones."),
+    );
+  }
+
+  const repo = new BotSkillsRepo(new Db(c.env.DB), botId);
+  const slug = await repo.uniqueSlug(slugify(name));
+  await repo.create({ slug, name, instructions, outputFields: fields });
+  return c.redirect("/admin/habilidades", 302);
+});
+
+// Las rutas de llaves van ANTES de /habilidades/:id — si no, el segmento
+// dinámico se traga "llaves" y el POST termina intentando editar una
+// habilidad con ese id (mismo detalle que ya cuidan las rutas de /conversations).
+//
+// La llave se muestra UNA vez, en el redirect — nunca se vuelve a poder leer.
+adminApp.post("/habilidades/llaves", async (c) => {
+  const form = await c.req.formData();
+  const name = String(form.get("name") ?? "").trim() || "Sin nombre";
+  const { plaintext } = await new BotApiKeysRepo(new Db(c.env.DB)).create(c.get("botId"), name);
+  return c.redirect(`/admin/habilidades?key=${encodeURIComponent(plaintext)}`, 302);
+});
+
+adminApp.post("/habilidades/llaves/:id/revocar", async (c) => {
+  await new BotApiKeysRepo(new Db(c.env.DB)).setEnabled(c.req.param("id"), c.get("botId"), false);
+  return c.redirect("/admin/habilidades", 302);
+});
+
+adminApp.post("/habilidades/:id", async (c) => {
+  const botId = c.get("botId");
+  const id = c.req.param("id");
+  const form = await c.req.formData();
+  const name = String(form.get("name") ?? "").trim();
+  const instructions = String(form.get("instructions") ?? "").trim();
+  const fields = parseOutputFields(form);
+
+  const invalid = validateFields(fields);
+  if (!name || !instructions || invalid) {
+    return c.html(
+      await renderSkillForm(c.env, botId, id, invalid ?? "Falta el nombre o las instrucciones."),
+    );
+  }
+
+  await new BotSkillsRepo(new Db(c.env.DB), botId).update(id, {
+    name,
+    instructions,
+    outputFields: fields,
+    enabled: String(form.get("enabled") ?? "1") === "1",
+  });
+  return c.redirect("/admin/habilidades", 302);
+});
+
+adminApp.post("/habilidades/:id/borrar", async (c) => {
+  await new BotSkillsRepo(new Db(c.env.DB), c.get("botId")).remove(c.req.param("id"));
+  return c.redirect("/admin/habilidades", 302);
 });
 
 // --- Conocimiento (KB editable, F4) -------------------------------------------
@@ -1306,6 +1429,15 @@ adminApp.post("/config", async (c) => {
   const languageRaw = form.get("bot_language");
   if (languageRaw !== null && String(languageRaw).trim() !== "") {
     await botsRepo.updateLanguage(configBotId, String(languageRaw));
+  }
+  // El nombre vive en LOS DOS lados y hay que moverlos juntos: settings.bot_name
+  // (arriba, en textKeys) es lo que lee el agente; bots.name es lo que pinta el
+  // panel (selector, /admin/projects, leads, overview). Vacío = el dueño borró el
+  // campo para volver al default — settings-loader.ts ya cae a identity.name en
+  // ese caso, así que bots.name se deja intacto en vez de guardar "".
+  const botNameRaw = form.get(SETTING_KEYS.botName);
+  if (botNameRaw !== null && String(botNameRaw).trim() !== "") {
+    await botsRepo.updateName(configBotId, String(botNameRaw));
   }
 
   // Todo lo demás de "Información del negocio" vive en bots.config (JSONB) —

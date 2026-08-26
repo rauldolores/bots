@@ -24,6 +24,7 @@ import { saveCapture, isLearnMode } from "./learn/mapping";
 import { tokensMatch } from "./http-auth";
 import { apiApp } from "./api";
 import { widgetApp, widgetScriptHandler } from "./widget/routes";
+import { skillsApp } from "./skills/routes";
 import { ingestMessage } from "./agent/runner";
 import { wakeTickAfter } from "./queue/wake";
 import { tick } from "./queue/tick";
@@ -297,6 +298,11 @@ app.route("/api", apiApp);
 // fetch() que ese script hace después contra /widget/*.
 app.get("/widget.js", widgetScriptHandler);
 app.route("/widget", widgetApp);
+
+// F8 — el agente como servicio: un sistema externo invoca una habilidad y
+// recibe JSON estructurado. Va en /v1/* y no en /api/*, que tiene su propio
+// token de despliegue y es de un solo tenant; aquí el bot lo dice la llave.
+app.route("/v1", skillsApp);
 
 // KB reindex — embeds scripts/kb-fixtures.json into pgvector. Guarded by the
 // KB_REINDEX_TOKEN secret via the X-Reindex-Token header. Trigger after deploy:

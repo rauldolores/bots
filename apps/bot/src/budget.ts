@@ -16,17 +16,36 @@ export function monthStartMs(now = Date.now()): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
 }
 
-/** Exact month-to-date AI cost, computed from per-message token usage. */
+/**
+ * Exact month-to-date AI cost, computed from per-message token usage.
+ *
+ * F8: se suma también `ai_usage`, donde queda el consumo que NO nace de una
+ * conversación (hoy las habilidades por API). Sin ese UNION, una habilidad
+ * gastaría el presupuesto del dueño sin que el guard ni la pestaña de Costos
+ * se enteraran — que es justo lo que hoy pasa con voz, que guarda dólares en
+ * vez de tokens y por eso no se puede sumar aquí.
+ */
 export async function monthIaCostUsd(db: Db, botId: string, now = Date.now()): Promise<number> {
   const rows = await db.all<{ model_used: string; input: number; output: number; cached: number }>(
     `SELECT model_used,
-            SUM(COALESCE(input_tokens, 0)) as input,
-            SUM(COALESCE(output_tokens, 0)) as output,
-            SUM(COALESCE(cached_input_tokens, 0)) as cached
-     FROM messages
-     WHERE bot_id = ? AND created_at >= ? AND model_used IS NOT NULL
+            SUM(input) as input, SUM(output) as output, SUM(cached) as cached
+     FROM (
+       SELECT model_used,
+              COALESCE(input_tokens, 0) as input,
+              COALESCE(output_tokens, 0) as output,
+              COALESCE(cached_input_tokens, 0) as cached
+       FROM messages
+       WHERE bot_id = ? AND created_at >= ? AND model_used IS NOT NULL
+       UNION ALL
+       SELECT model_used,
+              COALESCE(input_tokens, 0) as input,
+              COALESCE(output_tokens, 0) as output,
+              COALESCE(cached_input_tokens, 0) as cached
+       FROM ai_usage
+       WHERE bot_id = ? AND created_at >= ?
+     ) todo
      GROUP BY model_used`,
-    [botId, monthStartMs(now)],
+    [botId, monthStartMs(now), botId, monthStartMs(now)],
   );
   let total = 0;
   for (const r of rows) {

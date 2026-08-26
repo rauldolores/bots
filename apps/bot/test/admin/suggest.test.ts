@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // --- Mocks (must be declared before importing the route module) -------------
 
 const generateTextMock = vi.fn();
+const BOT_DE_PRUEBA = "00000000-0000-0000-0000-0000000000aa";
 
 vi.mock("ai", () => ({
   generateText: (...args: unknown[]) => generateTextMock(...args),
@@ -33,7 +34,12 @@ vi.mock("../../src/db/bots", () => ({
   BotsRepo: class {
     constructor(_db: unknown) {}
     async getById(_id: string) {
-      return { config: {} };
+      return { id: BOT_DE_PRUEBA, config: {} };
+    }
+    // resolveAdminTenant lista los bots para saber si hay que ofrecer un
+    // selector; con uno solo se comporta como siempre.
+    async listAll() {
+      return [{ id: BOT_DE_PRUEBA, config: {} }];
     }
   },
 }));

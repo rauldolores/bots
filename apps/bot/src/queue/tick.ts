@@ -11,12 +11,16 @@ import { Db } from "../db/client";
 import { AgentJobsRepo } from "./jobs";
 import { runTurn } from "../agent/runner";
 import { processCampaignJobs } from "../campaigns";
+import { processSkillJobs } from "../skills/routes";
 
 /** Cuántas conversaciones atiende un tick. */
 const DEFAULT_LIMIT = 10;
 
 /** Cuántos envíos de campaña procesa un tick (F6) — ver src/campaigns.ts. */
 const CAMPAIGN_BATCH_LIMIT = 20;
+
+/** Cuántas habilidades asíncronas procesa un tick (F8) — cada una es una llamada al LLM, así que el lote va chico. */
+const SKILL_BATCH_LIMIT = 5;
 
 /** Tras este número de intentos fallidos, el trabajo se abandona. */
 const MAX_ATTEMPTS = 5;
@@ -30,6 +34,8 @@ export interface TickResult {
   failed: number;
   /** Envíos de campaña (F6) procesados en esta misma corrida — ver src/campaigns.ts. */
   campaignsSent: number;
+  /** Habilidades asíncronas (F8) terminadas en esta corrida — ver src/skills/routes.ts. */
+  skillsRun: number;
 }
 
 export async function tick(
@@ -40,7 +46,7 @@ export async function tick(
   const jobs = new AgentJobsRepo(db);
 
   const keys = await jobs.claimDue(opts.limit ?? DEFAULT_LIMIT);
-  const result: TickResult = { claimed: keys.length, answered: 0, failed: 0, campaignsSent: 0 };
+  const result: TickResult = { claimed: keys.length, answered: 0, failed: 0, campaignsSent: 0, skillsRun: 0 };
 
   for (const key of keys) {
     try {
@@ -73,6 +79,15 @@ export async function tick(
     result.campaignsSent = camp.sentFreeform + camp.sentTemplate;
   } catch (e) {
     console.error("[tick] processCampaignJobs:", e);
+  }
+
+  // Habilidades con callback_url (F8): mismo criterio que las campañas — un
+  // lote chico, y aislado, para que nunca tumbe el tick de turnos.
+  try {
+    const skills = await processSkillJobs(env, SKILL_BATCH_LIMIT);
+    result.skillsRun = skills.done;
+  } catch (e) {
+    console.error("[tick] processSkillJobs:", e);
   }
 
   return result;

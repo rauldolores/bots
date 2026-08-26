@@ -11,8 +11,13 @@
 // sin cookie válida, se usa el primero (por antigüedad) y se dejan la cookie
 // apuntando ahí, para que quedarse quieto sea predecible.
 //
-// Sin sesión de KontrolIA (Basic Auth, o KontrolIA sin configurar): cero
-// cambio de comportamiento — resolveBotId(db) de siempre.
+// Sin sesión de KontrolIA (Basic Auth, o KontrolIA sin configurar): con UN
+// bot, cero cambio de comportamiento. Con 2+, antes se llamaba a
+// resolveBotId() y TODO el panel respondía 500 — y desde que se pueden crear
+// bots desde el panel, tener dos dejó de ser un caso raro. Ahora se recuerda
+// el elegido en la misma cookie, y el header muestra un selector para
+// cambiarlo: adivinar en silencio sería peor que fallar, pero elegir de forma
+// visible y reversible no es adivinar.
 import type { Context } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import type { Env } from "../env";
@@ -44,27 +49,56 @@ export type AdminBindings = {
 
 type HonoContext = Context<AdminBindings>;
 
+/** Un año: el bot elegido debe sobrevivir a cerrar el navegador. */
+export function setBotCookie(c: HonoContext, botId: string): void {
+  setCookie(c, BOT_COOKIE, botId, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    maxAge: 60 * 60 * 24 * 365,
+  });
+}
+
+/**
+ * Elige entre una lista ya acotada: la cookie si sigue siendo válida, si no el
+ * primero (más antiguo — `listAll`/`listByOrganization` ordenan por created_at,
+ * así que "el primero" es estable entre requests y no cambia solo).
+ */
+function pickCurrent(c: HonoContext, bots: { id: string }[]): string {
+  const cookieBotId = getCookie(c, BOT_COOKIE);
+  const current = bots.find((b) => b.id === cookieBotId) ?? bots[0];
+  if (current.id !== cookieBotId) setBotCookie(c, current.id);
+  return current.id;
+}
+
 export async function resolveAdminTenant(
   c: HonoContext,
   db: Db,
   organizationId: string | null,
 ): Promise<AdminTenant> {
   if (!organizationId) {
-    return { organizationId: null, botId: await resolveBotId(db) };
+    return { organizationId: null, botId: await resolveLocalBotId(c, db) };
   }
   const bots = await new BotsRepo(db).listByOrganization(organizationId);
   if (bots.length === 0) {
     throw new NoBotsInOrganizationError(organizationId);
   }
-  const cookieBotId = getCookie(c, BOT_COOKIE);
-  const current = bots.find((b) => b.id === cookieBotId) ?? bots[0];
-  if (current.id !== cookieBotId) {
-    setCookie(c, BOT_COOKIE, current.id, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "Lax",
-      maxAge: 60 * 60 * 24 * 365,
-    });
-  }
-  return { organizationId, botId: current.id };
+  return { organizationId, botId: pickCurrent(c, bots) };
+}
+
+/**
+ * Basic Auth: quien entra tiene la contraseña del DESPLIEGUE, así que ya ve
+ * todos los bots — aquí no hay frontera de datos que cuidar entre
+ * organizaciones (eso solo aplica con sesión de KontrolIA). Lo único en juego
+ * es no mostrar el bot equivocado sin avisar, y de eso se encarga el selector
+ * del header.
+ *
+ * Con cero bots se sigue delegando en resolveBotId(): eso no es una
+ * ambigüedad, es una instalación a medias, y su mensaje ya lo explica.
+ */
+async function resolveLocalBotId(c: HonoContext, db: Db): Promise<string> {
+  const bots = await new BotsRepo(db).listAll();
+  if (bots.length === 0) return resolveBotId(db);
+  if (bots.length === 1) return bots[0].id;
+  return pickCurrent(c, bots);
 }
