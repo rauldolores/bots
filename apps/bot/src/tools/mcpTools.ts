@@ -4,6 +4,7 @@ import type { Env } from "../env";
 import { BotConnectorsRepo } from "../db/botConnectors";
 import { readSecret, updateSecret } from "../db/vault";
 import { McpOAuthState, connectorToSnapshot, mcpOAuthRedirectUrl } from "../connectors/mcpOAuth";
+import { mcpToolPrefixes, mcpToolName } from "../connectors/mcpNaming";
 
 /**
  * Cuánto se espera a que un servidor MCP remoto conteste antes de darlo por
@@ -27,8 +28,13 @@ export async function loadMcpTools(env: Env, db: Db, botId: string): Promise<Rec
   );
   if (connectors.length === 0) return {};
 
+  // Prefijo legible por conector ("Vinqulia" → `vinqulia_*`) — el modelo elige
+  // la tool por su nombre, y un UUID ahí no le dice nada. Ver connectors/mcpNaming.ts.
+  const prefixes = mcpToolPrefixes(connectors);
+
   const toolSets = await Promise.all(
     connectors.map(async (c) => {
+      const prefix = prefixes.get(c.provider) ?? c.provider;
       try {
         // OAuth (F-MCP-OAuth, connectors/mcpOAuth.ts): el token vivo en Vault
         // es un JSON de tokens (access+refresh), no un string plano — y
@@ -55,7 +61,7 @@ export async function loadMcpTools(env: Env, db: Db, botId: string): Promise<Rec
           }
           const prefixed: Record<string, unknown> = {};
           for (const [name, t] of Object.entries(tools)) {
-            prefixed[`mcp_${c.provider}_${name}`] = t;
+            prefixed[mcpToolName(prefix, name)] = t;
           }
           return prefixed;
         }
@@ -75,7 +81,7 @@ export async function loadMcpTools(env: Env, db: Db, botId: string): Promise<Rec
         // serverless de un solo turno — el propio runtime limpia al terminar.
         const prefixed: Record<string, unknown> = {};
         for (const [name, t] of Object.entries(tools)) {
-          prefixed[`mcp_${c.provider}_${name}`] = t;
+          prefixed[mcpToolName(prefix, name)] = t;
         }
         return prefixed;
       } catch (e) {

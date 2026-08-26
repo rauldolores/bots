@@ -3,6 +3,7 @@ import { Db } from "./db/client";
 import { SettingsRepo, SETTING_KEYS } from "./db/settings";
 import { BotsRepo } from "./db/bots";
 import { BotConnectorsRepo } from "./db/botConnectors";
+import { mcpToolPrefixes } from "./connectors/mcpNaming";
 import { resolveBotId } from "./tenant";
 import { systemPromptFromEnv } from "./system-prompt";
 import { renderBusinessContext } from "./businessContext";
@@ -188,11 +189,21 @@ export async function resolveAgentConfig(
   // caso más específico y puede convivir con este).
   let mcpToolsNote: string | undefined;
   if (activeMcpConnectors.length > 0) {
-    mcpToolsNote = `<herramientas_mcp>\nTienes herramientas conectadas (nombradas mcp_...) a los sistemas propios de este negocio: ${activeMcpConnectors
-      .map((c) => c.name ?? c.provider)
-      .join(
-        ", ",
-      )}. Tus herramientas internas (captureLead, crear ticket, agendar cita) SOLO guardan la información dentro de Nodia Agents — NO la registran automáticamente en esos sistemas externos salvo que además llames la herramienta MCP correspondiente. Cuando lo que estás haciendo tenga sentido en uno de esos sistemas (ej. registrar un lead o un cliente en un CRM, abrir un ticket en una plataforma de soporte), usa la herramienta MCP que más se parezca a esa acción, ADEMÁS de tu herramienta interna — nunca asumas que una ya cubre a la otra.\n</herramientas_mcp>`;
+    // El servidor MCP describe qué HACE cada tool (eso ya llega solo, vía
+    // tools/list). Lo que NUNCA va a decir es CUÁNDO este negocio en concreto
+    // quiere usarla — eso es una regla del dueño, y es justo lo que va en
+    // `config.purpose`. Sin ella el modelo solo puede adivinar por el nombre
+    // y la descripción técnica de la tool.
+    const prefixes = mcpToolPrefixes(activeMcpConnectors);
+    const lines = activeMcpConnectors.map((c) => {
+      const label = c.name ?? c.provider;
+      const prefix = prefixes.get(c.provider) ?? c.provider;
+      const purpose = (c.config.purpose ?? "").trim();
+      return `- ${label} — sus herramientas empiezan con \`${prefix}_\`.${purpose ? ` ${purpose}` : ""}`;
+    });
+    mcpToolsNote = `<herramientas_mcp>\nEste negocio tiene conectados estos sistemas externos:\n${lines.join(
+      "\n",
+    )}\n\nTus herramientas internas (captureLead, crear ticket, agendar cita) SOLO guardan la información dentro de Nodia Agents — NO la registran automáticamente en esos sistemas externos salvo que además llames la herramienta correspondiente de la lista de arriba. Cuando lo que estás haciendo tenga sentido en uno de esos sistemas (ej. registrar un lead o un cliente en un CRM, abrir un ticket en una plataforma de soporte), usa la herramienta que más se parezca a esa acción, ADEMÁS de tu herramienta interna — nunca asumas que una ya cubre a la otra.\n</herramientas_mcp>`;
   }
   const nichoPlaybook = [nichoPlaybookBase, mcpNote, mcpToolsNote].filter(Boolean).join("\n\n") || undefined;
 

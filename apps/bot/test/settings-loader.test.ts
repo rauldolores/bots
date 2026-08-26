@@ -294,6 +294,48 @@ describe("resolveAgentConfig — <herramientas_mcp> (bug real: captureLead/hando
     expect(cfg.systemPrompt).not.toContain("<herramientas_mcp>");
   });
 
+  it("nombra el prefijo real de las tools, para que el modelo sepa cuáles son de ese conector", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "mcp-uuid-ilegible",
+      name: "Vinqulia",
+      config: { url: "https://crm.example.com/api/mcp" },
+    });
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).toContain("vinqulia_");
+    // El UUID del provider no le sirve de nada al modelo — no tiene por qué gastar tokens ahí.
+    expect(cfg.systemPrompt).not.toContain("mcp-uuid-ilegible");
+  });
+
+  it("el propósito que escribió el dueño se le pasa al agente tal cual (es lo único que el servidor MCP no autodescribe)", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "mcp-con-proposito",
+      name: "Vinqulia",
+      config: {
+        url: "https://crm.example.com/api/mcp",
+        purpose: "Es mi CRM. Cada lead que captures regístralo también aquí.",
+      },
+    });
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).toContain("Cada lead que captures regístralo también aquí.");
+  });
+
+  it("sin propósito escrito, la nota sigue saliendo (solo que sin la regla de negocio)", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "mcp-sin-proposito",
+      name: "Pelón",
+      config: { url: "https://mcp.example.com/x" },
+    });
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).toContain("<herramientas_mcp>");
+    expect(cfg.systemPrompt).toContain("pelon_"); // acento fuera, prefijo válido
+  });
+
   it("convive con <catalogo_mcp> cuando ambas aplican (mismo o distinto conector)", async () => {
     await new BotsRepo(db).mergeConfig(TEST_BOT_ID, { catalogSource: "mcp" });
     await new BotConnectorsRepo(db).upsert({

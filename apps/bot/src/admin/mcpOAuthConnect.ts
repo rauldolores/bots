@@ -23,6 +23,8 @@ export interface McpOAuthStateData {
    */
   botId: string;
   mcpName: string;
+  /** Para qué sirve este MCP y cuándo usarlo, en palabras del dueño — va al prompt del agente (ver settings-loader.ts). */
+  mcpPurpose?: string;
   snapshot: McpOAuthSnapshot;
 }
 
@@ -43,6 +45,7 @@ export async function startMcpOAuth(
   name: string,
   url: string,
   fixedClientId?: string,
+  purpose?: string,
 ): Promise<StartMcpOAuthResult> {
   const trimmedName = name.trim();
   if (!trimmedName) return { error: "Falta el nombre." };
@@ -66,7 +69,16 @@ export async function startMcpOAuth(
     return { error: `No se pudo iniciar OAuth: ${(e as Error)?.message ?? String(e)}` };
   }
 
-  return { url: provider.snapshot.authorizationUrl, state: { botId, mcpName: trimmedName, snapshot: provider.snapshot } };
+  const trimmedPurpose = purpose?.trim();
+  return {
+    url: provider.snapshot.authorizationUrl,
+    state: {
+      botId,
+      mcpName: trimmedName,
+      ...(trimmedPurpose ? { mcpPurpose: trimmedPurpose } : {}),
+      snapshot: provider.snapshot,
+    },
+  };
 }
 
 export interface McpOAuthCallbackQuery {
@@ -118,7 +130,10 @@ export async function handleMcpOAuthCallback(
     provider: `mcp-${crypto.randomUUID()}`,
     name: stored.mcpName,
     secretRef,
-    config: snapshotToConnectorConfig(provider.snapshot),
+    config: {
+      ...snapshotToConnectorConfig(provider.snapshot),
+      ...(stored.mcpPurpose ? { purpose: stored.mcpPurpose } : {}),
+    },
   });
 
   return { redirectTo: "/admin/conexiones?cat=mcp&ok=1" };

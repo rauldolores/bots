@@ -298,12 +298,25 @@ export async function renderThreadLive(env: Env, botId: string, convId: string):
       let chips = "";
       if (m.tool_calls) {
         try {
-          const calls = JSON.parse(m.tool_calls) as { toolName: string; input?: unknown }[];
+          const calls = JSON.parse(m.tool_calls) as {
+            toolName: string;
+            input?: unknown;
+            ok?: boolean;
+            output?: string;
+          }[];
           chips = calls
-            .map(
-              (tc) => `
-            <div style="align-self:flex-start;display:inline-flex;align-items:center;gap:6px;font-size:10.5px;color:var(--dim);border:1px dashed var(--linelit);padding:3px 10px;margin-bottom:2px">→ <span style="color:var(--accent-2);font-weight:600">${escapeHtml(tc.toolName ?? "?")}</span> «${escapeHtml(toolInputSummary(tc.input))}»</div>`,
-            )
+            .map((tc) => {
+              // `ok === false` es el caso que importa: la herramienta se llamó y
+              // FALLÓ. Antes eso era invisible aquí — el turno seguía normal y
+              // nadie se enteraba de que el sistema externo no recibió nada.
+              // (`ok` undefined = mensaje viejo, sin resultado registrado.)
+              const failed = tc.ok === false;
+              const color = failed ? "var(--bad)" : "var(--accent-2)";
+              const border = failed ? "var(--bad)" : "var(--linelit)";
+              const detail = failed && tc.output ? ` — ${escapeHtml(tc.output.slice(0, 160))}` : "";
+              return `
+            <div style="align-self:flex-start;display:inline-flex;align-items:center;gap:6px;font-size:10.5px;color:var(--dim);border:1px dashed ${border};padding:3px 10px;margin-bottom:2px">${failed ? "✕" : "→"} <span style="color:${color};font-weight:600">${escapeHtml(tc.toolName ?? "?")}</span> «${escapeHtml(toolInputSummary(tc.input))}»${detail}</div>`;
+            })
             .join("");
         } catch { /* legacy/malformed tool_calls JSON — skip chips */ }
       }

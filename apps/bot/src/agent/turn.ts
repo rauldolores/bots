@@ -37,13 +37,59 @@ export interface AgentTurnInput {
   userText: string;
 }
 
+/**
+ * Lo que se guarda en messages.tool_calls por cada herramienta que el modelo
+ * llamó en el turno. `ok`/`output` se agregaron después: sin el RESULTADO, un
+ * MCP que devuelve error se ve exactamente igual que uno que funcionó — el
+ * turno sigue, el cliente recibe respuesta normal, y el dueño nunca se entera
+ * de que su CRM no recibió nada. Las filas viejas no los traen (por eso
+ * opcionales), y quien las lea tiene que tolerar `undefined`.
+ */
+export interface ToolCallRecord {
+  toolName: string;
+  input: unknown;
+  /** `undefined` = el turno terminó sin que se registrara resultado (ej. cortado por stopWhen). */
+  ok?: boolean;
+  /** Resumen del resultado, truncado — nunca es el payload completo. */
+  output?: string;
+}
+
 export interface AgentTurnResult {
   text: string;
   modelId: string;
   inputTokens: number;
   outputTokens: number;
   cachedTokens: number;
-  toolCallsMade: { toolName: string; input: unknown }[];
+  toolCallsMade: ToolCallRecord[];
+}
+
+/**
+ * Tope de lo que se guarda por resultado. Una tool MCP puede devolver miles de
+ * filas; el objetivo aquí es poder DIAGNOSTICAR ("¿funcionó?, ¿qué dijo el
+ * error?"), no archivar la respuesta entera en cada mensaje.
+ */
+const MAX_TOOL_OUTPUT_CHARS = 1500;
+
+/** Aplana el resultado de una tool a `{ok, output}` — tolerante, nunca lanza: esto es telemetría, no puede tumbar el turno. */
+function summarizeToolResult(result: any): Pick<ToolCallRecord, "ok" | "output"> {
+  if (!result) return {};
+  try {
+    const raw = result.output ?? result.result ?? result.error;
+    // Dos formas de fallar: la parte viene marcada como error por el SDK, o es
+    // una tool MCP que respondió con isError (el protocolo MCP no usa HTTP 4xx).
+    const isError =
+      result.type === "tool-error" ||
+      result.error !== undefined ||
+      (raw && typeof raw === "object" && (raw as any).isError === true);
+    let text = typeof raw === "string" ? raw : JSON.stringify(raw ?? null);
+    if (typeof text !== "string") text = String(text);
+    if (text.length > MAX_TOOL_OUTPUT_CHARS) {
+      text = `${text.slice(0, MAX_TOOL_OUTPUT_CHARS)}… (+${text.length - MAX_TOOL_OUTPUT_CHARS} caracteres)`;
+    }
+    return { ok: !isError, output: text };
+  } catch {
+    return { ok: undefined, output: "[resultado no serializable]" };
+  }
 }
 
 export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurnResult> {
@@ -135,7 +181,7 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
   let outputTokens = 0;
   let cachedTokens = 0;
   let toolCallCount = 0;
-  let toolCallsMade: { toolName: string; input: unknown }[] = [];
+  let toolCallsMade: ToolCallRecord[] = [];
   let usedModelId = modelId;
 
   const attempt = async (m: any) => {
@@ -158,12 +204,19 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
     cachedTokens = usage?.cachedInputTokens ?? 0;
     const steps = await result.steps;
     toolCallCount = steps.reduce((n, s) => n + (s.toolCalls?.length ?? 0), 0);
-    toolCallsMade = steps.flatMap((s) =>
-      (s.toolCalls ?? []).map((tc: any) => ({
+    toolCallsMade = steps.flatMap((s) => {
+      // Los resultados vienen en su propio array; se casan con la llamada por
+      // toolCallId (una misma tool puede llamarse dos veces en el mismo step).
+      const byCallId = new Map<string, any>();
+      for (const tr of ((s as any).toolResults ?? []) as any[]) {
+        if (tr?.toolCallId) byCallId.set(tr.toolCallId, tr);
+      }
+      return (s.toolCalls ?? []).map((tc: any) => ({
         toolName: tc.toolName as string,
         input: tc.input,
-      })),
-    );
+        ...summarizeToolResult(tc.toolCallId ? byCallId.get(tc.toolCallId) : undefined),
+      }));
+    });
   };
 
   try {

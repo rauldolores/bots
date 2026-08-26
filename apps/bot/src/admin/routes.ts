@@ -69,6 +69,8 @@ import {
   renderMcpConnectModal,
   connectMcp,
   renderMcpToolsModal,
+  renderMcpEditModal,
+  saveMcpPurpose,
   updateConnectorConfig,
   saveWidgetConfig,
 } from "./views/conexiones";
@@ -1162,6 +1164,20 @@ adminApp.get("/conexiones/connectors/mcp/:provider/tools", async (c) => {
   return c.html(await renderMcpToolsModal(c.env, c.get("botId"), provider));
 });
 
+// Propósito del conector: lo único que el servidor MCP no puede autodescribir
+// (qué hace cada tool ya viene en tools/list; cuándo el negocio la quiere, no).
+adminApp.get("/conexiones/connectors/mcp/:provider/editar", async (c) => {
+  const provider = c.req.param("provider");
+  return c.html(await renderMcpEditModal(c.env, c.get("botId"), provider));
+});
+
+adminApp.post("/conexiones/connectors/mcp/:provider/editar", async (c) => {
+  const provider = c.req.param("provider");
+  const modalHtml = await saveMcpPurpose(c.env, c.get("botId"), provider, await c.req.formData());
+  const gridHtml = await renderConnectorsGrid(c.env, c.get("botId"), "mcp");
+  return c.html(modalHtml + gridHtml);
+});
+
 // Config posterior a un OAuth (ej. Project Key de Jira) — solo config, nunca el token.
 adminApp.post("/conexiones/connectors/:provider/config", async (c) => {
   const provider = c.req.param("provider");
@@ -1214,7 +1230,8 @@ adminApp.get("/conexiones/connectors/mcp/oauth/start", async (c) => {
   const name = c.req.query("name") ?? "";
   const url = c.req.query("url") ?? "";
   const clientId = c.req.query("client_id") ?? "";
-  const result = await startMcpOAuth(c.env, c.get("botId"), name, url, clientId);
+  const purpose = c.req.query("purpose") ?? "";
+  const result = await startMcpOAuth(c.env, c.get("botId"), name, url, clientId, purpose);
   if ("error" in result) return c.redirect(`/admin/conexiones?cat=mcp&err=${encodeURIComponent(result.error)}`, 302);
   setCookie(c, MCP_OAUTH_STATE_COOKIE, JSON.stringify(result.state), {
     httpOnly: true,

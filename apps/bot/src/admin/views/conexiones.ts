@@ -13,6 +13,7 @@ import { VoiceNumbersRepo, DuplicateVoiceNumberError } from "../../db/voiceNumbe
 import { createSecret, updateSecret, deleteSecret } from "../../db/vault";
 import { setTelegramWebhook } from "../../channels/telegram";
 import { listMcpConnectorTools } from "../../tools/mcpTools";
+import { mcpToolPrefixes } from "../../connectors/mcpNaming";
 import {
   CRM_PROVIDERS,
   TICKET_PROVIDERS,
@@ -616,8 +617,15 @@ function renderPostAuthForm(meta: ConnectorMeta, row: BotConnector): string {
 // aquí puede haber varios a la vez y cada uno lo da de alta el usuario con su
 // propio nombre + URL — por eso viven fuera del molde genérico de arriba.
 
-function renderMcpConnectedCard(c: BotConnector): string {
+function renderMcpConnectedCard(c: BotConnector, prefix: string): string {
   const url = typeof c.config.url === "string" ? c.config.url : "";
+  const purpose = (c.config.purpose ?? "").trim();
+  // El propósito es lo ÚNICO que el agente no puede deducir solo: el servidor
+  // MCP describe qué hace cada tool, pero nunca cuándo este negocio la quiere.
+  // Si falta, se avisa aquí — no en silencio.
+  const purposeBlock = purpose
+    ? `<p class="text-[12px]" style="color:var(--muted);margin:0;line-height:1.5">${esc(purpose)}</p>`
+    : `<p class="text-[11.5px]" style="color:var(--dim);margin:0;line-height:1.5;font-style:italic">Sin propósito definido — el agente solo puede adivinar cuándo usarlo. Dale clic a "Editar" para explicárselo.</p>`;
   return `
     <div class="bg-panel border" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;border-color:rgba(127,183,126,.45)">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
@@ -628,14 +636,59 @@ function renderMcpConnectedCard(c: BotConnector): string {
         <span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>
       </div>
       <p class="text-dim text-[12px]" style="margin:0;word-break:break-all">${esc(url)}</p>
-      <div style="display:flex;gap:8px">
+      <p class="font-mono text-[11px]" style="color:var(--dim);margin:0">El agente las ve como <span style="color:var(--accent-2)">${esc(prefix)}_*</span></p>
+      ${purposeBlock}
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" class="text-[11px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 10px;cursor:pointer;background:none"
                 hx-get="/admin/conexiones/connectors/mcp/${encodeURIComponent(c.provider)}/tools" hx-target="#modal-root" hx-swap="innerHTML">Ver herramientas</button>
+        <button type="button" class="text-[11px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 10px;cursor:pointer;background:none"
+                hx-get="/admin/conexiones/connectors/mcp/${encodeURIComponent(c.provider)}/editar" hx-target="#modal-root" hx-swap="innerHTML">Editar</button>
         <form method="POST" action="/admin/conexiones/connectors/${c.provider}/disconnect" onsubmit="return confirm('¿Quitar ${esc(c.name ?? "este conector")}? El agente perderá acceso a sus tools.')">
           <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Quitar</button>
         </form>
       </div>
     </div>`;
+}
+
+/** Ejemplo que se muestra bajo el campo de propósito — lo que el dueño tiene que redactar es una REGLA, no una descripción técnica. */
+const MCP_PURPOSE_PLACEHOLDER =
+  "Ej. Vinqulia es mi CRM. Cada vez que captures un lead, regístralo también ahí. Consulta el catálogo antes de dar precios.";
+
+/** Diálogo para editar el propósito de un conector MCP ya conectado (lo único que el servidor MCP no puede autodescribir). */
+export async function renderMcpEditModal(env: Env, botId: string, provider: string): Promise<string> {
+  const connector = await new BotConnectorsRepo(new Db(env.DB)).getByBotAndProvider(botId, provider);
+  if (!connector) {
+    return modalShell("plug", "Conector MCP", `<div class="text-[12.5px]" style="color:var(--bad)">Este conector ya no existe.</div>`);
+  }
+  return modalShell(
+    "plug",
+    `Editar ${connector.name ?? "conector MCP"}`,
+    `
+    <form hx-post="/admin/conexiones/connectors/mcp/${encodeURIComponent(provider)}/editar" hx-target="#modal-root" hx-swap="innerHTML">
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+        <label class="font-display font-semibold text-[12.5px] text-cream">¿Para qué sirve y cuándo usarlo?</label>
+        <textarea name="purpose" rows="4" placeholder="${esc(MCP_PURPOSE_PLACEHOLDER)}"
+                  style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;font-family:inherit;outline:none;width:100%;resize:vertical">${esc(connector.config.purpose ?? "")}</textarea>
+        <p class="text-dim text-[11px]" style="margin:0">Esto se le pasa al agente tal cual. El servidor ya le dice qué HACE cada herramienta;
+          aquí le dices cuándo TÚ quieres que las use.</p>
+      </div>
+      <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:10px">Guardar</button>
+    </form>`,
+  );
+}
+
+/** Guarda el propósito editado y devuelve el modal de éxito (la grilla se refresca aparte, OOB). */
+export async function saveMcpPurpose(env: Env, botId: string, provider: string, form: FormData): Promise<string> {
+  const purpose = String(form.get("purpose") ?? "").trim();
+  await new BotConnectorsRepo(new Db(env.DB)).mergeConfig(botId, provider, { purpose });
+  return modalShell(
+    "plug",
+    "Guardado",
+    `<div class="text-[13px]" style="color:var(--ok);font-weight:600;margin-bottom:12px">✓ Listo</div>
+     <p class="text-[12.5px]" style="color:var(--muted);margin:0 0 14px">El agente va a tomarlo en cuenta desde su próximo mensaje.</p>
+     <button type="button" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:9px"
+             onclick="document.getElementById('modal-root').innerHTML=''">Listo</button>`,
+  );
 }
 
 /** Diálogo con scroll: qué herramientas expone un conector MCP conectado — se conecta de verdad para listarlas, F-MCP-OAuth. */
@@ -710,6 +763,13 @@ export function renderMcpConnectModal(opts?: { error?: string }): string {
           autorizar con el proveedor real.</p>
       </div>
       <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+        <label class="font-display font-semibold text-[12.5px] text-cream">¿Para qué sirve y cuándo usarlo?</label>
+        <textarea name="purpose" rows="3" placeholder="${esc(MCP_PURPOSE_PLACEHOLDER)}"
+                  style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;font-family:inherit;outline:none;width:100%;resize:vertical"></textarea>
+        <p class="text-dim text-[11px]" style="margin:0">El servidor ya le dice al agente qué HACE cada herramienta; aquí le dices cuándo TÚ
+          quieres que las use. Puedes dejarlo vacío y llenarlo después.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
         <label class="font-display font-semibold text-[12.5px] text-cream">Client ID de OAuth (opcional)</label>
         <input type="text" name="oauth_client_id" placeholder="Solo si el servidor no soporta registro automático"
                style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
@@ -719,7 +779,7 @@ export function renderMcpConnectModal(opts?: { error?: string }): string {
       </div>
       <div style="display:flex;gap:8px">
         <button type="button"
-                onclick="var f=this.closest('form');var n=f.querySelector('[name=name]').value.trim();var u=f.querySelector('[name=url]').value.trim();var cid=f.querySelector('[name=oauth_client_id]').value.trim();if(!n||!u){alert('Completa nombre y URL primero.');return;}var q='/admin/conexiones/connectors/mcp/oauth/start?name='+encodeURIComponent(n)+'&url='+encodeURIComponent(u);if(cid)q+='&client_id='+encodeURIComponent(cid);location.href=q;"
+                onclick="var f=this.closest('form');var n=f.querySelector('[name=name]').value.trim();var u=f.querySelector('[name=url]').value.trim();var cid=f.querySelector('[name=oauth_client_id]').value.trim();var pp=f.querySelector('[name=purpose]').value.trim();if(!n||!u){alert('Completa nombre y URL primero.');return;}var q='/admin/conexiones/connectors/mcp/oauth/start?name='+encodeURIComponent(n)+'&url='+encodeURIComponent(u);if(cid)q+='&client_id='+encodeURIComponent(cid);if(pp)q+='&purpose='+encodeURIComponent(pp);location.href=q;"
                 class="ghostbtn font-display font-bold text-[12.5px] cursor-pointer"
                 style="flex:1;border:1px solid var(--line);color:var(--cream);padding:10px">Conectar con OAuth</button>
         <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
@@ -736,6 +796,7 @@ export async function connectMcp(env: Env, botId: string, form: FormData): Promi
   const name = str("name");
   const url = str("url");
   const token = str("token");
+  const purpose = str("purpose");
 
   if (!name) return renderMcpConnectModal({ error: "Falta el nombre." });
   let parsed: URL;
@@ -750,7 +811,14 @@ export async function connectMcp(env: Env, botId: string, form: FormData): Promi
 
   const secretRef = token ? await createSecret(db, token, `mcp:${botId}:${name}`) : null;
   const provider = `mcp-${crypto.randomUUID()}`;
-  await new BotConnectorsRepo(db).upsert({ botId, category: "mcp", provider, name, secretRef, config: { url } });
+  await new BotConnectorsRepo(db).upsert({
+    botId,
+    category: "mcp",
+    provider,
+    name,
+    secretRef,
+    config: { url, ...(purpose ? { purpose } : {}) },
+  });
 
   return modalShell(
     "plug",
@@ -767,7 +835,12 @@ async function renderMcpCategoryBody(env: Env, botId: string): Promise<{ summary
   const connectors = (await new BotConnectorsRepo(db).listByBot(botId)).filter(
     (c) => c.category === "mcp" && c.enabled,
   );
-  const cards = connectors.map(renderMcpConnectedCard).join("") + renderMcpAddCard();
+  // Mismos prefijos que verá el modelo (connectors/mcpNaming.ts) — se calculan
+  // sobre la lista completa porque la deduplicación depende de los vecinos.
+  const prefixes = mcpToolPrefixes(connectors);
+  const cards =
+    connectors.map((c) => renderMcpConnectedCard(c, prefixes.get(c.provider) ?? c.provider)).join("") +
+    renderMcpAddCard();
   return { summary: `Conectores MCP: ${connectors.length} conectado${connectors.length === 1 ? "" : "s"}`, cards };
 }
 

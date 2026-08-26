@@ -67,7 +67,9 @@ describe("loadMcpTools", () => {
         }),
       }),
     );
-    expect(tools).toEqual({ "mcp_mcp-abc_search": fakeTool });
+    // El prefijo sale del NOMBRE del conector ("Notion"), no del provider
+    // (un UUID) — el modelo elige la tool por su nombre. Ver connectors/mcpNaming.ts.
+    expect(tools).toEqual({ notion_search: fakeTool });
   });
 
   it("sin token guardado, conecta sin cabecera Authorization", async () => {
@@ -106,7 +108,7 @@ describe("loadMcpTools", () => {
     });
 
     const tools = await loadMcpTools(env, db, TEST_BOT_ID);
-    expect(tools).toEqual({ "mcp_mcp-ok_ping": { description: "pong" } });
+    expect(tools).toEqual({ ok_ping: { description: "pong" } });
   });
 
   it("no ve los conectores MCP de otro bot", async () => {
@@ -153,7 +155,7 @@ describe("loadMcpTools — conectores OAuth (F-MCP-OAuth, connectors/mcpOAuth.ts
     const [[callArg]] = createMCPClientMock.mock.calls;
     expect(callArg.transport.headers).toBeUndefined();
     expect(callArg.transport.authProvider.tokens()).toEqual(storedTokens);
-    expect(tools).toEqual({ "mcp_mcp-oauth1_registrar_lead": { description: "registra un lead" } });
+    expect(tools).toEqual({ crm_propio_registrar_lead: { description: "registra un lead" } });
   });
 
   it("si el SDK refresca el token durante la llamada, se persiste en Vault", async () => {
