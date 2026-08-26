@@ -671,9 +671,17 @@ export function renderMcpConnectModal(opts?: { error?: string }): string {
           vacío y usa el botón "Conectar con OAuth" — reutiliza el nombre y la URL de arriba, te va a mandar a
           autorizar con el proveedor real.</p>
       </div>
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+        <label class="font-display font-semibold text-[12.5px] text-cream">Client ID de OAuth (opcional)</label>
+        <input type="text" name="oauth_client_id" placeholder="Solo si el servidor no soporta registro automático"
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
+        <p class="text-dim text-[11px]" style="margin:0">La mayoría de los servidores MCP con OAuth se registran solos — deja
+          esto vacío primero. Si al conectar te sale un error de "registro dinámico", el dueño del servidor tiene que darte de
+          alta un client_id a mano y lo pegas aquí.</p>
+      </div>
       <div style="display:flex;gap:8px">
         <button type="button"
-                onclick="var f=this.closest('form');var n=f.querySelector('[name=name]').value.trim();var u=f.querySelector('[name=url]').value.trim();if(!n||!u){alert('Completa nombre y URL primero.');return;}location.href='/admin/conexiones/connectors/mcp/oauth/start?name='+encodeURIComponent(n)+'&url='+encodeURIComponent(u);"
+                onclick="var f=this.closest('form');var n=f.querySelector('[name=name]').value.trim();var u=f.querySelector('[name=url]').value.trim();var cid=f.querySelector('[name=oauth_client_id]').value.trim();if(!n||!u){alert('Completa nombre y URL primero.');return;}var q='/admin/conexiones/connectors/mcp/oauth/start?name='+encodeURIComponent(n)+'&url='+encodeURIComponent(u);if(cid)q+='&client_id='+encodeURIComponent(cid);location.href=q;"
                 class="ghostbtn font-display font-bold text-[12.5px] cursor-pointer"
                 style="flex:1;border:1px solid var(--line);color:var(--cream);padding:10px">Conectar con OAuth</button>
         <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"

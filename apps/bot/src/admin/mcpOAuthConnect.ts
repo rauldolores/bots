@@ -19,8 +19,16 @@ export interface McpOAuthStateData {
 
 export type StartMcpOAuthResult = { url: string; state: McpOAuthStateData } | { error: string };
 
-/** Valida nombre/URL, arranca el flujo (discovery + registro dinámico + PKCE vía @ai-sdk/mcp) y arma qué guardar en la cookie de state. */
-export async function startMcpOAuth(env: Env, name: string, url: string): Promise<StartMcpOAuthResult> {
+/**
+ * Valida nombre/URL, arranca el flujo (discovery + PKCE vía @ai-sdk/mcp) y
+ * arma qué guardar en la cookie de state.
+ *
+ * `fixedClientId`: para servidores MCP que soportan OAuth pero no discovery
+ * ni registro dinámico (RFC7591) — el dueño lo da de alta a mano del lado
+ * del servidor y pega aquí el client_id que le dieron, saltando el registro
+ * automático (ver McpOAuthState.fresh en connectors/mcpOAuth.ts).
+ */
+export async function startMcpOAuth(env: Env, name: string, url: string, fixedClientId?: string): Promise<StartMcpOAuthResult> {
   const trimmedName = name.trim();
   if (!trimmedName) return { error: "Falta el nombre." };
   let parsed: URL;
@@ -33,7 +41,7 @@ export async function startMcpOAuth(env: Env, name: string, url: string): Promis
     return { error: "La URL debe empezar con http:// o https://." };
   }
 
-  const provider = McpOAuthState.fresh(url, mcpOAuthRedirectUrl(env));
+  const provider = McpOAuthState.fresh(url, mcpOAuthRedirectUrl(env), fixedClientId?.trim() || undefined);
   try {
     const result = await mcpOAuthAuth(provider, { serverUrl: url });
     if (result !== "REDIRECT" || !provider.snapshot.authorizationUrl) {

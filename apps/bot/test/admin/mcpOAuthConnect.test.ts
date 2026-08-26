@@ -66,6 +66,20 @@ describe("startMcpOAuth", () => {
     }
   });
 
+  it("con client_id fijo (servidor sin discovery/DCR — ej. Vinqulia), el provider ya trae clientInformation ANTES de llamar a auth()", async () => {
+    let clientInformationSeenByAuth: unknown;
+    mcpAuthMock.mockImplementation(async (provider: any) => {
+      // auth() real, con esto ya precargado, nunca llamaría a saveClientInformation ni a POST /register.
+      clientInformationSeenByAuth = provider.clientInformation();
+      provider.redirectToAuthorization(new URL("https://crm.kontrolia.io/api/mcp/authorize?client_id=nodia-fijo"));
+      return "REDIRECT";
+    });
+    const result = await startMcpOAuth(env, "Vinqulia", "https://crm.kontrolia.io/api/mcp", "nodia-fijo");
+    expect(clientInformationSeenByAuth).toEqual({ client_id: "nodia-fijo" });
+    expect("url" in result).toBe(true);
+    if ("url" in result) expect(result.state.snapshot.clientInformation).toEqual({ client_id: "nodia-fijo" });
+  });
+
   it("auth() devuelve AUTHORIZED sin redirect (no debería pasar al arrancar): error defensivo", async () => {
     mcpAuthMock.mockResolvedValue("AUTHORIZED");
     const result = await startMcpOAuth(env, "Mi CRM", "https://mcp.example.com");

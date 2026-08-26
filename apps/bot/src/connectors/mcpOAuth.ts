@@ -59,9 +59,25 @@ export class McpOAuthState implements OAuthClientProvider {
     this.snapshot = snapshot;
   }
 
-  /** Arranca un flujo nuevo — nada guardado todavía, `auth()` lo va llenando. */
-  static fresh(mcpUrl: string, redirectUrl: string): McpOAuthState {
-    return new McpOAuthState({ mcpUrl, redirectUrl });
+  /**
+   * Arranca un flujo nuevo — nada guardado todavía, `auth()` lo va llenando.
+   *
+   * `fixedClientId`: cuando el servidor MCP no soporta registro dinámico de
+   * cliente (RFC7591) ni trae metadata de discovery (`.well-known/...`), no
+   * hay forma de que `auth()` se auto-registre — hay que darle un client_id
+   * ya dado de alta a mano del lado del servidor. Al venir precargado,
+   * `auth()` salta el paso de registro dinámico por completo (ver
+   * `clientInformation()` abajo: si ya hay algo, nunca llama a
+   * `saveClientInformation`). Solo client_id — nuestro `clientMetadata`
+   * declara `token_endpoint_auth_method: "none"` (cliente público con PKCE),
+   * así que nunca se guarda un client_secret aquí.
+   */
+  static fresh(mcpUrl: string, redirectUrl: string, fixedClientId?: string): McpOAuthState {
+    return new McpOAuthState({
+      mcpUrl,
+      redirectUrl,
+      ...(fixedClientId ? { clientInformation: { client_id: fixedClientId } } : {}),
+    });
   }
 
   /** Reconstituye desde una cookie de state (callback) o desde bot_connectors + Vault (uso en tiempo real). */
