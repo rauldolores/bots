@@ -12,6 +12,7 @@ import { BotConnectorsRepo, type BotConnector } from "../../db/botConnectors";
 import { VoiceNumbersRepo, DuplicateVoiceNumberError } from "../../db/voiceNumbers";
 import { createSecret, updateSecret, deleteSecret } from "../../db/vault";
 import { setTelegramWebhook } from "../../channels/telegram";
+import { listMcpConnectorTools } from "../../tools/mcpTools";
 import {
   CRM_PROVIDERS,
   TICKET_PROVIDERS,
@@ -627,10 +628,47 @@ function renderMcpConnectedCard(c: BotConnector): string {
         <span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>
       </div>
       <p class="text-dim text-[12px]" style="margin:0;word-break:break-all">${esc(url)}</p>
-      <form method="POST" action="/admin/conexiones/connectors/${c.provider}/disconnect" onsubmit="return confirm('¿Quitar ${esc(c.name ?? "este conector")}? El agente perderá acceso a sus tools.')">
-        <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Quitar</button>
-      </form>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="text-[11px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 10px;cursor:pointer;background:none"
+                hx-get="/admin/conexiones/connectors/mcp/${encodeURIComponent(c.provider)}/tools" hx-target="#modal-root" hx-swap="innerHTML">Ver herramientas</button>
+        <form method="POST" action="/admin/conexiones/connectors/${c.provider}/disconnect" onsubmit="return confirm('¿Quitar ${esc(c.name ?? "este conector")}? El agente perderá acceso a sus tools.')">
+          <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Quitar</button>
+        </form>
+      </div>
     </div>`;
+}
+
+/** Diálogo con scroll: qué herramientas expone un conector MCP conectado — se conecta de verdad para listarlas, F-MCP-OAuth. */
+export async function renderMcpToolsModal(env: Env, botId: string, provider: string): Promise<string> {
+  const db = new Db(env.DB);
+  const connector = await new BotConnectorsRepo(db).getByBotAndProvider(botId, provider);
+  const name = connector?.name ?? "Conector MCP";
+  const result = await listMcpConnectorTools(env, db, botId, provider);
+
+  let body: string;
+  if ("error" in result) {
+    body = `<div class="text-[12.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:10px 12px">${esc(result.error)}</div>`;
+  } else if (result.tools.length === 0) {
+    body = `<p class="text-dim text-[12.5px]" style="margin:0">Este servidor no expone ninguna herramienta.</p>`;
+  } else {
+    const count = result.tools.length;
+    body = `
+      <p class="text-dim text-[11.5px]" style="margin:0 0 12px">${count} herramienta${count === 1 ? "" : "s"} disponible${count === 1 ? "" : "s"} para el agente.</p>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        ${result.tools
+          .map(
+            (t) => `
+          <div style="border:1px solid var(--line);padding:10px 12px;background:var(--bg)">
+            <div class="font-mono font-semibold text-[12.5px]" style="color:var(--accent-2)">${esc(t.title ?? t.name)}</div>
+            ${t.title ? `<div class="font-mono text-[10.5px]" style="color:var(--dim);margin-top:1px">${esc(t.name)}</div>` : ""}
+            ${t.description ? `<p class="text-[12px]" style="color:var(--muted);margin:6px 0 0;line-height:1.5">${esc(t.description)}</p>` : ""}
+          </div>`,
+          )
+          .join("")}
+      </div>`;
+  }
+
+  return modalShell("wrench", `Herramientas de ${name}`, body);
 }
 
 function renderMcpAddCard(): string {

@@ -86,3 +86,59 @@ export async function loadMcpTools(env: Env, db: Db, botId: string): Promise<Rec
   );
   return Object.assign({}, ...toolSets);
 }
+
+export interface McpToolInfo {
+  name: string;
+  title?: string;
+  description?: string;
+}
+
+export type ListMcpConnectorToolsResult = { tools: McpToolInfo[] } | { error: string };
+
+/**
+ * Qué herramientas expone UN conector MCP en concreto, con su descripción —
+ * para mostrarlas en el panel (F-MCP-OAuth). Se conecta de verdad (mismo
+ * transporte/auth que loadMcpTools) pero solo para listar, nunca ejecuta
+ * nada.
+ */
+export async function listMcpConnectorTools(
+  env: Env,
+  db: Db,
+  botId: string,
+  provider: string,
+): Promise<ListMcpConnectorToolsResult> {
+  const connector = await new BotConnectorsRepo(db).getByBotAndProvider(botId, provider);
+  if (!connector || typeof connector.config.url !== "string" || !connector.config.url) {
+    return { error: "Este conector ya no existe." };
+  }
+
+  try {
+    let client: Awaited<ReturnType<typeof createMCPClient>>;
+    if (connector.config.authMode === "oauth") {
+      const tokenJson = connector.secret_ref ? await readSecret(db, connector.secret_ref) : null;
+      const authProvider = McpOAuthState.fromSnapshot(connectorToSnapshot(connector, mcpOAuthRedirectUrl(env), tokenJson));
+      client = await createMCPClient({
+        transport: { type: "http", url: connector.config.url, authProvider },
+        initializationOptions: { timeout: MCP_TIMEOUT_MS },
+      });
+    } else {
+      const token = connector.secret_ref ? await readSecret(db, connector.secret_ref) : null;
+      client = await createMCPClient({
+        transport: {
+          type: "http",
+          url: connector.config.url,
+          ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+        },
+        initializationOptions: { timeout: MCP_TIMEOUT_MS },
+      });
+    }
+    const { tools } = await client.listTools();
+    return {
+      tools: tools
+        .map((t) => ({ name: t.name, title: t.title, description: t.description }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  } catch (e) {
+    return { error: `No se pudo conectar: ${(e as Error)?.message ?? String(e)}` };
+  }
+}

@@ -25,7 +25,7 @@ vi.mock("../../src/db/vault", async (importOriginal) => {
   };
 });
 
-const { loadMcpTools } = await import("../../src/tools/mcpTools");
+const { loadMcpTools, listMcpConnectorTools } = await import("../../src/tools/mcpTools");
 const { McpOAuthState } = await import("../../src/connectors/mcpOAuth");
 
 let db: Db;
@@ -194,5 +194,53 @@ describe("loadMcpTools — conectores OAuth (F-MCP-OAuth, connectors/mcpOAuth.ts
 
     await loadMcpTools(env, db, TEST_BOT_ID);
     expect(updateSecretMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("listMcpConnectorTools", () => {
+  it("conector inexistente: error, nunca llama a createMCPClient", async () => {
+    const result = await listMcpConnectorTools(env, db, TEST_BOT_ID, "mcp-no-existe");
+    expect(result).toEqual({ error: expect.any(String) });
+    expect(createMCPClientMock).not.toHaveBeenCalled();
+  });
+
+  it("devuelve nombre, título y descripción de cada tool, ordenadas — sin ejecutar nada", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "mcp-abc",
+      name: "Notion",
+      config: { url: "https://mcp.example.com/mcp" },
+    });
+    createMCPClientMock.mockResolvedValue({
+      listTools: async () => ({
+        tools: [
+          { name: "z_tool", description: "la última" },
+          { name: "a_tool", title: "Tool A", description: "la primera" },
+        ],
+      }),
+    });
+
+    const result = await listMcpConnectorTools(env, db, TEST_BOT_ID, "mcp-abc");
+    expect(result).toEqual({
+      tools: [
+        { name: "a_tool", title: "Tool A", description: "la primera" },
+        { name: "z_tool", title: undefined, description: "la última" },
+      ],
+    });
+  });
+
+  it("servidor caído: error explicativo, no truena", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "mcp-roto",
+      name: "Roto",
+      config: { url: "https://roto.example.com" },
+    });
+    createMCPClientMock.mockRejectedValue(new Error("timeout"));
+
+    const result = await listMcpConnectorTools(env, db, TEST_BOT_ID, "mcp-roto");
+    expect("error" in result).toBe(true);
   });
 });

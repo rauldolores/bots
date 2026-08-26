@@ -80,6 +80,14 @@ describe("disconnectConnector (genérico) sobre un conector MCP", () => {
     expect(await new BotConnectorsRepo(db).getByBotAndProvider(TEST_BOT_ID, row.provider)).toBeNull();
   });
 
+  it("la tarjeta de un conector conectado trae un botón 'Ver herramientas' hacia su modal", async () => {
+    await connectMcp(env, TEST_BOT_ID, form({ name: "Notion", url: "https://mcp.example.com" }));
+    const [row] = await new BotConnectorsRepo(db).listByBot(TEST_BOT_ID);
+    const grid = await renderConnectorsGrid(env, TEST_BOT_ID, "mcp");
+    expect(grid).toContain("Ver herramientas");
+    expect(grid).toContain(`/admin/conexiones/connectors/mcp/${encodeURIComponent(row.provider)}/tools`);
+  });
+
   it("tras desconectar, la grilla ya no muestra la tarjeta (bug: listByBot() no filtraba enabled)", async () => {
     await connectMcp(env, TEST_BOT_ID, form({ name: "Notion", url: "https://mcp.example.com", token: "tok123" }));
     const [row] = await new BotConnectorsRepo(db).listByBot(TEST_BOT_ID);

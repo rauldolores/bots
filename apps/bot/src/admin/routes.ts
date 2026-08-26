@@ -68,6 +68,7 @@ import {
   categoryOfProvider,
   renderMcpConnectModal,
   connectMcp,
+  renderMcpToolsModal,
   updateConnectorConfig,
   saveWidgetConfig,
 } from "./views/conexiones";
@@ -1154,6 +1155,11 @@ adminApp.post("/conexiones/connectors/mcp/add", async (c) => {
   const modalHtml = await connectMcp(c.env, c.get("botId"), form);
   const gridHtml = await renderConnectorsGrid(c.env, c.get("botId"), "mcp");
   return c.html(modalHtml + gridHtml);
+});
+
+adminApp.get("/conexiones/connectors/mcp/:provider/tools", async (c) => {
+  const provider = c.req.param("provider");
+  return c.html(await renderMcpToolsModal(c.env, c.get("botId"), provider));
 });
 
 // Config posterior a un OAuth (ej. Project Key de Jira) — solo config, nunca el token.
