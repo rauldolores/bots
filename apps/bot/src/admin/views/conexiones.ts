@@ -667,8 +667,17 @@ export function renderMcpConnectModal(opts?: { error?: string }): string {
         <label class="font-display font-semibold text-[12.5px] text-cream">Token (opcional)</label>
         <input type="password" name="token" placeholder="········"
                style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
+        <p class="text-dim text-[11px]" style="margin:0">¿Tu servidor MCP usa OAuth en vez de un token? Deja este campo
+          vacío y usa el botón "Conectar con OAuth" — reutiliza el nombre y la URL de arriba, te va a mandar a
+          autorizar con el proveedor real.</p>
       </div>
-      <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:10px">Conectar</button>
+      <div style="display:flex;gap:8px">
+        <button type="submit" formmethod="get" formaction="/admin/conexiones/connectors/mcp/oauth/start"
+                class="ghostbtn font-display font-bold text-[12.5px] cursor-pointer"
+                style="flex:1;border:1px solid var(--line);color:var(--cream);padding:10px">Conectar con OAuth</button>
+        <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
+                style="flex:1;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:10px">Conectar con token</button>
+      </div>
     </form>`,
   );
 }
