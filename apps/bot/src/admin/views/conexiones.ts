@@ -424,7 +424,7 @@ export function renderConnectorModal(meta: ConnectorMeta, opts?: { error?: strin
       (f) => `
       <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
         <label for="${f.name}" class="font-display font-semibold text-[12.5px] text-cream">${esc(f.label)}</label>
-        <input type="${f.type ?? "text"}" id="${f.name}" name="${f.name}" required
+        <input type="${f.type ?? "text"}" id="${f.name}" name="${f.name}" ${f.optional ? "" : "required"}
                placeholder="${esc(f.placeholder)}"
                style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
       </div>`,
@@ -482,7 +482,10 @@ export async function connectConnector(
   const config: Record<string, string> = {};
   for (const f of meta.fields ?? []) {
     const v = str(f.name);
-    if (!v) return renderConnectorModal(meta, { error: `Falta "${f.label}".` });
+    if (!v) {
+      if (f.optional) continue;
+      return renderConnectorModal(meta, { error: `Falta "${f.label}".` });
+    }
     config[f.name] = v;
   }
 

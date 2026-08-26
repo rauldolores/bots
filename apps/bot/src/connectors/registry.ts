@@ -6,6 +6,7 @@
 import type { CrmConnector, TicketConnector, CalendarConnector } from "./types";
 import { hubspotConnector } from "./crm/hubspot";
 import { pipedriveConnector } from "./crm/pipedrive";
+import { vinquliaConnector } from "./crm/vinqulia";
 import { zendeskConnector } from "./tickets/zendesk";
 import { jiraConnector } from "./tickets/jira";
 import { calcomConnector } from "./calendar/calcom";
@@ -20,6 +21,8 @@ export interface ConnectorFieldSpec {
   type?: "text" | "password";
   /** Va a `config` (no-secreto) en vez de a Vault. */
   isConfig?: boolean;
+  /** Se puede dejar vacío — sin esto, connectConnector() lo exige y bloquea la conexión. */
+  optional?: boolean;
 }
 
 export interface ConnectorMeta {
@@ -40,6 +43,24 @@ export interface ConnectorMeta {
 }
 
 export const CRM_PROVIDERS: Record<string, ConnectorMeta> = {
+  vinqulia: {
+    id: "vinqulia",
+    category: "crm",
+    name: "Vinqulia",
+    icon: "target",
+    desc: "Los leads del bot se dan de alta como contactos en tu Vinqulia.",
+    steps: [
+      'En Vinqulia: <span class="font-mono">Ajustes → API</span>, crea una clave de API y cópiala.',
+      "Pega la dirección de tu Vinqulia — solo el dominio, sin rutas (ej. <span class=\"font-mono\">https://crm.miempresa.com</span>).",
+      'El <b>ID del vendedor</b> es opcional: si lo pones, los contactos que cree el bot quedan asignados a esa persona (lo ves en <span class="font-mono">Ajustes → Equipo</span>).',
+    ],
+    apiKeyLabel: "Clave de API",
+    apiKeyPlaceholder: "········",
+    fields: [
+      { name: "url", label: "Dirección de tu Vinqulia", placeholder: "https://crm.miempresa.com", isConfig: true },
+      { name: "salesId", label: "ID del vendedor (opcional)", placeholder: "1", isConfig: true, optional: true },
+    ],
+  },
   hubspot: {
     id: "hubspot",
     category: "crm",
@@ -144,7 +165,11 @@ export const CALENDAR_PROVIDERS: Record<string, ConnectorMeta> = {
 };
 export const MCP_PROVIDERS: Record<string, ConnectorMeta> = {};
 
-export const CRM_ADAPTERS: Record<string, CrmConnector> = { hubspot: hubspotConnector, pipedrive: pipedriveConnector };
+export const CRM_ADAPTERS: Record<string, CrmConnector> = {
+  vinqulia: vinquliaConnector,
+  hubspot: hubspotConnector,
+  pipedrive: pipedriveConnector,
+};
 export const TICKET_ADAPTERS: Record<string, TicketConnector> = { zendesk: zendeskConnector, jira: jiraConnector };
 export const CALENDAR_ADAPTERS: Record<string, CalendarConnector> = { calcom: calcomConnector, "google-calendar": googleCalendarConnector };
 
