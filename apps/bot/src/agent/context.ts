@@ -36,6 +36,8 @@ export interface AgentContext {
   tools: Record<string, any>;
   cfg: AgentConfig;
   state: AgentState | null;
+  /** Nombre del <cliente_conocido> (mismo lookup de abajo), en crudo — para canales que necesitan el valor solo, no el bloque de texto ya armado (ej. el saludo de voz, ver voiceGreeting.ts). undefined si no se conoce. */
+  knownCustomerName?: string;
 }
 
 export async function buildAgentContext(input: AgentContextInput): Promise<AgentContext> {
@@ -58,6 +60,7 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
   const state = await new AgentStateRepo(db).get(conversationKey);
 
   const memoryBlocks: string[] = [];
+  let knownCustomerName: string | undefined;
 
   // Memoria del cliente (flywheel): los hechos que extrajo el analizador.
   try {
@@ -80,6 +83,7 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
     const channelUserId = state?.channelUserId;
     if (channelUserId) {
       const knownLead = await new LeadsRepo(db, botId).findLatestByChannelUserId(channelUserId);
+      if (knownLead?.name) knownCustomerName = knownLead.name;
       if (knownLead && (knownLead.name || knownLead.contact)) {
         memoryBlocks.push(
           `<cliente_conocido>\nYa conoces a este cliente de una conversación anterior: ${
@@ -94,5 +98,5 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
     console.warn("[buildAgentContext] known-lead lookup failed:", e);
   }
 
-  return { bot, basePrompt: cfg.systemPrompt, memoryBlocks, tools: enabledTools, cfg, state };
+  return { bot, basePrompt: cfg.systemPrompt, memoryBlocks, tools: enabledTools, cfg, state, knownCustomerName };
 }

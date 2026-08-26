@@ -9,6 +9,7 @@ import { renderBusinessContext } from "../../businessContext";
 import { CURATED_MODELS } from "../../llm/provider";
 import { TIMEZONE_OPTIONS, resolveTimezone } from "../../datetime";
 import { resolveKeySource } from "../../channels/voice/openaiKey";
+import { DEFAULT_VOICE_GREETING_TEMPLATE } from "../../channels/voice/voiceGreeting";
 import {
   CONTROL_LIST,
   valueToLevel,
@@ -259,6 +260,15 @@ function renderVoiceSection(settings: Record<string, string>, hasEnvOpenAiKey: b
             (v) => `<option value="${v}" ${(settings[SETTING_KEYS.voiceName] || "alloy") === v ? "selected" : ""}>${v}</option>`,
           ).join("")}
         </select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="font-display font-semibold text-[12.5px] text-cream">Saludo al contestar</label>
+        <p class="text-dim text-[11px]">Con qué frase EXACTA contesta el bot — ya no improvisa. Usa
+          <code style="background:var(--bg);padding:1px 4px">{{negocio}}</code> para el nombre del negocio, y
+          <code style="background:var(--bg);padding:1px 4px">{{nombre}}</code> (pegado, sin espacio antes) para el
+          nombre del cliente — solo se dice si ya lo conocemos de una llamada o chat anterior; si no, se omite solo.</p>
+        <input type="text" name="${SETTING_KEYS.voiceGreeting}" value="${esc(settings[SETTING_KEYS.voiceGreeting] ?? "")}"
+               placeholder="${esc(DEFAULT_VOICE_GREETING_TEMPLATE)}" style="${INPUT_STYLE}">
       </div>
     </div>`;
 }

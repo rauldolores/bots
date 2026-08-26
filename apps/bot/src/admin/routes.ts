@@ -1287,6 +1287,7 @@ adminApp.post("/config", async (c) => {
     SETTING_KEYS.escalationKeywords,
     SETTING_KEYS.salesPlaybook,
     SETTING_KEYS.voiceName,
+    SETTING_KEYS.voiceGreeting,
   ];
   for (const key of textKeys) {
     const raw = form.get(key);

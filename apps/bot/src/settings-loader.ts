@@ -30,6 +30,8 @@ export interface AgentConfig {
   llm: LlmOverrides;
   /** Voz de OpenAI Realtime para llamadas — undefined = default de realtimeClient.ts ("alloy"). */
   voiceName?: string;
+  /** Plantilla del saludo de llamada — undefined = DEFAULT_VOICE_GREETING_TEMPLATE (voiceGreeting.ts). */
+  voiceGreeting?: string;
 }
 
 /** Extract the BYO-LLM overrides from a settings snapshot. */
@@ -141,6 +143,7 @@ export async function resolveAgentConfig(
   const tone = get(SETTING_KEYS.tone) ?? (niche.defaultTone || undefined);
   const escalationKeywords = parseCsvList(get(SETTING_KEYS.escalationKeywords));
   const voiceName = get(SETTING_KEYS.voiceName);
+  const voiceGreeting = get(SETTING_KEYS.voiceGreeting);
   const country = botConfig.country?.trim() || undefined;
   const currency = botConfig.currency?.trim() || undefined;
 
@@ -234,5 +237,6 @@ export async function resolveAgentConfig(
     monthlyBudgetUsd,
     llm: llmOverridesFrom(settings),
     voiceName,
+    voiceGreeting,
   };
 }

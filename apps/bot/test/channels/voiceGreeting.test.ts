@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { FakeRealtimeServer } from "../helpers/fakeRealtimeServer";
 import { Db } from "../../src/db/client";
-import { SettingsRepo } from "../../src/db/settings";
+import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { LeadsRepo } from "../../src/db/leads";
 import { VoiceSession } from "../../src/channels/voice/session";
@@ -41,25 +41,23 @@ async function startBridge(callerId: string) {
   return { bridge, ws };
 }
 
-describe("El bot saluda primero al contestar — nunca espera a que el cliente hable", () => {
-  it("manda un response.create apenas conecta, ANTES de cualquier turno del cliente", async () => {
+describe("El bot saluda primero al contestar — con un saludo FIJO, no improvisado (ver voiceGreeting.ts)", () => {
+  it("manda un response.create apenas conecta, ANTES de cualquier turno del cliente, con el saludo por default", async () => {
     const { ws } = await startBridge("+5215500009999");
     const greeting = await fakeRealtime.waitForMessageType(ws, "response.create");
     expect(greeting.response.instructions).toContain("<saludo_inicial>");
-    expect(greeting.response.instructions).toContain("Saluda TÚ primero");
+    expect(greeting.response.instructions).toContain("Di EXACTAMENTE esta frase");
+    // Default template con {{negocio}} resuelto y sin {{nombre}} (cliente nuevo).
+    expect(greeting.response.instructions).toContain("Hola, gracias por llamar a Test Business. ¿En qué podemos ayudarte?");
   });
 
-  it("cliente NUEVO (sin lead previo): el saludo no trae el bloque de memoria <cliente_conocido>", async () => {
+  it("cliente NUEVO (sin lead previo): el saludo NO trae ningún nombre", async () => {
     const { ws } = await startBridge("+5215500008888");
     const greeting = await fakeRealtime.waitForMessageType(ws, "response.create");
-    // Las instructions de <saludo_inicial> SIEMPRE mencionan el tag "<cliente_conocido>"
-    // (le dice al modelo dónde mirar SI está presente) — lo que este test
-    // verifica es que el BLOQUE de memoria en sí (agent/context.ts) no se
-    // haya inyectado, no la mera mención del tag.
-    expect(greeting.response.instructions).not.toContain("Ya conoces a este cliente de una conversación anterior");
+    expect(greeting.response.instructions).not.toContain("¿En qué podemos ayudarte,");
   });
 
-  it("cliente CONOCIDO (mismo channel_user_id que un lead con nombre): el saludo trae <cliente_conocido> con su nombre para que el modelo lo use", async () => {
+  it("cliente CONOCIDO (mismo channel_user_id que un lead con nombre): el saludo incluye su nombre, ya resuelto en el texto — no deja que el modelo decida", async () => {
     const callerId = "+5215500007777";
     // Simula que este número ya dejó su nombre alguna vez, en CUALQUIER canal
     // (mismo mecanismo que ya prueba agent/context.ts para <cliente_conocido>).
@@ -74,8 +72,15 @@ describe("El bot saluda primero al contestar — nunca espera a que el cliente h
 
     const { ws } = await startBridge(callerId);
     const greeting = await fakeRealtime.waitForMessageType(ws, "response.create");
-    expect(greeting.response.instructions).toContain("<cliente_conocido>");
-    expect(greeting.response.instructions).toContain("Raúl");
-    expect(greeting.response.instructions).toContain("Saluda TÚ primero");
+    expect(greeting.response.instructions).toContain("Hola, gracias por llamar a Test Business. ¿En qué podemos ayudarte, Raúl?");
+  });
+
+  it("saludo personalizado (settings.voice_greeting): se usa tal cual, con los placeholders resueltos", async () => {
+    vi.spyOn(SettingsRepo.prototype, "all").mockResolvedValue({
+      [SETTING_KEYS.voiceGreeting]: "Gracias por llamar a {{negocio}}, un gusto atenderte{{nombre}}.",
+    });
+    const { ws } = await startBridge("+5215500006666");
+    const greeting = await fakeRealtime.waitForMessageType(ws, "response.create");
+    expect(greeting.response.instructions).toContain("Gracias por llamar a Test Business, un gusto atenderte.");
   });
 });

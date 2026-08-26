@@ -26,6 +26,7 @@ import { createCallMetrics, beginTurn, timeToFirstAudioMs, turnLatencyMs, respon
 import { resolveVoiceOpenAiApiKey } from "./openaiKey";
 import { logVoiceEvent, maskId } from "./log";
 import { VOICE_BEHAVIOR_ADDENDUM } from "./voiceInstructions";
+import { resolveVoiceGreeting } from "./voiceGreeting";
 import { recordOnboardingMilestones } from "./onboarding/milestones";
 import { transferToHumanTool } from "./tools/transferToHuman";
 import { buildTransferTwiml, redirectLiveCall } from "./transfer";
@@ -229,13 +230,16 @@ export class RealtimeCallBridge {
     await this.sessionsRepo().markAnswered(this.callRowId);
     await recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.answered", { model: this.realtimeModel });
 
-    // El bot SALUDA PRIMERO — nunca espera a que el cliente hable. Si
-    // <cliente_conocido> ya está en `instructions` (viene de
-    // ctx.memoryBlocks, ver connectRealtime arriba), el modelo tiene el
-    // nombre disponible ahí mismo y lo usa en el saludo sin que se lo
-    // pidamos aparte cada vez.
+    // El bot SALUDA PRIMERO — nunca espera a que el cliente hable. El saludo
+    // YA NO queda a criterio del modelo (antes se le pedía "saluda tú
+    // primero, breve y natural" y el resultado era inconsistente — narraba
+    // instrucciones internas, o sonaba a lectura de documento, ver
+    // voiceGreeting.ts): se resuelve en código, texto fijo, con el nombre del
+    // cliente solo si ya se conoce (ctx.knownCustomerName — mismo lookup que
+    // <cliente_conocido>), y al modelo solo se le pide que lo diga tal cual.
+    const greeting = resolveVoiceGreeting(ctx.cfg.voiceGreeting, ctx.bot?.business_name ?? env.BUSINESS_NAME ?? "", ctx.knownCustomerName);
     this.requestResponse(
-      `${this.instructions}\n\n<saludo_inicial>\nAcabas de contestar la llamada — el cliente todavía no ha dicho nada. Saluda TÚ primero, breve y natural, preséntate y pregunta en qué puedes ayudar. Si ya conoces el nombre del cliente (ver <cliente_conocido> arriba, si está presente), salúdalo por su nombre. Nunca te quedes esperando en silencio a que hable primero. Es tu PRIMERA frase de la llamada: no hay ningún idioma que "reconocer" ni ningún cambio que anunciar — simplemente saluda, en una sola frase corta y cálida, como contestaría el teléfono una persona real de este negocio.\n</saludo_inicial>`,
+      `<saludo_inicial>\nAcabas de contestar la llamada — el cliente todavía no ha dicho nada. Di EXACTAMENTE esta frase, palabra por palabra, sin agregar ni quitar nada, sin improvisar ni personalizarla más:\n\n"${greeting}"\n\nEsa es tu única frase — termina tu turno justo ahí y espera a que el cliente hable. Nunca te quedes esperando en silencio sin decirla primero.\n</saludo_inicial>`,
     );
   }
 

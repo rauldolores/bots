@@ -90,14 +90,16 @@ describe("POST /admin/config — negocio (giro, idioma, país, moneda, campos di
     expect(bot?.config.catalogSource).toBe("manual");
   });
 
-  it("guarda sales_playbook y voice_name como settings de texto plano", async () => {
+  it("guarda sales_playbook, voice_name y voice_greeting como settings de texto plano", async () => {
     await postConfig({
       [SETTING_KEYS.salesPlaybook]: "Ofrece siempre agendar al final.",
       [SETTING_KEYS.voiceName]: "shimmer",
+      [SETTING_KEYS.voiceGreeting]: "Hola, {{negocio}} al habla{{nombre}}.",
     });
     const settings = await new SettingsRepo(db, TEST_BOT_ID).all();
     expect(settings[SETTING_KEYS.salesPlaybook]).toBe("Ofrece siempre agendar al final.");
     expect(settings[SETTING_KEYS.voiceName]).toBe("shimmer");
+    expect(settings[SETTING_KEYS.voiceGreeting]).toBe("Hola, {{negocio}} al habla{{nombre}}.");
   });
 
   it("GET /config renderiza el giro, los campos dinámicos y el catálogo ya guardados", async () => {

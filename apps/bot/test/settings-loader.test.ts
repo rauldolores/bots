@@ -191,6 +191,19 @@ describe("resolveAgentConfig — voice_name", () => {
   });
 });
 
+describe("resolveAgentConfig — voice_greeting", () => {
+  it("undefined cuando no está configurado — el saludo cae al default (voiceGreeting.ts)", async () => {
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.voiceGreeting).toBeUndefined();
+  });
+
+  it("se lee tal cual del setting", async () => {
+    await repo.set(SETTING_KEYS.voiceGreeting, "Hola, {{negocio}} al habla{{nombre}}.");
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.voiceGreeting).toBe("Hola, {{negocio}} al habla{{nombre}}.");
+  });
+});
+
 describe("resolveAgentConfig — país/moneda (<contexto_regional>)", () => {
   it("con ambos capturados, aparecen en el prompt", async () => {
     await new BotsRepo(db).mergeConfig(TEST_BOT_ID, { country: "México", currency: "MXN" });

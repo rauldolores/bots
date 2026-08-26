@@ -63,6 +63,11 @@ export const SETTING_KEYS = {
   // — antes no era configurable, siempre caía al default hardcodeado
   // "alloy" en realtimeClient.ts.
   voiceName: "voice_name",
+  // Saludo con el que el bot contesta la llamada — antes quedaba a criterio
+  // del modelo (podía improvisar, o narrar instrucciones internas). Ahora es
+  // texto fijo que el dueño controla; placeholders {{negocio}} y {{nombre}}
+  // — ver channels/voice/voiceGreeting.ts. Vacío = DEFAULT_VOICE_GREETING_TEMPLATE.
+  voiceGreeting: "voice_greeting",
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];
