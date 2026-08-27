@@ -5,8 +5,10 @@ import { Db } from "../db/client";
 import { LeadsRepo } from "../db/leads";
 import { ConversationsRepo } from "../db/conversations";
 import { BotConnectorsRepo } from "../db/botConnectors";
+import { BotsRepo } from "../db/bots";
 import { resolveConnectorCreds } from "../connectors/creds";
 import { CRM_ADAPTERS } from "../connectors/registry";
+import type { CrmLeadInput } from "../connectors/types";
 import { registerLeadContacts } from "../contacts/register";
 import { classifyContact, normalizePhone, phoneVariants, regionForTimezone } from "../contacts/normalize";
 import { SettingsRepo, SETTING_KEYS } from "../db/settings";
@@ -21,8 +23,20 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
       contact: z.string().optional().describe("Teléfono o email"),
       intent: z.string().describe("Qué quiere el cliente, en 1-2 frases"),
       notes: z.string().optional(),
+      company: z
+        .string()
+        .optional()
+        .describe(
+          "Empresa o negocio del cliente, SOLO si lo mencionó explícitamente (ej. \"trabajo en Acme\"). Nunca lo inventes ni lo confundas con el nombre del cliente.",
+        ),
+      estimatedValue: z
+        .number()
+        .optional()
+        .describe(
+          "Monto o presupuesto que el cliente mencionó, como número, SOLO si dio una cifra concreta (ej. \"tengo like $5000 de presupuesto\" → 5000). Nunca lo inventes ni lo estimes tú.",
+        ),
     }),
-    execute: async ({ name, contact, intent, notes }) => {
+    execute: async ({ name, contact, intent, notes, company, estimatedValue }) => {
       const convId = getConversationId();
       const db = new Db(env.DB);
       const leads = new LeadsRepo(db, botId);
@@ -70,12 +84,19 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
           : [];
       const existing = await leads.findOpenByContactAddress(addressNorms);
 
+      // Empresa/monto capturados, si el cliente los dio — se guardan en el
+      // mismo bolsón de metadata que ya usan los campos de nicho, así que
+      // aparecen gratis en la sección "Datos" del detalle del lead.
+      const metadata: Record<string, string | number | null> = {};
+      if (company) metadata.empresa = company;
+      if (estimatedValue !== undefined) metadata.presupuesto_estimado = estimatedValue;
+
       let leadId: string;
       let isNew: boolean;
       if (existing) {
         leadId = existing.id;
         isNew = false;
-        await leads.mergeCapture(leadId, { name, contact: effectiveContact, intent, notes });
+        await leads.mergeCapture(leadId, { name, contact: effectiveContact, intent, notes, metadata });
       } else {
         leadId = await leads.create({
           conversationId: convId,
@@ -84,6 +105,7 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
           channelUserId: conv?.channel_user_id ?? null,
           intent,
           notes,
+          metadata,
         });
         isNew = true;
       }
@@ -105,11 +127,15 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
       // se había exportado (es el lead existente reencontrado), no se vuelve
       // a empujar — evitaría crear un segundo registro duplicado allá.
       if (isNew || !existing?.exported_to) {
+        const bot = await new BotsRepo(db).getById(botId);
         await pushToCrmIfConnected(env, db, botId, leadId, {
           name: name ?? null,
           contact: effectiveContact ?? null,
           intent,
           notes: notes ?? null,
+          company: company ?? null,
+          estimatedValue: estimatedValue ?? null,
+          currency: bot?.config.currency || "MXN",
         });
       }
 
@@ -127,7 +153,7 @@ async function pushToCrmIfConnected(
   db: Db,
   botId: string,
   leadId: string,
-  lead: { name: string | null; contact: string | null; intent: string; notes: string | null },
+  lead: CrmLeadInput,
 ): Promise<void> {
   try {
     const connector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "crm");

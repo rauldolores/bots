@@ -54,12 +54,15 @@ export const CRM_PROVIDERS: Record<string, ConnectorMeta> = {
       'En Vinqulia: <span class="font-mono">Ajustes → API</span>, crea una clave de API y cópiala.',
       "Pega la dirección de tu Vinqulia — solo el dominio, sin rutas (ej. <span class=\"font-mono\">https://crm.miempresa.com</span>).",
       'El <b>ID del vendedor</b> es opcional: si lo pones, los contactos que cree el bot quedan asignados a esa persona (lo ves en <span class="font-mono">Ajustes → Equipo</span>).',
+      "El pipeline y la etapa son opcionales, pero sin ellos el bot NO crea la oportunidad (solo el contacto): escribe los mismos valores que ya usas dentro de tu Vinqulia (ej. \"ventas\" y \"proposal-sent\").",
     ],
     apiKeyLabel: "Clave de API",
     apiKeyPlaceholder: "········",
     fields: [
       { name: "url", label: "Dirección de tu Vinqulia", placeholder: "https://crm.miempresa.com", isConfig: true },
       { name: "salesId", label: "ID del vendedor (opcional)", placeholder: "1", isConfig: true, optional: true },
+      { name: "dealPipeline", label: "Pipeline de la oportunidad inicial (opcional)", placeholder: "ventas", isConfig: true, optional: true },
+      { name: "dealStage", label: "Etapa de la oportunidad inicial (opcional)", placeholder: "proposal-sent", isConfig: true, optional: true },
     ],
   },
   hubspot: {

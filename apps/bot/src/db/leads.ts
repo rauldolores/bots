@@ -133,11 +133,19 @@ export class LeadsRepo {
    * Actualiza un lead existente con lo que trae una segunda captura del MISMO
    * cliente (ver findOpenByContactAddress) en vez de crear una fila duplicada.
    * name/contact solo se llenan si faltaban — no se pisa un dato bueno con
-   * uno vacío o distinto; intent/notes se ACUMULAN para no perder historial.
+   * uno vacío o distinto; intent/notes se ACUMULAN para no perder historial;
+   * metadata (empresa/presupuesto estimado, F-CRM-completo) rellena claves
+   * vacías sin pisar un valor que ya se tenía.
    */
   async mergeCapture(
     id: string,
-    input: { name?: string; contact?: string; intent: string; notes?: string },
+    input: {
+      name?: string;
+      contact?: string;
+      intent: string;
+      notes?: string;
+      metadata?: Record<string, string | number | null>;
+    },
   ): Promise<void> {
     const current = await this.getById(id);
     if (!current) return;
@@ -146,10 +154,25 @@ export class LeadsRepo {
         ? `${current.intent}\n${input.intent}`
         : current.intent || input.intent;
     const notes = [current.notes, input.notes].filter((v) => v && v.trim() !== "").join("\n") || null;
+    const currentMeta = leadMetadata(current);
+    const merged: Record<string, string> = { ...currentMeta };
+    for (const [k, v] of Object.entries(input.metadata ?? {})) {
+      if (!merged[k] && v !== null && v !== undefined) merged[k] = String(v);
+    }
+    const metadata = Object.keys(merged).length > 0 ? JSON.stringify(merged) : current.metadata;
     await this.db.run(
-      `UPDATE leads SET name = ?, contact = ?, intent = ?, notes = ?, updated_at = ?
+      `UPDATE leads SET name = ?, contact = ?, intent = ?, notes = ?, metadata = ?, updated_at = ?
        WHERE id = ? AND bot_id = ?`,
-      [current.name ?? input.name ?? null, current.contact ?? input.contact ?? null, intent, notes, Date.now(), id, this.botId],
+      [
+        current.name ?? input.name ?? null,
+        current.contact ?? input.contact ?? null,
+        intent,
+        notes,
+        metadata,
+        Date.now(),
+        id,
+        this.botId,
+      ],
     );
   }
 

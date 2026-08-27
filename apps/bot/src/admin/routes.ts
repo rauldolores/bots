@@ -76,6 +76,8 @@ import {
   saveMcpPurpose,
   updateConnectorConfig,
   saveWidgetConfig,
+  renderPipelineStageModal,
+  savePipelineStage,
 } from "./views/conexiones";
 import { startOAuth, handleOAuthCallback } from "./oauthConnect";
 import { startMcpOAuth, handleMcpOAuthCallback } from "./mcpOAuthConnect";
@@ -1235,6 +1237,21 @@ adminApp.post("/conexiones/connectors/mcp/:provider/editar", async (c) => {
   const provider = c.req.param("provider");
   const modalHtml = await saveMcpPurpose(c.env, c.get("botId"), provider, await c.req.formData());
   const gridHtml = await renderConnectorsGrid(c.env, c.get("botId"), "mcp");
+  return c.html(modalHtml + gridHtml);
+});
+
+// En qué etapa de su pipeline cae la oportunidad inicial de un CRM conectado
+// (F-CRM-completo) — se elige de una lista con las etapas reales de la
+// cuenta, no un ID a mano.
+adminApp.get("/conexiones/connectors/crm/:provider/etapa", async (c) => {
+  const provider = c.req.param("provider");
+  return c.html(await renderPipelineStageModal(c.env, c.get("botId"), provider));
+});
+
+adminApp.post("/conexiones/connectors/crm/:provider/etapa", async (c) => {
+  const provider = c.req.param("provider");
+  const modalHtml = await savePipelineStage(c.env, c.get("botId"), provider, await c.req.formData());
+  const gridHtml = await renderConnectorsGrid(c.env, c.get("botId"), "crm");
   return c.html(modalHtml + gridHtml);
 });
 

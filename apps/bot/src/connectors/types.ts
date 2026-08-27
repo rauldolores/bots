@@ -15,6 +15,12 @@ export interface CrmLeadInput {
   contact: string | null;
   intent: string;
   notes: string | null;
+  /** Empresa del cliente, solo si la mencionó explícitamente — null/ausente si no se sabe. */
+  company?: string | null;
+  /** Monto/presupuesto estimado que el cliente mencionó — null/ausente si no se sabe. Nunca se inventa. */
+  estimatedValue?: number | null;
+  /** Moneda del monto — `bots.config.currency`, default "MXN". Solo importa si estimatedValue no es null. */
+  currency?: string;
 }
 
 export interface ConnectorPushResult {
@@ -37,9 +43,28 @@ export interface ConnectorListResult<T> {
   error?: string;
 }
 
+export interface PipelineStageOption {
+  id: string;
+  label: string;
+}
+
+export interface PipelineStageListResult {
+  ok: boolean;
+  items: PipelineStageOption[];
+  error?: string;
+}
+
 export interface CrmConnector {
   pushLead(creds: ConnectorCreds, lead: CrmLeadInput): Promise<ConnectorPushResult>;
   listRecent(creds: ConnectorCreds, limit: number): Promise<ConnectorListResult<CrmRecord>>;
+  /**
+   * Los pipelines/etapas reales de la cuenta conectada — para que el dueño
+   * elija en cuál cae la oportunidad inicial desde un selector, en vez de
+   * escribir un ID a mano. Ausente en proveedores donde el concepto no aplica
+   * o todavía no se implementó (ver el panel: sin este método, no se muestra
+   * el botón de "Configurar etapa inicial").
+   */
+  listPipelineStages?(creds: ConnectorCreds): Promise<PipelineStageListResult>;
 }
 
 export interface TicketInput {

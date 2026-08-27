@@ -45,6 +45,84 @@ describe("pipedriveConnector.pushLead", () => {
   });
 });
 
+// F-CRM-completo: organización (si hay company) + trato (si hay etapa
+// configurada), ligados a la persona vía person_id/org_id en el mismo body
+// — Pipedrive no necesita una llamada de asociación aparte.
+describe("pipedriveConnector.pushLead — organización y trato", () => {
+  it("sin company ni etapa configurada: solo crea la persona", async () => {
+    const calls: string[] = [];
+    global.fetch = vi.fn(async (url: any) => {
+      calls.push(url);
+      return new Response(JSON.stringify({ data: { id: 1 } }), { status: 201 });
+    }) as any;
+    await pipedriveConnector.pushLead(creds, { name: "Luis", contact: null, intent: "x", notes: null });
+    expect(calls.every((u) => !u.includes("/organizations") && !u.includes("/deals"))).toBe(true);
+  });
+
+  it("con company: crea la organización", async () => {
+    const calls: Array<{ url: string; body: any }> = [];
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      calls.push({ url, body: JSON.parse(init.body) });
+      if (url.includes("/persons?")) return new Response(JSON.stringify({ data: { id: 42 } }), { status: 201 });
+      if (url.includes("/organizations?")) return new Response(JSON.stringify({ data: { id: 7 } }), { status: 201 });
+      return new Response(JSON.stringify({ data: { id: 1 } }), { status: 201 });
+    }) as any;
+
+    await pipedriveConnector.pushLead(creds, { name: "Luis", contact: null, intent: "x", notes: null, company: "Acme" });
+    const orgCall = calls.find((c) => c.url.includes("/organizations?"));
+    expect(orgCall?.body).toEqual({ name: "Acme" });
+  });
+
+  it("con etapa configurada: crea el trato ligado a la persona (y a la organización, si hay)", async () => {
+    const withStage = { apiKey: "tok123", config: { domain: "acme", pipelineStage: "55" } };
+    const calls: Array<{ url: string; body: any }> = [];
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      calls.push({ url, body: JSON.parse(init.body) });
+      if (url.includes("/persons?")) return new Response(JSON.stringify({ data: { id: 42 } }), { status: 201 });
+      if (url.includes("/organizations?")) return new Response(JSON.stringify({ data: { id: 7 } }), { status: 201 });
+      if (url.includes("/deals?")) return new Response(JSON.stringify({ data: { id: 99 } }), { status: 201 });
+      return new Response("{}", { status: 200 });
+    }) as any;
+
+    await pipedriveConnector.pushLead(withStage, {
+      name: "Luis",
+      contact: null,
+      intent: "quiere cotización",
+      notes: null,
+      company: "Acme",
+      estimatedValue: 2000,
+      currency: "USD",
+    });
+
+    const dealCall = calls.find((c) => c.url.includes("/deals?"));
+    expect(dealCall?.body).toMatchObject({
+      title: "Luis — quiere cotización",
+      stage_id: 55,
+      person_id: 42,
+      org_id: 7,
+      value: 2000,
+      currency: "USD",
+    });
+  });
+});
+
+describe("pipedriveConnector.listPipelineStages", () => {
+  it("combina /stages con /pipelines para el label", async () => {
+    global.fetch = vi.fn(async (url: any) => {
+      if (url.includes("/stages?")) {
+        return new Response(JSON.stringify({ data: [{ id: 1, name: "Nuevo", pipeline_id: 10 }] }), { status: 200 });
+      }
+      if (url.includes("/pipelines?")) {
+        return new Response(JSON.stringify({ data: [{ id: 10, name: "Ventas" }] }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    }) as any;
+    const result = await pipedriveConnector.listPipelineStages!(creds);
+    expect(result.ok).toBe(true);
+    expect(result.items).toEqual([{ id: "1", label: "Ventas — Nuevo" }]);
+  });
+});
+
 describe("pipedriveConnector.listRecent", () => {
   it("pide ordenado por add_time descendente y arma la URL de la persona", async () => {
     global.fetch = vi.fn(async (url: any) => {

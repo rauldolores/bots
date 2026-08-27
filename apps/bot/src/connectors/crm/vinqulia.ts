@@ -32,6 +32,22 @@ function splitName(full: string | null): { first_name: string; last_name: string
   return { first_name: parts[0], last_name: parts.slice(1).join(" ") };
 }
 
+/**
+ * `deals.pipeline`/`deals.stage` en Vinqulia (esquema `crm`) son texto libre
+ * por convención del cliente (ej. "ventas"/"proposal-sent"), NO un catálogo
+ * normalizado con IDs — confirmado contra el esquema real (introspección vía
+ * PostgREST, `GET /companies`/`GET /deals`). Por eso, a diferencia de
+ * HubSpot/Pipedrive, aquí no hay `listPipelineStages` que ofrecer: el dueño
+ * escribe los mismos dos valores que ya usa dentro de su Vinqulia, como
+ * config de texto (mismo mecanismo que `salesId`) — ver CRM_PROVIDERS.vinqulia
+ * en connectors/registry.ts.
+ */
+function dealPipelineStageFrom(creds: ConnectorCreds): { pipeline: string; stage: string } | null {
+  const pipeline = (creds.config.dealPipeline ?? "").trim();
+  const stage = (creds.config.dealStage ?? "").trim();
+  return pipeline && stage ? { pipeline, stage } : null;
+}
+
 export const vinquliaConnector: CrmConnector = {
   async pushLead(creds: ConnectorCreds, lead: CrmLeadInput): Promise<ConnectorPushResult> {
     const base = vinquliaBaseUrl(creds);
@@ -73,6 +89,44 @@ export const vinquliaConnector: CrmConnector = {
           }),
         }).catch(() => {});
       }
+
+      // Empresa y oportunidad: best-effort, igual que la nota — un contacto
+      // ya creado nunca se pierde porque esto falle.
+      try {
+        let companyId: number | string | undefined;
+        if (lead.company) {
+          const res = await fetch(`${base}/companies`, {
+            method: "POST",
+            headers: vinquliaHeaders(creds, { "Content-Type": "application/json", Prefer: "return=representation" }),
+            body: JSON.stringify({ name: lead.company, ...(sales !== undefined ? { sales_id: sales } : {}) }),
+          });
+          if (res.ok) companyId = firstRowId(await res.json().catch(() => null));
+        }
+
+        const dealStage = dealPipelineStageFrom(creds);
+        if (dealStage) {
+          const dealBody: Record<string, unknown> = {
+            name: `${lead.name || lead.contact || "Lead"} — ${lead.intent}`.slice(0, 250),
+            pipeline: dealStage.pipeline,
+            stage: dealStage.stage,
+            ...(contactId !== undefined ? { contact_ids: [contactId] } : {}),
+            ...(companyId !== undefined ? { company_id: companyId } : {}),
+            ...(lead.estimatedValue ? { amount: lead.estimatedValue } : {}),
+            ...(sales !== undefined ? { sales_id: sales } : {}),
+          };
+          const res = await fetch(`${base}/deals`, {
+            method: "POST",
+            headers: vinquliaHeaders(creds, { "Content-Type": "application/json" }),
+            body: JSON.stringify(dealBody),
+          });
+          if (!res.ok) {
+            console.error(`[vinqulia] no se pudo crear la oportunidad: ${res.status} ${(await res.text()).slice(0, 200)}`);
+          }
+        }
+      } catch (e) {
+        console.error("[vinqulia] empresa/oportunidad falló (el contacto ya quedó creado):", e);
+      }
+
       return { ok: true, externalId: contactId !== undefined ? String(contactId) : undefined };
     } catch (e) {
       return { ok: false, error: String((e as Error)?.message ?? e) };

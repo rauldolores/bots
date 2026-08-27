@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
-import { LeadsRepo } from "../../src/db/leads";
+import { LeadsRepo, leadMetadata } from "../../src/db/leads";
 import { BotConnectorsRepo } from "../../src/db/botConnectors";
 import { captureLeadTool } from "../../src/tools/captureLead";
 
@@ -244,5 +244,69 @@ describe("captureLeadTool — evita duplicados", () => {
 
     expect(second.leadId).toBe(first.leadId);
     expect(await leads.list(10)).toHaveLength(1);
+  });
+});
+
+// F-CRM-completo: empresa/presupuesto capturados, solo cuando el cliente los
+// menciona — nunca inventados. Van al mismo bolsón de metadata que ya usan
+// los campos de nicho.
+describe("captureLeadTool — empresa y presupuesto (F-CRM-completo)", () => {
+  it("los guarda en metadata cuando el cliente los menciona", async () => {
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    await tool.execute!(
+      { contact: "+5215512345678", intent: "quiere el curso", company: "Acme Corp", estimatedValue: 5000 },
+      {} as any,
+    );
+    const row = (await leads.list(10))[0];
+    expect(leadMetadata(row)).toEqual({ empresa: "Acme Corp", presupuesto_estimado: "5000" });
+  });
+
+  it("sin mencionarlos, metadata queda vacío — nunca se inventan", async () => {
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    await tool.execute!({ contact: "+5215512345678", intent: "quiere el curso" }, {} as any);
+    const row = (await leads.list(10))[0];
+    expect(leadMetadata(row)).toEqual({});
+  });
+
+  it("mergeCapture rellena metadata sin pisar un valor que ya se tenía", async () => {
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    const first = (await tool.execute!(
+      { contact: "+5215512345678", intent: "primer contacto", company: "Acme Corp" },
+      {} as any,
+    )) as { leadId: string };
+    // Segunda captura del MISMO contacto: trae presupuesto (antes no lo tenía)
+    // y una empresa DISTINTA — la empresa ya guardada no se debe pisar.
+    const second = (await tool.execute!(
+      { contact: "+5215512345678", intent: "segundo contacto", company: "Otra Empresa", estimatedValue: 8000 },
+      {} as any,
+    )) as { leadId: string };
+
+    expect(second.leadId).toBe(first.leadId);
+    const row = (await leads.list(10))[0];
+    expect(leadMetadata(row)).toEqual({ empresa: "Acme Corp", presupuesto_estimado: "8000" });
+  });
+
+  it("empresa y presupuesto se empujan al CRM conectado, junto con el contacto", async () => {
+    await new BotConnectorsRepo(new Db(env.DB)).upsert({ botId: TEST_BOT_ID, category: "crm", provider: "hubspot", secretRef: "11111111-1111-1111-1111-111111111111" });
+    readSecretMock.mockResolvedValue("pat-fake");
+    const calls: string[] = [];
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      calls.push(url);
+      if (url.endsWith("/crm/v3/objects/contacts")) return new Response(JSON.stringify({ id: "hs-1" }), { status: 201 });
+      if (url.endsWith("/crm/v3/objects/companies")) {
+        const body = JSON.parse(init.body);
+        expect(body.properties.name).toBe("Acme Corp");
+        return new Response(JSON.stringify({ id: "hs-co-1" }), { status: 201 });
+      }
+      return new Response("{}", { status: 200 });
+    }) as any;
+
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    await tool.execute!(
+      { contact: "ana@x.com", intent: "quiere cotización", company: "Acme Corp", estimatedValue: 3000 },
+      {} as any,
+    );
+
+    expect(calls).toContain("https://api.hubapi.com/crm/v3/objects/companies");
   });
 });

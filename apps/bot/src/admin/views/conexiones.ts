@@ -14,6 +14,7 @@ import { createSecret, updateSecret, deleteSecret } from "../../db/vault";
 import { setTelegramWebhook } from "../../channels/telegram";
 import { listMcpConnectorTools } from "../../tools/mcpTools";
 import { mcpToolPrefixes } from "../../connectors/mcpNaming";
+import { resolveConnectorCreds } from "../../connectors/creds";
 import {
   CRM_PROVIDERS,
   TICKET_PROVIDERS,
@@ -568,6 +569,12 @@ async function renderConnectorCard(db: Db, botId: string, meta: ConnectorMeta): 
          <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Desconectar</button>
        </form>`;
 
+  const stageButton =
+    ok && meta.category === "crm" && CRM_ADAPTERS[meta.id]?.listPipelineStages
+      ? `<button type="button" class="text-[11px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 10px;cursor:pointer;background:none"
+                hx-get="/admin/conexiones/connectors/crm/${encodeURIComponent(meta.id)}/etapa" hx-target="#modal-root" hx-swap="innerHTML">Configurar etapa inicial</button>`
+      : "";
+
   let action: string;
   if (!ok) {
     action =
@@ -576,9 +583,9 @@ async function renderConnectorCard(db: Db, botId: string, meta: ConnectorMeta): 
         : `<button type="button" class="text-[12px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600"
                hx-get="/admin/conexiones/connectors/${meta.category}/${meta.id}/connect" hx-target="#modal-root" hx-swap="innerHTML">Conectar</button>`;
   } else if (meta.postAuthFields?.length) {
-    action = `${renderPostAuthForm(meta, row!)}${disconnectForm}`;
+    action = `${renderPostAuthForm(meta, row!)}${stageButton}${disconnectForm}`;
   } else {
-    action = disconnectForm;
+    action = `${stageButton}${disconnectForm}`;
   }
 
   return `
@@ -612,6 +619,80 @@ function renderPostAuthForm(meta: ConnectorMeta, row: BotConnector): string {
       ${fields}
       <button type="submit" class="text-[11px]" style="align-self:flex-start;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:5px 10px;cursor:pointer;font-weight:600">Guardar</button>
     </form>`;
+}
+
+// ── CRM: en qué etapa cae la oportunidad inicial ───────────────────────────
+//
+// A diferencia de domain/salesId/projectKey (texto libre), esto se elige de
+// una lista con los pipelines/etapas REALES de la cuenta conectada — un ID
+// escrito a mano es fácil de equivocar y falla en silencio en el próximo
+// lead. Mismo patrón htmx que "Ver herramientas" de un conector MCP
+// (renderMcpToolsModal): un botón que carga el modal, que a su vez consulta
+// la API de verdad.
+
+/** Diálogo: elegir en qué etapa cae la oportunidad inicial de un CRM conectado. */
+export async function renderPipelineStageModal(env: Env, botId: string, provider: string): Promise<string> {
+  const db = new Db(env.DB);
+  const connector = await new BotConnectorsRepo(db).getByBotAndProvider(botId, provider);
+  const meta = CRM_PROVIDERS[provider];
+  const adapter = CRM_ADAPTERS[provider];
+  if (!connector || !meta) {
+    return modalShell("route", "Etapa inicial", `<div class="text-[12.5px]" style="color:var(--bad)">Este conector ya no existe.</div>`);
+  }
+  if (!adapter?.listPipelineStages) {
+    return modalShell(
+      "route",
+      "Etapa inicial",
+      `<p class="text-[12.5px]" style="color:var(--muted);margin:0">${esc(meta.name)} todavía no soporta elegir una etapa desde aquí.</p>`,
+    );
+  }
+
+  const creds = await resolveConnectorCreds(db, connector, env);
+  if (!creds) {
+    return modalShell("route", "Etapa inicial", `<div class="text-[12.5px]" style="color:var(--bad)">No se pudieron leer las credenciales de ${esc(meta.name)}.</div>`);
+  }
+  const result = await adapter.listPipelineStages(creds);
+  if (!result.ok) {
+    return modalShell(
+      "route",
+      "Etapa inicial",
+      `<div class="text-[12.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:10px 12px">${esc(result.error ?? "No se pudo consultar " + meta.name)}</div>`,
+    );
+  }
+  if (result.items.length === 0) {
+    return modalShell("route", "Etapa inicial", `<p class="text-[12.5px]" style="color:var(--muted);margin:0">${esc(meta.name)} no tiene ningún pipeline/etapa configurado todavía — créalo ahí primero.</p>`);
+  }
+
+  const current = connector.config.pipelineStage ?? "";
+  const options = result.items
+    .map((o) => `<option value="${esc(o.id)}" ${o.id === current ? "selected" : ""}>${esc(o.label)}</option>`)
+    .join("");
+  return modalShell(
+    "route",
+    `Etapa inicial en ${meta.name}`,
+    `
+    <p class="text-[12.5px]" style="color:var(--muted);line-height:1.6;margin:0 0 16px">Cuando el bot capture un lead, la oportunidad que se crea en ${esc(meta.name)} caerá aquí.</p>
+    <form hx-post="/admin/conexiones/connectors/crm/${encodeURIComponent(provider)}/etapa" hx-target="#modal-root" hx-swap="innerHTML">
+      <select name="pipeline_stage" style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 10px;font-size:12.5px;font-family:inherit;outline:none;width:100%;margin-bottom:14px">
+        ${options}
+      </select>
+      <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:10px">Guardar</button>
+    </form>`,
+  );
+}
+
+/** Guarda la etapa elegida y devuelve el modal de éxito. */
+export async function savePipelineStage(env: Env, botId: string, provider: string, form: FormData): Promise<string> {
+  const pipelineStage = String(form.get("pipeline_stage") ?? "").trim();
+  await new BotConnectorsRepo(new Db(env.DB)).mergeConfig(botId, provider, { pipelineStage });
+  return modalShell(
+    "route",
+    "Guardado",
+    `<div class="text-[13px]" style="color:var(--ok);font-weight:600;margin-bottom:12px">✓ Listo</div>
+     <p class="text-[12.5px]" style="color:var(--muted);margin:0 0 14px">Los próximos leads capturados caerán en esa etapa.</p>
+     <button type="button" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:9px"
+             onclick="document.getElementById('modal-root').innerHTML=''">Listo</button>`,
+  );
 }
 
 // ── Conectores MCP: sin catálogo fijo, el usuario nombra los suyos ─────────

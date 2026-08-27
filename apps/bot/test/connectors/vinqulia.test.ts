@@ -292,6 +292,77 @@ describe("pushLead", () => {
     const result = await vinquliaConnector.pushLead(creds(), LEAD);
     expect(result).toEqual({ ok: false, error: "ECONNREFUSED" });
   });
+
+  // F-CRM-completo: además del contacto, empresa (si hay) y oportunidad (si
+  // hay pipeline/etapa configurados) — esquema real confirmado por
+  // introspección contra Vinqulia (crm.companies/crm.deals): `deals.stage` y
+  // `deals.pipeline` son texto libre, `deals.contact_ids` es un ARRAY.
+  //
+  // Se mockea por URL (no por orden posicional): con intent siempre presente,
+  // /contact_notes también se llama, y la posición de /companies y /deals en
+  // la secuencia de llamadas no es lo que importa aquí.
+  describe("empresa y oportunidad", () => {
+    function byUrl(handlers: Record<string, unknown>) {
+      return (async (url: string) => {
+        for (const [suffix, body] of Object.entries(handlers)) {
+          if (url.endsWith(suffix)) return jsonResponse(body);
+        }
+        return jsonResponse([{ id: 1 }]);
+      }) as unknown as typeof fetch;
+    }
+
+    it("sin company ni pipeline/etapa configurados: nada de /companies ni /deals", async () => {
+      fetchMock.mockImplementation(byUrl({ "/contacts": [{ id: 42 }] }));
+      await vinquliaConnector.pushLead(creds(), LEAD);
+      const urls = fetchMock.mock.calls.map(([url]) => String(url));
+      expect(urls.some((u) => u.endsWith("/companies"))).toBe(false);
+      expect(urls.some((u) => u.endsWith("/deals"))).toBe(false);
+    });
+
+    it("con company: crea la empresa", async () => {
+      fetchMock.mockImplementation(byUrl({ "/contacts": [{ id: 42 }], "/companies": [{ id: 7 }] }));
+      await vinquliaConnector.pushLead(creds({ salesId: "1" }), { ...LEAD, company: "Acme" });
+
+      const companyCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/companies"));
+      expect(companyCall).toBeTruthy();
+      expect(JSON.parse(companyCall![1].body)).toEqual({ name: "Acme", sales_id: 1 });
+    });
+
+    it("con pipeline/etapa configurados: crea la oportunidad ligada al contacto (array) y a la empresa", async () => {
+      fetchMock.mockImplementation(
+        byUrl({ "/contacts": [{ id: 42 }], "/companies": [{ id: 7 }], "/deals": [{ id: 99 }] }),
+      );
+      await vinquliaConnector.pushLead(
+        creds({ dealPipeline: "ventas", dealStage: "proposal-sent" }),
+        { ...LEAD, company: "Acme", estimatedValue: 5000 },
+      );
+
+      const dealCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/deals"));
+      expect(dealCall).toBeTruthy();
+      expect(JSON.parse(dealCall![1].body)).toMatchObject({
+        pipeline: "ventas",
+        stage: "proposal-sent",
+        contact_ids: [42],
+        company_id: 7,
+        amount: 5000,
+      });
+    });
+
+    it("sin AMBOS pipeline y etapa, no intenta crear la oportunidad", async () => {
+      fetchMock.mockImplementation(byUrl({ "/contacts": [{ id: 42 }] }));
+      await vinquliaConnector.pushLead(creds({ dealPipeline: "ventas" }), LEAD);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/deals"))).toBe(false);
+    });
+
+    it("si la oportunidad falla, el contacto ya creado sigue siendo un push exitoso", async () => {
+      fetchMock.mockImplementation((async (url: string) => {
+        if (url.endsWith("/deals")) throw new Error("boom");
+        return jsonResponse([{ id: 42 }]);
+      }) as unknown as typeof fetch);
+      const result = await vinquliaConnector.pushLead(creds({ dealPipeline: "ventas", dealStage: "nuevo" }), LEAD);
+      expect(result).toEqual({ ok: true, externalId: "42" });
+    });
+  });
 });
 
 describe("listRecent", () => {
