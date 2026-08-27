@@ -727,7 +727,14 @@ adminApp.post("/habilidades/:id", async (c) => {
     name,
     instructions,
     outputFields: fields,
-    enabled: String(form.get("enabled") ?? "1") === "1",
+    // Bug real: el checkbox manda un <input type="hidden" name="enabled"
+    // value="0"> ANTES que el checkbox mismo (para que "sin marcar" tenga un
+    // valor que mandar) — con `form.get()`, que devuelve el PRIMER valor
+    // repetido, eso significa que "activar" nunca se detectaba: siempre
+    // ganaba el "0" del hidden, estuviera marcado o no. `getAll()` +
+    // `includes("1")` no depende del orden — mismo patrón ya correcto en
+    // segments.ts para exclude_busy.
+    enabled: form.getAll("enabled").includes("1"),
   });
   return c.redirect("/admin/habilidades", 302);
 });
@@ -800,7 +807,9 @@ adminApp.post("/seguimientos/:id", async (c) => {
     name,
     goal,
     steps,
-    enabled: String(form.get("enabled") ?? "1") === "1",
+    // Bug real: "activar" nunca se guardaba — ver el comentario igual en el
+    // handler de /habilidades/:id, mismo patrón exacto y misma causa.
+    enabled: form.getAll("enabled").includes("1"),
   });
   return c.redirect("/admin/seguimientos", 302);
 });

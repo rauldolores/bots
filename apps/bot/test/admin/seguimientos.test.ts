@@ -57,6 +57,50 @@ describe("crear secuencia", () => {
   });
 });
 
+// Bug real reportado: "les pongo editar y les activo la casilla pero siguen
+// apagadas". Causa: el checkbox "Activa" va acompañado de un
+// <input type="hidden" name="enabled" value="0"> que, con la casilla
+// MARCADA, un navegador real manda JUNTO con "enabled=1" (el hidden primero,
+// tal como aparece en el HTML) — `form.get()` devolvía el primero ("0")
+// siempre, sin importar la casilla. Corregido a `getAll().includes("1")`.
+describe("activar/desactivar una secuencia (checkbox + hidden)", () => {
+  async function crearApagada(): Promise<string> {
+    const body = new URLSearchParams();
+    body.append("name", "Mi secuencia");
+    body.append("goal", "Cerrar la venta");
+    body.append("step_hours", "24");
+    body.append("step_instruction", "Pregunta si tiene dudas");
+    await post("/seguimientos/nueva", body.toString());
+    const [seq] = await new NurtureSequencesRepo(db, TEST_BOT_ID).list();
+    // Apagarla primero, para partir de un estado conocido en false.
+    const off = new URLSearchParams();
+    off.append("name", seq.name);
+    off.append("goal", seq.goal);
+    off.append("step_hours", "24");
+    off.append("step_instruction", "Pregunta si tiene dudas");
+    off.append("enabled", "0");
+    await post(`/seguimientos/${seq.id}`, off.toString());
+    expect((await new NurtureSequencesRepo(db, TEST_BOT_ID).getById(seq.id))?.enabled).toBe(false);
+    return seq.id;
+  }
+
+  it("marcar la casilla (hidden Y checkbox juntos, como manda un navegador real) SÍ la activa", async () => {
+    const id = await crearApagada();
+    // El hidden (value=0) Y el checkbox (value=1) juntos, en ese orden —
+    // exactamente lo que manda un navegador con la casilla marcada.
+    const on = new URLSearchParams();
+    on.append("name", "Mi secuencia");
+    on.append("goal", "Cerrar la venta");
+    on.append("step_hours", "24");
+    on.append("step_instruction", "Pregunta si tiene dudas");
+    on.append("enabled", "0");
+    on.append("enabled", "1");
+    const res = await post(`/seguimientos/${id}`, on.toString());
+    expect(res.status).toBe(302);
+    expect((await new NurtureSequencesRepo(db, TEST_BOT_ID).getById(id))?.enabled).toBe(true);
+  });
+});
+
 // Plantillas — ahorrarle al dueño escribir objetivo/pasos desde cero.
 describe("plantillas de seguimiento", () => {
   it("la galería muestra las plantillas curadas", async () => {

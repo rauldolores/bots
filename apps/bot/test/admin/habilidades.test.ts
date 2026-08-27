@@ -195,6 +195,44 @@ describe("editar y borrar", () => {
     expect(await new BotSkillsRepo(db, TEST_BOT_ID).getEnabledBySlug(skill.slug)).toBeNull();
   });
 
+  // Bug real reportado: marcar "Activa" y guardar la dejaba apagada de
+  // todos modos. Causa: el checkbox va acompañado de un <input type="hidden"
+  // name="enabled" value="0"> (para que "desmarcado" también mande algo) — un
+  // navegador real, con el checkbox MARCADO, manda las DOS entradas
+  // ("enabled=0" del hidden, que va primero en el HTML, y "enabled=1" del
+  // checkbox). Los tests anteriores nunca reproducían esto: mandaban un solo
+  // "enabled" a mano, nunca el par completo tal como lo manda un navegador.
+  it("activarla (checkbox marcado = hidden Y checkbox juntos) SÍ la prende — bug real ya corregido", async () => {
+    const skill = await crear();
+    // Apagarla primero, para partir de un estado conocido en false.
+    await post(`/habilidades/${skill.id}`, form([
+      ["name", "Calificar"],
+      ["instructions", "original"],
+      ["field_key", "a"],
+      ["field_type", "string"],
+      ["field_desc", ""],
+      ["field_required", "1"],
+      ["enabled", "0"],
+    ]));
+    expect((await new BotSkillsRepo(db, TEST_BOT_ID).getById(skill.id))?.enabled).toBe(false);
+
+    // Ahora "la marca": el hidden (value=0) Y el checkbox (value=1) juntos,
+    // en ese orden — exactamente lo que manda un navegador real al enviar
+    // el formulario con la casilla activada.
+    const res = await post(`/habilidades/${skill.id}`, form([
+      ["name", "Calificar"],
+      ["instructions", "original"],
+      ["field_key", "a"],
+      ["field_type", "string"],
+      ["field_desc", ""],
+      ["field_required", "1"],
+      ["enabled", "0"],
+      ["enabled", "1"],
+    ]));
+    expect(res.status).toBe(302);
+    expect((await new BotSkillsRepo(db, TEST_BOT_ID).getById(skill.id))?.enabled).toBe(true);
+  });
+
   it("borrar la quita", async () => {
     const skill = await crear();
     expect((await post(`/habilidades/${skill.id}/borrar`, "")).status).toBe(302);
