@@ -24,6 +24,13 @@ export const WIDGET_SCRIPT_JS = `(function () {
   var MSG_CACHE_KEY = "nodia_widget_msgs_" + botId;
   var POWERED_BY_URL = "https://horizontesia.com";
 
+  /**
+   * Cuánto se espera una respuesta antes de dejar de mostrar "escribiendo…".
+   * Por encima del tope de un turno del servidor (50s), para no rendirse
+   * mientras todavía viene en camino.
+   */
+  var TYPING_GIVE_UP_MS = 90000;
+
   function uuid() {
     if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
@@ -213,8 +220,25 @@ export const WIDGET_SCRIPT_JS = `(function () {
 
   function updateTyping() {
     if (!state.typing) { typingEl.hidden = true; return; }
-    typingEl.hidden = false;
     var waited = Date.now() - state.typingSince;
+    // Rendirse es mejor que girar para siempre. Antes, un turno que moría del
+    // lado del servidor dejaba el "escribiendo…" puesto indefinidamente: el
+    // visitante veía que el bot seguía "pensando" y nunca sabía que ya nadie
+    // le iba a contestar. Si el turno murió, el servidor lo reintenta solo,
+    // así que esto es lo que se le dice a la persona mientras tanto.
+    if (waited > TYPING_GIVE_UP_MS) {
+      state.typing = false;
+      typingEl.hidden = true;
+      state.messages.push({
+        role: "client-error",
+        content: "Parece que me quedé pensando de más. Vuelve a escribirme y lo retomamos.",
+        created_at: Date.now()
+      });
+      saveCache();
+      renderMessages();
+      return;
+    }
+    typingEl.hidden = false;
     typingEl.textContent = waited > 20000
       ? "esto está tardando un poco más de lo normal…"
       : "escribiendo…";

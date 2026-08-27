@@ -7,8 +7,26 @@
 
 import type { Db } from "../db/client";
 
-/** Cuánto puede tardar un turno antes de considerarse abandonado. */
-export const AGENT_JOB_LEASE_MS = 5 * 60_000;
+/**
+ * Cuánto puede tardar un turno antes de considerarse abandonado.
+ *
+ * Tiene que ser MAYOR que lo máximo que un turno puede tardar de verdad (hoy
+ * TURN_TIMEOUT_MS en tick.ts lo corta a los 50s), y lo más chico posible por
+ * encima de eso: mientras la reserva siga viva, claimDue() no vuelve a tomar
+ * esa conversación, así que un turno muerto de golpe (kill del proceso, sin
+ * que corra ningún catch) congela al cliente exactamente este rato.
+ *
+ * Estaba en 5 minutos, que era ~6x lo que un turno puede tardar: un cliente
+ * real escribió, el turno murió, y se quedó cinco minutos sin respuesta.
+ */
+export const AGENT_JOB_LEASE_MS = 90_000;
+
+/**
+ * Cuánto puede quedar un mensaje marcado "en proceso" antes de volver solo a
+ * la cola. Misma idea que el lease, para el caso en que nadie alcance a
+ * soltarlo (proceso muerto de golpe).
+ */
+export const PENDING_CLAIM_TTL_MS = 90_000;
 
 /** epoch ms según el reloj de la base. */
 const NOW_MS = "(EXTRACT(EPOCH FROM now()) * 1000)::bigint";
@@ -76,16 +94,50 @@ export class AgentJobsRepo {
   }
 
   /**
-   * Saca los mensajes en espera y los BORRA en la misma sentencia.
+   * Toma los mensajes en espera para este turno: los MARCA (claimed_at), no
+   * los borra.
    *
-   * Es un DELETE ... RETURNING y no un SELECT seguido de DELETE porque entre
-   * ambos podría llegar un mensaje nuevo y se perdería sin haberse respondido.
+   * Era un `DELETE ... RETURNING`, y ahí estaba el bug que perdía mensajes: el
+   * texto salía del buffer antes de que el turno respondiera, así que un turno
+   * que moría a la mitad se lo llevaba para siempre — el reintento encontraba
+   * el buffer vacío y se iba callado. Ahora el borrado ocurre al final, en
+   * clearClaimedPending(), y si el turno falla releaseClaimedPending() los
+   * devuelve a la cola.
+   *
+   * Sigue siendo una sola sentencia (no SELECT + UPDATE): entre las dos podría
+   * llegar un mensaje nuevo y marcarse sin que este turno lo haya leído.
    */
   async drainPending(conversationKey: string): Promise<PendingMessage[]> {
-    return this.db.all<PendingMessage>(
-      `DELETE FROM pending_messages
+    const rows = await this.db.all<PendingMessage>(
+      `UPDATE pending_messages
+          SET claimed_at = ${NOW_MS}
         WHERE conversation_key = ?
+          AND (claimed_at IS NULL OR claimed_at < ${NOW_MS} - ?)
        RETURNING id, text, received_at`,
+      [conversationKey, PENDING_CLAIM_TTL_MS],
+    );
+    // UPDATE ... RETURNING no garantiza orden, y el orden importa: los textos
+    // se unen con "\n" para formar el turno. Se ordena por id (BIGSERIAL, o
+    // sea orden de llegada).
+    return rows.sort((a, b) => a.id - b.id);
+  }
+
+  /** El turno ya respondió: los mensajes que tomó se pueden tirar. */
+  async clearClaimedPending(conversationKey: string): Promise<void> {
+    await this.db.run(
+      "DELETE FROM pending_messages WHERE conversation_key = ? AND claimed_at IS NOT NULL",
+      [conversationKey],
+    );
+  }
+
+  /**
+   * El turno falló: lo que había tomado vuelve a la cola para el siguiente
+   * intento, en vez de perderse. Solo suelta lo marcado — un mensaje que llegó
+   * durante el turno (claimed_at NULL) no se toca.
+   */
+  async releaseClaimedPending(conversationKey: string): Promise<void> {
+    await this.db.run(
+      "UPDATE pending_messages SET claimed_at = NULL WHERE conversation_key = ? AND claimed_at IS NOT NULL",
       [conversationKey],
     );
   }

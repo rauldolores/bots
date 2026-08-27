@@ -32,6 +32,37 @@ const MAX_ATTEMPTS = 5;
 /** Espera antes de reintentar un turno que falló. */
 const RETRY_DELAY_MS = 30_000;
 
+/**
+ * Tope propio de un turno, POR DEBAJO del límite de la plataforma (Vercel corta
+ * a los 65s — ver `maxDuration` en vercel.json).
+ *
+ * La diferencia importa: si nos mata la plataforma, no corre ningún `catch`, el
+ * trabajo se queda con la reserva puesta y el cliente se congela hasta que
+ * vence. Fallando nosotros primero, el error es atrapable: se sueltan los
+ * mensajes de vuelta a la cola y se reintenta como cualquier otro fallo.
+ *
+ * La cadena de failover del LLM (reintento + degradado + proveedor alterno, con
+ * backoffs) puede acercarse sola a los 65s, así que esto no es hipotético.
+ */
+const TURN_TIMEOUT_MS = 50_000;
+
+/**
+ * Corre `p`, pero se rinde a los `ms`.
+ *
+ * El trabajo de fondo no se cancela de verdad (no hay forma en JS), pero en
+ * serverless el proceso se congela al devolver la respuesta, así que en la
+ * práctica muere con la invocación.
+ */
+function conTimeout<T>(p: Promise<T>, ms: number, etiqueta: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${etiqueta} excedió ${ms}ms`)), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
+
 export interface TickResult {
   claimed: number;
   answered: number;
@@ -56,7 +87,7 @@ export async function tick(
 
   for (const key of keys) {
     try {
-      const respondio = await runTurn(env, key);
+      const respondio = await conTimeout(runTurn(env, key), TURN_TIMEOUT_MS, `[tick] turno de ${key}`);
       // Sin nada que responder el trabajo igual se cierra: dejarlo vivo lo
       // haría reintentar para siempre sobre un buffer vacío.
       await jobs.complete(key);
@@ -69,10 +100,24 @@ export async function tick(
       if (intentos >= MAX_ATTEMPTS) {
         // Rendirse es mejor que reintentar en bucle: cada intento cuesta LLM y
         // el cliente ya no está esperando. Queda en los logs.
+        //
+        // Aquí SÍ se tiran los mensajes tomados: soltarlos otra vez los dejaría
+        // esperando al próximo turno, que volvería a romperse con ellos
+        // (mensaje envenenado). Cinco intentos ya es suficiente evidencia de
+        // que el problema no se arregla solo.
         console.error(`[tick] ${key} abandonado tras ${intentos} intentos: ${msg}`);
+        await jobs.clearClaimedPending(key).catch((e2) =>
+          console.error(`[tick] no se pudo limpiar el buffer de ${key}:`, e2),
+        );
         await jobs.complete(key);
       } else {
+        // Lo que el turno alcanzó a tomar vuelve a la cola. Sin esto, el
+        // reintento corre sobre un buffer vacío y el cliente nunca recibe
+        // respuesta — que era justo el bug.
         console.error(`[tick] ${key} falló (intento ${intentos}): ${msg}`);
+        await jobs.releaseClaimedPending(key).catch((e2) =>
+          console.error(`[tick] no se pudieron devolver los mensajes de ${key} a la cola:`, e2),
+        );
         await jobs.fail(key, msg, RETRY_DELAY_MS);
       }
     }

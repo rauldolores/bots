@@ -3,7 +3,7 @@
 // buffer, la serialización por conversación, y que ningún mensaje se pierda.
 import { describe, it, expect, beforeEach } from "vitest";
 import { createTestDb } from "../helpers/pgSetup";
-import { AgentJobsRepo, AGENT_JOB_LEASE_MS } from "../../src/queue/jobs";
+import { AgentJobsRepo, AGENT_JOB_LEASE_MS, PENDING_CLAIM_TTL_MS } from "../../src/queue/jobs";
 import type { Db } from "../../src/db/client";
 
 let db: Db;
@@ -131,6 +131,101 @@ describe("pending — el buffer", () => {
 
     await jobs.drainPending("telegram:u1");
     expect(await jobs.drainPending("whatsapp:u2")).toHaveLength(1);
+  });
+});
+
+/**
+ * Bug real, en el widget de un cliente: escribió, el turno arrancó y se murió
+ * a la mitad (timeout), y nadie le contestó NUNCA. La causa era que
+ * drainPending() borraba el texto antes de que el turno respondiera — el
+ * reintento encontraba el buffer vacío y se iba callado.
+ */
+describe("el buffer no se pierde si el turno falla", () => {
+  it("drenar MARCA los mensajes, no los borra — siguen ahí por si hay que reintentar", async () => {
+    await jobs.addPending("telegram:u1", "hola");
+    await jobs.drainPending("telegram:u1");
+
+    const filas = await db.all<{ claimed_at: number | null }>(
+      "SELECT claimed_at FROM pending_messages WHERE conversation_key = ?",
+      ["telegram:u1"],
+    );
+    expect(filas).toHaveLength(1);
+    expect(filas[0].claimed_at).not.toBeNull();
+  });
+
+  it("tras responder, clearClaimedPending sí los tira", async () => {
+    await jobs.addPending("telegram:u1", "hola");
+    await jobs.drainPending("telegram:u1");
+    await jobs.clearClaimedPending("telegram:u1");
+
+    expect(await db.all("SELECT id FROM pending_messages WHERE conversation_key = ?", ["telegram:u1"])).toHaveLength(0);
+  });
+
+  it("si el turno falla, releaseClaimedPending los devuelve y el reintento SÍ los ve", async () => {
+    await jobs.addPending("telegram:u1", "quiero informes");
+    const primerIntento = await jobs.drainPending("telegram:u1");
+    expect(primerIntento.map((m) => m.text)).toEqual(["quiero informes"]);
+
+    // El turno explotó: nada de clearClaimedPending.
+    await jobs.releaseClaimedPending("telegram:u1");
+
+    const reintento = await jobs.drainPending("telegram:u1");
+    expect(reintento.map((m) => m.text)).toEqual(["quiero informes"]);
+  });
+
+  it("un mensaje que llega DURANTE el turno no se tira al limpiar — se responde en el siguiente", async () => {
+    await jobs.addPending("telegram:u1", "primero");
+    await jobs.drainPending("telegram:u1");
+    // El cliente sigue escribiendo mientras el bot "piensa" (típico del widget).
+    await jobs.addPending("telegram:u1", "segundo");
+
+    await jobs.clearClaimedPending("telegram:u1");
+
+    const siguiente = await jobs.drainPending("telegram:u1");
+    expect(siguiente.map((m) => m.text)).toEqual(["segundo"]);
+  });
+
+  it("releaseClaimedPending no toca lo que llegó después (no lo re-responde dos veces)", async () => {
+    await jobs.addPending("telegram:u1", "primero");
+    await jobs.drainPending("telegram:u1");
+    await jobs.addPending("telegram:u1", "segundo");
+
+    await jobs.releaseClaimedPending("telegram:u1");
+
+    const reintento = await jobs.drainPending("telegram:u1");
+    expect(reintento.map((m) => m.text)).toEqual(["primero", "segundo"]);
+  });
+
+  it("una marca vieja (proceso muerto sin soltar nada) se puede retomar sola", async () => {
+    await jobs.addPending("telegram:u1", "hola");
+    await jobs.drainPending("telegram:u1");
+    // Nadie soltó ni limpió: el proceso murió de golpe.
+    expect(await jobs.drainPending("telegram:u1")).toEqual([]);
+
+    await db.run(
+      "UPDATE pending_messages SET claimed_at = (EXTRACT(EPOCH FROM now()) * 1000)::bigint - ? WHERE conversation_key = ?",
+      [PENDING_CLAIM_TTL_MS + 1000, "telegram:u1"],
+    );
+    expect((await jobs.drainPending("telegram:u1")).map((m) => m.text)).toEqual(["hola"]);
+  });
+
+  it("los mensajes salen en orden de llegada — se unen con \\n para armar el turno", async () => {
+    await jobs.addPending("telegram:u1", "uno");
+    await jobs.addPending("telegram:u1", "dos");
+    await jobs.addPending("telegram:u1", "tres");
+    expect((await jobs.drainPending("telegram:u1")).map((m) => m.text)).toEqual(["uno", "dos", "tres"]);
+  });
+
+  it("limpiar/soltar solo afecta a su conversación", async () => {
+    await jobs.addPending("telegram:u1", "mío");
+    await jobs.addPending("whatsapp:u2", "ajeno");
+    await jobs.drainPending("telegram:u1");
+    await jobs.drainPending("whatsapp:u2");
+
+    await jobs.clearClaimedPending("telegram:u1");
+
+    await jobs.releaseClaimedPending("whatsapp:u2");
+    expect((await jobs.drainPending("whatsapp:u2")).map((m) => m.text)).toEqual(["ajeno"]);
   });
 });
 

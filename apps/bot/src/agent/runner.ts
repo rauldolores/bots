@@ -278,6 +278,11 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
   await enviarRespuesta(env, state, result.text, cfg);
   await jobs.clearPendingReply(conversationKey);
 
+  // Hasta AQUÍ no se tiran los mensajes del cliente: ya se respondieron. Si
+  // cualquier cosa de arriba hubiera fallado, siguen marcados en el buffer y
+  // el tick los devuelve a la cola (releaseClaimedPending) para reintentar.
+  await jobs.clearClaimedPending(conversationKey);
+
   const chunks = chunkReply(result.text, cfg.maxChunks);
   console.log(
     `[runTurn] sent ${chunks.length} chunks, model=${result.modelId}, cost=$${costOfUsage(
