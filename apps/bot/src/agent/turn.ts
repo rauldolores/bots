@@ -36,7 +36,27 @@ export interface AgentTurnInput {
   conversationKey: string;
   /** Lo que dijo/escribió el cliente en este turno, ya resuelto a texto (buffer combinado para canales de texto; una sola frase/utterance para voz). */
   userText: string;
+  /**
+   * Entrega ANTICIPADA de lo que el modelo alcanzó a decir antes de llamar una
+   * herramienta lenta ("dame un segundo, estoy registrando eso…").
+   *
+   * Sin esto, ese aviso viaja pegado a la respuesta final y llega cuando la
+   * espera ya pasó — inútil. Quien lo pasa es el canal, porque es quien sabe
+   * cómo mandar un mensaje suelto (ver runner.ts).
+   *
+   * Opcional a propósito: sin callback, el turno acumula todo y se comporta
+   * EXACTAMENTE como antes. Voz no lo usa (ahí el audio ya fluye solo).
+   */
+  onInterimMessage?: (text: string) => Promise<void>;
 }
+
+/**
+ * Cuántos avisos anticipados como mucho por turno.
+ *
+ * Uno alcanza para "espérame que voy a consultar algo". Más que eso, con un
+ * modelo encadenando hasta 6 pasos, sería una ráfaga de mensajitos.
+ */
+const MAX_AVISOS_POR_TURNO = 1;
 
 /**
  * Lo que se guarda en messages.tool_calls por cada herramienta que el modelo
@@ -96,7 +116,7 @@ function summarizeToolResult(result: any): Pick<ToolCallRecord, "ok" | "output">
 }
 
 export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurnResult> {
-  const { env, botId, conversationId: convId, conversationKey, userText } = input;
+  const { env, botId, conversationId: convId, conversationKey, userText, onInterimMessage } = input;
   const db = new Db(env.DB);
   const msgs = new MessagesRepo(db, botId);
   const stateRepo = new AgentStateRepo(db);
@@ -185,6 +205,8 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
   ];
 
   let assistantText = "";
+  /** Todo lo que dijo el modelo, incluido lo ya adelantado — es lo que se guarda en el historial. */
+  let fullAssistantText = "";
   let inputTokens = 0;
   let outputTokens = 0;
   let cachedTokens = 0;
@@ -192,6 +214,11 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
   let toolCallsMade: ToolCallRecord[] = [];
   let usedModelId = modelId;
   const tLlm = Date.now();
+  // Se cuenta FUERA de attempt() a propósito: si un intento adelanta el aviso y
+  // luego falla, el reintento no debe volver a mandárselo al cliente.
+  let avisosEnviados = 0;
+  /** El último aviso que el cliente ya recibió — para no repetírselo si un reintento regenera el mismo preámbulo. */
+  let ultimoAvisoEnviado = "";
 
   const attempt = async (m: any) => {
     const result = streamText({
@@ -202,11 +229,52 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
       stopWhen: ({ steps }) => steps.length >= 6,
       ...(cfg.temperature !== undefined ? { temperature: cfg.temperature } : {}),
     });
-    let text = "";
-    for await (const chunk of result.textStream) {
-      text += chunk;
+
+    // Se recorre `fullStream` y no `textStream` para poder ver el momento EXACTO
+    // en que el modelo llama a una herramienta.
+    //
+    // Antes se acumulaba todo y no salía nada hasta terminar: si el modelo decía
+    // "déjame registrar eso, un momento…" y luego consultaba un sistema externo
+    // que tarda segundos, ese aviso llegaba pegado a la respuesta final — o sea,
+    // el cliente veía silencio y después un mensaje más largo. El aviso solo
+    // sirve si sale ANTES de la espera, que es justo lo que hace este corte.
+    //
+    // El texto lo escribe el modelo, no nosotros: así dice lo que corresponde
+    // al caso ("estoy registrando tu oportunidad" vs "déjame ver tu historial")
+    // en vez de un genérico. Y si no dice nada antes de la herramienta, no se
+    // manda nada — los turnos rápidos no ganan ruido.
+    let completo = "";
+    let porEnviar = "";
+    for await (const part of result.fullStream as AsyncIterable<any>) {
+      if (part?.type === "text-delta") {
+        const delta: string = part.text ?? part.delta ?? "";
+        completo += delta;
+        porEnviar += delta;
+      } else if (part?.type === "tool-call" && onInterimMessage) {
+        const aviso = porEnviar.trim();
+        if (aviso && aviso === ultimoAvisoEnviado) {
+          // Reintento tras un fallo: el modelo volvió a escribir el mismo
+          // preámbulo, y el cliente YA lo recibió en el intento anterior. Se
+          // descarta — si se dejara acumulado terminaría dentro del mensaje
+          // final y la persona vería la misma frase dos veces.
+          porEnviar = "";
+        } else if (aviso && avisosEnviados < MAX_AVISOS_POR_TURNO) {
+          porEnviar = "";
+          avisosEnviados++;
+          ultimoAvisoEnviado = aviso;
+          // Si el aviso no se puede entregar, el turno sigue: es un extra de
+          // cortesía, nunca un motivo para perder la respuesta de verdad.
+          await onInterimMessage(aviso).catch((e) =>
+            console.error("[runAgentTurnCore] no se pudo adelantar el aviso:", e),
+          );
+        }
+        // Alcanzado el tope, el texto NO se descarta: se queda acumulado y
+        // viaja en la respuesta final. Entre dos herramientas el modelo suele
+        // decir cosas con contenido real, no solo "espérame".
+      }
     }
-    assistantText = text;
+    fullAssistantText = completo;
+    assistantText = porEnviar;
     const usage = await result.usage;
     inputTokens = usage?.inputTokens ?? 0;
     outputTokens = usage?.outputTokens ?? 0;
@@ -290,6 +358,7 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
 
     if (!ok) {
       assistantText = "Algo falló de mi lado, intenta de nuevo en un momento.";
+      fullAssistantText = assistantText;
     }
   }
 
@@ -309,7 +378,11 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
   // Las dos escrituras son independientes entre sí y ambas están ANTES de que
   // el cliente reciba nada — en serie eran dos viajes a la base de espera pura.
   await Promise.all([
-    msgs.append(convId, "assistant", assistantText, {
+    // Se guarda lo COMPLETO, no solo lo que falta por enviar: el historial
+    // tiene que reflejar todo lo que el modelo le dijo al cliente, incluido el
+    // aviso que ya se adelantó. Si guardáramos solo el resto, el turno
+    // siguiente leería un historial con huecos.
+    msgs.append(convId, "assistant", fullAssistantText || assistantText, {
       modelUsed: usedModelId,
       inputTokens,
       outputTokens,

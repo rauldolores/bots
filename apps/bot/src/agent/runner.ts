@@ -264,6 +264,13 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
     conversationId: convId,
     conversationKey,
     userText: combined,
+    // Lo que el modelo alcance a decir antes de llamar una herramienta lenta
+    // sale YA, como mensaje suelto, en vez de esperar a que termine todo el
+    // turno. Se manda sin trocear (es una frase corta) y sin pausas entre
+    // partes: el punto es justamente que llegue antes de la espera.
+    onInterimMessage: async (aviso) => {
+      await enviarRespuesta(env, state, aviso, { maxChunks: 1, interChunkDelayMs: 0 });
+    },
   });
 
   // maxChunks/interChunkDelayMs son config de ENTREGA (no del turno en sí),
@@ -277,11 +284,18 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
   // tirarlo a la basura. En el camino crítico del cliente.
   const cfg = result.cfg;
 
-  // La respuesta se aparta ANTES de mandarla. Si el canal falla, el reintento
-  // la reenvía en vez de perderla — que era lo que pasaba antes.
-  await jobs.savePendingReply(conversationKey, result.text);
-  await enviarRespuesta(env, state, result.text, cfg);
-  await jobs.clearPendingReply(conversationKey);
+  // `result.text` es lo que queda por enviar: si ya se adelantó un aviso antes
+  // de una herramienta lenta, ese pedazo NO viene aquí (ya se mandó). Puede
+  // quedar vacío si el modelo lo dijo todo antes de la herramienta y después no
+  // agregó nada — en ese caso no hay nada que mandar, y mandar "" haría que el
+  // canal publique un mensaje en blanco.
+  if (result.text.trim()) {
+    // La respuesta se aparta ANTES de mandarla. Si el canal falla, el reintento
+    // la reenvía en vez de perderla — que era lo que pasaba antes.
+    await jobs.savePendingReply(conversationKey, result.text);
+    await enviarRespuesta(env, state, result.text, cfg);
+    await jobs.clearPendingReply(conversationKey);
+  }
 
   // Hasta AQUÍ no se tiran los mensajes del cliente: ya se respondieron. Si
   // cualquier cosa de arriba hubiera fallado, siguen marcados en el buffer y
