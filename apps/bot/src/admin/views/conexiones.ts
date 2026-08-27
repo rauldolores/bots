@@ -710,17 +710,37 @@ function renderMcpConnectedCard(c: BotConnector, prefix: string): string {
   const purposeBlock = purpose
     ? `<p class="text-[12px]" style="color:var(--muted);margin:0;line-height:1.5">${esc(purpose)}</p>`
     : `<p class="text-[11.5px]" style="color:var(--dim);margin:0;line-height:1.5;font-style:italic">Sin propósito definido — el agente solo puede adivinar cuándo usarlo. Dale clic a "Editar" para explicárselo.</p>`;
+
+  // Un conector que falla al conectarse era invisible: el agente se quedaba
+  // sin esas herramientas Y cada mensaje del cliente pagaba la espera, sin que
+  // nada lo dijera. Pasó de verdad — un token OAuth vencido tuvo el bot lento
+  // durante horas. Si falló hace poco, aquí se ve.
+  const fallo = (c.config.mcpLastError ?? "").trim();
+  const falloAt = Number(c.config.mcpLastErrorAt ?? "");
+  const falloReciente = fallo && Number.isFinite(falloAt) && falloAt > 0;
+  const estado = falloReciente
+    ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:3px 10px;font-weight:700">● SIN CONEXIÓN</span>`
+    : `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>`;
+  const falloBlock = falloReciente
+    ? `<div class="text-[11.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;line-height:1.5">
+         <b>El agente no pudo conectarse</b> (${esc(new Date(falloAt).toLocaleString("es-MX"))}). Mientras siga así, no tiene estas herramientas.
+         Si es un conector OAuth, lo más probable es que el acceso haya caducado: vuelve a conectarlo.
+         <div class="font-mono text-[10.5px]" style="color:var(--dim);margin-top:5px;word-break:break-word">${esc(fallo)}</div>
+       </div>`
+    : "";
+
   return `
-    <div class="bg-panel border" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;border-color:rgba(127,183,126,.45)">
+    <div class="bg-panel border" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;border-color:${falloReciente ? "var(--bad)" : "rgba(127,183,126,.45)"}">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
         <div class="font-display font-semibold text-[13.5px] text-cream" style="display:flex;align-items:center;gap:9px">
           <i data-lucide="plug" width="16" height="16" class="text-accent"></i>
           ${esc(c.name ?? "Conector MCP")}
         </div>
-        <span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>
+        ${estado}
       </div>
       <p class="text-dim text-[12px]" style="margin:0;word-break:break-all">${esc(url)}</p>
       <p class="font-mono text-[11px]" style="color:var(--dim);margin:0">El agente las ve como <span style="color:var(--accent-2)">${esc(prefix)}_*</span></p>
+      ${falloBlock}
       ${purposeBlock}
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button type="button" class="text-[11px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 10px;cursor:pointer;background:none"

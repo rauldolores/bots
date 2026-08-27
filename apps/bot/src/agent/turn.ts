@@ -25,6 +25,7 @@ import { createModel } from "../llm/provider";
 import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 import { AgentStateRepo } from "./state";
 import { buildAgentContext } from "./context";
+import type { AgentConfig } from "../settings-loader";
 
 export interface AgentTurnInput {
   env: Env;
@@ -61,6 +62,8 @@ export interface AgentTurnResult {
   outputTokens: number;
   cachedTokens: number;
   toolCallsMade: ToolCallRecord[];
+  /** La config YA resuelta de este turno — para que el llamador no la vuelva a pedir (ver runner.ts). */
+  cfg: AgentConfig;
 }
 
 /**
@@ -284,17 +287,20 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
     }
   }
 
-  await msgs.append(convId, "assistant", assistantText, {
-    modelUsed: usedModelId,
-    inputTokens,
-    outputTokens,
-    cachedInputTokens: cachedTokens,
-    toolCalls: toolCallsMade.length > 0 ? toolCallsMade : undefined,
-  });
-
-  await stateRepo.saveTurnCounters(conversationKey, {
-    toolCallsInLast2Turns: toolCallCount,
-  });
+  // Las dos escrituras son independientes entre sí y ambas están ANTES de que
+  // el cliente reciba nada — en serie eran dos viajes a la base de espera pura.
+  await Promise.all([
+    msgs.append(convId, "assistant", assistantText, {
+      modelUsed: usedModelId,
+      inputTokens,
+      outputTokens,
+      cachedInputTokens: cachedTokens,
+      toolCalls: toolCallsMade.length > 0 ? toolCallsMade : undefined,
+    }),
+    stateRepo.saveTurnCounters(conversationKey, {
+      toolCallsInLast2Turns: toolCallCount,
+    }),
+  ]);
 
   return {
     text: assistantText,
@@ -303,5 +309,9 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
     outputTokens,
     cachedTokens,
     toolCallsMade,
+    // Se devuelve para que runTurn NO tenga que volver a resolverlo: es la
+    // misma config, y recalcularla cuesta 3 consultas + rearmar el system
+    // prompt entero (que además se tira a la basura).
+    cfg: ctx.cfg,
   };
 }

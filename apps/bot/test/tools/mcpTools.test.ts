@@ -246,3 +246,100 @@ describe("listMcpConnectorTools", () => {
     expect("error" in result).toBe(true);
   });
 });
+
+/**
+ * Un conector MCP roto costaba ~8s de espera del cliente en CADA mensaje —
+ * medido en producción: un token OAuth vencido tuvo los turnos en 9-13s
+ * durante horas, en silencio y sin aportar una sola herramienta.
+ */
+describe("loadMcpTools — un conector roto no se cobra en cada turno", () => {
+  it("tras fallar, deja constancia del error en el conector (para el enfriamiento y para el panel)", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "mcp-roto",
+      name: "Roto",
+      config: { url: "https://roto.example.com" },
+    });
+    createMCPClientMock.mockRejectedValue(new Error("token vencido"));
+
+    await loadMcpTools(env, db, TEST_BOT_ID);
+
+    const row = await new BotConnectorsRepo(db).getByBotAndProvider(TEST_BOT_ID, "mcp-roto");
+    expect(row?.config.mcpLastError).toContain("token vencido");
+    expect(Number(row?.config.mcpLastErrorAt)).toBeGreaterThan(0);
+  });
+
+  it("si falló hace poco, NI SE INTENTA — ahí está el ahorro de segundos por turno", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "mcp-roto",
+      name: "Roto",
+      config: {
+        url: "https://roto.example.com",
+        mcpLastError: "token vencido",
+        mcpLastErrorAt: String(Date.now()),
+      },
+    });
+
+    const tools = await loadMcpTools(env, db, TEST_BOT_ID);
+    expect(tools).toEqual({});
+    expect(createMCPClientMock).not.toHaveBeenCalled();
+  });
+
+  it("pasado el enfriamiento vuelve a intentarse — no se abandona para siempre", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "mcp-roto",
+      name: "Roto",
+      config: {
+        url: "https://roto.example.com",
+        mcpLastError: "token vencido",
+        mcpLastErrorAt: String(Date.now() - 6 * 60_000),
+      },
+    });
+    createMCPClientMock.mockResolvedValue({ tools: async () => ({ ping: { description: "pong" } }) });
+
+    expect(await loadMcpTools(env, db, TEST_BOT_ID)).toEqual({ roto_ping: { description: "pong" } });
+    expect(createMCPClientMock).toHaveBeenCalled();
+  });
+
+  it("al recuperarse borra la marca, para que el panel deje de avisar", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "mcp-ok",
+      name: "OK",
+      config: {
+        url: "https://ok.example.com",
+        mcpLastError: "se cayó ayer",
+        mcpLastErrorAt: String(Date.now() - 6 * 60_000),
+      },
+    });
+    createMCPClientMock.mockResolvedValue({ tools: async () => ({}) });
+
+    await loadMcpTools(env, db, TEST_BOT_ID);
+    await new Promise((r) => setTimeout(r, 50)); // la limpieza es best-effort (void)
+
+    const row = await new BotConnectorsRepo(db).getByBotAndProvider(TEST_BOT_ID, "mcp-ok");
+    expect(row?.config.mcpLastError).toBe("");
+  });
+
+  it("un conector en enfriamiento no impide que los demás carguen sus tools", async () => {
+    const repo = new BotConnectorsRepo(db);
+    await repo.upsert({
+      botId: TEST_BOT_ID, category: "mcp", provider: "mcp-roto", name: "Roto",
+      config: { url: "https://roto.example.com", mcpLastError: "x", mcpLastErrorAt: String(Date.now()) },
+    });
+    await repo.upsert({
+      botId: TEST_BOT_ID, category: "mcp", provider: "mcp-sano", name: "Sano",
+      config: { url: "https://sano.example.com" },
+    });
+    createMCPClientMock.mockResolvedValue({ tools: async () => ({ ping: { description: "pong" } }) });
+
+    expect(await loadMcpTools(env, db, TEST_BOT_ID)).toEqual({ sano_ping: { description: "pong" } });
+    expect(createMCPClientMock).toHaveBeenCalledTimes(1);
+  });
+});

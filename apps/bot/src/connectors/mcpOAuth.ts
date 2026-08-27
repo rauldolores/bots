@@ -159,6 +159,19 @@ export function snapshotToConnectorConfig(snapshot: McpOAuthSnapshot): Record<st
   const config: Record<string, string> = { url: snapshot.mcpUrl, authMode: "oauth" };
   if (snapshot.clientInformation) config.oauthClientInfo = JSON.stringify(snapshot.clientInformation);
   if (snapshot.authorizationServerInformation) config.oauthServerInfo = JSON.stringify(snapshot.authorizationServerInformation);
+
+  // Cuándo caduca el acceso, en absoluto.
+  //
+  // El token trae `expires_in` (segundos DESDE que se emitió), y el momento de
+  // emisión no se guardaba en ningún lado — así que después nadie podía saber
+  // si seguía vigente. @ai-sdk/mcp tampoco lleva la cuenta: es puramente
+  // reactivo (manda el token vencido, se come el 401, y recién ahí intenta
+  // recuperarse). Guardarlo aquí permite al menos AVISAR en el panel antes de
+  // que el dueño se entere porque el bot se puso lento.
+  const expiresIn = Number((snapshot.tokens as { expires_in?: number } | undefined)?.expires_in);
+  if (Number.isFinite(expiresIn) && expiresIn > 0) {
+    config.oauthExpiresAt = String(Date.now() + expiresIn * 1000);
+  }
   return config;
 }
 

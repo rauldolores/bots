@@ -267,10 +267,15 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
   });
 
   // maxChunks/interChunkDelayMs son config de ENTREGA (no del turno en sí),
-  // así que se resuelve aparte — mismo patrón que ya usaba el camino de
-  // reenvío de arriba (resolveAgentConfig con toolNames vacío es barato: no
-  // rearma el system prompt, solo lee overlays de settings).
-  const cfg = await resolveAgentConfig(env, [], botId);
+  // pero salen de la MISMA config que el turno ya resolvió — así que se
+  // reusa en vez de volver a pedirla.
+  //
+  // Antes aquí había otro resolveAgentConfig(env, [], botId), con un comentario
+  // que decía que era barato "porque no rearma el system prompt". Las dos
+  // cosas eran falsas: hace sus 3 consultas igual y sí rearma el prompt entero
+  // (el toolNames vacío solo acorta la lista de tools anunciadas), para luego
+  // tirarlo a la basura. En el camino crítico del cliente.
+  const cfg = result.cfg;
 
   // La respuesta se aparta ANTES de mandarla. Si el canal falla, el reintento
   // la reenvía en vez de perderla — que era lo que pasaba antes.

@@ -1,7 +1,7 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import type { Db } from "../db/client";
 import type { Env } from "../env";
-import { BotConnectorsRepo } from "../db/botConnectors";
+import { BotConnectorsRepo, type BotConnector } from "../db/botConnectors";
 import { readSecret, updateSecret } from "../db/vault";
 import { McpOAuthState, connectorToSnapshot, mcpOAuthRedirectUrl } from "../connectors/mcpOAuth";
 import { mcpToolPrefixes, mcpToolName } from "../connectors/mcpNaming";
@@ -10,8 +10,50 @@ import { mcpToolPrefixes, mcpToolName } from "../connectors/mcpNaming";
  * Cuánto se espera a que un servidor MCP remoto conteste antes de darlo por
  * caído. Un MCP lento/roto no debe colgar el turno del cliente — mejor
  * responder sin esas tools que dejarlo esperando.
+ *
+ * OJO: esto es `initializationOptions`, y el propio SDK documenta que solo
+ * acota "transport startup and the initialize request" — NO cubre el OAuth ni
+ * el tools/list. Por eso además está MCP_TOTAL_TIMEOUT_MS abajo: sin él, un
+ * servidor lento se llevaba 13s de un turno pese a este tope de 8.
  */
 const MCP_TIMEOUT_MS = 8_000;
+
+/**
+ * Tope de TODO el trabajo de un conector: handshake + OAuth + tools/list.
+ * Este sí es el que manda, y corre en el camino crítico del cliente — cada
+ * segundo aquí es un segundo que alguien espera su respuesta.
+ */
+const MCP_TOTAL_TIMEOUT_MS = 4_000;
+
+/**
+ * Tras un fallo, cuánto se deja de intentar ese conector.
+ *
+ * El caso real que motivó esto: a un conector se le venció el token OAuth y
+ * quedó inservible, pero CADA turno seguía pagando ~8s intentando conectarse
+ * — durante horas, en silencio, y sin obtener ni una sola tool. Con esto se
+ * paga una vez cada cinco minutos en vez de en cada mensaje.
+ */
+const MCP_COOLDOWN_MS = 5 * 60_000;
+
+/** Llaves donde se recuerda el último fallo (en la config del conector, para que sobreviva al reinicio y se pueda mostrar en el panel). */
+const ERR_KEY = "mcpLastError";
+const ERR_AT_KEY = "mcpLastErrorAt";
+
+function enCooldown(c: BotConnector): boolean {
+  const at = Number(c.config[ERR_AT_KEY] ?? "");
+  return Number.isFinite(at) && at > 0 && Date.now() - at < MCP_COOLDOWN_MS;
+}
+
+/** Corre `p` pero se rinde a los `ms` — el trabajo de fondo se abandona, no se espera. */
+function conTimeout<T>(p: Promise<T>, ms: number, etiqueta: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${etiqueta} no respondió en ${ms}ms`)), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
 
 /**
  * Conecta a cada servidor MCP remoto que el bot tenga activo (F5 Fase 3) y
@@ -23,7 +65,8 @@ const MCP_TIMEOUT_MS = 8_000;
  * proceso local en Vercel/Cloudflare).
  */
 export async function loadMcpTools(env: Env, db: Db, botId: string): Promise<Record<string, unknown>> {
-  const connectors = (await new BotConnectorsRepo(db).listByBot(botId)).filter(
+  const repo = new BotConnectorsRepo(db);
+  const connectors = (await repo.listByBot(botId)).filter(
     (c) => c.category === "mcp" && c.enabled && typeof c.config.url === "string" && c.config.url,
   );
   if (connectors.length === 0) return {};
@@ -34,63 +77,89 @@ export async function loadMcpTools(env: Env, db: Db, botId: string): Promise<Rec
 
   const toolSets = await Promise.all(
     connectors.map(async (c) => {
+      const etiqueta = c.name ?? c.provider;
       const prefix = prefixes.get(c.provider) ?? c.provider;
-      try {
-        // OAuth (F-MCP-OAuth, connectors/mcpOAuth.ts): el token vivo en Vault
-        // es un JSON de tokens (access+refresh), no un string plano — y
-        // createMCPClient() puede refrescarlo solo a media llamada si expiró
-        // (llama provider.saveTokens() de nuevo). Cualquier conector SIN
-        // authMode:"oauth" (el token estático de siempre) sigue exactamente
-        // igual que antes.
-        if (c.config.authMode === "oauth") {
-          const tokenJson = c.secret_ref ? await readSecret(db, c.secret_ref) : null;
-          const provider = McpOAuthState.fromSnapshot(connectorToSnapshot(c, mcpOAuthRedirectUrl(env), tokenJson));
-          const client = await createMCPClient({
-            transport: { type: "http", url: c.config.url, authProvider: provider },
-            initializationOptions: { timeout: MCP_TIMEOUT_MS },
-          });
-          const tools = await client.tools();
-          // Si el SDK refrescó el token durante la conexión, persistirlo —
-          // best-effort: si falla, el próximo turno simplemente refresca de
-          // nuevo, nunca vale la pena tronar el turno actual por esto.
-          const refreshedTokens = JSON.stringify(provider.snapshot.tokens ?? {});
-          if (c.secret_ref && refreshedTokens !== tokenJson) {
-            void updateSecret(db, c.secret_ref, refreshedTokens).catch((e) =>
-              console.error(`[mcpTools] no se pudo persistir el refresh de token de ${c.name ?? c.provider}:`, e),
-            );
-          }
-          const prefixed: Record<string, unknown> = {};
-          for (const [name, t] of Object.entries(tools)) {
-            prefixed[mcpToolName(prefix, name)] = t;
-          }
-          return prefixed;
-        }
 
-        const token = c.secret_ref ? await readSecret(db, c.secret_ref) : null;
-        const client = await createMCPClient({
-          transport: {
-            type: "http",
-            url: c.config.url,
-            ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
-          },
-          initializationOptions: { timeout: MCP_TIMEOUT_MS },
-        });
-        const tools = await client.tools();
-        // Sin close() a propósito: transporte HTTP no mantiene un socket vivo
-        // que valga la pena cerrar explícitamente dentro de una invocación
-        // serverless de un solo turno — el propio runtime limpia al terminar.
+      // Falló hace poco: no se vuelve a intentar hasta que pase el enfriamiento.
+      // Un conector roto costaba ~8s de espera del cliente en CADA mensaje.
+      if (enCooldown(c)) return {};
+
+      try {
+        const tools = await conTimeout(
+          conectarYListarTools(env, db, c),
+          MCP_TOTAL_TIMEOUT_MS,
+          `[mcpTools] ${etiqueta}`,
+        );
+        // Se recuperó: se borra la marca para que el panel deje de avisar.
+        if (c.config[ERR_AT_KEY]) {
+          void repo
+            .mergeConfig(botId, c.provider, { [ERR_KEY]: "", [ERR_AT_KEY]: "" })
+            .catch((e) => console.error(`[mcpTools] no se pudo limpiar el estado de ${etiqueta}:`, e));
+        }
         const prefixed: Record<string, unknown> = {};
         for (const [name, t] of Object.entries(tools)) {
           prefixed[mcpToolName(prefix, name)] = t;
         }
         return prefixed;
       } catch (e) {
-        console.error(`[mcpTools] ${c.name ?? c.provider} (${c.config.url}) falló:`, e);
+        const msg = (e as Error)?.message ?? String(e);
+        console.error(`[mcpTools] ${etiqueta} (${c.config.url}) falló:`, e);
+        // Se recuerda el fallo: sirve para el enfriamiento Y para que el dueño
+        // lo VEA en /admin/conexiones. Antes esto se tragaba en silencio y la
+        // única señal era que el bot se ponía lento sin explicación.
+        void repo
+          .mergeConfig(botId, c.provider, { [ERR_KEY]: msg.slice(0, 300), [ERR_AT_KEY]: String(Date.now()) })
+          .catch((e2) => console.error(`[mcpTools] no se pudo registrar el fallo de ${etiqueta}:`, e2));
         return {};
       }
     }),
   );
   return Object.assign({}, ...toolSets);
+}
+
+/**
+ * Conecta a UN servidor MCP y devuelve sus tools sin prefijar.
+ *
+ * Sin close() a propósito: el transporte HTTP no mantiene un socket vivo que
+ * valga la pena cerrar dentro de una invocación serverless de un solo turno —
+ * el runtime limpia al terminar.
+ */
+async function conectarYListarTools(env: Env, db: Db, c: BotConnector): Promise<Record<string, unknown>> {
+  // OAuth (F-MCP-OAuth, connectors/mcpOAuth.ts): el token vivo en Vault es un
+  // JSON de tokens (access+refresh), no un string plano — y createMCPClient()
+  // puede refrescarlo solo a media llamada si expiró (llama provider.saveTokens()
+  // de nuevo). Cualquier conector SIN authMode:"oauth" (el token estático de
+  // siempre) sigue exactamente igual que antes.
+  if (c.config.authMode === "oauth") {
+    const tokenJson = c.secret_ref ? await readSecret(db, c.secret_ref) : null;
+    const provider = McpOAuthState.fromSnapshot(connectorToSnapshot(c, mcpOAuthRedirectUrl(env), tokenJson));
+    const client = await createMCPClient({
+      transport: { type: "http", url: c.config.url, authProvider: provider },
+      initializationOptions: { timeout: MCP_TIMEOUT_MS },
+    });
+    const tools = await client.tools();
+    // Si el SDK refrescó el token durante la conexión, persistirlo —
+    // best-effort: si falla, el próximo turno simplemente refresca de nuevo,
+    // nunca vale la pena tronar el turno actual por esto.
+    const refreshedTokens = JSON.stringify(provider.snapshot.tokens ?? {});
+    if (c.secret_ref && refreshedTokens !== tokenJson) {
+      void updateSecret(db, c.secret_ref, refreshedTokens).catch((e) =>
+        console.error(`[mcpTools] no se pudo persistir el refresh de token de ${c.name ?? c.provider}:`, e),
+      );
+    }
+    return tools as Record<string, unknown>;
+  }
+
+  const token = c.secret_ref ? await readSecret(db, c.secret_ref) : null;
+  const client = await createMCPClient({
+    transport: {
+      type: "http",
+      url: c.config.url,
+      ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+    },
+    initializationOptions: { timeout: MCP_TIMEOUT_MS },
+  });
+  return (await client.tools()) as Record<string, unknown>;
 }
 
 export interface McpToolInfo {

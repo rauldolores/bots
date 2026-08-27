@@ -44,7 +44,18 @@ const RETRY_DELAY_MS = 30_000;
  * La cadena de failover del LLM (reintento + degradado + proveedor alterno, con
  * backoffs) puede acercarse sola a los 65s, así que esto no es hipotético.
  */
-const TURN_TIMEOUT_MS = 50_000;
+const TURN_TIMEOUT_MS = 40_000;
+
+/**
+ * Cuántas conversaciones se atienden A LA VEZ.
+ *
+ * Antes era una fila india: la décima conversación esperaba detrás de nueve
+ * turnos completos de LLM. Casi todo el tiempo de un turno es esperar a un
+ * servicio ajeno (LLM, MCP, la API del canal), así que solaparlos no cuesta
+ * CPU — pero sí sube el pico de conexiones a la base y de llamadas al LLM,
+ * por eso hay tope y no un Promise.all suelto.
+ */
+const TURN_CONCURRENCY = 3;
 
 /**
  * Corre `p`, pero se rinde a los `ms`.
@@ -75,6 +86,55 @@ export interface TickResult {
   nurtureSent: number;
 }
 
+/**
+ * Un turno completo con su manejo de fallos. Nunca lanza: un error de una
+ * conversación no puede tumbar a las demás que corren en paralelo.
+ */
+async function atenderConversacion(
+  env: Env,
+  jobs: AgentJobsRepo,
+  key: string,
+  result: TickResult,
+): Promise<void> {
+  try {
+    const respondio = await conTimeout(runTurn(env, key), TURN_TIMEOUT_MS, `[tick] turno de ${key}`);
+    // Sin nada que responder el trabajo igual se cierra: dejarlo vivo lo
+    // haría reintentar para siempre sobre un buffer vacío.
+    await jobs.complete(key);
+    if (respondio) result.answered++;
+  } catch (e) {
+    result.failed++;
+    const msg = e instanceof Error ? e.message : String(e);
+    const intentos = await jobs.attemptsOf(key).catch(() => MAX_ATTEMPTS);
+
+    if (intentos >= MAX_ATTEMPTS) {
+      // Rendirse es mejor que reintentar en bucle: cada intento cuesta LLM y
+      // el cliente ya no está esperando. Queda en los logs.
+      //
+      // Aquí SÍ se tiran los mensajes tomados: soltarlos otra vez los dejaría
+      // esperando al próximo turno, que volvería a romperse con ellos
+      // (mensaje envenenado). Cinco intentos ya es suficiente evidencia de
+      // que el problema no se arregla solo.
+      console.error(`[tick] ${key} abandonado tras ${intentos} intentos: ${msg}`);
+      await jobs.clearClaimedPending(key).catch((e2) =>
+        console.error(`[tick] no se pudo limpiar el buffer de ${key}:`, e2),
+      );
+      await jobs.complete(key).catch((e2) => console.error(`[tick] no se pudo cerrar ${key}:`, e2));
+    } else {
+      // Lo que el turno alcanzó a tomar vuelve a la cola. Sin esto, el
+      // reintento corre sobre un buffer vacío y el cliente nunca recibe
+      // respuesta — que era justo el bug.
+      console.error(`[tick] ${key} falló (intento ${intentos}): ${msg}`);
+      await jobs.releaseClaimedPending(key).catch((e2) =>
+        console.error(`[tick] no se pudieron devolver los mensajes de ${key} a la cola:`, e2),
+      );
+      await jobs.fail(key, msg, RETRY_DELAY_MS).catch((e2) =>
+        console.error(`[tick] no se pudo reprogramar ${key}:`, e2),
+      );
+    }
+  }
+}
+
 export async function tick(
   env: Env,
   opts: { limit?: number } = {},
@@ -85,43 +145,18 @@ export async function tick(
   const keys = await jobs.claimDue(opts.limit ?? DEFAULT_LIMIT);
   const result: TickResult = { claimed: keys.length, answered: 0, failed: 0, campaignsSent: 0, skillsRun: 0, nurtureSent: 0 };
 
-  for (const key of keys) {
-    try {
-      const respondio = await conTimeout(runTurn(env, key), TURN_TIMEOUT_MS, `[tick] turno de ${key}`);
-      // Sin nada que responder el trabajo igual se cierra: dejarlo vivo lo
-      // haría reintentar para siempre sobre un buffer vacío.
-      await jobs.complete(key);
-      if (respondio) result.answered++;
-    } catch (e) {
-      result.failed++;
-      const msg = e instanceof Error ? e.message : String(e);
-      const intentos = await jobs.attemptsOf(key);
-
-      if (intentos >= MAX_ATTEMPTS) {
-        // Rendirse es mejor que reintentar en bucle: cada intento cuesta LLM y
-        // el cliente ya no está esperando. Queda en los logs.
-        //
-        // Aquí SÍ se tiran los mensajes tomados: soltarlos otra vez los dejaría
-        // esperando al próximo turno, que volvería a romperse con ellos
-        // (mensaje envenenado). Cinco intentos ya es suficiente evidencia de
-        // que el problema no se arregla solo.
-        console.error(`[tick] ${key} abandonado tras ${intentos} intentos: ${msg}`);
-        await jobs.clearClaimedPending(key).catch((e2) =>
-          console.error(`[tick] no se pudo limpiar el buffer de ${key}:`, e2),
-        );
-        await jobs.complete(key);
-      } else {
-        // Lo que el turno alcanzó a tomar vuelve a la cola. Sin esto, el
-        // reintento corre sobre un buffer vacío y el cliente nunca recibe
-        // respuesta — que era justo el bug.
-        console.error(`[tick] ${key} falló (intento ${intentos}): ${msg}`);
-        await jobs.releaseClaimedPending(key).catch((e2) =>
-          console.error(`[tick] no se pudieron devolver los mensajes de ${key} a la cola:`, e2),
-        );
-        await jobs.fail(key, msg, RETRY_DELAY_MS);
-      }
+  // Cada conversación es independiente de las demás, así que se atienden de a
+  // TURN_CONCURRENCY en vez de una por una: quien caía último en la lista
+  // esperaba detrás de todos los turnos anteriores sin ninguna razón.
+  const pendientes = [...keys];
+  const trabajadores = Array.from({ length: Math.min(TURN_CONCURRENCY, pendientes.length) }, async () => {
+    for (;;) {
+      const key = pendientes.shift();
+      if (key === undefined) return;
+      await atenderConversacion(env, jobs, key, result);
     }
-  }
+  });
+  await Promise.all(trabajadores);
 
   // Campañas (F6): un lote chico de envíos pendientes por corrida — nunca
   // debe tumbar el tick de turnos, que es lo que de verdad no puede esperar.
