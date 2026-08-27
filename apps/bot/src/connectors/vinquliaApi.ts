@@ -88,3 +88,61 @@ export function firstRowId(payload: unknown): number | string | undefined {
   const row = Array.isArray(payload) ? payload[0] : payload;
   return (row as { id?: number | string } | null)?.id;
 }
+
+// ── Buscar antes de crear ──────────────────────────────────────────────────
+//
+// `crm.contacts`, `crm.companies` y `crm.deals` NO tienen ninguna restricción
+// de unicidad más allá de su llave primaria (verificado contra el esquema
+// real), así que nada impide meter el mismo contacto dos veces: el CRM del
+// cliente ya tenía a la misma persona duplicada con el teléfono en dos
+// formatos. Evitar el duplicado es responsabilidad de quien inserta, o sea
+// nuestra.
+
+/** Un GET a la API REST. Devuelve [] ante cualquier problema: buscar es best-effort, nunca motivo para no registrar el lead. */
+export async function vinquliaBuscar<T = Record<string, unknown>>(
+  creds: ConnectorCreds,
+  base: string,
+  ruta: string,
+): Promise<T[]> {
+  try {
+    const res = await fetch(`${base}${ruta}`, { headers: vinquliaHeaders(creds) });
+    if (!res.ok) return [];
+    const filas = await res.json().catch(() => []);
+    return Array.isArray(filas) ? (filas as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Solo los dígitos, sin lada de país ni separadores — "+52 55 4334-4334" y "5543344334" tienen que verse iguales. */
+export function soloDigitos(v: string): string {
+  return (v.match(/\d/g) ?? []).join("");
+}
+
+/**
+ * Variantes con las que buscar un mismo teléfono.
+ *
+ * PostgREST compara el string tal cual está guardado, y el mismo número entra
+ * con lada, sin lada, con espacios o con guiones según quién lo escribió. Se
+ * prueban unas pocas formas plausibles en vez de traerse la tabla entera.
+ */
+export function variantesDeTelefono(v: string): string[] {
+  const d = soloDigitos(v);
+  const ultimos10 = d.slice(-10);
+  return [...new Set([v.trim(), d, ultimos10, `+${d}`, `+52${ultimos10}`])].filter(Boolean);
+}
+
+/** El filtro PostgREST `or=(...)` para hallar un contacto por cualquiera de sus formas de contacto. */
+export function filtroContactoPorDato(contacto: string): string | null {
+  if (isEmail(contacto)) {
+    // La búsqueda por contención ignora el orden de las llaves del objeto.
+    return `email_jsonb=cs.${encodeURIComponent(JSON.stringify([{ email: contacto.trim() }]))}`;
+  }
+  if (isPhone(contacto)) {
+    const ors = variantesDeTelefono(contacto)
+      .map((v) => `phone_jsonb.cs.${JSON.stringify([{ number: v }])}`)
+      .join(",");
+    return `or=(${encodeURIComponent(ors)})`;
+  }
+  return null;
+}

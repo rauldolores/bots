@@ -592,19 +592,18 @@ async function renderConnectorCard(db: Db, botId: string, meta: ConnectorMeta): 
   // Un CRM conectado que solo crea contactos y nunca la oportunidad deja leads
   // que nadie trabaja — y hasta ahora lo hacía en silencio. Si al conector le
   // faltan los campos que habilitan la oportunidad, se dice aquí.
-  const faltantes = ok
-    ? (meta.fields ?? [])
-        .filter((f) => (f.name === "dealPipeline" || f.name === "dealStage") && !(row?.config[f.name] ?? "").trim())
-        .map((f) => f.label)
-    : [];
-  const avisoSinOportunidad =
-    faltantes.length > 0
-      ? `<div class="text-[11.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;line-height:1.5">
-           <b>Solo se están creando contactos, no oportunidades.</b> Un lead sin oportunidad no le aparece a nadie en su
-           embudo, así que nadie le da seguimiento. Llena ${esc(faltantes.join(" y "))} aquí abajo con los mismos valores
-           que ya usas dentro de ${esc(meta.name)}.
-         </div>`
-      : "";
+  const sinEtapa =
+    ok &&
+    meta.category === "crm" &&
+    !!CRM_ADAPTERS[meta.id]?.listPipelineStages &&
+    !(row?.config.pipelineStage ?? "").trim() &&
+    !((row?.config.dealPipeline ?? "").trim() && (row?.config.dealStage ?? "").trim());
+  const avisoSinOportunidad = sinEtapa
+    ? `<div class="text-[11.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;line-height:1.5">
+         <b>Solo se están creando contactos, no oportunidades.</b> Un lead sin oportunidad no le aparece a nadie en su
+         embudo, así que nadie le da seguimiento. Usa "Configurar etapa inicial" aquí abajo y elige dónde deben caer.
+       </div>`
+    : "";
 
   return `
     <div class="bg-panel border ${ok ? "" : "border-line"}" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;${ok ? "border-color:rgba(127,183,126,.45)" : ""}">

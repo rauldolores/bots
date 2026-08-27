@@ -54,15 +54,19 @@ export const CRM_PROVIDERS: Record<string, ConnectorMeta> = {
       'En Vinqulia: <span class="font-mono">Ajustes → API</span>, crea una clave de API y cópiala.',
       "Pega la dirección de tu Vinqulia — solo el dominio, sin rutas (ej. <span class=\"font-mono\">https://crm.miempresa.com</span>).",
       'El <b>ID del vendedor</b> es opcional: si lo pones, los contactos que cree el bot quedan asignados a esa persona (lo ves en <span class="font-mono">Ajustes → Equipo</span>).',
-      "El pipeline y la etapa son opcionales, pero sin ellos el bot NO crea la oportunidad (solo el contacto): escribe los mismos valores que ya usas dentro de tu Vinqulia (ej. \"ventas\" y \"proposal-sent\").",
+      'Ya conectado, usa el botón <b>"Configurar etapa inicial"</b> para elegir en qué pipeline y etapa caen las oportunidades que cree el bot. Sin eso registra el contacto pero NO la oportunidad.',
     ],
     apiKeyLabel: "Clave de API",
     apiKeyPlaceholder: "········",
+    // El pipeline y la etapa NO se piden aquí como texto: Vinqulia guarda por
+    // value interno ("ventas", "opportunity") y muestra por label ("Ventas",
+    // "Oportunidad"). Al teclearlos, el dueño escribe lo que ve y la
+    // oportunidad queda guardada donde su tablero no la dibuja — pasó en
+    // producción. Ahora salen de un selector poblado con su propia
+    // configuración (ver listPipelineStages en crm/vinqulia.ts).
     fields: [
       { name: "url", label: "Dirección de tu Vinqulia", placeholder: "https://crm.miempresa.com", isConfig: true },
       { name: "salesId", label: "ID del vendedor (opcional)", placeholder: "1", isConfig: true, optional: true },
-      { name: "dealPipeline", label: "Pipeline de la oportunidad inicial (opcional)", placeholder: "ventas", isConfig: true, optional: true },
-      { name: "dealStage", label: "Etapa de la oportunidad inicial (opcional)", placeholder: "proposal-sent", isConfig: true, optional: true },
     ],
   },
   hubspot: {
