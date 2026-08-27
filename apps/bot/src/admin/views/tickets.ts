@@ -121,6 +121,51 @@ function renderTicketsExternalList(
     : `<div class="bg-panel border border-line" style="padding:40px 18px;text-align:center"><p class="text-dim text-[12.5px]">Aún no hay tickets abiertos en ${esc(providerLabel)}.</p></div>`;
 }
 
+/** Una tarjeta de ticket LOCAL — igual estén todos (sin conector) o solo los que no se sincronizaron (con conector). */
+function renderLocalTicketCard(t: Ticket, timezone: string): string {
+  const date = new Date(t.created_at).toLocaleString("es-MX", { timeZone: timezone });
+  const pillColor = STATUS_PILL[t.status] ?? "var(--muted)";
+  const prioColor = PRIORITY_PILL[t.priority] ?? "var(--muted)";
+  const requesterLine =
+    t.requester_name || t.requester_contact
+      ? `<div class="text-muted text-[12px]" style="margin-bottom:8px">${esc(t.requester_name ?? "(sin nombre)")}${t.requester_contact ? ` · ${esc(t.requester_contact)}` : ""}</div>`
+      : "";
+  const transcriptBlock = t.transcript
+    ? `<div class="tk-detail" style="display:none;margin:0 0 12px;padding:10px 12px;background:var(--bg);border:1px solid var(--line);max-height:260px;overflow-y:auto;white-space:pre-wrap;font-size:12px;line-height:1.6;color:var(--muted)">${esc(t.transcript)}</div>`
+    : "";
+  return `<div class="tkcard bg-panel border border-line" style="padding:16px 18px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;cursor:pointer"
+         onclick="var d=this.parentNode.querySelector('.tk-detail');if(!d)return;var open=d.style.display==='block';d.style.display=open?'none':'block';this.querySelector('.chev').style.transform=open?'rotate(0deg)':'rotate(90deg)'">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        <i data-lucide="chevron-right" width="13" height="13" class="chev" style="flex:none;color:var(--dim);transition:transform .12s ease"></i>
+        <span style="font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:${pillColor};border:1px solid ${pillColor};padding:1px 6px;flex:none">${esc(t.status.toUpperCase())}</span>
+        <span style="font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:${prioColor};border:1px solid ${prioColor};padding:1px 6px;flex:none">${esc(PRIORITY_LABEL[t.priority] ?? t.priority)}</span>
+        <span class="font-display font-semibold text-[13px] text-cream truncate">${esc(t.category)}</span>
+      </div>
+      <span class="text-dim text-[11px]" style="flex:none">${date}</span>
+    </div>
+    ${requesterLine}
+    <p class="text-muted text-[12.5px] leading-relaxed" style="margin:0 0 12px">${esc(t.summary)}</p>
+    ${transcriptBlock}
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <form method="POST" action="/admin/tickets/${t.id}/priority" onclick="event.stopPropagation()">
+        <select name="priority" onchange="this.form.submit()"
+                style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:8px 10px;font-size:12px;outline:none;cursor:pointer">
+          ${(["low", "normal", "high", "urgent"] as const)
+            .map((p) => `<option ${t.priority === p ? "selected" : ""} value="${p}">${PRIORITY_LABEL[p]}</option>`)
+            .join("")}
+        </select>
+      </form>
+      <form method="POST" action="/admin/tickets/${t.id}/resolve" style="display:flex;gap:8px;flex:1;min-width:220px" onclick="event.stopPropagation()">
+        <input name="resolved_by" placeholder="tu email" required
+               style="flex:1;background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 12px;font-size:12.5px;outline:none">
+        <button class="bigbtn font-display font-bold text-[11.5px] cursor-pointer"
+                style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 16px">Resolver</button>
+      </form>
+    </div>
+  </div>`;
+}
+
 export async function renderTickets(env: Env, botId: string, visibleNavIds: Set<string> | null = null): Promise<string> {
   const db = new Db(env.DB);
   const timezone = resolveTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
@@ -146,64 +191,36 @@ export async function renderTickets(env: Env, botId: string, visibleNavIds: Set<
           .filter((t) => t.exported_to === ticketsConnector.provider && t.external_id)
           .map((t) => [t.external_id as string, t] as const),
       );
+      // Tickets que el bot creó aquí pero que NUNCA llegaron a ${providerLabel}
+      // (push fallido — credenciales, red, un campo que el CRM exige y no le
+      // mandamos). Antes quedaban invisibles: esta pantalla solo pintaba la
+      // lista remota, así que un ticket sin sincronizar no aparecía en
+      // ningún lado, aunque sí existiera.
+      const unsynced = localTickets.filter((t) => t.status === "open" && t.exported_to !== ticketsConnector.provider);
+      const unsyncedBlock = unsynced.length
+        ? `<div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line)">
+             <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+               <h3 class="font-display font-semibold text-[13.5px] text-cream">Sin sincronizar con ${esc(providerLabel)}</h3>
+               <span style="font-size:10px;letter-spacing:.1em;color:var(--bad);border:1px solid var(--bad);padding:2px 8px;font-weight:600">${unsynced.length}</span>
+             </div>
+             <p class="text-dim text-[11.5px]" style="margin:0 0 14px">Se crearon aquí pero no llegaron a ${esc(providerLabel)} — revisa la conexión. Se pueden atender igual desde aquí mientras tanto.</p>
+             ${unsynced.map((t) => renderLocalTicketCard(t, timezone)).join("")}
+           </div>`
+        : "";
       const body = `
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
           <h2 class="font-display font-semibold text-[15px] text-cream">Tickets — ${esc(providerLabel)}</h2>
           <a href="/admin/conexiones?cat=tickets" class="text-[12px]" style="color:var(--muted)">gestionar conexión</a>
         </div>
-        ${renderTicketsExternalList(providerLabel, result.items, timezone, localByExternalId)}`;
+        ${renderTicketsExternalList(providerLabel, result.items, timezone, localByExternalId)}
+        ${unsyncedBlock}`;
       return layout({ title: "Tickets", activeTab: "tickets", body, pro: true, visibleNavIds });
     }
     ticketsErrorBanner = `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px;margin-bottom:14px">No se pudo consultar ${esc(providerLabel)} (${esc(result?.error ?? "sin credenciales")}) — mostrando la copia local mientras tanto.</div>`;
   }
 
   const open = await repo.listOpen();
-
-  const list = open
-    .map((t) => {
-      const date = new Date(t.created_at).toLocaleString("es-MX", { timeZone: timezone });
-      const pillColor = STATUS_PILL[t.status] ?? "var(--muted)";
-      const prioColor = PRIORITY_PILL[t.priority] ?? "var(--muted)";
-      const requesterLine =
-        t.requester_name || t.requester_contact
-          ? `<div class="text-muted text-[12px]" style="margin-bottom:8px">${esc(t.requester_name ?? "(sin nombre)")}${t.requester_contact ? ` · ${esc(t.requester_contact)}` : ""}</div>`
-          : "";
-      const transcriptBlock = t.transcript
-        ? `<div class="tk-detail" style="display:none;margin:0 0 12px;padding:10px 12px;background:var(--bg);border:1px solid var(--line);max-height:260px;overflow-y:auto;white-space:pre-wrap;font-size:12px;line-height:1.6;color:var(--muted)">${esc(t.transcript)}</div>`
-        : "";
-      return `<div class="tkcard bg-panel border border-line" style="padding:16px 18px;margin-bottom:12px">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;cursor:pointer"
-             onclick="var d=this.parentNode.querySelector('.tk-detail');if(!d)return;var open=d.style.display==='block';d.style.display=open?'none':'block';this.querySelector('.chev').style.transform=open?'rotate(0deg)':'rotate(90deg)'">
-          <div style="display:flex;align-items:center;gap:8px;min-width:0">
-            <i data-lucide="chevron-right" width="13" height="13" class="chev" style="flex:none;color:var(--dim);transition:transform .12s ease"></i>
-            <span style="font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:${pillColor};border:1px solid ${pillColor};padding:1px 6px;flex:none">${esc(t.status.toUpperCase())}</span>
-            <span style="font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:${prioColor};border:1px solid ${prioColor};padding:1px 6px;flex:none">${esc(PRIORITY_LABEL[t.priority] ?? t.priority)}</span>
-            <span class="font-display font-semibold text-[13px] text-cream truncate">${esc(t.category)}</span>
-          </div>
-          <span class="text-dim text-[11px]" style="flex:none">${date}</span>
-        </div>
-        ${requesterLine}
-        <p class="text-muted text-[12.5px] leading-relaxed" style="margin:0 0 12px">${esc(t.summary)}</p>
-        ${transcriptBlock}
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <form method="POST" action="/admin/tickets/${t.id}/priority" onclick="event.stopPropagation()">
-            <select name="priority" onchange="this.form.submit()"
-                    style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:8px 10px;font-size:12px;outline:none;cursor:pointer">
-              ${(["low", "normal", "high", "urgent"] as const)
-                .map((p) => `<option ${t.priority === p ? "selected" : ""} value="${p}">${PRIORITY_LABEL[p]}</option>`)
-                .join("")}
-            </select>
-          </form>
-          <form method="POST" action="/admin/tickets/${t.id}/resolve" style="display:flex;gap:8px;flex:1;min-width:220px" onclick="event.stopPropagation()">
-            <input name="resolved_by" placeholder="tu email" required
-                   style="flex:1;background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 12px;font-size:12.5px;outline:none">
-            <button class="bigbtn font-display font-bold text-[11.5px] cursor-pointer"
-                    style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 16px">Resolver</button>
-          </form>
-        </div>
-      </div>`;
-    })
-    .join("");
+  const list = open.map((t) => renderLocalTicketCard(t, timezone)).join("");
 
   const body =
     ticketsErrorBanner +

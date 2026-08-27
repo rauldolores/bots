@@ -47,7 +47,7 @@ describe("handoffHumanTool — owner WhatsApp notification (Pro)", () => {
     );
     const tool = handoffHumanTool(env, () => convId, TEST_BOT_ID);
     await tool.execute!(
-      { reason: "complejo", summary: "cliente quiere reembolso", category: "billing", priority: "normal" },
+      { reason: "complejo", summary: "cliente quiere reembolso", category: "billing", priority: "normal", contact: "cliente@ejemplo.com" },
       {} as any,
     );
     const twilioCall = fetchSpy.mock.calls.find((c: any[]) =>
@@ -67,7 +67,7 @@ describe("handoffHumanTool — owner WhatsApp notification (Pro)", () => {
     const { TWILIO_HANDOFF_CONTENT_SID, ...noTemplate } = env;
     const tool = handoffHumanTool(noTemplate, () => convId, TEST_BOT_ID);
     const result = await tool.execute!(
-      { reason: "x", summary: "y", category: "other", priority: "normal" },
+      { reason: "x", summary: "y", category: "other", priority: "normal", contact: "cliente@ejemplo.com" },
       {} as any,
     );
     expect((result as any).ticketId).toBeTruthy();
@@ -81,7 +81,7 @@ describe("handoffHumanTool — owner WhatsApp notification (Pro)", () => {
     fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("twilio down"));
     const tool = handoffHumanTool(env, () => convId, TEST_BOT_ID);
     const result = await tool.execute!(
-      { reason: "x", summary: "y", category: "other", priority: "normal" },
+      { reason: "x", summary: "y", category: "other", priority: "normal", contact: "cliente@ejemplo.com" },
       {} as any,
     );
     expect((result as any).ticketId).toBeTruthy();

@@ -45,6 +45,7 @@ describe("handoffHumanTool", () => {
         summary: "María pregunta sobre shampoo sin sulfatos",
         category: "product",
         priority: "normal",
+        contact: "maria@ejemplo.com",
       },
       {} as any,
     );
@@ -52,6 +53,61 @@ describe("handoffHumanTool", () => {
     const list = await tickets.listOpen();
     expect(list).toHaveLength(1);
     expect(list[0].summary).toContain("María");
+  });
+});
+
+// El teléfono/correo es OBLIGATORIO: sin uno real, el dueño no tiene forma de
+// darle seguimiento si la conversación termina ahí (ej. el widget se cierra).
+// Un canal opaco (Telegram, Messenger, el widget) no lo trae solo — hay que
+// pedirlo; uno telefónico (WhatsApp, voz) ya lo trae en channel_user_id.
+describe("handoffHumanTool — el contacto es obligatorio", () => {
+  it("sin contact explícito y por un canal opaco (Telegram), se rechaza y NO crea el ticket", async () => {
+    const tool = handoffHumanTool(env, () => convId, TEST_BOT_ID);
+    const result = (await tool.execute!(
+      { reason: "x", summary: "y", category: "other", priority: "normal" },
+      {} as any,
+    )) as { ticketId: string | null; created: boolean };
+
+    expect(result.created).toBe(false);
+    expect(result.ticketId).toBeNull();
+    expect(await tickets.listOpen()).toHaveLength(0);
+  });
+
+  it("por un canal telefónico (WhatsApp/Twilio) NO hace falta contact explícito — el número del canal ya sirve", async () => {
+    const db = new Db(env.DB);
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("twilio", "+5215512345678");
+    const tool = handoffHumanTool(env, () => conv.id, TEST_BOT_ID);
+
+    const result = (await tool.execute!(
+      { reason: "x", summary: "y", category: "other", priority: "normal" },
+      {} as any,
+    )) as { ticketId: string; created: boolean };
+
+    expect(result.created).toBe(true);
+    const ticket = await tickets.getById(result.ticketId);
+    // normalizePhone quita el "1" móvil legacy de México.
+    expect(ticket?.requester_contact).toBe("+525512345678");
+  });
+
+  it("reusa el contacto que captureLead ya capturó en esta misma conversación, sin volver a pedirlo", async () => {
+    const db = new Db(env.DB);
+    const { LeadsRepo } = await import("../../src/db/leads");
+    await new LeadsRepo(db, TEST_BOT_ID).create({
+      conversationId: convId,
+      channelUserId: "u1",
+      contact: "ana@ejemplo.com",
+      intent: "quiere el curso",
+    });
+
+    const tool = handoffHumanTool(env, () => convId, TEST_BOT_ID);
+    const result = (await tool.execute!(
+      { reason: "x", summary: "y", category: "other", priority: "normal" },
+      {} as any,
+    )) as { ticketId: string; created: boolean };
+
+    expect(result.created).toBe(true);
+    const ticket = await tickets.getById(result.ticketId);
+    expect(ticket?.requester_contact).toBe("ana@ejemplo.com");
   });
 });
 
@@ -75,7 +131,7 @@ describe("handoffHumanTool — con una plataforma de tickets conectada", () => {
     const envNoResend = { ...env, RESEND_API_KEY: undefined };
     const tool = handoffHumanTool(envNoResend, () => convId, TEST_BOT_ID);
     const result = await tool.execute!(
-      { reason: "complejo", summary: "María pregunta sobre shampoo", category: "product", priority: "normal" },
+      { reason: "complejo", summary: "María pregunta sobre shampoo", category: "product", priority: "normal", contact: "maria@ejemplo.com" },
       {} as any,
     );
     expect((result as { ticketId: string }).ticketId).toBeTruthy();
@@ -106,7 +162,7 @@ describe("handoffHumanTool — con una plataforma de tickets conectada", () => {
     const envNoResend = { ...env, RESEND_API_KEY: undefined };
     const tool = handoffHumanTool(envNoResend, () => convId, TEST_BOT_ID);
     const result = await tool.execute!(
-      { reason: "complejo", summary: "María pregunta sobre shampoo", category: "product", priority: "normal" },
+      { reason: "complejo", summary: "María pregunta sobre shampoo", category: "product", priority: "normal", contact: "maria@ejemplo.com" },
       {} as any,
     );
     expect((result as { ticketId: string }).ticketId).toBeTruthy();
@@ -117,7 +173,8 @@ describe("handoffHumanTool — con una plataforma de tickets conectada", () => {
 describe("handoffHumanTool — prioridad, quién pide, y transcripción", () => {
   it("saca nombre/contacto de la conversación (no se le pide al LLM) y arma la transcripción", async () => {
     const db = new Db(env.DB);
-    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "5215512345", "María López");
+    // twilio: el channel_user_id YA es un teléfono real — no hace falta pedirlo.
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("twilio", "+5215512345678", "María López");
     await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "no puedo pagar mi pedido");
     await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "assistant", "entiendo, déjame ayudarte");
 
@@ -128,20 +185,22 @@ describe("handoffHumanTool — prioridad, quién pide, y transcripción", () => 
     );
     const ticket = await tickets.getById((result as { ticketId: string }).ticketId);
     expect(ticket?.requester_name).toBe("María López");
-    expect(ticket?.requester_contact).toBe("5215512345");
+    // normalizePhone quita el "1" móvil legacy de México.
+    expect(ticket?.requester_contact).toBe("+525512345678");
     expect(ticket?.priority).toBe("urgent");
     expect(ticket?.transcript).toContain("no puedo pagar mi pedido");
     expect(ticket?.transcript).toContain("entiendo, déjame ayudarte");
   });
 
-  it("sin conversationId (ej. una llamada de sistema), no truena — requester/transcript quedan vacíos", async () => {
+  it("sin conversationId (ej. una llamada de sistema), no truena — requester/transcript quedan vacíos, pero igual exige contact", async () => {
     const tool = handoffHumanTool(env, () => null, TEST_BOT_ID);
     const result = await tool.execute!(
-      { reason: "x", summary: "y", category: "other", priority: "normal" },
+      { reason: "x", summary: "y", category: "other", priority: "normal", contact: "sistema@ejemplo.com" },
       {} as any,
     );
     const ticket = await tickets.getById((result as { ticketId: string }).ticketId);
     expect(ticket?.requester_name).toBeNull();
+    expect(ticket?.requester_contact).toBe("sistema@ejemplo.com");
     expect(ticket?.transcript).toBe("");
   });
 
@@ -155,7 +214,8 @@ describe("handoffHumanTool — prioridad, quién pide, y transcripción", () => 
     });
     readSecretMock.mockResolvedValue("tok-fake");
     const db = new Db(env.DB);
-    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "ana@x.com", "Ana");
+    // Telegram (canal opaco): el LLM ya le pidió el correo al cliente.
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "chat-id-9", "Ana");
     let pushedBody: any;
     global.fetch = vi.fn(async (_url: any, init: any) => {
       pushedBody = JSON.parse(init.body);
@@ -163,7 +223,7 @@ describe("handoffHumanTool — prioridad, quién pide, y transcripción", () => 
     }) as any;
 
     const tool = handoffHumanTool({ ...env, RESEND_API_KEY: undefined }, () => conv.id, TEST_BOT_ID);
-    await tool.execute!({ reason: "x", summary: "y", category: "billing", priority: "high" }, {} as any);
+    await tool.execute!({ reason: "x", summary: "y", category: "billing", priority: "high", contact: "ana@x.com" }, {} as any);
 
     expect(pushedBody.ticket.priority).toBe("high");
     expect(pushedBody.ticket.requester).toEqual({ name: "Ana", email: "ana@x.com" });

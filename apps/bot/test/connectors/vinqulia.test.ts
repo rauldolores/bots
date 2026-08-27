@@ -67,6 +67,10 @@ describe("está dado de alta en el catálogo", () => {
   });
 });
 
+// `tickets.contact_id` es NOT NULL en el esquema real de Vinqulia
+// (confirmado por introspección contra crm.kontrolia.io) — por eso pushTicket
+// SIEMPRE crea primero un contacto y solo después el ticket, con ese id.
+// Los mocks van por URL (no posicionales) para no depender del orden exacto.
 describe("tickets — pushTicket", () => {
   const TICKET = {
     category: "queja",
@@ -76,23 +80,48 @@ describe("tickets — pushTicket", () => {
     requesterContact: "ana@empresa.com",
   };
 
-  it("crea el ticket abierto, con el asunto etiquetado por categoría", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse([{ id: 3 }]));
+  function byUrl(handlers: Record<string, unknown>) {
+    return (async (url: string) => {
+      for (const [suffix, body] of Object.entries(handlers)) {
+        if (url.endsWith(suffix)) return jsonResponse(body);
+      }
+      return jsonResponse([{ id: 1 }]);
+    }) as unknown as typeof fetch;
+  }
+
+  it("crea el contacto y el ticket con contact_id, en ese orden", async () => {
+    fetchMock.mockImplementation(byUrl({ "/contacts": [{ id: 7 }], "/tickets": [{ id: 3 }] }));
     const result = await vinquliaTicketConnector.pushTicket(creds({ salesId: "1" }), TICKET);
     expect(result).toEqual({ ok: true, externalId: "3" });
 
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://crm.miempresa.com/api/datos/rest/v1/tickets");
-    const body = JSON.parse(init.body);
-    expect(body.subject).toBe("[queja] No puedo iniciar sesión");
-    expect(body.status).toBe("open");
-    expect(body.sales_id).toBe(1);
+    const ticketCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/tickets"));
+    expect(ticketCall).toBeTruthy();
+    const body = JSON.parse(ticketCall![1].body);
+    expect(body).toMatchObject({
+      subject: "[queja] No puedo iniciar sesión",
+      status: "open",
+      contact_id: 7,
+      sales_id: 1,
+    });
+  });
+
+  it("el contacto se arma con el nombre/contacto de quien reporta", async () => {
+    fetchMock.mockImplementation(byUrl({ "/contacts": [{ id: 7 }], "/tickets": [{ id: 3 }] }));
+    await vinquliaTicketConnector.pushTicket(creds(), TICKET);
+
+    const contactCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/contacts"));
+    expect(JSON.parse(contactCall![1].body)).toMatchObject({
+      first_name: "Ana",
+      last_name: "García",
+      email_jsonb: [{ email: "ana@empresa.com", type: "Work" }],
+    });
   });
 
   it("la prioridad y quién reporta se conservan en la descripción — el ticket de Vinqulia no tiene esos campos", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse([{ id: 3 }]));
+    fetchMock.mockImplementation(byUrl({ "/contacts": [{ id: 7 }], "/tickets": [{ id: 3 }] }));
     await vinquliaTicketConnector.pushTicket(creds(), TICKET);
-    const { description } = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const ticketCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/tickets"));
+    const { description } = JSON.parse(ticketCall![1].body);
     expect(description).toContain("No puedo iniciar sesión");
     expect(description).toContain("Ana García");
     expect(description).toContain("ana@empresa.com");
@@ -100,27 +129,44 @@ describe("tickets — pushTicket", () => {
   });
 
   it("un asunto larguísimo se corta en vez de que el CRM lo rechace", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse([{ id: 3 }]));
+    fetchMock.mockImplementation(byUrl({ "/contacts": [{ id: 7 }], "/tickets": [{ id: 3 }] }));
     await vinquliaTicketConnector.pushTicket(creds(), { ...TICKET, summary: "x".repeat(400) });
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).subject.length).toBeLessThanOrEqual(150);
+    const ticketCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/tickets"));
+    expect(JSON.parse(ticketCall![1].body).subject.length).toBeLessThanOrEqual(150);
   });
 
-  it("sin datos de quien reporta, no deja una línea 'Reporta:' vacía", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse([{ id: 3 }]));
-    await vinquliaTicketConnector.pushTicket(creds(), {
+  it("sin datos de quien reporta, no deja una línea 'Reporta:' vacía — y el contacto se crea igual (placeholder)", async () => {
+    fetchMock.mockImplementation(byUrl({ "/contacts": [{ id: 7 }], "/tickets": [{ id: 3 }] }));
+    const result = await vinquliaTicketConnector.pushTicket(creds(), {
       category: "duda",
       summary: "Pregunta general",
       requesterName: null,
       requesterContact: null,
     });
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).description).not.toContain("Reporta:");
+    expect(result.ok).toBe(true);
+    const ticketCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/tickets"));
+    expect(JSON.parse(ticketCall![1].body).description).not.toContain("Reporta:");
   });
 
-  it("error del CRM: se reporta, no se traga en silencio", async () => {
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 401, text: async () => "clave inválida" } as unknown as Response);
+  it("si no se puede crear el contacto, el ticket NUNCA se intenta y se reporta el error", async () => {
+    fetchMock.mockImplementation((async (url: string) => {
+      if (url.endsWith("/contacts")) return { ok: false, status: 401, text: async () => "clave inválida" } as unknown as Response;
+      return jsonResponse([{ id: 3 }]);
+    }) as unknown as typeof fetch);
     const result = await vinquliaTicketConnector.pushTicket(creds(), TICKET);
     expect(result.ok).toBe(false);
     expect(result.error).toContain("401");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/tickets"))).toBe(false);
+  });
+
+  it("error al crear el ticket (con contacto ya creado): se reporta, no se traga en silencio", async () => {
+    fetchMock.mockImplementation((async (url: string) => {
+      if (url.endsWith("/contacts")) return jsonResponse([{ id: 7 }]);
+      return { ok: false, status: 500, text: async () => "boom" } as unknown as Response;
+    }) as unknown as typeof fetch);
+    const result = await vinquliaTicketConnector.pushTicket(creds(), TICKET);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("500");
   });
 
   it("sin URL configurada: error claro, sin salir a la red", async () => {

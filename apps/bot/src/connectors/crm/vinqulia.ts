@@ -9,6 +9,7 @@ import {
   isEmail,
   isPhone,
   firstRowId,
+  splitName,
 } from "../vinquliaApi";
 
 /**
@@ -23,14 +24,6 @@ import {
  * herramienta. El conector MCP de Vinqulia (si además está conectado) sigue
  * sirviendo para lo otro — que el agente CONSULTE catálogo, precios, historial.
  */
-
-/** "Raúl Dolores Calzadilla" → first_name "Raúl", last_name "Dolores Calzadilla". */
-function splitName(full: string | null): { first_name: string; last_name: string } {
-  const parts = (full ?? "").trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return { first_name: "(sin nombre)", last_name: "" };
-  if (parts.length === 1) return { first_name: parts[0], last_name: "" };
-  return { first_name: parts[0], last_name: parts.slice(1).join(" ") };
-}
 
 /**
  * `deals.pipeline`/`deals.stage` en Vinqulia (esquema `crm`) son texto libre

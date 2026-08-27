@@ -7,9 +7,12 @@ import { TicketsRepo, type TicketPriority } from "../db/tickets";
 import { ConversationsRepo } from "../db/conversations";
 import { MessagesRepo } from "../db/messages";
 import { BotsRepo } from "../db/bots";
+import { LeadsRepo } from "../db/leads";
 import { BotConnectorsRepo } from "../db/botConnectors";
 import { resolveConnectorCreds } from "../connectors/creds";
 import { TICKET_ADAPTERS } from "../connectors/registry";
+import { classifyContact, normalizePhone, regionForTimezone } from "../contacts/normalize";
+import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 import { resolveBotId } from "../tenant";
 import { isProTier } from "../config";
 import { resolveChannelEnv } from "../channels/effectiveEnv";
@@ -23,7 +26,8 @@ async function buildTranscript(db: Db, botId: string, convId: string): Promise<s
 export function handoffHumanTool(env: Env, getConversationId: () => string | null, botId: string) {
   return tool({
     description:
-      "Crea un ticket para el dueño + le manda email. Usalo cuando el bot no puede resolver o el cliente pide humano explícitamente.",
+      "Crea un ticket para el dueño + le manda email. Usalo cuando el bot no puede resolver o el cliente pide humano explícitamente. " +
+      "Necesita un teléfono o correo REAL para que el dueño pueda dar seguimiento después — si el canal ya lo trae (WhatsApp, llamada) no hace falta pedirlo, pero si no (Telegram, Messenger, el widget web) pídeselo antes de llamar esta tool: sin eso, el ticket se rechaza.",
     inputSchema: z.object({
       reason: z.string().describe("Categoría corta del problema"),
       summary: z.string().max(300).describe("Resumen en 1 frase del contexto"),
@@ -32,24 +36,51 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
         .enum(["low", "normal", "high", "urgent"])
         .default("normal")
         .describe("Qué tan urgente es: urgent = el cliente no puede operar/pagar; high = afecta bastante; normal = molestia normal; low = duda menor"),
+      contact: z.string().optional().describe("Teléfono o correo del cliente — pídeselo si el canal no lo trae ya"),
     }),
-    execute: async ({ reason, summary, category, priority }) => {
+    execute: async ({ reason, summary, category, priority, contact }) => {
       const convId = getConversationId();
       const db = new Db(env.DB);
       const tickets = new TicketsRepo(db, botId);
 
-      // El nombre/contacto del cliente se saca de la conversación (no se le
-      // pide al LLM que lo recuerde/escriba bien) y la transcripción completa
-      // se congela AL MOMENTO del ticket — si la conversación sigue después,
-      // el ticket no cambia bajo los pies de quien lo está atendiendo.
+      // El nombre se saca de la conversación (no se le pide al LLM que lo
+      // recuerde/escriba bien) y la transcripción completa se congela AL
+      // MOMENTO del ticket — si la conversación sigue después, el ticket no
+      // cambia bajo los pies de quien lo está atendiendo.
       let requesterName: string | null = null;
-      let requesterContact: string | null = null;
       let transcript = "";
+      let convPhone: string | null = null;
+      const region = regionForTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
       if (convId) {
         const conv = await new ConversationsRepo(db, botId).getById(convId);
         requesterName = conv?.display_name ?? null;
-        requesterContact = conv?.channel_user_id ?? null;
         transcript = await buildTranscript(db, botId, convId);
+        // Si el canal YA es un teléfono (WhatsApp, voz), ese número cuenta como
+        // contacto real aunque el LLM no haya llenado `contact` — ya sabemos
+        // cómo llegarle. Un canal opaco (Telegram, Messenger, el widget) no.
+        convPhone = conv ? normalizePhone(conv.channel_user_id, region) : null;
+      }
+
+      const classified = classifyContact(contact, region);
+      let requesterContact = convPhone ?? classified?.addressNorm ?? null;
+
+      // Antes de pedirlo de nuevo: ¿ya se capturó un contacto real en esta
+      // MISMA conversación (ej. captureLead ya lo pidió hace un momento)?
+      if (!requesterContact && convId) {
+        requesterContact = await new LeadsRepo(db, botId).findContactByConversation(convId);
+      }
+
+      // Obligatorio: sin un teléfono o correo real, el dueño no tiene forma
+      // de darle seguimiento a este ticket si la conversación termina aquí
+      // (ej. el cliente cierra la pestaña del widget). Mejor no abrir un
+      // ticket huérfano que uno al que nadie le puede volver a escribir.
+      if (!requesterContact) {
+        return {
+          ticketId: null,
+          created: false,
+          message:
+            "No se creó el ticket: falta un teléfono o correo válido para poder darle seguimiento. Pídeselo al cliente y vuelve a llamar esta tool con ese dato.",
+        };
       }
 
       const ticketId = await tickets.create({
@@ -97,7 +128,7 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
       // text would be rejected by WhatsApp. Both are best-effort.
       await notifyOwner(env, { reason, summary, ticketId }, botId);
 
-      return { ticketId };
+      return { ticketId, created: true };
     },
   });
 }

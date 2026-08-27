@@ -52,7 +52,7 @@ describe("renderTickets — con Zendesk conectado", () => {
     readSecretMock.mockResolvedValue("tok-fake");
   });
 
-  it("consulta Zendesk en vivo y NO la tabla local", async () => {
+  it("consulta Zendesk en vivo, y el ticket local que NO llegó allá aparece aparte (ya no se pierde)", async () => {
     global.fetch = vi.fn(async () =>
       new Response(
         JSON.stringify({ tickets: [{ id: 1, subject: "Ticket de Zendesk", status: "open", created_at: "2026-08-20T00:00:00Z" }] }),
@@ -62,7 +62,24 @@ describe("renderTickets — con Zendesk conectado", () => {
     const html = await renderTickets(env, TEST_BOT_ID);
     expect(html).toContain("Tickets — Zendesk");
     expect(html).toContain("Ticket de Zendesk");
-    expect(html).not.toContain("Ticket local de prueba");
+    // Antes: un ticket local nunca sincronizado desaparecía por completo de la
+    // pantalla — este es justo el bug reportado ("el widget dijo que creó un
+    // ticket... revisé y no había nada"). Ahora se muestra en su propia sección.
+    expect(html).toContain("Sin sincronizar con Zendesk");
+    expect(html).toContain("Ticket local de prueba");
+  });
+
+  it("un ticket local YA exportado a Zendesk no se duplica en 'Sin sincronizar'", async () => {
+    const [{ id: soloLocalId }] = await new TicketsRepo(db, TEST_BOT_ID).listAll(10);
+    await new TicketsRepo(db, TEST_BOT_ID).setExported(soloLocalId, "zendesk", "1");
+    global.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ tickets: [{ id: 1, subject: "Ticket de Zendesk", status: "open", created_at: "2026-08-20T00:00:00Z" }] }),
+        { status: 200 },
+      ),
+    ) as any;
+    const html = await renderTickets(env, TEST_BOT_ID);
+    expect(html).not.toContain("Sin sincronizar con Zendesk");
   });
 
   it("si Zendesk falla, avisa y cae a la tabla local", async () => {

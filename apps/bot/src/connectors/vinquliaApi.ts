@@ -71,6 +71,18 @@ export function isPhone(v: string): boolean {
   return (v.match(/\d/g) ?? []).length >= 7;
 }
 
+/**
+ * "Raúl Dolores Calzadilla" → first_name "Raúl", last_name "Dolores Calzadilla".
+ * Compartido entre el conector de CRM y el de tickets — los dos crean
+ * contactos en `crm.contacts`.
+ */
+export function splitName(full: string | null): { first_name: string; last_name: string } {
+  const parts = (full ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { first_name: "(sin nombre)", last_name: "" };
+  if (parts.length === 1) return { first_name: parts[0], last_name: "" };
+  return { first_name: parts[0], last_name: parts.slice(1).join(" ") };
+}
+
 /** PostgREST con `Prefer: return=representation` devuelve un ARRAY con la fila creada. */
 export function firstRowId(payload: unknown): number | string | undefined {
   const row = Array.isArray(payload) ? payload[0] : payload;

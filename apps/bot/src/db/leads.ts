@@ -224,4 +224,18 @@ export class LeadsRepo {
       [this.botId, channelUserId],
     );
   }
+
+  /**
+   * El contacto ya capturado (por captureLead) en ESTA conversación — para
+   * que handoffHuman no le vuelva a pedir su teléfono/correo a alguien que
+   * ya lo dio hace un momento, dos tools después.
+   */
+  async findContactByConversation(conversationId: string): Promise<string | null> {
+    const row = await this.db.first<{ contact: string }>(
+      `SELECT contact FROM leads WHERE bot_id = ? AND conversation_id = ? AND contact IS NOT NULL
+       ORDER BY created_at DESC LIMIT 1`,
+      [this.botId, conversationId],
+    );
+    return row?.contact ?? null;
+  }
 }

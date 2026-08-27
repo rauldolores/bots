@@ -7,6 +7,9 @@ import {
   vinquliaSalesId,
   VINQULIA_MISSING_URL,
   firstRowId,
+  splitName,
+  isEmail,
+  isPhone,
 } from "../vinquliaApi";
 
 /**
@@ -38,13 +41,46 @@ export const vinquliaTicketConnector: TicketConnector = {
   async pushTicket(creds: ConnectorCreds, ticket: TicketInput): Promise<ConnectorPushResult> {
     const base = vinquliaBaseUrl(creds);
     if (!base) return { ok: false, error: VINQULIA_MISSING_URL };
+    const sales = vinquliaSalesId(creds);
+
+    // `tickets.contact_id` es NOT NULL en el esquema real de Vinqulia
+    // (confirmado contra crm.kontrolia.io) — sin un contacto vinculado, TODO
+    // POST a /tickets truena con "null value in column contact_id violates
+    // not-null constraint". Se crea (o se intenta) el contacto con los datos
+    // de quien reporta antes de abrir el ticket — mismo patrón que ya usa el
+    // conector de CRM para contactos.
+    const contactBody: Record<string, unknown> = splitName(ticket.requesterName ?? null);
+    if (ticket.requesterContact) {
+      if (isEmail(ticket.requesterContact)) contactBody.email_jsonb = [{ email: ticket.requesterContact, type: "Work" }];
+      else if (isPhone(ticket.requesterContact)) contactBody.phone_jsonb = [{ number: ticket.requesterContact, type: "Work" }];
+    }
+    if (sales !== undefined) contactBody.sales_id = sales;
+
+    let contactId: number | string | undefined;
+    try {
+      const contactRes = await fetch(`${base}/contacts`, {
+        method: "POST",
+        headers: vinquliaHeaders(creds, { "Content-Type": "application/json", Prefer: "return=representation" }),
+        body: JSON.stringify(contactBody),
+      });
+      if (contactRes.ok) {
+        contactId = firstRowId(await contactRes.json().catch(() => null));
+      } else {
+        return { ok: false, error: `Vinqulia (contacto del ticket) respondió ${contactRes.status}: ${(await contactRes.text()).slice(0, 200)}` };
+      }
+    } catch (e) {
+      return { ok: false, error: String((e as Error)?.message ?? e) };
+    }
+    if (contactId === undefined) {
+      return { ok: false, error: "Vinqulia no devolvió el id del contacto del ticket." };
+    }
 
     const body: Record<string, unknown> = {
       subject: `[${ticket.category}] ${ticket.summary}`.slice(0, MAX_SUBJECT),
       description: buildDescription(ticket),
       status: "open",
+      contact_id: contactId,
     };
-    const sales = vinquliaSalesId(creds);
     if (sales !== undefined) body.sales_id = sales;
 
     try {
