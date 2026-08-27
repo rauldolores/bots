@@ -40,13 +40,16 @@ import { renderKbList, renderKbEditor } from "./views/kb";
 import {
   renderHabilidades,
   renderSkillForm,
+  renderSkillTemplatesModal,
   parseOutputFields,
   validateFields,
 } from "./views/habilidades";
 import { BotSkillsRepo, slugify } from "../db/skills";
+import { SKILL_TEMPLATES } from "../skills/templates";
 import { BotApiKeysRepo } from "../db/apiKeys";
-import { renderSeguimientos, renderSequenceForm, parseSteps } from "./views/seguimientos";
+import { renderSeguimientos, renderSequenceForm, renderNurtureTemplatesModal, parseSteps } from "./views/seguimientos";
 import { NurtureSequencesRepo } from "../db/nurtureSequences";
+import { NURTURE_TEMPLATES } from "../nurture/templates";
 import { enrollLeadInSequence, stopSequenceForLead } from "../nurture/run";
 import { KbDocsRepo, indexDoc, removeDocVectors, reindexAll, MAX_DOC_CHARS } from "../kb/docs";
 import { CrmProposalsRepo } from "../db/crmProposals";
@@ -645,6 +648,25 @@ adminApp.get("/habilidades/nueva", async (c) =>
   c.html(await renderSkillForm(c.env, c.get("botId"), null)),
 );
 
+// Plantillas — van ANTES de /habilidades/:id* (mismo motivo que /habilidades/llaves
+// más abajo: si no, el segmento dinámico se traga "plantillas").
+adminApp.get("/habilidades/plantillas", (c) => c.html(renderSkillTemplatesModal()));
+
+adminApp.post("/habilidades/plantillas/:slug/usar", async (c) => {
+  const botId = c.get("botId");
+  const template = SKILL_TEMPLATES.find((t) => t.slug === c.req.param("slug"));
+  if (!template) return c.text("Plantilla no encontrada.", 404);
+  const repo = new BotSkillsRepo(new Db(c.env.DB), botId);
+  const slug = await repo.uniqueSlug(slugify(template.name));
+  const id = await repo.create({
+    slug,
+    name: template.name,
+    instructions: template.instructions,
+    outputFields: template.outputFields,
+  });
+  return c.redirect(`/admin/habilidades/${id}/editar`, 302);
+});
+
 adminApp.get("/habilidades/:id/editar", async (c) =>
   c.html(await renderSkillForm(c.env, c.get("botId"), c.req.param("id"))),
 );
@@ -724,6 +746,22 @@ adminApp.get("/seguimientos", async (c) =>
 adminApp.get("/seguimientos/nueva", async (c) =>
   c.html(await renderSequenceForm(c.env, c.get("botId"), null)),
 );
+
+// Plantillas — van ANTES de /seguimientos/:id* (mismo motivo que las rutas de
+// llaves en /habilidades: si no, el segmento dinámico se traga "plantillas").
+adminApp.get("/seguimientos/plantillas", (c) => c.html(renderNurtureTemplatesModal()));
+
+adminApp.post("/seguimientos/plantillas/:slug/usar", async (c) => {
+  const botId = c.get("botId");
+  const template = NURTURE_TEMPLATES.find((t) => t.slug === c.req.param("slug"));
+  if (!template) return c.text("Plantilla no encontrada.", 404);
+  const id = await new NurtureSequencesRepo(new Db(c.env.DB), botId).create({
+    name: template.name,
+    goal: template.goal,
+    steps: template.steps,
+  });
+  return c.redirect(`/admin/seguimientos/${id}/editar`, 302);
+});
 
 adminApp.get("/seguimientos/:id/editar", async (c) =>
   c.html(await renderSequenceForm(c.env, c.get("botId"), c.req.param("id"))),
@@ -1499,7 +1537,7 @@ adminApp.post("/config/suggest-fields", async (c) => {
     const result = await generateObject({
       model,
       schema: SUGGEST_FIELDS_SCHEMA,
-      prompt: `Un dueño de un negocio de giro "${niche}" está configurando un chatbot de atención al cliente. Sugiere entre 4 y 8 datos ESPECÍFICOS de ese giro que un cliente típicamente preguntaría y que el dueño debería capturar — cada uno como un campo corto "nombre del dato" + un placeholder de ejemplo para el valor. NO sugieras horario, precios/catálogo, ubicación, métodos de pago ni teléfono — esos ya se capturan aparte. Responde en español, campos concretos y accionables para ESTE giro, no genéricos.`,
+      prompt: `Un dueño de un negocio de giro "${niche}" está configurando un chatbot de atención al cliente. Sugiere entre 4 y 8 datos ESPECÍFICOS de ese giro que un cliente típicamente preguntaría y que el dueño debería capturar — cada uno como un campo corto "nombre del dato" + un placeholder de ejemplo para el valor. NO sugieras horario, precios/catálogo, ubicación, métodos de pago, teléfono ni sitio web — esos ya se capturan aparte. Responde en español, campos concretos y accionables para ESTE giro, no genéricos.`,
     });
     return c.json(result.object);
   } catch (err) {
@@ -1625,6 +1663,27 @@ adminApp.post("/config", async (c) => {
   const currencyRaw = form.get("currency");
   if (currencyRaw !== null) configPatch.currency = String(currencyRaw).trim().slice(0, 40);
 
+  // Datos básicos del negocio — antes solo se cargaban una vez desde el
+  // skill de onboarding y no había forma de verlos/editarlos/borrarlos desde
+  // el panel (quedaban "fantasma": el bot los seguía usando, pero nadie
+  // podía saber de dónde salían ni corregirlos). Ahora son campos explícitos
+  // aquí, y un valor vacío SÍ los borra (mismo mergeConfig de siempre).
+  const hoursRaw = form.get("hours");
+  if (hoursRaw !== null) configPatch.hours = String(hoursRaw).trim().slice(0, 300);
+  const locationRaw = form.get("location");
+  if (locationRaw !== null) configPatch.location = String(locationRaw).trim().slice(0, 300);
+  const contactPhoneRaw = form.get("contact_phone");
+  if (contactPhoneRaw !== null) configPatch.contactPhone = String(contactPhoneRaw).trim().slice(0, 60);
+  const websiteRaw = form.get("website");
+  if (websiteRaw !== null) configPatch.website = String(websiteRaw).trim().slice(0, 200);
+  const paymentMethodsRaw = form.get("payment_methods");
+  if (paymentMethodsRaw !== null) {
+    configPatch.paymentMethods = String(paymentMethodsRaw)
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
   const customFieldsRaw = form.get("custom_fields_json");
   if (customFieldsRaw !== null) {
     const parsed = parseCustomFieldsJson(String(customFieldsRaw));
@@ -1633,7 +1692,16 @@ adminApp.post("/config", async (c) => {
   const catalogRaw = form.get("catalog_json");
   if (catalogRaw !== null) {
     const parsed = parseCatalogJson(String(catalogRaw));
-    if (parsed) configPatch.catalog = parsed;
+    if (parsed) {
+      configPatch.catalog = parsed;
+      // `services` es el campo viejo que reemplazó "Catálogo" — se precargó
+      // en el editor (ver config.ts) si nunca se había migrado. Cualquier
+      // guardado del catálogo completa esa migración: de aquí en adelante
+      // `catalog` es la única fuente, así esto no puede volver a quedar
+      // fantasma. `undefined` borra la llave del JSON (mergeConfig hace
+      // JSON.stringify, que omite las propiedades undefined).
+      configPatch.services = undefined;
+    }
   }
   const catalogSourceRaw = form.get("catalog_source");
   if (catalogSourceRaw !== null) configPatch.catalogSource = catalogSourceRaw === "mcp" ? "mcp" : "manual";

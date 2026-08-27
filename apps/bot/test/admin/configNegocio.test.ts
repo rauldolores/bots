@@ -90,6 +90,97 @@ describe("POST /admin/config — negocio (giro, idioma, país, moneda, campos di
     expect(bot?.config.catalogSource).toBe("manual");
   });
 
+  // Antes hours/location/contactPhone/paymentMethods solo se llenaban una vez
+  // desde el skill de onboarding y no había forma de verlos/editarlos/
+  // borrarlos desde el panel — quedaban "fantasma" en el prompt sin que el
+  // dueño supiera de dónde salían. Ahora son campos explícitos de /admin/config.
+  it("guarda horario/ubicación/teléfono/web/métodos de pago en bots.config", async () => {
+    const res = await postConfig({
+      hours: "Lun-Vie 9am-6pm",
+      location: "Av. Reforma 123, CDMX",
+      contact_phone: "55 1234 5678",
+      website: "https://minegocio.example.com",
+      payment_methods: "Efectivo, Tarjeta, Transferencia",
+    });
+    expect(res.status).toBe(302);
+    const bot = await new BotsRepo(db).getById(TEST_BOT_ID);
+    expect(bot?.config.hours).toBe("Lun-Vie 9am-6pm");
+    expect(bot?.config.location).toBe("Av. Reforma 123, CDMX");
+    expect(bot?.config.contactPhone).toBe("55 1234 5678");
+    expect(bot?.config.website).toBe("https://minegocio.example.com");
+    expect(bot?.config.paymentMethods).toEqual(["Efectivo", "Tarjeta", "Transferencia"]);
+  });
+
+  it("dejar un campo básico vacío lo BORRA (antes no había forma de quitar un dato viejo del onboarding)", async () => {
+    await new BotsRepo(db).mergeConfig(TEST_BOT_ID, { hours: "dato viejo del onboarding", location: "dirección vieja" });
+    const res = await postConfig({ hours: "", location: "" });
+    expect(res.status).toBe(302);
+    const bot = await new BotsRepo(db).getById(TEST_BOT_ID);
+    expect(bot?.config.hours).toBe("");
+    expect(bot?.config.location).toBe("");
+  });
+
+  it("GET /config renderiza horario/ubicación/teléfono/web/métodos de pago ya guardados, editables", async () => {
+    await new BotsRepo(db).mergeConfig(TEST_BOT_ID, {
+      hours: "Lun-Vie 9-6",
+      location: "CDMX",
+      contactPhone: "5512345678",
+      website: "https://x.example.com",
+      paymentMethods: ["Efectivo", "Tarjeta"],
+    });
+    const res = await adminApp.request("/config", { headers: AUTH }, env);
+    const html = await res.text();
+    expect(html).toContain("Lun-Vie 9-6");
+    expect(html).toContain("CDMX");
+    expect(html).toContain("5512345678");
+    expect(html).toContain("https://x.example.com");
+    expect(html).toContain("Efectivo, Tarjeta");
+  });
+
+  it("GET /config solo ofrece marin/cedar como voz, con etiquetas descriptivas", async () => {
+    const res = await adminApp.request("/config", { headers: AUTH }, env);
+    const html = await res.text();
+    expect(html).toContain('<option value="marin"');
+    expect(html).toContain('<option value="cedar"');
+    expect(html).toContain("Voz femenina");
+    expect(html).toContain("Voz masculina");
+    // El resto del catálogo de OpenAI (acento en inglés) ya no se ofrece.
+    expect(html).not.toContain('value="alloy"');
+    expect(html).not.toContain('value="shimmer"');
+  });
+
+  // Bug real reportado: `services` (el campo VIEJO de precios, todavía
+  // llenado por el skill de onboarding) nunca tuvo un campo en el panel —
+  // quedaba en la vista previa sin ninguna forma de editarlo o borrarlo.
+  describe("migración de `services` (legacy) a `catalog`", () => {
+    it("si catalog está vacío, precarga el editor con lo que traiga el legacy `services`", async () => {
+      await new BotsRepo(db).mergeConfig(TEST_BOT_ID, { services: [{ name: "Corte", price: 250 }] });
+      const res = await adminApp.request("/config", { headers: AUTH }, env);
+      const html = await res.text();
+      expect(html).toContain('value="Corte"');
+      expect(html).toContain('value="250"');
+    });
+
+    it("si catalog YA tiene datos, no se mezcla con el legacy services", async () => {
+      await new BotsRepo(db).mergeConfig(TEST_BOT_ID, {
+        catalog: [{ name: "Consultoría", price: 5000 }],
+        services: [{ name: "Corte", price: 250 }],
+      });
+      const res = await adminApp.request("/config", { headers: AUTH }, env);
+      const html = await res.text();
+      expect(html).toContain('value="Consultoría"');
+      expect(html).not.toContain('value="Corte"');
+    });
+
+    it("guardar el catálogo (aunque sea vacío) retira `services` para siempre", async () => {
+      await new BotsRepo(db).mergeConfig(TEST_BOT_ID, { services: [{ name: "Corte", price: 250 }] });
+      const res = await postConfig({ catalog_json: "[]" });
+      expect(res.status).toBe(302);
+      const bot = await new BotsRepo(db).getById(TEST_BOT_ID);
+      expect(bot?.config.services).toBeUndefined();
+    });
+  });
+
   it("guarda sales_playbook, voice_name, voice_greeting y agent_mode como settings de texto plano", async () => {
     await postConfig({
       [SETTING_KEYS.salesPlaybook]: "Ofrece siempre agendar al final.",

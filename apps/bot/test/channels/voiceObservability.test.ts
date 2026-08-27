@@ -184,7 +184,7 @@ describe("Voz configurable — SETTING_KEYS.voiceName llega al session.update re
     ws.close();
   });
 
-  it("sin configurar, cae al default de realtimeClient.ts (alloy)", async () => {
+  it("sin configurar, cae al default de realtimeClient.ts (marin)", async () => {
     vi.spyOn(SettingsRepo.prototype, "all").mockRestore(); // settings reales, pero voice_name nunca se seteó
     const callSid = `CAvoice2${Math.random().toString(36).slice(2)}`;
     const voiceSession = await VoiceSession.start(env, { tenantId: TEST_BOT_ID, callerId: "+5215500004444", provider: "twilio", providerCallId: callSid });
@@ -193,7 +193,7 @@ describe("Voz configurable — SETTING_KEYS.voiceName llega al session.update re
     bridges.push(bridge);
     const ws = await fakeRealtime.waitForConnection(connIndex);
     const sessionUpdate = await fakeRealtime.waitForMessageType(ws, "session.update");
-    expect(sessionUpdate.session.audio.output.voice).toBe("alloy");
+    expect(sessionUpdate.session.audio.output.voice).toBe("marin");
     ws.close();
   });
 });

@@ -86,6 +86,30 @@ describe("Mi Agente — node panels", () => {
     expect(html).toContain("Test Bot"); // bots.name (F3, pgSetup TEST_BOT_ID)
   });
 
+  // Bug real reportado: el dueño pensaba que editar aquí y en /admin/config
+  // se reflejaba en ambos sentidos. En automático SÍ es el mismo dato — pero
+  // esta caja mostraba el prompt COMPLETO editable con un solo botón de
+  // guardar, así que con solo tocarlo un poco y guardar, se congelaba en modo
+  // manual y las pestañas de /admin/config (negocio, tono, etc.) dejaban de
+  // tener efecto. Ahora, en automático, el textarea es de solo lectura hasta
+  // que se pide explícitamente "editarlo a mano".
+  it("brain panel: en modo automático el prompt es de solo lectura (evita congelarlo sin querer)", async () => {
+    const res = await adminApp.request("/agente/node/brain", { headers: AUTH }, env);
+    const html = await res.text();
+    expect(html).toContain("readonly");
+    expect(html).toContain("Editar manualmente");
+    expect(html).not.toContain("Volver al automático");
+  });
+
+  it("brain panel: en modo manual (ya congelado) el prompt SÍ es editable directo, sin candado", async () => {
+    await settings.set(SETTING_KEYS.systemPromptOverride, "MI PROMPT MANUAL");
+    const res = await adminApp.request("/agente/node/brain", { headers: AUTH }, env);
+    const html = await res.text();
+    expect(html).not.toContain("readonly");
+    expect(html).not.toContain("Editar manualmente");
+    expect(html).toContain("Volver al automático");
+  });
+
   it("tool panel shows usage and the toggle button", async () => {
     const res = await adminApp.request("/agente/node/tool%3AcaptureLead", { headers: AUTH }, env);
     expect(res.status).toBe(200);

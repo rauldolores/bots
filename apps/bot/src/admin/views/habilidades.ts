@@ -11,6 +11,7 @@ import { BotApiKeysRepo } from "../../db/apiKeys";
 import { SkillRunsRepo, type SkillRun } from "../../db/skillRuns";
 import { BotChannelsRepo } from "../../db/botChannels";
 import { FIELD_KEY_RE, FIELD_TYPES } from "../../skills/schema";
+import { SKILL_TEMPLATES } from "../../skills/templates";
 import { layout } from "./layout";
 
 function esc(s: string): string {
@@ -156,6 +157,41 @@ function skillForm(skill: BotSkill | null, error?: string): string {
   </script>`;
 }
 
+/**
+ * Galería de plantillas — mismo patrón que /admin/agente (modal en #modal-root
+ * vía htmx). "Usar esta plantilla" es un POST normal: crea la habilidad de
+ * una vez y redirige a su formulario de edición para ajustarla al negocio.
+ */
+export function renderSkillTemplatesModal(): string {
+  const cards = SKILL_TEMPLATES.map(
+    (t) => `
+    <div class="bg-panel border border-line" style="padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+      <span class="font-display font-semibold text-[13px] text-cream">${esc(t.label)}</span>
+      <p class="text-dim text-[11.5px]" style="margin:0">${esc(t.description)}</p>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${t.outputFields.map((f) => `<span class="font-mono" style="font-size:10px;color:var(--muted);border:1px solid var(--line);padding:2px 7px">${esc(f.key)}</span>`).join("")}
+      </div>
+      <form method="POST" action="/admin/habilidades/plantillas/${esc(t.slug)}/usar" style="margin-top:4px">
+        <button type="submit" class="text-[11.5px] font-display font-semibold cursor-pointer"
+                style="width:100%;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 10px">Usar esta plantilla</button>
+      </form>
+    </div>`,
+  ).join("");
+
+  return `
+  <div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
+    <div class="modal-card w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+      <div class="flex items-center justify-between mb-1">
+        <h3 class="font-display font-semibold text-[15px] text-cream">Plantillas de habilidad</h3>
+        <button type="button" class="ghostbtn cursor-pointer" style="background:none;border:0;color:var(--muted);font-size:18px;line-height:1"
+                onclick="document.getElementById('modal-root').innerHTML=''">×</button>
+      </div>
+      <p class="text-muted text-[12px] mb-4">Elige un punto de partida y ajústalo a tu negocio después de crearlo.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">${cards}</div>
+    </div>
+  </div>`;
+}
+
 function runRow(r: SkillRun, skillName: string): string {
   const color = r.status === "ok" ? "var(--ok)" : r.status === "error" ? "var(--bad)" : "var(--muted)";
   const detail = r.status === "error" ? r.error : JSON.stringify(r.output ?? {});
@@ -274,8 +310,13 @@ export async function renderHabilidades(
 
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
         <h3 class="font-display font-semibold text-[13.5px] text-cream">Tus habilidades</h3>
-        <a href="/admin/habilidades/nueva" class="bigbtn font-display font-bold text-[12.5px]"
-           style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:8px 16px;text-decoration:none">+ Nueva habilidad</a>
+        <div style="display:flex;gap:8px">
+          <button type="button" class="ghostbtn font-display font-semibold text-[12.5px] cursor-pointer"
+                  hx-get="/admin/habilidades/plantillas" hx-target="#modal-root" hx-swap="innerHTML"
+                  style="background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:8px 16px">✦ Usar una plantilla</button>
+          <a href="/admin/habilidades/nueva" class="bigbtn font-display font-bold text-[12.5px]"
+             style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:8px 16px;text-decoration:none">+ Nueva habilidad</a>
+        </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px">${skillCards}</div>
 

@@ -59,9 +59,9 @@ export const SETTING_KEYS = {
   // system-prompt.ts (antes siempre vacío: no había forma de escribirlo sin
   // pasar por systemPromptOverride, que reemplaza TODO el prompt).
   salesPlaybook: "sales_playbook",
-  // Voz de OpenAI Realtime para llamadas telefónicas (alloy, shimmer, verse…)
-  // — antes no era configurable, siempre caía al default hardcodeado
-  // "alloy" en realtimeClient.ts.
+  // Voz de OpenAI Realtime para llamadas telefónicas — el panel solo ofrece
+  // marin/cedar (las únicas dos que suenan bien en español); sin configurar,
+  // cae al default hardcodeado "marin" en realtimeClient.ts.
   voiceName: "voice_name",
   // Saludo con el que el bot contesta la llamada — antes quedaba a criterio
   // del modelo (podía improvisar, o narrar instrucciones internas). Ahora es

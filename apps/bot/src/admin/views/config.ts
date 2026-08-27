@@ -111,8 +111,18 @@ function renderTextArea(opts: {
 const SELECT_STYLE =
   "background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%";
 
-/** Voces de OpenAI Realtime disponibles hoy (API GA) — el acento no cambia por idioma, solo probando se sabe cuál suena mejor en español. */
-const VOICE_OPTIONS = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"];
+/**
+ * Solo las dos voces GA de OpenAI Realtime que mejor suenan en español
+ * (marin/cedar) — el resto del catálogo (alloy, ash, ballad…) suena
+ * marcadamente a acento en inglés. Se muestran con una etiqueta descriptiva
+ * en vez del nombre propio: a un dueño de negocio "voz femenina/masculina"
+ * le dice mucho más que "marin"/"cedar" para diferenciarlas de oído.
+ */
+const VOICE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "marin", label: "Voz femenina" },
+  { value: "cedar", label: "Voz masculina" },
+];
+const DEFAULT_VOICE = "marin";
 
 /** Curado, no exhaustivo — LATAM es el mercado principal de este starter (ver CLAUDE.md). */
 const LANGUAGE_OPTIONS = [
@@ -255,11 +265,14 @@ function renderVoiceSection(settings: Record<string, string>, hasEnvOpenAiKey: b
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
         <label class="font-display font-semibold text-[12.5px] text-cream">Voz</label>
-        <p class="text-dim text-[11px]">El acento de la voz NO cambia aunque hable español — solo probando con una llamada real se sabe cuál suena mejor para tu negocio.</p>
+        <p class="text-dim text-[11px]">Las dos opciones son las que mejor suenan en español — solo probando con una llamada real se sabe cuál conviene más para tu negocio.</p>
         <select name="${SETTING_KEYS.voiceName}" style="${SELECT_STYLE}">
-          ${VOICE_OPTIONS.map(
-            (v) => `<option value="${v}" ${(settings[SETTING_KEYS.voiceName] || "alloy") === v ? "selected" : ""}>${v}</option>`,
-          ).join("")}
+          ${VOICE_OPTIONS.map((v) => {
+            const current = settings[SETTING_KEYS.voiceName];
+            const isCurrentValid = VOICE_OPTIONS.some((o) => o.value === current);
+            const selected = (isCurrentValid ? current : DEFAULT_VOICE) === v.value;
+            return `<option value="${v.value}" ${selected ? "selected" : ""}>${esc(v.label)}</option>`;
+          }).join("")}
         </select>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
@@ -450,9 +463,53 @@ export function renderConfig(
                 })}
               </div>
 
+              <div style="display:flex;flex-direction:column;gap:14px;border-top:1px solid var(--line);padding-top:16px">
+                <label class="font-display font-semibold text-[12.5px] text-cream">Datos básicos del negocio</label>
+                <p class="text-dim text-[11px]" style="margin:0">Lo más común que un cliente pregunta — el bot los usa para responder directo, sin inventar.</p>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                  ${renderTextField({
+                    name: "hours",
+                    label: "Horario",
+                    help: "Cuándo atiendes.",
+                    value: botConfig.hours ?? "",
+                    placeholder: "Ej. Lun-Vie 9am-6pm, Sáb 9am-2pm",
+                  })}
+                  ${renderTextField({
+                    name: "contact_phone",
+                    label: "Teléfono",
+                    help: "El que le compartes a tus clientes.",
+                    value: botConfig.contactPhone ?? "",
+                    placeholder: "Ej. 55 1234 5678",
+                  })}
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                  ${renderTextField({
+                    name: "location",
+                    label: "Ubicación / Dirección",
+                    help: "Dónde te ubicas o a dónde llegan tus clientes.",
+                    value: botConfig.location ?? "",
+                    placeholder: "Ej. Av. Insurgentes Sur 123, CDMX",
+                  })}
+                  ${renderTextField({
+                    name: "website",
+                    label: "Web",
+                    help: "Tu página o red social principal.",
+                    value: botConfig.website ?? "",
+                    placeholder: "Ej. https://tunegocio.com",
+                  })}
+                </div>
+                ${renderTextField({
+                  name: "payment_methods",
+                  label: "Métodos de pago",
+                  help: "Sepáralos con comas.",
+                  value: (botConfig.paymentMethods ?? []).join(", "),
+                  placeholder: "Ej. Efectivo, tarjeta, transferencia",
+                })}
+              </div>
+
               <div style="display:flex;align-items:flex-start;gap:9px;background:var(--accent-soft);border:1px solid rgba(245,197,24,.35);border-radius:var(--radius-sm);padding:13px 15px">
                 <span style="color:var(--accent-2);flex:none;line-height:1">◆</span>
-                <p class="text-[12px]" style="color:var(--muted);margin:0">No siempre es fácil saber qué información capturar. Dinos el giro de tu negocio y la IA te sugiere qué preguntas suele hacer un cliente — tú solo llenas las respuestas.</p>
+                <p class="text-[12px]" style="color:var(--muted);margin:0">No siempre es fácil saber qué más información capturar. Dinos el giro de tu negocio y la IA te sugiere qué OTRAS preguntas suele hacer un cliente de ese giro — tú solo llenas las respuestas.</p>
               </div>
 
               <div style="display:flex;gap:10px;align-items:flex-end">
@@ -473,7 +530,7 @@ export function renderConfig(
 
               <div style="display:flex;flex-direction:column;gap:8px">
                 <label class="font-display font-semibold text-[12.5px] text-cream">Datos específicos de tu negocio</label>
-                <p class="text-dim text-[11px]">Lo que un cliente típicamente pregunta y no está en horario/precio/ubicación.</p>
+                <p class="text-dim text-[11px]">Lo que un cliente típicamente pregunta de TU giro en particular — lo genérico (horario, teléfono, ubicación, métodos de pago, web) ya se captura arriba.</p>
                 <div id="custom-fields-list" style="display:flex;flex-direction:column;gap:8px">
                   ${Object.entries(botConfig.customFields ?? {})
                     .map(([k, v]) => renderCustomFieldRow(k, v))
@@ -496,8 +553,21 @@ export function renderConfig(
                 </div>
 
                 <div id="catalog-manual-block" style="display:${botConfig.catalogSource === "mcp" ? "none" : "flex"};flex-direction:column;gap:8px">
+                  ${
+                    !botConfig.catalog?.length && botConfig.services?.length
+                      ? `<p class="text-[11px]" style="color:var(--accent-2);margin:0">Esto venía de tu configuración inicial y nunca había tenido dónde editarse o borrarse — ya lo puedes cambiar o quitar aquí abajo. Al guardar, se guarda como catálogo normal.</p>`
+                      : ""
+                  }
                   <div id="catalog-list" style="display:flex;flex-direction:column;gap:8px">
-                    ${(botConfig.catalog ?? []).map((item) => renderCatalogRow(item)).join("")}
+                    ${(
+                      // `services` es el campo viejo que llenaba el onboarding sin que
+                      // ningún campo del panel lo mostrara jamás (ver businessContext.ts)
+                      // — si el dueño todavía no migró a "Catálogo", se precarga aquí una
+                      // sola vez para que por fin sea visible y editable/borrable.
+                      botConfig.catalog?.length ? botConfig.catalog : (botConfig.services ?? [])
+                    )
+                      .map((item) => renderCatalogRow(item))
+                      .join("")}
                   </div>
                   <button type="button" id="add-catalog-row-btn" class="text-dim text-[11.5px]"
                           style="width:fit-content;background:transparent;border:1px dashed var(--line);color:var(--muted);padding:7px 12px;cursor:pointer">+ agregar producto/servicio</button>

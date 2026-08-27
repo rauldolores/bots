@@ -30,7 +30,7 @@ export interface AgentConfig {
   monthlyBudgetUsd?: number;
   /** BYO-LLM del dashboard (proveedor / API key / modelo). */
   llm: LlmOverrides;
-  /** Voz de OpenAI Realtime para llamadas — undefined = default de realtimeClient.ts ("alloy"). */
+  /** Voz de OpenAI Realtime para llamadas — undefined = default de realtimeClient.ts ("marin"). */
   voiceName?: string;
   /** Plantilla del saludo de llamada — undefined = DEFAULT_VOICE_GREETING_TEMPLATE (voiceGreeting.ts). */
   voiceGreeting?: string;

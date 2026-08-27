@@ -627,15 +627,20 @@ export async function renderNodeModal(env: Env, botId: string, nodeId: string, s
           <label for="system_prompt_override" class="text-[12.5px] font-medium text-cream">Prompt del agente</label>
           <span class="text-[9.5px] tracking-[.05em]" style="color:${hasOverride ? "var(--accent-2)" : "var(--info)"};border:1px solid ${hasOverride ? "var(--accent-2)" : "var(--info)"};padding:1px 7px">${hasOverride ? "✍ manual" : "⚙ automático"}</span>
         </div>
-        <p class="text-[11px] mb-2 leading-relaxed" style="color:var(--dim)">Este es el prompt efectivo — exactamente lo que Claude recibe. ${hasOverride
-          ? "Estás en modo manual: el texto de abajo se usa tal cual."
-          : "Se genera solo con la información del negocio. Si lo editas y guardas, se congela como prompt manual y deja de actualizarse automáticamente."}</p>
-        <textarea id="system_prompt_override" name="system_prompt_override" rows="14" required
+        <p class="text-[11px] mb-2 leading-relaxed" style="color:var(--dim)">Este es el prompt efectivo — exactamente lo que Claude recibe HOY, letra por letra (el mismo texto que verías si lo revisaras en /admin/config → Instrucciones avanzadas). ${hasOverride
+          ? "Estás en modo manual: el texto de abajo se usa tal cual, y las pestañas de /admin/config (negocio, tono, palabras de escalamiento…) dejaron de tener efecto sobre él."
+          : "Se genera solo con lo que llenaste en /admin/config (negocio, tono, instrucciones) — de solo lectura aquí a propósito, para que nadie lo congele sin querer con un cambio suelto. Para tocarlo, ajusta esas pestañas; si de verdad quieres escribirlo tú mismo, usa \"Editar manualmente\" de abajo."}</p>
+        <textarea id="system_prompt_override" name="system_prompt_override" rows="14" required ${hasOverride ? "" : "readonly"}
                   class="w-full font-mono text-[11px] p-3 outline-none resize-y"
-                  style="background:var(--bg);border:1px solid var(--line);color:var(--cream)">${esc(d.cfg.systemPrompt)}</textarea>
+                  style="background:var(--bg);border:1px solid var(--line);color:var(--cream)${hasOverride ? "" : ";opacity:.7;cursor:not-allowed"}">${esc(d.cfg.systemPrompt)}</textarea>
         <div class="flex flex-wrap gap-2 mt-3">
-          <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:8px 16px">Guardar prompt manual</button>
-          ${hasOverride ? `<button type="submit" name="action" value="reset" formnovalidate class="ghostbtn text-[12.5px] cursor-pointer" style="background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:8px 16px">⚙ Volver al automático</button>` : ""}
+          ${hasOverride
+            ? `<button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:8px 16px">Guardar prompt manual</button>
+               <button type="submit" name="action" value="reset" formnovalidate class="ghostbtn text-[12.5px] cursor-pointer" style="background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:8px 16px">⚙ Volver al automático</button>`
+            : `<button type="button" id="brain-unlock-btn" class="ghostbtn text-[12.5px] cursor-pointer" style="background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:8px 16px"
+                       onclick="var t=document.getElementById('system_prompt_override');t.removeAttribute('readonly');t.style.opacity='1';t.style.cursor='text';t.focus();this.style.display='none';document.getElementById('brain-save-btn').style.display='inline-flex';">✍ Editar manualmente (se congela)</button>
+               <button type="submit" id="brain-save-btn" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="display:none;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:8px 16px">Guardar prompt manual</button>`
+          }
         </div>
       </form>`, saved);
   }

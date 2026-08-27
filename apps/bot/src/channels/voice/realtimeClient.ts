@@ -154,7 +154,12 @@ export class RealtimeClient {
           },
           output: {
             format: g711UlawFormat,
-            voice: this.config.voice ?? "alloy",
+            // "marin" — el panel (/admin/config → Voz) hoy solo ofrece
+            // marin/cedar, las dos únicas voces GA que suenan bien en
+            // español; el resto del catálogo de OpenAI se nota con acento en
+            // inglés. Si nunca se configuró nada, cae aquí en vez de en una
+            // voz que ya ni siquiera aparece como opción en el panel.
+            voice: this.config.voice ?? "marin",
           },
         },
         tools: this.config.tools,

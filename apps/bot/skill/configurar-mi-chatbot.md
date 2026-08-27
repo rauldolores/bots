@@ -358,13 +358,20 @@ teléfono y `customFields` como `ofrecemos`, `preguntasFrecuentes`, `reglasYEsca
 ```bash
 npm run bot:config -- '{
   "hours": "...",
-  "services": [{"name": "...", "price": 0}],
+  "catalog": [{"name": "...", "price": 0}],
   "location": "...",
   "paymentMethods": ["efectivo", "..."],
   "contactPhone": "...",
+  "website": "...",
   "customFields": {"...": "..."}
 }'
 ```
+
+`catalog` (no `services` — ese campo quedó retirado: nunca tuvo un lugar en el panel
+donde editarlo o borrarlo, así que los precios que se guardaran ahí quedaban
+invisibles para el dueño para siempre). `catalog` es lo mismo que llena el dueño a
+mano en Configuración → "Catálogo / lista de precios" — el mismo campo, la misma
+UI, sin importar quién lo haya llenado primero.
 
 (Es un merge — solo pisa las llaves que mandas, el resto de `bots.config` queda igual.)
 

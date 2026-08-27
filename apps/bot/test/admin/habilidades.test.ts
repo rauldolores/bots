@@ -12,6 +12,7 @@ import { Db } from "../../src/db/client";
 import { BotSkillsRepo } from "../../src/db/skills";
 import { BotApiKeysRepo } from "../../src/db/apiKeys";
 import { parseOutputFields, validateFields } from "../../src/admin/views/habilidades";
+import { SKILL_TEMPLATES } from "../../src/skills/templates";
 import type { Env } from "../../src/env";
 
 const PASSWORD = "secret123";
@@ -198,6 +199,54 @@ describe("editar y borrar", () => {
     const skill = await crear();
     expect((await post(`/habilidades/${skill.id}/borrar`, "")).status).toBe(302);
     expect(await new BotSkillsRepo(db, TEST_BOT_ID).list()).toHaveLength(0);
+  });
+});
+
+// Plantillas — ahorrarle al dueño escribir instrucciones/campos desde cero.
+describe("plantillas de habilidad", () => {
+  it("la galería muestra las 7 plantillas curadas", async () => {
+    const res = await adminApp.request("/habilidades/plantillas", { headers: AUTH }, env);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    for (const t of SKILL_TEMPLATES) expect(html).toContain(t.label);
+  });
+
+  it("usar una plantilla crea la habilidad real (mismo camino que crearla a mano) y manda a editarla", async () => {
+    const template = SKILL_TEMPLATES[0];
+    const res = await post(`/habilidades/plantillas/${template.slug}/usar`, "");
+    expect(res.status).toBe(302);
+
+    const skills = await new BotSkillsRepo(db, TEST_BOT_ID).list();
+    expect(skills).toHaveLength(1);
+    expect(skills[0].name).toBe(template.name);
+    expect(skills[0].instructions).toBe(template.instructions);
+    expect(skills[0].output_fields).toEqual(template.outputFields);
+    // Compila contra el mismo validador que usa el runtime — no solo se guardó, sirve.
+    expect(res.headers.get("location")).toBe(`/admin/habilidades/${skills[0].id}/editar`);
+  });
+
+  it("dos habilidades de la misma plantilla no chocan de slug", async () => {
+    const template = SKILL_TEMPLATES[0];
+    await post(`/habilidades/plantillas/${template.slug}/usar`, "");
+    await post(`/habilidades/plantillas/${template.slug}/usar`, "");
+    const slugs = (await new BotSkillsRepo(db, TEST_BOT_ID).list()).map((s) => s.slug).sort();
+    expect(slugs).toHaveLength(2);
+    expect(new Set(slugs).size).toBe(2);
+  });
+
+  it("una plantilla que no existe responde 404 sin crear nada", async () => {
+    const res = await post("/habilidades/plantillas/no-existe/usar", "");
+    expect(res.status).toBe(404);
+    expect(await new BotSkillsRepo(db, TEST_BOT_ID).list()).toHaveLength(0);
+  });
+
+  it("GET /habilidades/plantillas no choca con /habilidades/:id/editar (orden de rutas)", async () => {
+    // La ruta de plantillas se registró ANTES de /habilidades/:id/editar —
+    // si no, ':id' se tragaría "plantillas" como si fuera un id real (mismo
+    // motivo por el que /habilidades/llaves también va antes).
+    const res = await adminApp.request("/habilidades/plantillas", { headers: AUTH }, env);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("Plantillas de habilidad");
   });
 });
 

@@ -7,6 +7,7 @@ import { Db } from "../../db/client";
 import { NurtureSequencesRepo, type NurtureSequence, type NurtureStep } from "../../db/nurtureSequences";
 import { LeadTouchesRepo, type LeadTouch } from "../../db/leadTouches";
 import { LeadsRepo } from "../../db/leads";
+import { NURTURE_TEMPLATES } from "../../nurture/templates";
 import { layout } from "./layout";
 
 function esc(s: string): string {
@@ -125,6 +126,44 @@ function sequenceForm(seq: NurtureSequence | null, error?: string): string {
   </script>`;
 }
 
+/**
+ * Galería de plantillas — un modal (mismo #modal-root/htmx que usa /admin/agente)
+ * con una tarjeta por plantilla. "Usar esta plantilla" es un POST normal (no
+ * htmx): crea la secuencia de una vez y redirige a su formulario de edición,
+ * para que el dueño la ajuste a su negocio antes de que quede activa.
+ */
+export function renderNurtureTemplatesModal(): string {
+  const cards = NURTURE_TEMPLATES.map(
+    (t) => `
+    <div class="bg-panel border border-line" style="padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+      <span class="font-display font-semibold text-[13px] text-cream">${esc(t.label)}</span>
+      <p class="text-dim text-[11.5px]" style="margin:0">${esc(t.description)}</p>
+      <div style="display:flex;flex-direction:column;gap:3px">
+        ${t.steps
+          .map((s, i) => `<span class="text-muted text-[11px]"><b class="text-dim">${i + 1}.</b> ${esc(fmtHours(s.afterHours))} — ${esc(s.instruction.slice(0, 90))}${s.instruction.length > 90 ? "…" : ""}</span>`)
+          .join("")}
+      </div>
+      <form method="POST" action="/admin/seguimientos/plantillas/${esc(t.slug)}/usar" style="margin-top:4px">
+        <button type="submit" class="text-[11.5px] font-display font-semibold cursor-pointer"
+                style="width:100%;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 10px">Usar esta plantilla</button>
+      </form>
+    </div>`,
+  ).join("");
+
+  return `
+  <div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
+    <div class="modal-card w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+      <div class="flex items-center justify-between mb-1">
+        <h3 class="font-display font-semibold text-[15px] text-cream">Plantillas de seguimiento</h3>
+        <button type="button" class="ghostbtn cursor-pointer" style="background:none;border:0;color:var(--muted);font-size:18px;line-height:1"
+                onclick="document.getElementById('modal-root').innerHTML=''">×</button>
+      </div>
+      <p class="text-muted text-[12px] mb-4">Elige un punto de partida y ajústalo a tu negocio después de crearlo.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">${cards}</div>
+    </div>
+  </div>`;
+}
+
 function touchRow(t: LeadTouch, leadName: string, sequenceName: string): string {
   const color = t.status === "sent" ? "var(--ok)" : t.status === "skipped" ? "var(--muted)" : "var(--bad)";
   return `
@@ -189,8 +228,13 @@ export async function renderSeguimientos(env: Env, botId: string, opts: { error?
 
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
         <h3 class="font-display font-semibold text-[13.5px] text-cream">Tus secuencias</h3>
-        <a href="/admin/seguimientos/nueva" class="bigbtn font-display font-bold text-[12.5px]"
-           style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:8px 16px;text-decoration:none">+ Nueva secuencia</a>
+        <div style="display:flex;gap:8px">
+          <button type="button" class="ghostbtn font-display font-semibold text-[12.5px] cursor-pointer"
+                  hx-get="/admin/seguimientos/plantillas" hx-target="#modal-root" hx-swap="innerHTML"
+                  style="background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:8px 16px">✦ Usar una plantilla</button>
+          <a href="/admin/seguimientos/nueva" class="bigbtn font-display font-bold text-[12.5px]"
+             style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:8px 16px;text-decoration:none">+ Nueva secuencia</a>
+        </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px">${cards}</div>
 

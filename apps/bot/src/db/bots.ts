@@ -26,6 +26,8 @@ export interface BotConfig {
   paymentMethods?: string[];
   contactPhone?: string;
   contactEmail?: string;
+  /** Sitio web o red social principal — ej. "https://tunegocio.com". */
+  website?: string;
   timezone?: string;
   /** Cualquier dato extra que el dueño quiera que el bot sepa. */
   customFields?: Record<string, string>;
