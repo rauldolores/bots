@@ -10,6 +10,7 @@
  * TODOS antes de mandar, no después.
  */
 import { generateText } from "ai";
+import { buildCustomerContext, renderCustomerContext } from "../customer/context";
 import type { Env } from "../env";
 import { Db } from "../db/client";
 import { LeadsRepo, type Lead } from "../db/leads";
@@ -286,6 +287,12 @@ async function draftTouchMessage(
   const bot = await new BotsRepo(db).getById(botId);
   const { model } = createModel(env, "fast", await loadLlmOverrides(env));
   const history = await new MessagesRepo(db, botId).lastN(conversationId, 6);
+  // Con qué se escribe este toque. Antes era `lead.intent` y nada más: el bot
+  // le escribía a alguien tres días después sin saber si tenía un caso
+  // abierto, una cita agendada o si ya había hablado por otro canal — y salía
+  // "¿sigues interesado?" en vez de algo que demostrara memoria.
+  const cliente = await buildCustomerContext(db, botId, { lead });
+  const contexto = renderCustomerContext(cliente, resolveTimezone(bot?.config?.timezone));
   const transcript = history
     .map((m) => `${m.role === "user" ? "Cliente" : "Tú"}: ${m.content.slice(0, 300)}`)
     .join("\n");
@@ -295,10 +302,14 @@ async function draftTouchMessage(
     prompt: `Eres ${bot?.name ?? env.BOT_NAME}, respondiendo chats de ${bot?.business_name ?? env.BUSINESS_NAME} en primera persona: humano, breve, español mexicano casual, sin emojis, nunca pushy.
 
 Estás dando seguimiento a este lead con un objetivo: ${sequence.goal}
-${lead.name ? `Se llama ${lead.name}.` : ""}
-Lo que sabes de él: ${lead.intent}
+${contexto ?? (lead.name ? `Se llama ${lead.name}.` : "")}
+${contexto ? "" : `Lo que sabes de él: ${lead.intent}`}
 
 Este paso del seguimiento: ${instruction}
+
+Si arriba aparece un caso abierto sin resolver, NO le vendas: primero
+reconoce que sigue pendiente. Si tiene una cita agendada, no le propongas
+otra.
 
 Últimos mensajes de la conversación (si los hay):
 ${transcript || "(sin conversación previa registrada)"}

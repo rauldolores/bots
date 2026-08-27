@@ -78,6 +78,24 @@ export class ConversationsRepo {
     );
   }
 
+  /**
+   * Conversaciones de la misma persona en CUALQUIER canal.
+   *
+   * A diferencia de findByPhoneVariants (acotado a twilio/whatsapp, para decidir
+   * por dónde mandar un toque), esto es para RECONOCER: la misma persona que
+   * ayer escribió por Telegram y hoy llamó es una sola relación, y el agente
+   * debe saberlo. Ver src/customer/context.ts.
+   */
+  async findByChannelUserIds(channelUserIds: string[]): Promise<Conversation[]> {
+    if (channelUserIds.length === 0) return [];
+    const marcas = channelUserIds.map(() => "?").join(", ");
+    return this.db.all<Conversation>(
+      `SELECT * FROM conversations WHERE bot_id = ? AND channel_user_id IN (${marcas})
+       ORDER BY last_message_at DESC NULLS LAST`,
+      [this.botId, ...channelUserIds],
+    );
+  }
+
   async getById(id: string): Promise<Conversation | null> {
     return this.db.first<Conversation>(
       "SELECT * FROM conversations WHERE id = ? AND bot_id = ?",

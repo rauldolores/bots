@@ -16,7 +16,8 @@ import { resolveAgentConfig, type AgentConfig } from "../settings-loader";
 import { buildTools } from "../tools";
 import { loadMcpTools } from "../tools/mcpTools";
 import { CustomerFactsRepo } from "../db/facts";
-import { LeadsRepo } from "../db/leads";
+import { buildCustomerContext, renderCustomerContext } from "../customer/context";
+import { resolveTimezone } from "../datetime";
 import { AgentStateRepo, type AgentState } from "./state";
 
 export interface AgentContextInput {
@@ -106,16 +107,17 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
   const toolNames = Object.keys(tools);
 
   // Tanda 2: lo que sí dependía de la anterior.
-  const [cfg, knownLead] = await Promise.all([
+  //
+  // El contexto de cliente reemplaza al viejo lookup de "lead conocido", que
+  // solo traía nombre y contacto. Ahora trae además sus casos abiertos, sus
+  // citas y si ya había hablado por otro canal — la diferencia entre saludar
+  // por su nombre y saber de verdad con quién estás hablando.
+  const [cfg, cliente] = await Promise.all([
     resolveAgentConfig(env, toolNames, botId),
-    state?.channelUserId
-      ? new LeadsRepo(db, botId)
-          .findLatestByChannelUserId(state.channelUserId)
-          .catch((e) => {
-            console.warn("[buildAgentContext] known-lead lookup failed:", e);
-            return null;
-          })
-      : Promise.resolve(null),
+    buildCustomerContext(db, botId, {
+      conversationId,
+      channelUserId: state?.channelUserId ?? null,
+    }),
   ]);
 
   // Respetar los toggles del panel: el prompt solo anuncia las herramientas
@@ -137,19 +139,12 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
     );
   }
 
-  // Nombre/contacto conocidos: por channel_user_id — así un cliente que ya
-  // dio su nombre alguna vez (captureLead, en CUALQUIER canal) no lo tiene
-  // que repetir, ni por chat ni por teléfono.
-  if (knownLead?.name) knownCustomerName = knownLead.name;
-  if (knownLead && (knownLead.name || knownLead.contact)) {
-    memoryBlocks.push(
-      `<cliente_conocido>\nYa conoces a este cliente de una conversación anterior: ${
-        knownLead.name ? `nombre=${knownLead.name}` : ""
-      }${knownLead.name && knownLead.contact ? ", " : ""}${
-        knownLead.contact ? `contacto=${knownLead.contact}` : ""
-      }. No se lo vuelvas a preguntar. Si él dice que ese no es su nombre o que cambió su contacto, créele a él y no a este dato.\n</cliente_conocido>`,
-    );
-  }
+  // Quién es y en qué quedaron: nombre, lo que buscaba, casos abiertos, citas
+  // agendadas, si ya habló por otro canal. Un cliente que ya dio su nombre
+  // alguna vez no lo tiene que repetir — ni por chat ni por teléfono.
+  if (cliente.lead?.name) knownCustomerName = cliente.lead.name;
+  const bloqueCliente = renderCustomerContext(cliente, resolveTimezone(bot?.config?.timezone));
+  if (bloqueCliente) memoryBlocks.push(bloqueCliente);
 
   return {
     bot,

@@ -217,6 +217,14 @@ export class LeadsRepo {
    * conversación anterior (misma cuenta de WhatsApp/Telegram/etc., semanas o
    * meses después). Null si nunca se capturó nada identificable de esta cuenta.
    */
+  /** El lead capturado en ESTA conversación — el punto de partida del contexto de cliente (src/customer/context.ts). */
+  async findByConversation(conversationId: string): Promise<Lead | null> {
+    return this.db.first<Lead>(
+      "SELECT * FROM leads WHERE bot_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 1",
+      [this.botId, conversationId],
+    );
+  }
+
   async findLatestByChannelUserId(channelUserId: string): Promise<Lead | null> {
     return this.db.first<Lead>(
       `SELECT * FROM leads WHERE bot_id = ? AND channel_user_id = ? AND (name IS NOT NULL OR contact IS NOT NULL)
