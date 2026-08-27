@@ -146,3 +146,57 @@ export function filtroContactoPorDato(contacto: string): string | null {
   }
   return null;
 }
+
+export interface ContactoVinqulia {
+  id: number | string;
+  company_id?: number | string | null;
+  email_jsonb?: unknown[] | null;
+  phone_jsonb?: unknown[] | null;
+}
+
+/** Busca un contacto por su correo o teléfono (probando las formas en que pudo quedar guardado). null = no existe. */
+export async function buscarContacto(
+  creds: ConnectorCreds,
+  base: string,
+  contacto: string,
+): Promise<ContactoVinqulia | null> {
+  const filtro = filtroContactoPorDato(contacto);
+  if (!filtro) return null;
+  const filas = await vinquliaBuscar<ContactoVinqulia>(creds, base, `/contacts?${filtro}&limit=1`);
+  return filas[0] ?? null;
+}
+
+/** La empresa por nombre (sin distinguir mayúsculas); si no existe, la crea. undefined si no se pudo ninguna de las dos. */
+export async function buscarOCrearEmpresa(
+  creds: ConnectorCreds,
+  base: string,
+  nombre: string,
+  sales: number | undefined,
+): Promise<number | string | undefined> {
+  const limpio = nombre.trim();
+  if (!limpio) return undefined;
+  // `ilike` sin comodines es igualdad sin distinguir mayúsculas: "Acme" y
+  // "ACME" son la misma empresa, no dos.
+  const existentes = await vinquliaBuscar<{ id: number | string }>(
+    creds,
+    base,
+    `/companies?name=ilike.${encodeURIComponent(limpio)}&limit=1`,
+  );
+  if (existentes[0]?.id !== undefined) return existentes[0].id;
+
+  try {
+    const res = await fetch(`${base}/companies`, {
+      method: "POST",
+      headers: vinquliaHeaders(creds, { "Content-Type": "application/json", Prefer: "return=representation" }),
+      body: JSON.stringify({ name: limpio, ...(sales !== undefined ? { sales_id: sales } : {}) }),
+    });
+    if (!res.ok) {
+      console.error(`[vinqulia] no se pudo crear la empresa: ${res.status} ${(await res.text()).slice(0, 200)}`);
+      return undefined;
+    }
+    return firstRowId(await res.json().catch(() => null));
+  } catch (e) {
+    console.error("[vinqulia] no se pudo crear la empresa:", e);
+    return undefined;
+  }
+}

@@ -8,6 +8,8 @@ import {
   VINQULIA_MISSING_URL,
   firstRowId,
   splitName,
+  buscarContacto,
+  buscarOCrearEmpresa,
   isEmail,
   isPhone,
 } from "../vinquliaApi";
@@ -23,6 +25,15 @@ import {
  */
 
 const MAX_SUBJECT = 150;
+
+/**
+ * Con qué empresa se archiva un ticket cuyo contacto todavía no tiene una.
+ *
+ * `crm.tickets.company_id` es NOT NULL, así que no hay opción de dejarlo
+ * vacío: o hay empresa o no hay ticket. Es UNA sola fila que se reutiliza
+ * siempre, con un nombre que el dueño reconoce y puede reasignar.
+ */
+const EMPRESA_DE_RESPALDO = "Sin empresa";
 
 function buildDescription(ticket: TicketInput): string {
   const who = [ticket.requesterName, ticket.requesterContact].filter(Boolean).join(" — ");
@@ -43,36 +54,59 @@ export const vinquliaTicketConnector: TicketConnector = {
     if (!base) return { ok: false, error: VINQULIA_MISSING_URL };
     const sales = vinquliaSalesId(creds);
 
-    // `tickets.contact_id` es NOT NULL en el esquema real de Vinqulia
-    // (confirmado contra crm.kontrolia.io) — sin un contacto vinculado, TODO
-    // POST a /tickets truena con "null value in column contact_id violates
-    // not-null constraint". Se crea (o se intenta) el contacto con los datos
-    // de quien reporta antes de abrir el ticket — mismo patrón que ya usa el
-    // conector de CRM para contactos.
-    const contactBody: Record<string, unknown> = splitName(ticket.requesterName ?? null);
-    if (ticket.requesterContact) {
-      if (isEmail(ticket.requesterContact)) contactBody.email_jsonb = [{ email: ticket.requesterContact, type: "Work" }];
-      else if (isPhone(ticket.requesterContact)) contactBody.phone_jsonb = [{ number: ticket.requesterContact, type: "Work" }];
-    }
-    if (sales !== undefined) contactBody.sales_id = sales;
-
+    // `tickets.contact_id` Y `tickets.company_id` son NOT NULL en el esquema
+    // real de Vinqulia (confirmado contra crm.kontrolia.io). Faltaba la
+    // empresa, y por eso TODOS los handoffs venían fallando en producción con
+    // "23502: null value in column company_id violates not-null constraint".
     let contactId: number | string | undefined;
+    let companyId: number | string | undefined;
+
     try {
-      const contactRes = await fetch(`${base}/contacts`, {
-        method: "POST",
-        headers: vinquliaHeaders(creds, { "Content-Type": "application/json", Prefer: "return=representation" }),
-        body: JSON.stringify(contactBody),
-      });
-      if (contactRes.ok) {
-        contactId = firstRowId(await contactRes.json().catch(() => null));
+      // Buscar antes de crear: quien abre un ticket casi siempre ya está en el
+      // CRM (lo capturó captureLead antes). Sin esto, cada handoff dejaba un
+      // contacto nuevo repetido.
+      const existente = ticket.requesterContact
+        ? await buscarContacto(creds, base, ticket.requesterContact)
+        : null;
+
+      if (existente) {
+        contactId = existente.id;
+        companyId = existente.company_id ?? undefined;
       } else {
-        return { ok: false, error: `Vinqulia (contacto del ticket) respondió ${contactRes.status}: ${(await contactRes.text()).slice(0, 200)}` };
+        const contactBody: Record<string, unknown> = splitName(ticket.requesterName ?? null);
+        if (ticket.requesterContact) {
+          if (isEmail(ticket.requesterContact)) contactBody.email_jsonb = [{ email: ticket.requesterContact, type: "Work" }];
+          else if (isPhone(ticket.requesterContact)) contactBody.phone_jsonb = [{ number: ticket.requesterContact, type: "Work" }];
+        }
+        if (sales !== undefined) contactBody.sales_id = sales;
+
+        const contactRes = await fetch(`${base}/contacts`, {
+          method: "POST",
+          headers: vinquliaHeaders(creds, { "Content-Type": "application/json", Prefer: "return=representation" }),
+          body: JSON.stringify(contactBody),
+        });
+        if (!contactRes.ok) {
+          return { ok: false, error: `Vinqulia (contacto del ticket) respondió ${contactRes.status}: ${(await contactRes.text()).slice(0, 200)}` };
+        }
+        contactId = firstRowId(await contactRes.json().catch(() => null));
+      }
+
+      // La empresa del contacto si la tiene; si no, una sola de respaldo que se
+      // reutiliza siempre. No es adorno: sin company_id el ticket NO se puede
+      // crear, y quedarse sin registrar el handoff es peor que archivarlo bajo
+      // un nombre genérico que el dueño puede reasignar después.
+      if (companyId === undefined) {
+        companyId = await buscarOCrearEmpresa(creds, base, EMPRESA_DE_RESPALDO, sales);
       }
     } catch (e) {
       return { ok: false, error: String((e as Error)?.message ?? e) };
     }
+
     if (contactId === undefined) {
       return { ok: false, error: "Vinqulia no devolvió el id del contacto del ticket." };
+    }
+    if (companyId === undefined) {
+      return { ok: false, error: "No se pudo resolver la empresa del ticket (company_id es obligatorio en Vinqulia)." };
     }
 
     const body: Record<string, unknown> = {
@@ -80,6 +114,7 @@ export const vinquliaTicketConnector: TicketConnector = {
       description: buildDescription(ticket),
       status: "open",
       contact_id: contactId,
+      company_id: companyId,
     };
     if (sales !== undefined) body.sales_id = sales;
 

@@ -189,8 +189,9 @@ describe("tickets — pushTicket", () => {
   });
 
   it("si no se puede crear el contacto, el ticket NUNCA se intenta y se reporta el error", async () => {
-    fetchMock.mockImplementation((async (url: string) => {
-      if (url.endsWith("/contacts")) return { ok: false, status: 401, text: async () => "clave inválida" } as unknown as Response;
+    fetchMock.mockImplementation((async (url: string, init?: { method?: string }) => {
+      if ((init?.method ?? "GET").toUpperCase() === "GET") return jsonResponse([]); // no existe todavía
+      if (String(url).endsWith("/contacts")) return { ok: false, status: 401, text: async () => "clave inválida" } as unknown as Response;
       return jsonResponse([{ id: 3 }]);
     }) as unknown as typeof fetch);
     const result = await vinquliaTicketConnector.pushTicket(creds(), TICKET);
@@ -200,9 +201,11 @@ describe("tickets — pushTicket", () => {
   });
 
   it("error al crear el ticket (con contacto ya creado): se reporta, no se traga en silencio", async () => {
-    fetchMock.mockImplementation((async (url: string) => {
-      if (url.endsWith("/contacts")) return jsonResponse([{ id: 7 }]);
-      return { ok: false, status: 500, text: async () => "boom" } as unknown as Response;
+    fetchMock.mockImplementation((async (url: string, init?: { method?: string }) => {
+      if ((init?.method ?? "GET").toUpperCase() === "GET") return jsonResponse([]);
+      // El contacto y la empresa de respaldo se crean bien; el ticket truena.
+      if (String(url).endsWith("/tickets")) return { ok: false, status: 500, text: async () => "boom" } as unknown as Response;
+      return jsonResponse([{ id: 7 }]);
     }) as unknown as typeof fetch);
     const result = await vinquliaTicketConnector.pushTicket(creds(), TICKET);
     expect(result.ok).toBe(false);
@@ -630,5 +633,56 @@ describe("pipeline y etapa", () => {
     const r = await vinquliaConnector.listPipelineStages!(creds());
     expect(r.ok).toBe(false);
     expect(r.items).toEqual([]);
+  });
+});
+
+/**
+ * `crm.tickets.company_id` es NOT NULL igual que contact_id — faltaba, y por
+ * eso TODOS los handoffs venían fallando en producción con el error 23502 de
+ * Postgres. El fallo era silencioso para el cliente: el bot decía que pasaba
+ * el caso a una persona y en el CRM no aparecía nada.
+ */
+describe("tickets — empresa obligatoria y sin duplicar contactos", () => {
+  const TICKET2 = {
+    category: "queja",
+    summary: "No puedo entrar",
+    requesterName: "Ana García",
+    requesterContact: "ana@empresa.com",
+  };
+
+  it("manda company_id: sin él, Vinqulia rechaza el ticket entero", async () => {
+    fetchMock.mockImplementation(api({ crea: { "/contacts": [{ id: 7 }], "/companies": [{ id: 4 }], "/tickets": [{ id: 3 }] } }));
+    const r = await vinquliaTicketConnector.pushTicket(creds(), TICKET2);
+    expect(r.ok).toBe(true);
+    expect(cuerpo("/tickets")).toMatchObject({ contact_id: 7, company_id: 4 });
+  });
+
+  it("si quien reporta YA está en el CRM, reutiliza su contacto y su empresa", async () => {
+    fetchMock.mockImplementation(
+      api({ busca: { "/contacts": [{ id: 99, company_id: 12 }] }, crea: { "/tickets": [{ id: 3 }] } }),
+    );
+    await vinquliaTicketConnector.pushTicket(creds(), TICKET2);
+
+    expect(llamada("/contacts", "POST")).toBeUndefined(); // no lo duplica
+    expect(llamada("/companies", "POST")).toBeUndefined(); // ya tenía empresa
+    expect(cuerpo("/tickets")).toMatchObject({ contact_id: 99, company_id: 12 });
+  });
+
+  it("contacto conocido pero SIN empresa: cae en la de respaldo en vez de fallar", async () => {
+    fetchMock.mockImplementation(
+      api({ busca: { "/contacts": [{ id: 99, company_id: null }] }, crea: { "/companies": [{ id: 4 }], "/tickets": [{ id: 3 }] } }),
+    );
+    await vinquliaTicketConnector.pushTicket(creds(), TICKET2);
+    expect(JSON.parse(llamada("/companies", "POST")[1].body).name).toBe("Sin empresa");
+    expect(cuerpo("/tickets").company_id).toBe(4);
+  });
+
+  it("la empresa de respaldo se reutiliza, no se crea una por ticket", async () => {
+    fetchMock.mockImplementation(
+      api({ busca: { "/companies": [{ id: 4 }] }, crea: { "/contacts": [{ id: 7 }], "/tickets": [{ id: 3 }] } }),
+    );
+    await vinquliaTicketConnector.pushTicket(creds(), TICKET2);
+    expect(llamada("/companies", "POST")).toBeUndefined();
+    expect(cuerpo("/tickets").company_id).toBe(4);
   });
 });
