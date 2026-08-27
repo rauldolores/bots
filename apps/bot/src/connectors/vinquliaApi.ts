@@ -60,6 +60,9 @@ export function vinquliaSalesId(creds: ConnectorCreds): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+/** Marcas diacríticas combinantes — lo que deja normalize("NFD") al separar "ó" en "o" + acento. */
+const COMBINING_MARKS = /[̀-ͯ]/g;
+
 export const VINQULIA_MISSING_URL = "Falta la URL de Vinqulia en la configuración (o no es válida).";
 
 export function isEmail(v: string): boolean {
@@ -149,21 +152,65 @@ export function filtroContactoPorDato(contacto: string): string | null {
 
 export interface ContactoVinqulia {
   id: number | string;
+  first_name?: string | null;
+  last_name?: string | null;
   company_id?: number | string | null;
   email_jsonb?: unknown[] | null;
   phone_jsonb?: unknown[] | null;
 }
 
-/** Busca un contacto por su correo o teléfono (probando las formas en que pudo quedar guardado). null = no existe. */
+/** Para comparar nombres sin que un acento o una mayúscula los haga distintos. */
+function normalizarNombre(v: string): string {
+  return v
+    .normalize("NFD")
+    .replace(COMBINING_MARKS, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * ¿El nombre que llega contradice al que ya está guardado?
+ *
+ * Un teléfono NO identifica a una persona: la línea de una empresa, una
+ * recepción o una pareja lo comparten. Visto en datos reales — dos contactos
+ * con el mismo número eran dos personas distintas. Si los nombres se
+ * contradicen, es más sano crear un contacto nuevo que fusionar a dos personas
+ * en una sola ficha, porque lo segundo NO se puede deshacer.
+ */
+function nombresSeContradicen(guardado: string, entrante: string): boolean {
+  const a = normalizarNombre(guardado);
+  const b = normalizarNombre(entrante);
+  if (!a || !b) return false; // sin nombre de un lado no hay contradicción que ver
+  // Basta con que uno contenga al otro: "Ana" y "Ana García" son la misma.
+  return !a.includes(b) && !b.includes(a);
+}
+
+/**
+ * Busca un contacto por su correo o teléfono (probando las formas en que pudo
+ * quedar guardado). null = no existe, o existe pero es OTRA persona.
+ *
+ * `nombreEntrante` solo se usa para el caso del teléfono: el correo sí
+ * identifica a una persona, el teléfono no.
+ */
 export async function buscarContacto(
   creds: ConnectorCreds,
   base: string,
   contacto: string,
+  nombreEntrante?: string | null,
 ): Promise<ContactoVinqulia | null> {
   const filtro = filtroContactoPorDato(contacto);
   if (!filtro) return null;
   const filas = await vinquliaBuscar<ContactoVinqulia>(creds, base, `/contacts?${filtro}&limit=1`);
-  return filas[0] ?? null;
+  const hallado = filas[0];
+  if (!hallado) return null;
+
+  if (!isEmail(contacto) && nombreEntrante) {
+    const guardado = [hallado.first_name, hallado.last_name].filter(Boolean).join(" ");
+    if (nombresSeContradicen(guardado, nombreEntrante)) return null;
+  }
+  return hallado;
 }
 
 /** La empresa por nombre (sin distinguir mayúsculas); si no existe, la crea. undefined si no se pudo ninguna de las dos. */

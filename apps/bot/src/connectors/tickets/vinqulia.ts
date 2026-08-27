@@ -66,7 +66,7 @@ export const vinquliaTicketConnector: TicketConnector = {
       // CRM (lo capturó captureLead antes). Sin esto, cada handoff dejaba un
       // contacto nuevo repetido.
       const existente = ticket.requesterContact
-        ? await buscarContacto(creds, base, ticket.requesterContact)
+        ? await buscarContacto(creds, base, ticket.requesterContact, ticket.requesterName)
         : null;
 
       if (existente) {

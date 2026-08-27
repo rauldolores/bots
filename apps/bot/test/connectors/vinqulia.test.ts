@@ -686,3 +686,63 @@ describe("tickets — empresa obligatoria y sin duplicar contactos", () => {
     expect(cuerpo("/tickets").company_id).toBe(4);
   });
 });
+
+/**
+ * Caso real: en el CRM de producción había dos contactos con el MISMO teléfono
+ * que eran DOS PERSONAS distintas ("Raul" y "Luiz Gargia") — el mismo número
+ * usado en dos pruebas. Un teléfono no identifica a nadie: lo comparten la
+ * línea de una empresa, una recepción, una pareja. Fusionarlas habría sido
+ * irreversible.
+ */
+describe("no fusionar personas distintas que comparten teléfono", () => {
+  it("mismo teléfono pero nombre que se contradice: crea contacto nuevo, no fusiona", async () => {
+    fetchMock.mockImplementation(
+      api({ busca: { "/contacts": [{ id: 7, first_name: "Raul", last_name: "" }] }, creaPorDefecto: [{ id: 20 }] }),
+    );
+    const r = await vinquliaConnector.pushLead(creds(), {
+      ...LEAD,
+      name: "Luiz Gargia",
+      contact: "5543344334",
+    });
+
+    expect(llamada("/contacts", "POST")).toBeTruthy(); // creó uno nuevo
+    expect(llamada("/contacts", "PATCH")).toBeUndefined(); // no tocó al de Raul
+    expect(r.externalId).toBe("20");
+  });
+
+  it("mismo teléfono y nombre compatible ('Ana' vs 'Ana García'): sí lo reutiliza", async () => {
+    fetchMock.mockImplementation(
+      api({ busca: { "/contacts": [{ id: 7, first_name: "Ana", last_name: "" }] } }),
+    );
+    const r = await vinquliaConnector.pushLead(creds(), { ...LEAD, name: "Ana García", contact: "5543344334" });
+    expect(llamada("/contacts", "POST")).toBeUndefined();
+    expect(r.externalId).toBe("7");
+  });
+
+  it("el correo SÍ identifica: aunque el nombre difiera, es la misma persona", async () => {
+    fetchMock.mockImplementation(
+      api({ busca: { "/contacts": [{ id: 7, first_name: "Raul", last_name: "" }] } }),
+    );
+    const r = await vinquliaConnector.pushLead(creds(), {
+      ...LEAD,
+      name: "Luiz Gargia",
+      contact: "ana@empresa.com",
+    });
+    expect(llamada("/contacts", "POST")).toBeUndefined();
+    expect(r.externalId).toBe("7");
+  });
+
+  it("acentos y mayúsculas no cuentan como contradicción", async () => {
+    fetchMock.mockImplementation(
+      api({ busca: { "/contacts": [{ id: 7, first_name: "Raúl", last_name: "Dolores" }] } }),
+    );
+    const r = await vinquliaConnector.pushLead(creds(), { ...LEAD, name: "raul dolores", contact: "5543344334" });
+    expect(r.externalId).toBe("7");
+  });
+
+  it("sin nombre de un lado no hay contradicción: se reutiliza el contacto", async () => {
+    fetchMock.mockImplementation(api({ busca: { "/contacts": [{ id: 7, first_name: "", last_name: "" }] } }));
+    const r = await vinquliaConnector.pushLead(creds(), { ...LEAD, name: "Quien sea", contact: "5543344334" });
+    expect(r.externalId).toBe("7");
+  });
+});

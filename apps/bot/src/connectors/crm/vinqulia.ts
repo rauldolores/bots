@@ -107,7 +107,7 @@ export const vinquliaConnector: CrmConnector = {
     // Buscar antes de crear. Sin esto, el mismo cliente escribiendo dos veces
     // deja dos contactos — ya pasó en el CRM real, con el teléfono en dos
     // formatos distintos.
-    const existente = lead.contact ? await buscarContacto(creds, base, lead.contact) : null;
+    const existente = lead.contact ? await buscarContacto(creds, base, lead.contact, lead.name) : null;
 
     const body: Record<string, unknown> = splitName(lead.name);
     if (lead.contact) {
