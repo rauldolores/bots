@@ -25,6 +25,7 @@ import {
   CATEGORY_LABELS,
   type ConnectorCategory,
   type ConnectorMeta,
+  type ConnectorFieldSpec,
 } from "../../connectors/registry";
 import { layout } from "./layout";
 
@@ -503,13 +504,13 @@ export async function disconnectConnector(env: Env, botId: string, provider: str
   await repo.disable(botId, provider);
 }
 
-/** Guarda la config posterior a un OAuth (ej. Project Key de Jira) — solo config, nunca toca el secret_ref/token. */
+/** Guarda la config editable de un conector ya conectado — solo config, nunca toca el secret_ref/token. */
 export async function updateConnectorConfig(env: Env, botId: string, provider: string, form: FormData): Promise<void> {
   const category = categoryOfProvider(provider);
   if (!category) return;
   const meta = providersFor(category)[provider];
   const patch: Record<string, string> = {};
-  for (const f of meta?.postAuthFields ?? []) {
+  for (const f of meta ? editableConfigFields(meta) : []) {
     const v = String(form.get(f.name) ?? "").trim();
     if (v) patch[f.name] = v;
   }
@@ -582,11 +583,28 @@ async function renderConnectorCard(db: Db, botId: string, meta: ConnectorMeta): 
         ? `<a href="/admin/conexiones/oauth/${meta.id}/start" class="text-[12px]" style="display:inline-block;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600;text-decoration:none">Conectar con ${esc(meta.name)}</a>`
         : `<button type="button" class="text-[12px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600"
                hx-get="/admin/conexiones/connectors/${meta.category}/${meta.id}/connect" hx-target="#modal-root" hx-swap="innerHTML">Conectar</button>`;
-  } else if (meta.postAuthFields?.length) {
+  } else if (editableConfigFields(meta).length) {
     action = `${renderPostAuthForm(meta, row!)}${stageButton}${disconnectForm}`;
   } else {
     action = `${stageButton}${disconnectForm}`;
   }
+
+  // Un CRM conectado que solo crea contactos y nunca la oportunidad deja leads
+  // que nadie trabaja — y hasta ahora lo hacía en silencio. Si al conector le
+  // faltan los campos que habilitan la oportunidad, se dice aquí.
+  const faltantes = ok
+    ? (meta.fields ?? [])
+        .filter((f) => (f.name === "dealPipeline" || f.name === "dealStage") && !(row?.config[f.name] ?? "").trim())
+        .map((f) => f.label)
+    : [];
+  const avisoSinOportunidad =
+    faltantes.length > 0
+      ? `<div class="text-[11.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;line-height:1.5">
+           <b>Solo se están creando contactos, no oportunidades.</b> Un lead sin oportunidad no le aparece a nadie en su
+           embudo, así que nadie le da seguimiento. Llena ${esc(faltantes.join(" y "))} aquí abajo con los mismos valores
+           que ya usas dentro de ${esc(meta.name)}.
+         </div>`
+      : "";
 
   return `
     <div class="bg-panel border ${ok ? "" : "border-line"}" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;${ok ? "border-color:rgba(127,183,126,.45)" : ""}">
@@ -598,13 +616,29 @@ async function renderConnectorCard(db: Db, botId: string, meta: ConnectorMeta): 
         ${badge}
       </div>
       <p class="text-dim text-[12px]" style="margin:0">${esc(meta.desc)}</p>
+      ${avisoSinOportunidad}
       ${action}
     </div>`;
 }
 
-/** Config que se completa/edita DESPUÉS de un OAuth (ej. a qué proyecto de Jira caen los tickets). */
+/**
+ * Qué config se puede editar SIN desconectar.
+ *
+ * Para los de OAuth son sus `postAuthFields` de siempre. Para los de clave de
+ * API no había NINGUNA forma de editar: los valores solo se pedían al
+ * conectar, así que cambiar uno obligaba a desconectar y volver a empezar —
+ * y si el conector se dio de alta antes de que un campo existiera (le pasó al
+ * CRM de Vinqulia con el pipeline de la oportunidad), quedaba imposible de
+ * llenar. La clave de API nunca entra aquí: mergeConfig no toca secret_ref.
+ */
+function editableConfigFields(meta: ConnectorMeta): ConnectorFieldSpec[] {
+  if (meta.postAuthFields?.length) return meta.postAuthFields;
+  return (meta.fields ?? []).filter((f) => f.isConfig);
+}
+
+/** Config que se completa/edita DESPUÉS de conectar (ej. a qué proyecto de Jira caen los tickets, o el pipeline de la oportunidad). */
 function renderPostAuthForm(meta: ConnectorMeta, row: BotConnector): string {
-  const fields = (meta.postAuthFields ?? [])
+  const fields = editableConfigFields(meta)
     .map((f) => {
       const current = typeof row.config[f.name] === "string" ? row.config[f.name] : "";
       return `

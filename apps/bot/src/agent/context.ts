@@ -43,6 +43,23 @@ export interface AgentContext {
   state: AgentState | null;
   /** Nombre del <cliente_conocido> (mismo lookup de abajo), en crudo — para canales que necesitan el valor solo, no el bloque de texto ya armado (ej. el saludo de voz, ver voiceGreeting.ts). undefined si no se conoce. */
   knownCustomerName?: string;
+  /** Cuánto costó armar todo esto — ver AgentContextTimings. */
+  timings: AgentContextTimings;
+}
+
+/**
+ * Cronómetro del armado del contexto.
+ *
+ * Existe porque durante días estuvimos DEDUCIENDO de dónde salían los segundos
+ * de un turno (¿el MCP?, ¿el LLM?, ¿la base?) en vez de medirlos, y una de esas
+ * deducciones ya resultó equivocada. Con esto, la respuesta a "¿por qué tarda?"
+ * sale de un log, no de un razonamiento.
+ */
+export interface AgentContextTimings {
+  /** Total de buildAgentContext. */
+  totalMs: number;
+  /** Cuánto de ese total fue hablar con los servidores MCP (0 si el bot no tiene ninguno). */
+  mcpMs: number;
 }
 
 /**
@@ -60,10 +77,20 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
   const { env, botId, conversationId, conversationKey } = input;
   const db = new Db(env.DB);
 
+  const t0 = Date.now();
+  let mcpMs = 0;
+
   // Tanda 1: nada de esto depende de nada más.
   const [bot, mcpTools, state, facts] = await Promise.all([
     new BotsRepo(db).getById(botId),
-    loadMcpTools(env, db, botId),
+    (async () => {
+      const t = Date.now();
+      try {
+        return await loadMcpTools(env, db, botId);
+      } finally {
+        mcpMs = Date.now() - t;
+      }
+    })(),
     conversationKey ? new AgentStateRepo(db).get(conversationKey) : Promise.resolve(null),
     // La memoria es un extra: si falla, el turno sigue sin ella. Nunca puede
     // tumbar la respuesta del cliente.
@@ -124,5 +151,14 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
     );
   }
 
-  return { bot, basePrompt: cfg.systemPrompt, memoryBlocks, tools: enabledTools, cfg, state, knownCustomerName };
+  return {
+    bot,
+    basePrompt: cfg.systemPrompt,
+    memoryBlocks,
+    tools: enabledTools,
+    cfg,
+    state,
+    knownCustomerName,
+    timings: { totalMs: Date.now() - t0, mcpMs },
+  };
 }

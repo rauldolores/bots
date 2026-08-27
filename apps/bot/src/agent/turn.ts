@@ -101,8 +101,13 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
   const msgs = new MessagesRepo(db, botId);
   const stateRepo = new AgentStateRepo(db);
 
-  await msgs.append(convId, "user", userText);
-  await new ConversationsRepo(db, botId).touchLastMessage(convId);
+  const tTurno = Date.now();
+
+  // Las dos son independientes entre sí y ambas van antes de poder pensar.
+  await Promise.all([
+    msgs.append(convId, "user", userText),
+    new ConversationsRepo(db, botId).touchLastMessage(convId),
+  ]);
 
   // Tools + system prompt + memoria: TODO sale de buildAgentContext(), la
   // misma función que usa el puente de OpenAI Realtime (F7 fase 3) — así
@@ -186,6 +191,7 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
   let toolCallCount = 0;
   let toolCallsMade: ToolCallRecord[] = [];
   let usedModelId = modelId;
+  const tLlm = Date.now();
 
   const attempt = async (m: any) => {
     const result = streamText({
@@ -286,6 +292,19 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
       assistantText = "Algo falló de mi lado, intenta de nuevo en un momento.";
     }
   }
+
+  const llmMs = Date.now() - tLlm;
+
+  // El desglose de a dónde se fue el tiempo de ESTE turno.
+  //
+  // Sin esto, la única forma de saber por qué un turno tardó 10s era deducirlo
+  // comparando fechas en la base y razonando sobre el código — y una de esas
+  // deducciones ya resultó equivocada. Es una línea por turno: barato, y
+  // convierte "creo que es el MCP" en un número.
+  console.log(
+    `[turno] total=${Date.now() - tTurno}ms contexto=${ctx.timings.totalMs}ms ` +
+      `(mcp=${ctx.timings.mcpMs}ms) llm=${llmMs}ms modelo=${usedModelId} tools=${toolCallCount}`,
+  );
 
   // Las dos escrituras son independientes entre sí y ambas están ANTES de que
   // el cliente reciba nada — en serie eran dos viajes a la base de espera pura.
