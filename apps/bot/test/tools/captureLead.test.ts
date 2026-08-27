@@ -36,7 +36,7 @@ describe("captureLeadTool", () => {
     const result = (await tool.execute!(
       {
         name: "María",
-        contact: "+5215512345",
+        contact: "+5215512345678",
         intent: "Corte + barba 5pm",
       },
       {} as any,
