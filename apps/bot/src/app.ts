@@ -394,25 +394,32 @@ export async function runScheduledJobs(env: Env, cron?: string): Promise<void> {
   // F7 fase 10: política de retención de llamadas (configurable por bot —
   // ver SETTING_KEYS.voiceCallRetentionDays). No debe tumbar el resto de la purga.
   await purgeOldVoiceCalls(env).catch((e) => console.error("purgeOldVoiceCalls:", e));
-  // Corrida nocturna del Analista de insights (F2). No debe tumbar la purga.
-  await analyzeConversations(env, { limit: 50 }).catch((e) => console.error("insights:", e));
-  // Flywheel (F5): detecta huecos de KB y lecciones de takeovers → propone
-  // mejoras en /admin/mejoras. Corre DESPUÉS del analizador (usa su output).
+  // Insights, flywheel y copiloto son POR BOT (a diferencia de purgeOldMessages/
+  // purgeOldVoiceCalls, que ya recorren todos los bots por dentro): sin este
+  // loop, con 2+ bots en el despliegue analyzeConversations/runFlywheel caían
+  // en resolveBotId(db) — que revienta a propósito cuando no puede adivinar
+  // cuál bot usar — y ninguno de los dos corría nunca, en silencio, cada noche.
+  const bots = await new BotsRepo(new Db(env.DB)).listAll();
   const { runFlywheel } = await import("./flywheel/detect");
-  await runFlywheel(env).catch((e) => console.error("flywheel:", e));
-  // Modo COPILOTO (autonomy_level="copilot"): auto-aplica las mejoras seguras
-  // detectadas (lecciones + KB sin huecos). Lo delicado espera al dueño.
-  try {
-    const copilotoDb = new Db(env.DB);
-    const level = await new SettingsRepo(copilotoDb, await resolveBotId(copilotoDb)).get(
-      SETTING_KEYS.autonomyLevel,
+  const { autoApplyPending } = await import("./flywheel/apply");
+  for (const bot of bots) {
+    // Corrida nocturna del Analista de insights (F2). No debe tumbar la purga.
+    await analyzeConversations(env, { limit: 50, botId: bot.id }).catch((e) =>
+      console.error(`insights (${bot.id}):`, e),
     );
-    if (level === "copilot") {
-      const { autoApplyPending } = await import("./flywheel/apply");
-      await autoApplyPending(env);
+    // Flywheel (F5): detecta huecos de KB y lecciones de takeovers → propone
+    // mejoras en /admin/mejoras. Corre DESPUÉS del analizador (usa su output).
+    await runFlywheel(env, bot.id).catch((e) => console.error(`flywheel (${bot.id}):`, e));
+    // Modo COPILOTO (autonomy_level="copilot"): auto-aplica las mejoras seguras
+    // detectadas (lecciones + KB sin huecos). Lo delicado espera al dueño.
+    try {
+      const level = await new SettingsRepo(new Db(env.DB), bot.id).get(SETTING_KEYS.autonomyLevel);
+      if (level === "copilot") {
+        await autoApplyPending(env, bot.id);
+      }
+    } catch (e) {
+      console.error(`copiloto (${bot.id}):`, e);
     }
-  } catch (e) {
-    console.error("copiloto:", e);
   }
 }
 

@@ -70,9 +70,12 @@ export async function dismissSuggestion(env: Env, id: string, botIdOverride?: st
  * espera el clic del dueño. Lo auto-aplicado queda marcado en la evidencia y
  * visible en el historial de ✦ Mejoras.
  */
-export async function autoApplyPending(env: Env): Promise<{ applied: number; left: number }> {
+export async function autoApplyPending(
+  env: Env,
+  botIdOverride?: string,
+): Promise<{ applied: number; left: number }> {
   const db = new Db(env.DB);
-  const botId = await resolveBotId(db);
+  const botId = botIdOverride ?? (await resolveBotId(db));
   const repo = new SuggestionsRepo(db, botId);
   const proposed = await repo.listProposed();
   let applied = 0;
