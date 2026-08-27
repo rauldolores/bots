@@ -9,6 +9,7 @@ import { SuggestionsRepo, type Suggestion } from "../../db/suggestions";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
 import { getLessons, MAX_LESSONS } from "../../flywheel/detect";
 import { layout } from "./layout";
+import { CrmProposalsRepo, type CrmProposal } from "../../db/crmProposals";
 
 function esc(s: string): string {
   return s.replace(
@@ -85,11 +86,14 @@ export async function renderMejoras(
 ): Promise<string> {
   const db = new Db(env.DB);
   const repo = new SuggestionsRepo(db, botId);
-  const [proposed, handled, lessons, autonomyRaw] = await Promise.all([
+  const propuestasRepo = new CrmProposalsRepo(db, botId);
+  const [proposed, handled, lessons, autonomyRaw, crmPendientes, crmDecididas] = await Promise.all([
     repo.listProposed(),
     repo.listHandled(8),
     getLessons(env, botId),
     new SettingsRepo(db, botId).get(SETTING_KEYS.autonomyLevel),
+    propuestasRepo.listPendientes().catch(() => []),
+    propuestasRepo.listDecididas(6).catch(() => []),
   ]);
   const copilot = autonomyRaw === "copilot";
 
@@ -196,7 +200,110 @@ export async function renderMejoras(
         <div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:8px">📓 Historial</div>
         ${historyRows}
       </div>
-    </div>`;
+    </div>
+
+    ${seccionCrm(crmPendientes, crmDecididas)}`;
 
   return layout({ title: "Mejoras", activeTab: "mejoras", body, pro: true, visibleNavIds });
+}
+
+// ── Cambios al CRM propuestos por el agente ────────────────────────────────
+//
+// Va en esta misma pestaña pero SEPARADO de lo de arriba, con su propio
+// encabezado y explicación: las mejoras del flywheel cambian cómo responde el
+// bot; esto toca los datos de tus clientes. Mezclarlas haría que el dueño
+// apruebe con el mismo clic dos cosas de consecuencia muy distinta.
+
+const RIESGO_PILL: Record<string, { txt: string; color: string }> = {
+  bajo: { txt: "riesgo bajo", color: "var(--ok)" },
+  medio: { txt: "riesgo medio", color: "var(--accent-2)" },
+  alto: { txt: "revisar bien", color: "var(--bad)" },
+};
+
+const KIND_ICONO: Record<string, string> = {
+  contacto: "👤",
+  empresa: "🏢",
+  nota: "📝",
+  etiqueta: "🏷️",
+  tarea: "✅",
+  oportunidad: "📈",
+  ticket: "🎫",
+};
+
+function propuestaCard(p: CrmProposal): string {
+  const riesgo = RIESGO_PILL[p.risk] ?? { txt: p.risk, color: "var(--dim)" };
+  // El antes/después es lo que hace revisable una propuesta de un vistazo: sin
+  // él, aprobar es un acto de fe.
+  const cambio = p.current_value
+    ? `<div class="text-[11.5px]" style="margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+         <span class="text-dim" style="text-decoration:line-through">${esc(p.current_value)}</span>
+         <span class="text-dim">→</span>
+         <span class="text-cream">${esc(p.proposed_value ?? "")}</span>
+       </div>`
+    : p.proposed_value
+      ? `<div class="text-[11.5px] text-muted" style="margin-top:8px;white-space:pre-wrap">${esc(p.proposed_value)}</div>`
+      : "";
+
+  return `
+    <div class="bg-panel border border-line" style="padding:14px 16px;display:flex;flex-direction:column;gap:2px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="text-[13px] text-cream" style="flex:1;min-width:200px">
+          ${KIND_ICONO[p.kind] ?? "•"} ${esc(p.summary)}
+        </span>
+        ${pill(riesgo.txt, riesgo.color)}
+      </div>
+      ${cambio}
+      <p class="text-dim text-[11.5px]" style="margin-top:8px">${esc(p.reason)}</p>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <form method="POST" action="/admin/mejoras/crm/${esc(p.id)}/aprobar">
+          <button class="text-[11.5px] cursor-pointer" style="border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent-2);padding:5px 12px;font-weight:600">Aplicar</button>
+        </form>
+        <form method="POST" action="/admin/mejoras/crm/${esc(p.id)}/rechazar">
+          <button class="text-[11.5px] cursor-pointer" style="border:1px solid var(--line);background:none;color:var(--dim);padding:5px 12px">Descartar</button>
+        </form>
+        ${p.conversation_id ? `<a href="/admin/conversations/${esc(p.conversation_id)}" class="text-[11.5px] text-dim" style="align-self:center;text-decoration:underline">ver conversación</a>` : ""}
+      </div>
+    </div>`;
+}
+
+function seccionCrm(pendientes: CrmProposal[], decididas: CrmProposal[]): string {
+  const lista = pendientes.length
+    ? `<div style="display:flex;flex-direction:column;gap:10px">${pendientes.map(propuestaCard).join("")}</div>`
+    : `<div class="bg-panel text-dim text-[12.5px]" style="border:1px solid var(--line);padding:28px;text-align:center">
+         Nada por revisar. Cuando el agente aprenda algo de una conversación, te lo propone aquí.
+       </div>`;
+
+  const historial = decididas.length
+    ? `<div class="bg-panel border border-line" style="padding:18px;margin-top:16px">
+         <div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:8px">📓 Ya decididas</div>
+         ${decididas
+           .map((d) => {
+             const est =
+               d.status === "aplicada"
+                 ? pill("✓ aplicada", "var(--ok)")
+                 : d.status === "fallida"
+                   ? pill("falló", "var(--bad)")
+                   : pill(d.status, "var(--dim)");
+             return `<div style="display:flex;align-items:center;gap:8px;border-top:1px solid var(--line);padding:8px 0;font-size:12.5px" class="first:border-t-0">
+                       <span class="text-muted truncate" style="flex:1">${esc(d.summary)}</span>${est}
+                     </div>
+                     ${d.status === "fallida" && d.result ? `<div class="text-[11px]" style="color:var(--bad);padding-bottom:8px">${esc(d.result)}</div>` : ""}`;
+           })
+           .join("")}
+       </div>`
+    : "";
+
+  return `
+    <div style="margin-top:40px;padding-top:28px;border-top:2px solid var(--line)">
+      <div style="margin-bottom:16px">
+        <h2 class="font-display font-semibold text-[15px] text-cream">⇄ Cambios al CRM por aprobar</h2>
+        <p class="text-muted text-[12.5px]" style="margin-top:2px">
+          Lo de arriba mejora cómo responde tu bot. Esto toca los datos de tus clientes, así que
+          <strong style="color:var(--cream)">nada se escribe sin tu clic</strong>. Conforme veas que acierta,
+          iremos soltando categorías a automático.
+        </p>
+      </div>
+      ${lista}
+      ${historial}
+    </div>`;
 }

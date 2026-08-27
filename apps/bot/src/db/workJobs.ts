@@ -16,7 +16,12 @@ export const WORK_JOB_LEASE_MS = 5 * 60_000;
 /** epoch ms según el reloj de POSTGRES — mismo criterio que la cola de turnos. */
 const NOW_MS = "(EXTRACT(EPOCH FROM now()) * 1000)::bigint";
 
-export type WorkJobKind = "skill_run" | "nurture_touch";
+/**
+ * `crm_analysis` corre DESPUÉS de responderle al cliente: mira la conversación
+ * ya terminada y propone qué actualizar en el CRM. Va por la cola justamente
+ * para que su costo (una llamada al LLM) no lo pague nadie esperando.
+ */
+export type WorkJobKind = "skill_run" | "nurture_touch" | "crm_analysis";
 
 export interface WorkJob {
   id: string;

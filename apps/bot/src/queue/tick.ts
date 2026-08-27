@@ -13,6 +13,7 @@ import { runTurn } from "../agent/runner";
 import { processCampaignJobs } from "../campaigns";
 import { processSkillJobs } from "../skills/routes";
 import { processNurtureJobs } from "../nurture/run";
+import { processCrmAnalysisJobs } from "../crm/analizar";
 
 /** Cuántas conversaciones atiende un tick. */
 const DEFAULT_LIMIT = 10;
@@ -25,6 +26,9 @@ const SKILL_BATCH_LIMIT = 5;
 
 /** Cuántos toques de seguimiento procesa un tick (F8 fase C) — mismo criterio que las habilidades. */
 const NURTURE_BATCH_LIMIT = 5;
+
+/** Cuántas conversaciones se analizan para el CRM por corrida. Cada una es una llamada al LLM. */
+const CRM_ANALYSIS_BATCH_LIMIT = 5;
 
 /** Tras este número de intentos fallidos, el trabajo se abandona. */
 const MAX_ATTEMPTS = 5;
@@ -177,6 +181,17 @@ export async function tick(
   }
 
   // Seguimiento de leads (F8 fase C): mismo criterio — lote chico y aislado.
+  // Poner el CRM al día con lo que se habló. Va al FINAL a propósito: el
+  // cliente ya tiene su respuesta, así que esto puede tardar sin costarle nada
+  // a nadie — y si el tick se queda sin tiempo, se pierde un análisis, no una
+  // respuesta.
+  try {
+    const crm = await processCrmAnalysisJobs(env, CRM_ANALYSIS_BATCH_LIMIT);
+    if (crm.analizadas > 0) console.log(`[tick] ${crm.analizadas} conversación(es) analizadas para el CRM`);
+  } catch (e) {
+    console.error("[tick] processCrmAnalysisJobs:", e);
+  }
+
   try {
     const nurture = await processNurtureJobs(env, NURTURE_BATCH_LIMIT);
     result.nurtureSent = nurture.sent;

@@ -21,6 +21,16 @@ import { pickAdapter } from "../replies/sender";
 import { costOfUsage } from "../pricing";
 import type { ChannelId } from "../channels/shared";
 import { AgentJobsRepo } from "../queue/jobs";
+import { WorkJobsRepo } from "../db/workJobs";
+
+/**
+ * Cuánto se espera antes de analizar la conversación para el CRM.
+ *
+ * No es por costo sino por CALIDAD: dos minutos después, lo más probable es
+ * que el intercambio haya terminado y se analice completo, en vez de una vez
+ * por mensaje sobre una charla a medias.
+ */
+const CRM_ANALYSIS_DELAY_MS = 2 * 60_000;
 import { AgentStateRepo } from "./state";
 import { conversationKeyOf, botIdFromKey, channelFromKey } from "./key";
 import { resolveChannelEnv } from "../channels/effectiveEnv";
@@ -313,6 +323,20 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
   // cualquier cosa de arriba hubiera fallado, siguen marcados en el buffer y
   // el tick los devuelve a la cola (releaseClaimedPending) para reintentar.
   await jobs.clearClaimedPending(conversationKey);
+
+  // Poner el CRM al día: se ENCOLA, no se hace aquí. El cliente ya recibió su
+  // respuesta y este análisis cuesta otra llamada al LLM — cobrársela al turno
+  // sería devolverle al cliente los segundos que llevamos meses quitándole.
+  // El retraso le da además margen a que la conversación siga: se analiza una
+  // vez, ya fría, en vez de en cada mensaje.
+  await new WorkJobsRepo(db)
+    .enqueue({
+      botId,
+      kind: "crm_analysis",
+      payload: { conversationId: convId },
+      delayMs: CRM_ANALYSIS_DELAY_MS,
+    })
+    .catch((e) => console.warn("[runTurn] no se pudo encolar el análisis de CRM:", e));
 
   const chunks = chunkReply(result.text, cfg.maxChunks);
   console.log(

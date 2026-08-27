@@ -49,6 +49,8 @@ import { renderSeguimientos, renderSequenceForm, parseSteps } from "./views/segu
 import { NurtureSequencesRepo } from "../db/nurtureSequences";
 import { enrollLeadInSequence, stopSequenceForLead } from "../nurture/run";
 import { KbDocsRepo, indexDoc, removeDocVectors, reindexAll, MAX_DOC_CHARS } from "../kb/docs";
+import { CrmProposalsRepo } from "../db/crmProposals";
+import { ejecutarPropuesta } from "../crm/ejecutar";
 import { renderMejoras } from "./views/mejoras";
 import { runFlywheel, getLessons, saveLessons } from "../flywheel/detect";
 import { applySuggestion, dismissSuggestion } from "../flywheel/apply";
@@ -886,6 +888,37 @@ adminApp.post("/mejoras/:id/dismiss", async (c) => {
   if (denied) return denied;
   const ok = await dismissSuggestion(c.env, c.req.param("id"), c.get("botId"));
   return c.redirect(ok ? "/admin/mejoras?dismissed=1" : "/admin/mejoras");
+});
+
+// Cambios al CRM propuestos por el agente. Van en la misma pestaña que las
+// mejoras pero son otra cosa: aquéllas cambian cómo responde el bot, éstas
+// tocan los datos de los clientes. Por eso ninguna se aplica sin este clic.
+adminApp.post("/mejoras/crm/:id/aprobar", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.mejoras.administrar");
+  if (denied) return denied;
+  const botId = c.get("botId");
+  const db = new Db(c.env.DB);
+  const repo = new CrmProposalsRepo(db, botId);
+
+  const propuesta = await repo.getById(c.req.param("id"));
+  if (!propuesta) return c.redirect("/admin/mejoras");
+
+  // `decidir` solo avanza desde 'pendiente': dos clics seguidos, o dos
+  // pestañas abiertas, no escriben en el CRM dos veces.
+  const tomada = await repo.decidir(propuesta.id, "aprobada");
+  if (!tomada) return c.redirect("/admin/mejoras");
+
+  const r = await ejecutarPropuesta(c.env, db, botId, propuesta);
+  return c.redirect(r.ok ? "/admin/mejoras?crm=aplicada" : "/admin/mejoras?crm=fallida");
+});
+
+adminApp.post("/mejoras/crm/:id/rechazar", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.mejoras.administrar");
+  if (denied) return denied;
+  await new CrmProposalsRepo(new Db(c.env.DB), c.get("botId"))
+    .decidir(c.req.param("id"), "rechazada")
+    .catch(() => false);
+  return c.redirect("/admin/mejoras?crm=rechazada");
 });
 
 // Autonomía del flywheel: manual (default) o copiloto (auto-aplica lo seguro
