@@ -15,6 +15,7 @@ import { MessagesRepo } from "../db/messages";
 import { BotsRepo } from "../db/bots";
 import { isProTier } from "../config";
 import { resolveAgentConfig } from "../settings-loader";
+import type { WarmTarget } from "../customer/warm";
 import { chunkReply } from "../replies/chunker";
 import { pickAdapter } from "../replies/sender";
 import { costOfUsage } from "../pricing";
@@ -46,6 +47,13 @@ export interface IngestResult {
    * despertar al tick a tiempo donde la plataforma lo permite.
    */
   scheduledInMs: number | null;
+  /**
+   * A quién calentarle el contexto del CRM mientras corre el buffer.
+   *
+   * Solo viene cuando SÍ se programó turno: sin turno no hay nada que
+   * preparar. Ver customer/warm.ts para por qué se hace en esa ventana.
+   */
+  warm?: WarmTarget | null;
 }
 
 /**
@@ -198,7 +206,11 @@ export async function ingestMessage(
   }
 
   await jobs.schedule(key, cfg.bufferMs);
-  return { acknowledged: true, scheduledInMs: cfg.bufferMs };
+  return {
+    acknowledged: true,
+    scheduledInMs: cfg.bufferMs,
+    warm: { botId, conversationId: conv.id },
+  };
 }
 
 /**

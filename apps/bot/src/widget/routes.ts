@@ -97,7 +97,7 @@ widgetApp.post("/message", async (c) => {
     botId,
   );
   if (r.scheduledInMs !== null) {
-    wakeTickAfter(c.env, ctxOpcional(c), r.scheduledInMs);
+    wakeTickAfter(c.env, ctxOpcional(c), r.scheduledInMs, r.warm);
   }
   return c.json({ ok: true, scheduledInMs: r.scheduledInMs });
 });

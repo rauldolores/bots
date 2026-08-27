@@ -80,7 +80,7 @@ async function routeToAgent(
     const msg = await adapter.parseIncoming(c.req.raw, env);
     const r = await ingestMessage(env, msg, botId);
     if (r.scheduledInMs !== null) {
-      wakeTickAfter(env, ctxOpcional(c), r.scheduledInMs);
+      wakeTickAfter(env, ctxOpcional(c), r.scheduledInMs, r.warm);
     }
     // Twilio treats the webhook's HTTP body as a reply to send. The real reply
     // is delivered asynchronously via the REST API, so ack with empty TwiML
@@ -137,7 +137,7 @@ async function routeTwilioToAgent(
   }
   await ingestMessage(env, msg, botId)
     .then((r) => {
-      if (r.scheduledInMs !== null) wakeTickAfter(env, ctxOpcional(c), r.scheduledInMs);
+      if (r.scheduledInMs !== null) wakeTickAfter(env, ctxOpcional(c), r.scheduledInMs, r.warm);
     })
     .catch((e) => console.error("ingest:", e));
   return TWIML_EMPTY;
@@ -212,7 +212,7 @@ app.post("/webhooks/meta", async (c) => {
     // colisiones de rate limit en ráfagas de historias).
     if (msg.channel === "instagram" && c.env.IG_DM_SOURCE === "manychat") continue;
     const r = await ingestMessage(c.env, msg);
-    if (r.scheduledInMs !== null) wakeTickAfter(c.env, ctxOpcional(c), r.scheduledInMs);
+    if (r.scheduledInMs !== null) wakeTickAfter(c.env, ctxOpcional(c), r.scheduledInMs, r.warm);
   }
   return c.text("EVENT_RECEIVED", 200);
 });
@@ -248,7 +248,7 @@ app.post("/webhooks/whatsapp", async (c) => {
   const origin = c.env.DASHBOARD_BASE_URL || new URL(c.req.url).origin;
   for (const msg of await parseWhatsAppEvents(body as any, c.env, origin)) {
     const r = await ingestMessage(c.env, msg);
-    if (r.scheduledInMs !== null) wakeTickAfter(c.env, ctxOpcional(c), r.scheduledInMs);
+    if (r.scheduledInMs !== null) wakeTickAfter(c.env, ctxOpcional(c), r.scheduledInMs, r.warm);
   }
   return c.text("EVENT_RECEIVED", 200);
 });

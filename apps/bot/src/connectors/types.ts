@@ -54,8 +54,43 @@ export interface PipelineStageListResult {
   error?: string;
 }
 
+/**
+ * Lo que el CRM sabe de una persona, para que el agente NO empiece de cero.
+ *
+ * Se trae completo de una vez (contacto + empresa + oportunidades + últimas
+ * notas) porque son varias llamadas HTTP: hacerlas durante el turno costaría
+ * segundos de espera al cliente. Por eso se calienta en la ventana del buffer
+ * y se guarda en caché — ver src/customer/crmSnapshot.ts.
+ */
+export interface CrmCustomerSnapshot {
+  contactId: string;
+  nombre?: string;
+  /** Puesto del contacto: cambia cómo se le habla y qué tanto decide. */
+  cargo?: string;
+  empresa?: { id: string; nombre: string; industria?: string; tamano?: number };
+  oportunidades: Array<{
+    id: string;
+    nombre: string;
+    pipeline?: string;
+    etapa?: string;
+    monto?: number;
+    cierreEstimado?: string;
+  }>;
+  /** Las más recientes primero. Texto ya recortado. */
+  notasRecientes: Array<{ fecha?: string; texto: string }>;
+  /** Enlace a la ficha en el CRM, para el panel. */
+  url?: string;
+}
+
 export interface CrmConnector {
   pushLead(creds: ConnectorCreds, lead: CrmLeadInput): Promise<ConnectorPushResult>;
+  /**
+   * Todo lo que el CRM sabe de esta persona. `null` si no la encuentra.
+   *
+   * Opcional: un proveedor sin esto simplemente no aporta contexto, y el
+   * agente sigue con lo que tiene en su propia base.
+   */
+  lookupCustomer?(creds: ConnectorCreds, buscarPor: { email?: string | null; telefono?: string | null }): Promise<CrmCustomerSnapshot | null>;
   listRecent(creds: ConnectorCreds, limit: number): Promise<ConnectorListResult<CrmRecord>>;
   /**
    * Los pipelines/etapas reales de la cuenta conectada — para que el dueño

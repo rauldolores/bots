@@ -7,6 +7,7 @@ import type {
   ConnectorPushResult,
   PipelineStageListResult,
   PipelineStageOption,
+  CrmCustomerSnapshot,
 } from "../types";
 import {
   vinquliaBaseUrl,
@@ -72,6 +73,14 @@ interface ConfiguracionVinqulia {
 }
 
 /** Etapas que significan "esta oportunidad ya se cerró" — con una así, sí conviene abrir otra nueva. */
+/** Topes de lo que se trae al contexto: es material para un prompt, no un reporte. */
+const MAX_DEALS = 5;
+const MAX_NOTAS = 3;
+const MAX_NOTA_CHARS = 240;
+
+/** Una oportunidad ya cerrada no cambia cómo hablarle hoy. */
+const CERRADAS_PARA_CONTEXTO = ["won", "lost"];
+
 const ETAPAS_CERRADAS = ["won", "lost"];
 
 /** ¿El contacto ya tiene una oportunidad viva? Para no abrirle una nueva en cada mensaje. */
@@ -235,6 +244,73 @@ export const vinquliaConnector: CrmConnector = {
       return { ok: false, items: [], error: "Vinqulia no devolvió ningún pipeline configurado." };
     }
     return { ok: true, items };
+  },
+
+  /**
+   * Todo lo que Vinqulia sabe de esta persona, en una sola pasada.
+   *
+   * Son cuatro llamadas HTTP encadenadas —contacto, empresa, oportunidades,
+   * notas— y por eso NO puede correr durante el turno: el cliente estaría
+   * esperando. Quien llama la calienta antes (src/customer/crmSnapshot.ts).
+   *
+   * Nunca lanza: sin contexto del CRM el agente sigue con lo suyo.
+   */
+  async lookupCustomer(
+    creds: ConnectorCreds,
+    buscarPor: { email?: string | null; telefono?: string | null },
+  ): Promise<CrmCustomerSnapshot | null> {
+    const base = vinquliaBaseUrl(creds);
+    if (!base) return null;
+
+    const dato = buscarPor.email?.trim() || buscarPor.telefono?.trim();
+    if (!dato) return null;
+
+    try {
+      // Sin nombre entrante: aquí solo se LEE, así que el guardarraíl de
+      // "no fusionar dos personas con el mismo teléfono" no aplica —
+      // encontrar de más es preferible a no reconocer al cliente.
+      const contacto = await buscarContacto(creds, base, dato);
+      if (!contacto) return null;
+
+      const [empresaFilas, deals, notas] = await Promise.all([
+        contacto.company_id
+          ? vinquliaBuscar<{ id: number | string; name?: string; sector?: string; size?: number }>(
+              creds, base, `/companies?id=eq.${encodeURIComponent(String(contacto.company_id))}&limit=1`)
+          : Promise.resolve([]),
+        vinquliaBuscar<{ id: number | string; name?: string; pipeline?: string; stage?: string; amount?: number; expected_closing_date?: string }>(
+          creds, base,
+          `/deals?contact_ids=cs.${encodeURIComponent(`{${contacto.id}}`)}&order=id.desc&limit=${MAX_DEALS}`),
+        vinquliaBuscar<{ text?: string; date?: string }>(
+          creds, base,
+          `/contact_notes?contact_id=eq.${encodeURIComponent(String(contacto.id))}&order=id.desc&limit=${MAX_NOTAS}`),
+      ]);
+
+      const emp = empresaFilas[0];
+      const site = vinquliaSiteUrl(creds);
+      return {
+        contactId: String(contacto.id),
+        nombre: [contacto.first_name, contacto.last_name].filter(Boolean).join(" ").trim() || undefined,
+        cargo: (contacto as { title?: string }).title ?? undefined,
+        empresa: emp ? { id: String(emp.id), nombre: emp.name ?? "(sin nombre)", industria: emp.sector ?? undefined, tamano: emp.size ?? undefined } : undefined,
+        oportunidades: deals
+          .filter((d) => !CERRADAS_PARA_CONTEXTO.includes((d.stage ?? "").toLowerCase()))
+          .map((d) => ({
+            id: String(d.id),
+            nombre: d.name ?? "(sin nombre)",
+            pipeline: d.pipeline ?? undefined,
+            etapa: d.stage ?? undefined,
+            monto: d.amount ?? undefined,
+            cierreEstimado: d.expected_closing_date ?? undefined,
+          })),
+        notasRecientes: notas
+          .filter((n) => (n.text ?? "").trim())
+          .map((n) => ({ fecha: n.date ?? undefined, texto: (n.text ?? "").slice(0, MAX_NOTA_CHARS) })),
+        url: vinquliaRecordUrl(site, "contacts", contacto.id),
+      };
+    } catch (e) {
+      console.error("[vinqulia] no se pudo leer el contexto del cliente:", e);
+      return null;
+    }
   },
 
   async listRecent(creds: ConnectorCreds, limit: number): Promise<ConnectorListResult<CrmRecord>> {

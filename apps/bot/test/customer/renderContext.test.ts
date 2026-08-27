@@ -19,6 +19,7 @@ function ctx(over: Partial<CustomerContext> = {}): CustomerContext {
     ticketsAbiertos: [],
     citasProximas: [],
     seguimiento: null,
+    crm: null,
     ...over,
   };
 }
@@ -145,5 +146,78 @@ describe("seguimiento en curso", () => {
       TZ,
     )!;
     expect(out).not.toContain("último contacto tuyo");
+  });
+});
+
+/**
+ * Lo que aporta el CRM sobre lo que el bot ya sabe por su cuenta: la empresa,
+ * las oportunidades vivas y lo último que anotó el equipo. Sale de caché — el
+ * turno nunca espera al CRM (ver src/customer/crmSnapshot.ts).
+ */
+describe("contexto que viene del CRM", () => {
+  it("sin CRM conectado, el bloque sigue siendo el de siempre", () => {
+    const out = renderCustomerContext(ctx({ lead: lead(), crm: null }), TZ)!;
+    expect(out).toContain("Ana García");
+    expect(out).not.toContain("Trabaja en");
+  });
+
+  it("cuenta la empresa con su industria y tamaño", () => {
+    const out = renderCustomerContext(
+      ctx({
+        lead: lead(),
+        crm: {
+          contactId: "42",
+          empresa: { id: "7", nombre: "Panadería La Espiga", industria: "Alimentos", tamano: 40 },
+          oportunidades: [],
+          notasRecientes: [],
+        },
+      }),
+      TZ,
+    )!;
+    expect(out).toContain("Panadería La Espiga");
+    expect(out).toContain("Alimentos");
+    expect(out).toContain("40 empleados");
+  });
+
+  it("dice en qué etapa va la oportunidad — es lo que cambia cómo hablarle", () => {
+    const out = renderCustomerContext(
+      ctx({
+        lead: lead(),
+        crm: {
+          contactId: "42",
+          oportunidades: [{ id: "3", nombre: "Implementación CRM", etapa: "proposal-sent", monto: 45000 }],
+          notasRecientes: [],
+        },
+      }),
+      TZ,
+    )!;
+    expect(out).toContain("Implementación CRM");
+    expect(out).toContain("proposal-sent");
+    expect(out).toContain("45000");
+  });
+
+  it("trae las últimas notas del equipo, que es la memoria que el bot no tiene", () => {
+    const out = renderCustomerContext(
+      ctx({
+        lead: lead(),
+        crm: {
+          contactId: "42",
+          oportunidades: [],
+          notasRecientes: [{ texto: "Pidió propuesta para 25 usuarios. Objeción: precio." }],
+        },
+      }),
+      TZ,
+    )!;
+    expect(out).toContain("Objeción: precio");
+  });
+
+  it("un contacto hallado pero sin nada útil no agrega ruido al prompt", () => {
+    const out = renderCustomerContext(
+      ctx({ lead: lead(), crm: { contactId: "42", oportunidades: [], notasRecientes: [] } }),
+      TZ,
+    )!;
+    expect(out).toContain("Ana García");
+    expect(out).not.toContain("Oportunidades abiertas");
+    expect(out).not.toContain("Últimas notas");
   });
 });

@@ -30,6 +30,8 @@ import { AppointmentsRepo, type Appointment } from "../db/appointments";
 import { LeadTouchesRepo, type LeadTouch } from "../db/leadTouches";
 import { ConversationsRepo, type Conversation } from "../db/conversations";
 import { NurtureSequencesRepo } from "../db/nurtureSequences";
+import { readCrmSnapshot, renderCrmSnapshot } from "./crmSnapshot";
+import type { CrmCustomerSnapshot } from "../connectors/types";
 
 /**
  * Cuánto se deja entrar. El objetivo es contexto ÚTIL, no exhaustivo: cada
@@ -52,6 +54,12 @@ export interface CustomerContext {
   citasProximas: Appointment[];
   /** Seguimiento activo, si está inscrito en una secuencia. */
   seguimiento: { secuencia: string; objetivo: string; toques: LeadTouch[] } | null;
+  /**
+   * Lo que el CRM sabe de esta persona: empresa, oportunidades abiertas, notas
+   * del equipo. Sale de CACHÉ — el turno nunca espera al CRM (ver crmSnapshot.ts).
+   * `null` si no hay CRM conectado, o si la caché está fría.
+   */
+  crm: CrmCustomerSnapshot | null;
 }
 
 export interface CustomerContextInput {
@@ -71,6 +79,7 @@ const VACIO: CustomerContext = {
   ticketsAbiertos: [],
   citasProximas: [],
   seguimiento: null,
+  crm: null,
 };
 
 export async function buildCustomerContext(
@@ -84,17 +93,19 @@ export async function buildCustomerContext(
 
     // Las cuatro son independientes entre sí: en serie serían cuatro viajes a
     // la base antes de que el cliente vea nada.
-    const [contactos, ticketsAbiertos, citasProximas, seguimiento] = await Promise.all([
+    const [contactos, ticketsAbiertos, citasProximas, seguimiento, crm] = await Promise.all([
       new LeadContactsRepo(db, botId).listByLead(lead.id).catch(() => []),
       ticketsDelLead(db, botId, lead).catch(() => []),
       citasDelLead(db, botId, lead).catch(() => []),
       seguimientoDelLead(db, botId, lead).catch(() => null),
+      // De caché, nunca del CRM en vivo: esto corre con el cliente esperando.
+      readCrmSnapshot(db, botId, lead.id).catch(() => null),
     ]);
 
     // Los otros canales dependen de las direcciones halladas arriba.
     const otrosCanales = await otrasConversaciones(db, botId, lead, contactos).catch(() => []);
 
-    return { lead, contactos, otrosCanales, ticketsAbiertos, citasProximas, seguimiento };
+    return { lead, contactos, otrosCanales, ticketsAbiertos, citasProximas, seguimiento, crm };
   } catch (e) {
     console.warn("[customerContext] no se pudo armar el contexto:", e);
     return VACIO;
@@ -227,6 +238,9 @@ export function renderCustomerContext(ctx: CustomerContext, timeZone: string): s
         (ultimo ? `; último contacto tuyo el ${cuando(ultimo.sent_at, timeZone)}.` : "."),
     );
   }
+
+  const delCrm = renderCrmSnapshot(ctx.crm);
+  if (delCrm) lineas.push(delCrm);
 
   if (lineas.length === 0) return null;
   return `<cliente_conocido>\n${lineas.join("\n")}\n</cliente_conocido>`;

@@ -20,6 +20,7 @@
 
 import type { Env } from "../env";
 import { tick } from "./tick";
+import { warmCustomerContext, type WarmTarget } from "../customer/warm";
 
 /** Lo mínimo que necesitamos del contexto de ejecución de cada plataforma. */
 export interface WaitUntilCtx {
@@ -39,13 +40,29 @@ export function wakeTickAfter(
   env: Env,
   ctx: WaitUntilCtx | undefined | null,
   delayMs: number,
+  /**
+   * A quién calentarle el contexto, si se conoce.
+   *
+   * Aprovecha la ventana del buffer: durante esos segundos la función está
+   * viva sin hacer nada, y es el único momento en que se puede consultar el
+   * CRM sin que el cliente lo espere. Ver customer/warm.ts.
+   */
+  calentar?: WarmTarget | null,
 ): boolean {
   if (!ctx || typeof ctx.waitUntil !== "function") return false;
 
   ctx.waitUntil(
     (async () => {
       try {
-        await new Promise((r) => setTimeout(r, delayMs + MARGEN_MS));
+        // Primero calentar, DESPUÉS dormir: así el trabajo cae dentro de la
+        // espera del buffer en vez de sumarse a ella.
+        const calentando = calentar
+          ? warmCustomerContext(env, calentar).catch(() => {})
+          : Promise.resolve();
+        await Promise.all([
+          calentando,
+          new Promise((r) => setTimeout(r, delayMs + MARGEN_MS)),
+        ]);
         await tick(env);
       } catch (e) {
         // Nunca tumbar la respuesta del webhook por esto: si falla, el
