@@ -21,7 +21,7 @@ import { MessagesRepo } from "../db/messages";
 import { CrmProposalsRepo } from "../db/crmProposals";
 import { buildCustomerContext } from "../customer/context";
 import { proponerDesdeAnalisis } from "./proponer";
-import { aplicarAutomaticas } from "./ejecutar";
+import { aplicarAutomaticas, crmQueRecibeCambios } from "./ejecutar";
 
 /** Tras estos intentos se abandona: el cliente ya fue atendido y la conversación sigue en la bandeja. */
 const MAX_INTENTOS = 3;
@@ -122,6 +122,14 @@ export async function analizarConversacion(
 ): Promise<{ propuestas: number } | null> {
   {
     const db = new Db(env.DB);
+
+    // Sin un CRM que sepa RECIBIR los cambios, analizar no tiene destino: la
+    // propuesta nacería condenada a fallar. Y esto no es gratis — es una
+    // llamada entera al LLM por conversación. Antes no se preguntaba, así que
+    // un bot sin CRM (o con HubSpot/Pipedrive, que todavía no saben aplicar)
+    // pagaba el análisis y además se le llenaba /admin/mejoras de fallidas.
+    if (!(await crmQueRecibeCambios(env, db, botId))) return null;
+
     const historia = await new MessagesRepo(db, botId).lastN(conversationId, MENSAJES_A_ANALIZAR);
     if (historia.length < 2) return null; // un saludo suelto no da para analizar
 

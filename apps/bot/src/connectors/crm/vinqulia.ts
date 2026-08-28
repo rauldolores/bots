@@ -8,6 +8,8 @@ import type {
   PipelineStageListResult,
   PipelineStageOption,
   CrmCustomerSnapshot,
+  CrmChange,
+  CrmChangeResult,
 } from "../types";
 import {
   vinquliaBaseUrl,
@@ -373,4 +375,140 @@ export const vinquliaConnector: CrmConnector = {
       return { ok: false, items: [], error: String((e as Error)?.message ?? e) };
     }
   },
+
+  sabeAplicarCambio(cambio) {
+    if (cambio.operation === "revisar_contradiccion") return true; // no toca el CRM
+    if (cambio.kind === "nota" || cambio.kind === "tarea") return true;
+    const campo = String(cambio.payload?.campo ?? "");
+    if (cambio.kind === "contacto") return campo in CAMPOS_CONTACTO;
+    if (cambio.kind === "empresa") return campo in CAMPOS_EMPRESA;
+    // Etiquetas: `crm.tags` es un catálogo por organización y `contacts.tags`
+    // un arreglo de ids. Hacerlo bien pide leer-modificar-escribir sin pisar
+    // las que ya tiene, y eso merece su propia vuelta.
+    return false;
+  },
+
+  async aplicarCambio(creds: ConnectorCreds, cambio: CrmChange): Promise<CrmChangeResult> {
+    const base = vinquliaBaseUrl(creds);
+    if (!base) return { ok: false, detalle: VINQULIA_MISSING_URL };
+
+    const contactId = await resolverContacto(creds, base, cambio.contacto);
+    if (!contactId) {
+      return { ok: false, detalle: "No se encontró a esta persona en el CRM. Regístrala primero." };
+    }
+
+    const payload = cambio.payload;
+    const sales = vinquliaSalesId(creds);
+
+    if (cambio.kind === "nota") {
+      return conResultado(
+        await fetch(`${base}/contact_notes`, {
+          method: "POST",
+          headers: vinquliaHeaders(creds, { "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            contact_id: contactId,
+            type: "note",
+            text: String(payload.texto ?? cambio.valorPropuesto ?? ""),
+            date: new Date().toISOString(),
+            ...(sales !== undefined ? { sales_id: sales } : {}),
+          }),
+        }),
+        "Nota guardada en el CRM.",
+      );
+    }
+
+    if (cambio.kind === "contacto") {
+      const columna = CAMPOS_CONTACTO[String(payload.campo ?? "")];
+      if (!columna) return { ok: false, detalle: `Todavía no sé actualizar "${payload.campo}" del contacto.` };
+      return conResultado(
+        await fetch(`${base}/contacts?id=eq.${encodeURIComponent(contactId)}`, {
+          method: "PATCH",
+          headers: vinquliaHeaders(creds, { "Content-Type": "application/json" }),
+          body: JSON.stringify({ [columna]: payload.valor }),
+        }),
+        "Contacto actualizado.",
+      );
+    }
+
+    if (cambio.kind === "empresa") {
+      const columna = CAMPOS_EMPRESA[String(payload.campo ?? "")];
+      if (!columna) return { ok: false, detalle: `Todavía no sé actualizar "${payload.campo}" de la empresa.` };
+      // Sin empresa ligada, el cambio se convierte en un alta: es lo que un
+      // operador haría, y sin ella el dato no tiene dónde vivir.
+      const companyId =
+        cambio.empresaIdEnCrm ??
+        (payload.campo === "nombre"
+          ? await buscarOCrearEmpresa(creds, base, String(payload.valor), sales)
+          : undefined);
+      if (companyId === undefined) {
+        return { ok: false, detalle: "Este contacto no tiene empresa en el CRM. Asígnale una primero." };
+      }
+      const valor = columna === "size" ? Number(payload.valor) : payload.valor;
+      return conResultado(
+        await fetch(`${base}/companies?id=eq.${encodeURIComponent(String(companyId))}`, {
+          method: "PATCH",
+          headers: vinquliaHeaders(creds, { "Content-Type": "application/json" }),
+          body: JSON.stringify({ [columna]: valor }),
+        }),
+        "Empresa actualizada.",
+      );
+    }
+
+    if (cambio.kind === "tarea") {
+      return conResultado(
+        await fetch(`${base}/tasks`, {
+          method: "POST",
+          headers: vinquliaHeaders(creds, { "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            contact_id: contactId,
+            type: "follow-up",
+            // La fecha va en el texto, no interpretada: "el martes" dicho un
+            // viernes es ambiguo, y una tarea con fecha equivocada es peor que
+            // una sin fecha.
+            text: [payload.texto, payload.cuando ? `(${payload.cuando})` : null].filter(Boolean).join(" "),
+            ...(sales !== undefined ? { sales_id: sales } : {}),
+          }),
+        }),
+        "Tarea creada en el CRM.",
+      );
+    }
+
+    return { ok: false, detalle: `Todavía no sé aplicar cambios de tipo "${cambio.kind}".` };
+  },
 };
+
+// ── Escribir en el CRM un cambio ya aprobado ───────────────────────────────
+//
+// Vivía en src/crm/ejecutar.ts, fuera de la capa de conectores y con un
+// `if (provider.startsWith("vinqulia"))` por candado. Traducir "cargo" a la
+// columna `title` es conocimiento de ESTE proveedor y de ninguno más — por eso
+// baja aquí, detrás de CrmConnector, y agregar otro CRM ya no obliga a tocar
+// código genérico.
+
+/** Campos del contacto que se pueden completar desde una conversación. */
+const CAMPOS_CONTACTO: Record<string, string> = { cargo: "title" };
+/** Y los de la empresa. */
+const CAMPOS_EMPRESA: Record<string, string> = { industria: "sector", nombre: "name", tamano: "size" };
+
+/**
+ * El contacto al que aplica el cambio: el id que la caché ya traía o, si venció
+ * —entre proponer y aprobar pueden pasar días—, buscándolo por su correo o
+ * teléfono. Sin nombre entrante a propósito: aquí ya hubo una decisión humana o
+ * una regla de rutina, y el guardarraíl de "no fusionar por teléfono" protege
+ * ALTAS automáticas, no esto.
+ */
+async function resolverContacto(
+  creds: ConnectorCreds,
+  base: string,
+  contacto: CrmChange["contacto"],
+): Promise<string | null> {
+  if (contacto.idEnCrm) return contacto.idEnCrm;
+  if (!contacto.dato) return null;
+  const hallado = await buscarContacto(creds, base, contacto.dato);
+  return hallado ? String(hallado.id) : null;
+}
+
+function conResultado(res: Response, exito: string): Promise<CrmChangeResult> {
+  if (res.ok) return Promise.resolve({ ok: true, detalle: exito });
+  return res.text().then((t) => ({ ok: false, detalle: `El CRM respondió ${res.status}: ${t.slice(0, 180)}` }));
+}

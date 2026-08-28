@@ -576,6 +576,21 @@ async function renderConnectorCard(db: Db, botId: string, meta: ConnectorMeta): 
                 hx-get="/admin/conexiones/connectors/crm/${encodeURIComponent(meta.id)}/etapa" hx-target="#modal-root" hx-swap="innerHTML">Configurar etapa inicial</button>`
       : "";
 
+  // Qué NO hace este CRM, dicho en voz alta. Los dos métodos son opcionales en
+  // CrmConnector y el código simplemente los omite si faltan — sin este aviso,
+  // el dueño ve su CRM "conectado" y no tiene forma de enterarse de que el
+  // agente nunca lee de ahí, ni de que lo aprendido no se va a escribir.
+  const faltantes =
+    ok && meta.category === "crm"
+      ? [
+          CRM_ADAPTERS[meta.id]?.lookupCustomer ? null : "leerle el historial al agente antes de contestar",
+          CRM_ADAPTERS[meta.id]?.aplicarCambio ? null : "escribir ahí lo que el bot aprenda en la conversación",
+        ].filter(Boolean)
+      : [];
+  const limitaciones = faltantes.length
+    ? `<p class="text-[11.5px]" style="color:var(--dim);margin:0;line-height:1.5">Con ${esc(meta.name)} todavía no se puede: ${faltantes.map((f) => esc(f as string)).join("; ")}. Los leads sí se dan de alta con normalidad.</p>`
+    : "";
+
   let action: string;
   if (!ok) {
     action =
@@ -616,6 +631,7 @@ async function renderConnectorCard(db: Db, botId: string, meta: ConnectorMeta): 
       </div>
       <p class="text-dim text-[12px]" style="margin:0">${esc(meta.desc)}</p>
       ${avisoSinOportunidad}
+      ${limitaciones}
       ${action}
     </div>`;
 }

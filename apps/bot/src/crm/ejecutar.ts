@@ -11,25 +11,37 @@ import type { Db } from "../db/client";
 import { CrmProposalsRepo, type CrmProposal } from "../db/crmProposals";
 import { BotConnectorsRepo } from "../db/botConnectors";
 import { resolveConnectorCreds } from "../connectors/creds";
-import {
-  vinquliaBaseUrl,
-  vinquliaHeaders,
-  vinquliaSalesId,
-  buscarContacto,
-  buscarOCrearEmpresa,
-} from "../connectors/vinquliaApi";
+import { CRM_ADAPTERS } from "../connectors/registry";
 import { readCrmSnapshot } from "../customer/crmSnapshot";
 import { LeadsRepo } from "../db/leads";
-import type { ConnectorCreds } from "../connectors/types";
-
-/** Campos del contacto que se pueden completar desde una conversación. */
-const CAMPOS_CONTACTO: Record<string, string> = { cargo: "title" };
-/** Y los de la empresa. */
-const CAMPOS_EMPRESA: Record<string, string> = { industria: "sector", nombre: "name", tamano: "size" };
+import type { ConnectorCreds, CrmChange, CrmConnector } from "../connectors/types";
 
 export interface ResultadoEjecucion {
   ok: boolean;
   detalle: string;
+}
+
+/**
+ * El CRM conectado, si además sabe RECIBIR cambios.
+ *
+ * Es la única puerta: sin `aplicarCambio` no hay nada que hacer con una
+ * propuesta, así que ni se analiza la conversación para generarla (ver
+ * src/crm/analizar.ts). Antes esto era `provider.startsWith("vinqulia")` — un
+ * nombre a mano, que dejaba a HubSpot/Pipedrive generando propuestas
+ * condenadas a fallar y cobrándole al dueño una llamada al LLM por cada una.
+ */
+export async function crmQueRecibeCambios(
+  env: Env,
+  db: Db,
+  botId: string,
+): Promise<{ adapter: CrmConnector; creds: ConnectorCreds; nombre: string } | null> {
+  const connector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "crm");
+  if (!connector) return null;
+  const adapter = CRM_ADAPTERS[connector.provider];
+  if (!adapter?.aplicarCambio) return null;
+  const creds = await resolveConnectorCreds(db, connector, env);
+  if (!creds) return null;
+  return { adapter, creds, nombre: connector.name ?? connector.provider };
 }
 
 /** El payload se guarda como jsonb, pero llega como texto según el driver. */
@@ -48,18 +60,19 @@ function leerPayload(p: Pick<CrmProposal, "payload">): Record<string, unknown> {
  * y el dueño perdería la oportunidad de hacerlas a mano. `aplicar()` la usa
  * como guarda, así que las dos no pueden separarse en la dirección peligrosa.
  */
-export function sabemosAplicar(p: Pick<CrmProposal, "kind" | "operation" | "payload">): boolean {
+export function sabemosAplicar(
+  adapter: Pick<CrmConnector, "sabeAplicarCambio"> | null | undefined,
+  p: Pick<CrmProposal, "kind" | "operation" | "payload">,
+): boolean {
   if (p.operation === "revisar_contradiccion") return true; // no toca el CRM
-  let campo = "";
+  if (!adapter?.sabeAplicarCambio) return false;
+  let payload: Record<string, unknown>;
   try {
-    campo = String(leerPayload(p).campo ?? "");
+    payload = leerPayload(p);
   } catch {
     return false; // payload ilegible: no se adivina
   }
-  if (p.kind === "nota" || p.kind === "tarea") return true;
-  if (p.kind === "contacto") return campo in CAMPOS_CONTACTO;
-  if (p.kind === "empresa") return campo in CAMPOS_EMPRESA;
-  return false;
+  return adapter.sabeAplicarCambio({ kind: p.kind, operation: p.operation, payload });
 }
 
 /**
@@ -92,8 +105,11 @@ export async function ejecutarPropuesta(
 const RIESGO_AUTOMATICO: ReadonlySet<string> = new Set(["bajo", "medio"]);
 
 /** Una propuesta que se puede escribir sin preguntarle a nadie. */
-export function seAplicaSola(p: CrmProposal): boolean {
-  return RIESGO_AUTOMATICO.has(p.risk) && sabemosAplicar(p);
+export function seAplicaSola(
+  adapter: Pick<CrmConnector, "sabeAplicarCambio"> | null | undefined,
+  p: CrmProposal,
+): boolean {
+  return RIESGO_AUTOMATICO.has(p.risk) && sabemosAplicar(adapter, p);
 }
 
 /**
@@ -128,8 +144,15 @@ export async function aplicarAutomaticas(
   limite = 25,
 ): Promise<{ aplicadas: number; fallidas: number; enEspera: number }> {
   const repo = new CrmProposalsRepo(db, botId);
+  const crm = await crmQueRecibeCambios(env, db, botId);
+  // Sin un CRM que sepa recibirlos, no se aprueba nada: marcarlas fallidas las
+  // sacaría de la cola y el dueño perdería la opción de hacerlas a mano.
+  if (!crm) return { aplicadas: 0, fallidas: 0, enEspera: 0 };
+
   const pendientes = await repo.listPendientes(limite);
-  const candidatas = pendientes.filter(seAplicaSola).sort((a, b) => ordenDeAplicacion(a) - ordenDeAplicacion(b));
+  const candidatas = pendientes
+    .filter((p) => seAplicaSola(crm.adapter, p))
+    .sort((a, b) => ordenDeAplicacion(a) - ordenDeAplicacion(b));
 
   let aplicadas = 0;
   let fallidas = 0;
@@ -151,134 +174,26 @@ async function aplicar(env: Env, db: Db, botId: string, p: CrmProposal): Promise
     return { ok: true, detalle: "Revisada. No se modificó nada en el CRM." };
   }
 
-  const connector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "crm");
-  if (!connector) return { ok: false, detalle: "No hay ningún CRM conectado." };
-  // Por ahora solo Vinqulia sabe recibir estos cambios; otros proveedores
-  // necesitan su propia implementación en vez de una traducción a ciegas.
-  if (!connector.provider.startsWith("vinqulia")) {
-    return { ok: false, detalle: `Todavía no sé aplicar cambios en ${connector.name ?? connector.provider}.` };
+  const crm = await crmQueRecibeCambios(env, db, botId);
+  if (!crm) {
+    const connector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "crm");
+    return connector
+      ? { ok: false, detalle: `Todavía no sé aplicar cambios en ${connector.name ?? connector.provider}.` }
+      : { ok: false, detalle: "No hay ningún CRM conectado." };
   }
 
-  const creds = await resolveConnectorCreds(db, connector, env);
-  const base = creds ? vinquliaBaseUrl(creds) : null;
-  if (!creds || !base) return { ok: false, detalle: "Faltan las credenciales o la URL del CRM." };
+  // Lo que sale de NUESTRA base lo resuelve este archivo; traducir al
+  // vocabulario del proveedor es del adaptador.
+  const snapshot = p.lead_id ? await readCrmSnapshot(db, botId, p.lead_id) : null;
+  const lead = p.lead_id ? await new LeadsRepo(db, botId).getById(p.lead_id) : null;
 
-  const contactId = await resolverContactId(db, botId, p, creds, base);
-  if (!contactId) {
-    return { ok: false, detalle: "No se encontró a esta persona en el CRM. Regístrala primero." };
-  }
-
-  const payload = leerPayload(p);
-  const sales = vinquliaSalesId(creds);
-
-  if (p.kind === "nota") {
-    return conResultado(
-      await fetch(`${base}/contact_notes`, {
-        method: "POST",
-        headers: vinquliaHeaders(creds, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          contact_id: contactId,
-          type: "note",
-          text: String(payload.texto ?? p.proposed_value ?? ""),
-          date: new Date().toISOString(),
-          ...(sales !== undefined ? { sales_id: sales } : {}),
-        }),
-      }),
-      "Nota guardada en el CRM.",
-    );
-  }
-
-  if (p.kind === "contacto") {
-    const columna = CAMPOS_CONTACTO[String(payload.campo ?? "")];
-    if (!columna) return { ok: false, detalle: `Todavía no sé actualizar "${payload.campo}" del contacto.` };
-    return conResultado(
-      await fetch(`${base}/contacts?id=eq.${encodeURIComponent(contactId)}`, {
-        method: "PATCH",
-        headers: vinquliaHeaders(creds, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ [columna]: payload.valor }),
-      }),
-      "Contacto actualizado.",
-    );
-  }
-
-  if (p.kind === "empresa") {
-    const columna = CAMPOS_EMPRESA[String(payload.campo ?? "")];
-    if (!columna) return { ok: false, detalle: `Todavía no sé actualizar "${payload.campo}" de la empresa.` };
-    const snapshot = p.lead_id ? await readCrmSnapshot(db, botId, p.lead_id) : null;
-    // Sin empresa ligada, el cambio se convierte en un alta: es lo que un
-    // operador haría, y sin ella el dato no tiene dónde vivir.
-    const companyId =
-      snapshot?.empresa?.id ??
-      (payload.campo === "nombre"
-        ? await buscarOCrearEmpresa(creds, base, String(payload.valor), sales)
-        : undefined);
-    if (companyId === undefined) {
-      return { ok: false, detalle: "Este contacto no tiene empresa en el CRM. Asígnale una primero." };
-    }
-    const valor = columna === "size" ? Number(payload.valor) : payload.valor;
-    return conResultado(
-      await fetch(`${base}/companies?id=eq.${encodeURIComponent(String(companyId))}`, {
-        method: "PATCH",
-        headers: vinquliaHeaders(creds, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ [columna]: valor }),
-      }),
-      "Empresa actualizada.",
-    );
-  }
-
-  if (p.kind === "tarea") {
-    return conResultado(
-      await fetch(`${base}/tasks`, {
-        method: "POST",
-        headers: vinquliaHeaders(creds, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          contact_id: contactId,
-          type: "follow-up",
-          // La fecha va en el texto, no interpretada: "el martes" dicho un
-          // viernes es ambiguo, y una tarea con fecha equivocada es peor que
-          // una sin fecha.
-          text: [payload.texto, payload.cuando ? `(${payload.cuando})` : null].filter(Boolean).join(" "),
-          ...(sales !== undefined ? { sales_id: sales } : {}),
-        }),
-      }),
-      "Tarea creada en el CRM.",
-    );
-  }
-
-  // Etiquetas: `crm.tags` es un catálogo por organización y `contacts.tags` un
-  // arreglo de ids. Hacerlo bien pide leer-modificar-escribir sin pisar las que
-  // ya tiene, y eso merece su propia vuelta. `sabemosAplicar` lo sabe, así que
-  // el aplicado automático ni las intenta: se quedan en la cola, visibles.
-  return { ok: false, detalle: `Todavía no sé aplicar cambios de tipo "${p.kind}".` };
-}
-
-/**
- * El contacto en el CRM al que aplica esta propuesta.
- *
- * Primero la caché; si venció —entre proponer y aprobar pueden pasar días— se
- * vuelve a buscar por su correo o teléfono. Sin nombre entrante a propósito:
- * aquí ya hay una decisión humana de por medio, y el guardarraíl de
- * "no fusionar por teléfono" protege ALTAS automáticas, no esto.
- */
-async function resolverContactId(
-  db: Db,
-  botId: string,
-  p: CrmProposal,
-  creds: ConnectorCreds,
-  base: string,
-): Promise<string | null> {
-  if (!p.lead_id) return null;
-
-  const cacheado = await readCrmSnapshot(db, botId, p.lead_id);
-  if (cacheado?.contactId) return cacheado.contactId;
-
-  const lead = await new LeadsRepo(db, botId).getById(p.lead_id);
-  if (!lead?.contact) return null;
-  const contacto = await buscarContacto(creds, base, lead.contact);
-  return contacto ? String(contacto.id) : null;
-}
-
-function conResultado(res: Response, exito: string): Promise<ResultadoEjecucion> {
-  if (res.ok) return Promise.resolve({ ok: true, detalle: exito });
-  return res.text().then((t) => ({ ok: false, detalle: `El CRM respondió ${res.status}: ${t.slice(0, 180)}` }));
+  const cambio: CrmChange = {
+    kind: p.kind,
+    operation: p.operation,
+    payload: leerPayload(p),
+    valorPropuesto: p.proposed_value,
+    contacto: { idEnCrm: snapshot?.contactId, dato: lead?.contact ?? null },
+    empresaIdEnCrm: snapshot?.empresa?.id,
+  };
+  return crm.adapter.aplicarCambio!(crm.creds, cambio);
 }

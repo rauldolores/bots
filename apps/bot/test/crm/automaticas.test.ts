@@ -28,12 +28,43 @@ vi.mock("../../src/db/crmProposals", () => ({
   },
 }));
 
-// Sin CRM conectado, `aplicar` se corta antes de la red. Da igual para lo que
-// se prueba aquí: lo que importa es a CUÁLES llega y en qué orden.
+// Un CRM cualquiera que SÍ sabe recibir cambios. Deliberadamente no es
+// Vinqulia: qué campos sabe escribir cada proveedor es asunto de su adaptador,
+// y este archivo prueba el CRITERIO de qué se escribe sin preguntar. Antes esto
+// se apoyaba en que ejecutar.ts conocía las columnas de Vinqulia — justo el
+// acoplamiento que se quitó.
+const CAMPOS_QUE_SABE = new Set(["industria", "nombre", "tamano", "cargo"]);
+const adaptadorFalso = {
+  sabeAplicarCambio(cambio: { kind: string; operation: string; payload: Record<string, unknown> }) {
+    if (cambio.operation === "revisar_contradiccion") return true;
+    if (cambio.kind === "nota" || cambio.kind === "tarea") return true;
+    if (cambio.kind === "contacto" || cambio.kind === "empresa") {
+      return CAMPOS_QUE_SABE.has(String(cambio.payload?.campo ?? ""));
+    }
+    return false; // etiquetas: nadie las sabe aplicar todavía
+  },
+  async aplicarCambio() {
+    return { ok: true, detalle: "escrito" };
+  },
+};
+
 vi.mock("../../src/db/botConnectors", () => ({
   BotConnectorsRepo: class {
     async getActiveByCategory() {
-      return null;
+      return { provider: "falso", name: "CRM de prueba", config: {} };
+    }
+  },
+}));
+vi.mock("../../src/connectors/registry", () => ({ CRM_ADAPTERS: { falso: adaptadorFalso } }));
+vi.mock("../../src/connectors/creds", () => ({
+  resolveConnectorCreds: async () => ({ apiKey: "k", config: {} }),
+}));
+// Lo que `aplicar` saca de NUESTRA base — irrelevante para este criterio.
+vi.mock("../../src/customer/crmSnapshot", () => ({ readCrmSnapshot: async () => null }));
+vi.mock("../../src/db/leads", () => ({
+  LeadsRepo: class {
+    async getById() {
+      return { contact: "ana@x.com" };
     }
   },
 }));
@@ -60,12 +91,12 @@ beforeEach(() => {
 
 describe("qué se escribe sin preguntar", () => {
   it("el riesgo bajo y el medio se aplican solos", () => {
-    expect(seAplicaSola(p({ id: "a", kind: "nota", risk: "bajo" }))).toBe(true);
-    expect(seAplicaSola(p({ id: "b", kind: "tarea", risk: "medio" }))).toBe(true);
+    expect(seAplicaSola(adaptadorFalso, p({ id: "a", kind: "nota", risk: "bajo" }))).toBe(true);
+    expect(seAplicaSola(adaptadorFalso, p({ id: "b", kind: "tarea", risk: "medio" }))).toBe(true);
   });
 
   it("el riesgo ALTO nunca, por más sencillo que parezca el cambio", () => {
-    expect(seAplicaSola(p({ id: "c", kind: "nota", risk: "alto" }))).toBe(false);
+    expect(seAplicaSola(adaptadorFalso, p({ id: "c", kind: "nota", risk: "alto" }))).toBe(false);
   });
 
   it("una contradicción es riesgo alto y sigue esperando al dueño", async () => {
@@ -85,12 +116,12 @@ describe("lo que todavía no sabemos escribir no se toca", () => {
   });
 
   it("un campo de empresa que no mapeamos tampoco", () => {
-    expect(sabemosAplicar(p({ id: "f", kind: "empresa", payload: { campo: "cumpleaños" } }))).toBe(false);
-    expect(sabemosAplicar(p({ id: "g", kind: "empresa", payload: { campo: "industria" } }))).toBe(true);
+    expect(sabemosAplicar(adaptadorFalso, p({ id: "f", kind: "empresa", payload: { campo: "cumpleaños" } }))).toBe(false);
+    expect(sabemosAplicar(adaptadorFalso, p({ id: "g", kind: "empresa", payload: { campo: "industria" } }))).toBe(true);
   });
 
   it("y un payload ilegible no se adivina", () => {
-    expect(sabemosAplicar(p({ id: "h", kind: "empresa", payload: "{roto" }))).toBe(false);
+    expect(sabemosAplicar(adaptadorFalso, p({ id: "h", kind: "empresa", payload: "{roto" }))).toBe(false);
   });
 });
 

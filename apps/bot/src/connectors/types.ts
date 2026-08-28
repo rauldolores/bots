@@ -82,6 +82,33 @@ export interface CrmCustomerSnapshot {
   url?: string;
 }
 
+/**
+ * Un cambio ya aprobado, listo para escribirse en el CRM (ver src/crm/).
+ *
+ * El que llama resuelve lo que sale de NUESTRA base (a quién aplica, qué
+ * empresa tenía ligada) y el adaptador traduce lo demás al vocabulario de su
+ * proveedor — "cargo" será `title` en uno y `jobtitle` en otro. Sin este
+ * contrato, esa traducción vivía suelta fuera de la capa de conectores.
+ */
+export interface CrmChange {
+  /** 'nota' | 'contacto' | 'empresa' | 'tarea' | 'etiqueta'… */
+  kind: string;
+  operation: string;
+  /** Los datos del cambio: `{campo, valor}` al actualizar, `{texto}` en una nota. */
+  payload: Record<string, unknown>;
+  /** Respaldo cuando el payload no trae el valor (propuestas viejas). */
+  valorPropuesto?: string | null;
+  /** A quién aplica: el id que la caché ya conocía, o su correo/teléfono para buscarlo. */
+  contacto: { idEnCrm?: string; dato?: string | null };
+  /** La empresa ligada a ese contacto, si la caché la conocía. */
+  empresaIdEnCrm?: string;
+}
+
+export interface CrmChangeResult {
+  ok: boolean;
+  detalle: string;
+}
+
 export interface CrmConnector {
   pushLead(creds: ConnectorCreds, lead: CrmLeadInput): Promise<ConnectorPushResult>;
   /**
@@ -100,6 +127,15 @@ export interface CrmConnector {
    * el botón de "Configurar etapa inicial").
    */
   listPipelineStages?(creds: ConnectorCreds): Promise<PipelineStageListResult>;
+  /**
+   * ¿Sabe escribir este tipo de cambio? Sin el método se asume que NO, y
+   * entonces ni siquiera se analiza la conversación para proponerlo — el
+   * proveedor que no puede recibirlos no debe costarle al dueño una llamada
+   * al LLM ni llenarle el panel de propuestas fallidas.
+   */
+  sabeAplicarCambio?(cambio: Pick<CrmChange, "kind" | "operation" | "payload">): boolean;
+  /** Escribe un cambio aprobado. Solo se llama si `sabeAplicarCambio` dijo que sí. */
+  aplicarCambio?(creds: ConnectorCreds, cambio: CrmChange): Promise<CrmChangeResult>;
 }
 
 export interface TicketInput {
