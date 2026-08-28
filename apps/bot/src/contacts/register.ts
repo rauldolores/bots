@@ -33,14 +33,20 @@ export async function registerLeadContacts(
   db: Db,
   botId: string,
   leadId: string,
-  contact: string | undefined | null,
+  /** Uno o varios datos dictados (correo, teléfono…). Cada uno se clasifica por su contenido. */
+  contact: string | undefined | null | Array<string | undefined | null>,
   conv: ConversationRef | null,
 ): Promise<void> {
   const region = regionForTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
   const repo = new LeadContactsRepo(db, botId);
 
-  const dictado = classifyContact(contact, region);
-  if (dictado) {
+  // Desde que se piden correo Y teléfono por separado, aquí pueden llegar los
+  // dos. Se guardan AMBOS: es justo para lo que existe lead_contacts, y es lo
+  // que después permite alcanzar a la persona por el canal que sí conteste.
+  const dictados = (Array.isArray(contact) ? contact : [contact])
+    .map((v) => classifyContact(v, region))
+    .filter((c): c is NonNullable<typeof c> => c !== null);
+  for (const dictado of dictados) {
     await repo.add({ leadId, ...dictado, consent: "inbound" });
   }
 

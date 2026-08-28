@@ -12,7 +12,12 @@ export interface ConnectorCreds {
 
 export interface CrmLeadInput {
   name: string | null;
+  /** El medio principal, para mostrar. Los dos de abajo son los que se empujan. */
   contact: string | null;
+  /** Correo, si lo dio. Se piden los dos por separado — ver captureLead. */
+  email?: string | null;
+  /** Teléfono, si lo dio (o el del canal por el que escribe). */
+  phone?: string | null;
   intent: string;
   notes: string | null;
   /** Empresa del cliente, solo si la mencionó explícitamente — null/ausente si no se sabe. */

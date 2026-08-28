@@ -36,7 +36,7 @@ describe("captureLeadTool", () => {
     const result = (await tool.execute!(
       {
         name: "María",
-        contact: "+5215512345678",
+        phone: "+5215512345678",
         intent: "Corte + barba 5pm",
       },
       {} as any,
@@ -60,7 +60,7 @@ describe("captureLeadTool — con un CRM conectado", () => {
 
     const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
     const result = (await tool.execute!(
-      { name: "Ana", contact: "ana@x.com", intent: "Quiere cotización" },
+      { name: "Ana", email: "ana@x.com", intent: "Quiere cotización" },
       {} as any,
     )) as { leadId: string };
 
@@ -77,7 +77,7 @@ describe("captureLeadTool — con un CRM conectado", () => {
 
     const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
     const result = (await tool.execute!(
-      { name: "Ana", contact: "ana@x.com", intent: "Quiere cotización" },
+      { name: "Ana", email: "ana@x.com", intent: "Quiere cotización" },
       {} as any,
     )) as { leadId: string };
 
@@ -95,7 +95,7 @@ describe("captureLeadTool — contactos tipados (F8 fase B)", () => {
   it("guarda el teléfono dictado en E.164, y el canal por el que escribe", async () => {
     const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
     await tool.execute!(
-      { name: "Ana", contact: "55 1234 5678", intent: "quiere el curso" },
+      { name: "Ana", phone: "55 1234 5678", intent: "quiere el curso" },
       {} as any,
     );
 
@@ -122,7 +122,7 @@ describe("captureLeadTool — contactos tipados (F8 fase B)", () => {
 
   it("un correo dictado se guarda como correo, en minúsculas", async () => {
     const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
-    await tool.execute!({ contact: "  Ana@Ejemplo.COM ", intent: "cotización" }, {} as any);
+    await tool.execute!({ email: "  Ana@Ejemplo.COM ", intent: "cotización" }, {} as any);
 
     const filas = await new Db(env.DB).all<{ kind: string; address_norm: string }>(
       "SELECT kind, address_norm FROM lead_contacts WHERE bot_id = ? AND kind = 'email'",
@@ -133,7 +133,7 @@ describe("captureLeadTool — contactos tipados (F8 fase B)", () => {
 
   it("un contacto que no se puede usar NO se guarda — mejor nada que basura", async () => {
     const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
-    await tool.execute!({ contact: "me llamo Ana", intent: "x" }, {} as any);
+    await tool.execute!({ phone: "me llamo Ana", intent: "x" }, {} as any);
 
     const filas = await new Db(env.DB).all(
       "SELECT id FROM lead_contacts WHERE bot_id = ? AND kind != 'channel'",
@@ -161,7 +161,7 @@ describe("captureLeadTool — el contacto es obligatorio", () => {
 
   it("un contacto dictado que no es ni teléfono ni correo tampoco crea el lead", async () => {
     const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
-    const result = (await tool.execute!({ contact: "me llamo Ana", intent: "x" }, {} as any)) as {
+    const result = (await tool.execute!({ phone: "me llamo Ana", intent: "x" }, {} as any)) as {
       captured: boolean;
     };
     expect(result.captured).toBe(false);
@@ -194,11 +194,11 @@ describe("captureLeadTool — evita duplicados", () => {
   it("el mismo teléfono capturado dos veces actualiza el lead existente en vez de duplicarlo", async () => {
     const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
     const first = (await tool.execute!(
-      { name: "Carla", contact: "+5215512345678", intent: "quiere el curso básico" },
+      { name: "Carla", phone: "+5215512345678", intent: "quiere el curso básico" },
       {} as any,
     )) as { leadId: string; captured: boolean };
     const second = (await tool.execute!(
-      { contact: "+5215512345678", intent: "también pregunta por el curso avanzado" },
+      { phone: "+5215512345678", intent: "también pregunta por el curso avanzado" },
       {} as any,
     )) as { leadId: string; captured: boolean };
 
@@ -214,13 +214,13 @@ describe("captureLeadTool — evita duplicados", () => {
   it("un lead 'sold'/cerrado no se reutiliza — el mismo contacto crea uno nuevo", async () => {
     const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
     const first = (await tool.execute!(
-      { contact: "+5215512345678", intent: "compró el curso" },
+      { phone: "+5215512345678", intent: "compró el curso" },
       {} as any,
     )) as { leadId: string };
     await leads.setStatus(first.leadId, "sold");
 
     const second = (await tool.execute!(
-      { contact: "+5215512345678", intent: "quiere otro curso, meses después" },
+      { phone: "+5215512345678", intent: "quiere otro curso, meses después" },
       {} as any,
     )) as { leadId: string };
 
@@ -234,11 +234,11 @@ describe("captureLeadTool — evita duplicados", () => {
     const tool1 = captureLeadTool(env, () => convId, TEST_BOT_ID);
     const tool2 = captureLeadTool(env, () => conv2.id, TEST_BOT_ID);
 
-    const first = (await tool1.execute!({ contact: "ana@ejemplo.com", intent: "quiere info" }, {} as any)) as {
+    const first = (await tool1.execute!({ email: "ana@ejemplo.com", intent: "quiere info" }, {} as any)) as {
       leadId: string;
     };
     const second = (await tool2.execute!(
-      { contact: "Ana@Ejemplo.com", intent: "escribió otra vez por Messenger" },
+      { email: "Ana@Ejemplo.com", intent: "escribió otra vez por Messenger" },
       {} as any,
     )) as { leadId: string };
 
@@ -254,7 +254,7 @@ describe("captureLeadTool — empresa y presupuesto (F-CRM-completo)", () => {
   it("los guarda en metadata cuando el cliente los menciona", async () => {
     const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
     await tool.execute!(
-      { contact: "+5215512345678", intent: "quiere el curso", company: "Acme Corp", estimatedValue: 5000 },
+      { phone: "+5215512345678", intent: "quiere el curso", company: "Acme Corp", estimatedValue: 5000 },
       {} as any,
     );
     const row = (await leads.list(10))[0];
@@ -263,7 +263,7 @@ describe("captureLeadTool — empresa y presupuesto (F-CRM-completo)", () => {
 
   it("sin mencionarlos, metadata queda vacío — nunca se inventan", async () => {
     const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
-    await tool.execute!({ contact: "+5215512345678", intent: "quiere el curso" }, {} as any);
+    await tool.execute!({ phone: "+5215512345678", intent: "quiere el curso" }, {} as any);
     const row = (await leads.list(10))[0];
     expect(leadMetadata(row)).toEqual({});
   });
@@ -271,13 +271,13 @@ describe("captureLeadTool — empresa y presupuesto (F-CRM-completo)", () => {
   it("mergeCapture rellena metadata sin pisar un valor que ya se tenía", async () => {
     const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
     const first = (await tool.execute!(
-      { contact: "+5215512345678", intent: "primer contacto", company: "Acme Corp" },
+      { phone: "+5215512345678", intent: "primer contacto", company: "Acme Corp" },
       {} as any,
     )) as { leadId: string };
     // Segunda captura del MISMO contacto: trae presupuesto (antes no lo tenía)
     // y una empresa DISTINTA — la empresa ya guardada no se debe pisar.
     const second = (await tool.execute!(
-      { contact: "+5215512345678", intent: "segundo contacto", company: "Otra Empresa", estimatedValue: 8000 },
+      { phone: "+5215512345678", intent: "segundo contacto", company: "Otra Empresa", estimatedValue: 8000 },
       {} as any,
     )) as { leadId: string };
 
@@ -303,10 +303,87 @@ describe("captureLeadTool — empresa y presupuesto (F-CRM-completo)", () => {
 
     const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
     await tool.execute!(
-      { contact: "ana@x.com", intent: "quiere cotización", company: "Acme Corp", estimatedValue: 3000 },
+      { email: "ana@x.com", intent: "quiere cotización", company: "Acme Corp", estimatedValue: 3000 },
       {} as any,
     );
 
     expect(calls).toContain("https://api.hubapi.com/crm/v3/objects/companies");
+  });
+});
+
+// Se piden correo Y teléfono (antes era UN campo "teléfono o email" y había
+// que adivinar cuál era), y la empresa se pide SIEMPRE.
+describe("captureLeadTool — correo, teléfono y empresa", () => {
+  it("guarda LOS DOS medios de contacto cuando el cliente da ambos", async () => {
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    await tool.execute!(
+      { name: "Ana", email: "ana@x.com", phone: "55 1234 5678", intent: "quiere el curso" },
+      {} as any,
+    );
+
+    const filas = await new Db(env.DB).all<{ kind: string; address_norm: string }>(
+      "SELECT kind, address_norm FROM lead_contacts WHERE bot_id = ? AND kind != 'channel' ORDER BY kind",
+      [TEST_BOT_ID],
+    );
+    expect(filas).toEqual([
+      { kind: "email", address_norm: "ana@x.com" },
+      { kind: "phone", address_norm: "+525512345678" },
+    ]);
+    // En la columna que ve el dueño manda el correo; el teléfono no se pierde.
+    expect((await leads.list(10))[0].contact).toBe("ana@x.com");
+  });
+
+  it("con uno solo basta — no se rechaza al cliente que solo dio el teléfono", async () => {
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    const r = (await tool.execute!({ phone: "55 1234 5678", intent: "x" }, {} as any)) as {
+      captured: boolean;
+    };
+    expect(r.captured).toBe(true);
+  });
+
+  it("cada dato se clasifica por su CONTENIDO, no por el campo donde vino", async () => {
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    // El modelo los invirtió: el correo en `phone` y el teléfono en `email`.
+    await tool.execute!(
+      { email: "55 1234 5678", phone: "ana@x.com", intent: "x" },
+      {} as any,
+    );
+    const filas = await new Db(env.DB).all<{ kind: string; address_norm: string }>(
+      "SELECT kind, address_norm FROM lead_contacts WHERE bot_id = ? AND kind != 'channel' ORDER BY kind",
+      [TEST_BOT_ID],
+    );
+    expect(filas).toEqual([
+      { kind: "email", address_norm: "ana@x.com" },
+      { kind: "phone", address_norm: "+525512345678" },
+    ]);
+  });
+
+  it("sin empresa: el lead SÍ se guarda, pero se le dice al modelo que la pida", async () => {
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    const r = (await tool.execute!({ email: "ana@x.com", intent: "quiere el curso" }, {} as any)) as {
+      captured: boolean;
+      faltaEmpresa: boolean;
+      message: string;
+    };
+    // Perder el lead sería peor que quedarse sin la empresa.
+    expect(r.captured).toBe(true);
+    expect(r.faltaEmpresa).toBe(true);
+    expect(r.message).toContain("FALTA la empresa");
+    expect(await leads.list(10)).toHaveLength(1);
+  });
+
+  it("con empresa no molesta, y al completarla después deja de pedirla", async () => {
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    const conEmpresa = (await tool.execute!(
+      { email: "ana@x.com", intent: "x", company: "Acme" },
+      {} as any,
+    )) as { faltaEmpresa: boolean };
+    expect(conEmpresa.faltaEmpresa).toBe(false);
+
+    // El mismo cliente, segunda llamada sin repetir la empresa: ya la sabemos.
+    const segunda = (await tool.execute!({ email: "ana@x.com", intent: "y" }, {} as any)) as {
+      faltaEmpresa: boolean;
+    };
+    expect(segunda.faltaEmpresa).toBe(false);
   });
 });

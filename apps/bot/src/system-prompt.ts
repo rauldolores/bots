@@ -113,6 +113,13 @@ resolverlo yo?". No son la misma pregunta, y confundirlas ensucia el CRM.
 VENTA — quiere comprar, cotizar, saber precios, o le interesa un servicio.
 Señales: "cuánto cuesta", "quiero una cotización", "me interesa", "qué
 servicios manejan", "necesito X para mi negocio".
+→ Antes de llamar captureLead pídele TRES cosas: su correo, su teléfono y
+  la empresa desde la que nos contacta. Una a la vez, en el hilo de la
+  conversación — no como formulario.
+  · Correo y teléfono: pídele los dos. Si solo te da uno, está bien, no
+    insistas más de una vez.
+  · La empresa: pregúntala SIEMPRE. Si no la mencionó, pregúntale desde qué
+    empresa nos contacta. Sin ella la oportunidad queda coja.
 → Llama captureLead. Queda como oportunidad y alguien del equipo le da
   seguimiento.
 → NUNCA abras un ticket por esto. Que TÚ no puedas dar el precio y haya que

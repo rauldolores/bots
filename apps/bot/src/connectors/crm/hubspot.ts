@@ -63,10 +63,12 @@ export const hubspotConnector: CrmConnector = {
   async pushLead(creds: ConnectorCreds, lead: CrmLeadInput): Promise<ConnectorPushResult> {
     const properties: Record<string, string> = {};
     if (lead.name) properties.firstname = lead.name;
-    if (lead.contact) {
-      if (isEmail(lead.contact)) properties.email = lead.contact;
-      else properties.phone = lead.contact;
-    }
+    // Correo Y teléfono cuando los hay — se piden por separado, así que ya no
+    // hay que adivinar. `contact` es el respaldo de quien solo manda uno.
+    const correo = lead.email ?? (lead.contact && isEmail(lead.contact) ? lead.contact : null);
+    const telefono = lead.phone ?? (lead.contact && !isEmail(lead.contact) ? lead.contact : null);
+    if (correo) properties.email = correo;
+    if (telefono) properties.phone = telefono;
     const message = [lead.intent, lead.notes].filter(Boolean).join("\n\n");
     if (message) properties.message = message;
 

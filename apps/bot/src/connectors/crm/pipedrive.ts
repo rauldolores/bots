@@ -42,10 +42,12 @@ export const pipedriveConnector: CrmConnector = {
     const token = encodeURIComponent(creds.apiKey);
 
     const body: Record<string, unknown> = { name: lead.name || "(sin nombre)" };
-    if (lead.contact) {
-      if (isEmail(lead.contact)) body.email = [{ value: lead.contact, primary: true }];
-      else body.phone = [{ value: lead.contact, primary: true }];
-    }
+    // Correo Y teléfono cuando los hay — se piden por separado, así que ya no
+    // hay que adivinar. `contact` es el respaldo de quien solo manda uno.
+    const correo = lead.email ?? (lead.contact && isEmail(lead.contact) ? lead.contact : null);
+    const telefono = lead.phone ?? (lead.contact && !isEmail(lead.contact) ? lead.contact : null);
+    if (correo) body.email = [{ value: correo, primary: true }];
+    if (telefono) body.phone = [{ value: telefono, primary: true }];
 
     let personId: number | undefined;
     try {

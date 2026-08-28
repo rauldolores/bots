@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import type { Env } from "../env";
 import { Db } from "../db/client";
-import { LeadsRepo } from "../db/leads";
+import { LeadsRepo, leadMetadata } from "../db/leads";
 import { ConversationsRepo } from "../db/conversations";
 import { BotConnectorsRepo } from "../db/botConnectors";
 import { BotsRepo } from "../db/bots";
@@ -20,17 +20,19 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
       "Registra una OPORTUNIDAD de venta. Úsala en cuanto el cliente muestre intención de compra: pide precios, pide una cotización, dice que le interesa, pregunta por un servicio. NO esperes a que cierre ni a tener todos los datos — capturar temprano es el objetivo. " +
       "Es la tool correcta AUNQUE tú no puedas dar el precio y haya que pasárselo a alguien del equipo: eso es una venta en curso, no un ticket de soporte. " +
       "Guarda localmente y, si hay un CRM conectado, da de alta ahí el contacto, la empresa, la oportunidad y una tarea de seguimiento para el equipo. " +
-      "Necesita un teléfono o correo REAL para poder contactar al lead después — si el cliente escribe por un canal que ya trae su teléfono (WhatsApp, llamada) no hace falta pedirlo aparte, pero si no (Telegram, Messenger, widget web) pídeselo antes de llamar esta tool: sin eso, la captura se rechaza.",
+      "Pídele SIEMPRE las tres cosas: correo, teléfono y empresa. Si solo te da uno de los dos medios de contacto, no insistas más de una vez — con uno basta para guardar. " +
+      "Sin NINGÚN medio de contacto la captura se rechaza (salvo que el canal ya traiga su teléfono, como WhatsApp o una llamada).",
     inputSchema: z.object({
       name: z.string().optional().describe("Nombre del cliente"),
-      contact: z.string().optional().describe("Teléfono o email"),
+      email: z.string().optional().describe("Su correo. Pídeselo aunque ya tengas el teléfono."),
+      phone: z.string().optional().describe("Su teléfono. Pídeselo aunque ya tengas el correo."),
       intent: z.string().describe("Qué quiere el cliente, en 1-2 frases"),
       notes: z.string().optional(),
       company: z
         .string()
         .optional()
         .describe(
-          "Empresa o negocio del cliente, SOLO si lo mencionó explícitamente (ej. \"trabajo en Acme\"). Nunca lo inventes ni lo confundas con el nombre del cliente.",
+          "Empresa o negocio desde el que nos contacta. PREGÚNTASELA siempre — si no la mencionó, pregúntale de qué empresa nos contacta antes de llamar esta tool. Nunca la inventes ni la confundas con el nombre de la persona.",
         ),
       estimatedValue: z
         .number()
@@ -39,7 +41,7 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
           "Monto o presupuesto que el cliente mencionó, como número, SOLO si dio una cifra concreta (ej. \"tengo like $5000 de presupuesto\" → 5000). Nunca lo inventes ni lo estimes tú.",
         ),
     }),
-    execute: async ({ name, contact, intent, notes, company, estimatedValue }) => {
+    execute: async ({ name, email, phone, intent, notes, company, estimatedValue }) => {
       const convId = getConversationId();
       const db = new Db(env.DB);
       const leads = new LeadsRepo(db, botId);
@@ -49,42 +51,49 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
       const conv = convId ? await new ConversationsRepo(db, botId).getById(convId) : null;
 
       const region = regionForTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
-      const classified = classifyContact(contact, region);
+      // Se piden por separado (antes era UN campo "teléfono o email" y había que
+      // adivinar cuál era), pero se validan igual: lo que el modelo escriba en
+      // `email` puede ser un teléfono y al revés, así que cada uno se clasifica
+      // por su contenido y no por el campo donde vino.
+      const clasificados = [email, phone]
+        .map((v) => classifyContact(v, region))
+        .filter((c): c is NonNullable<typeof c> => c !== null);
+      const correo = clasificados.find((c) => c.kind === "email") ?? null;
+      const telefono = clasificados.find((c) => c.kind === "phone") ?? null;
+
       // Si el canal por el que escribe YA es un teléfono (WhatsApp, voz), ese
       // número cuenta como medio de contacto aunque el LLM no haya llenado
-      // `contact` — ya sabemos cómo llegarle. Un canal opaco (Telegram,
-      // Messenger, widget) no cuenta: solo sirve dentro de esa conversación.
+      // nada — ya sabemos cómo llegarle. Un canal opaco (Telegram, Messenger,
+      // widget) no cuenta: solo sirve dentro de esa conversación.
       const convPhone = conv ? normalizePhone(conv.channel_user_id, region) : null;
 
       // Obligatorio: sin un teléfono o correo real no hay forma de contactar
       // al lead después de esta conversación. Mejor no guardar nada que
       // guardar un lead al que nadie le puede volver a escribir.
-      if (!classified && !convPhone) {
+      if (!correo && !telefono && !convPhone) {
         return {
           leadId: null,
           captured: false,
           message:
-            "No se guardó el lead: falta un teléfono o correo válido para poder contactarlo. Pídeselo al cliente y vuelve a llamar esta tool con ese dato.",
+            "No se guardó el lead: falta un teléfono o correo válido para poder contactarlo. Pídeselos al cliente y vuelve a llamar esta tool con esos datos.",
         };
       }
 
-      // Lo que se guarda en leads.contact (lo que el dueño VE en /admin/leads
-      // y en el CSV exportado): si el LLM no dictó nada pero el canal ya es
-      // un teléfono, se usa ese — así un lead de WhatsApp/voz nunca aparece
-      // con "—" en Contacto cuando en realidad sí se le puede escribir.
-      const effectiveContact = classified ? contact : (convPhone ?? contact);
+      // Lo que se guarda en leads.contact (lo que el dueño VE en /admin/leads y
+      // en el CSV): el correo si lo hay, si no el teléfono. Los DOS quedan
+      // completos y tipados en lead_contacts — esa tabla existe justo para eso.
+      const effectiveContact = correo?.addressRaw ?? telefono?.addressRaw ?? convPhone;
 
       // Evita duplicados: si este mismo contacto ya tiene un lead ABIERTO
       // (el cliente insiste en la misma conversación, o el modelo llamó la
       // tool dos veces para lo mismo), se actualiza ese en vez de crear uno
-      // nuevo — ver LeadsRepo.findOpenByContactAddress/mergeCapture.
-      const addressNorms = classified
-        ? classified.kind === "phone"
-          ? phoneVariants(classified.addressNorm)
-          : [classified.addressNorm]
-        : convPhone
-          ? phoneVariants(convPhone)
-          : [];
+      // nuevo — ver LeadsRepo.findOpenByContactAddress/mergeCapture. Se buscan
+      // por AMBOS medios: puede que el lead viejo se haya guardado con el otro.
+      const addressNorms = [
+        ...(correo ? [correo.addressNorm] : []),
+        ...(telefono ? phoneVariants(telefono.addressNorm) : []),
+        ...(convPhone ? phoneVariants(convPhone) : []),
+      ];
       const existing = await leads.findOpenByContactAddress(addressNorms);
 
       // Empresa/monto capturados, si el cliente los dio — se guardan en el
@@ -99,12 +108,12 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
       if (existing) {
         leadId = existing.id;
         isNew = false;
-        await leads.mergeCapture(leadId, { name, contact: effectiveContact, intent, notes, metadata });
+        await leads.mergeCapture(leadId, { name, contact: effectiveContact ?? undefined, intent, notes, metadata });
       } else {
         leadId = await leads.create({
           conversationId: convId,
           name,
-          contact: effectiveContact,
+          contact: effectiveContact ?? undefined,
           channelUserId: conv?.channel_user_id ?? null,
           intent,
           notes,
@@ -119,7 +128,7 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
       // conserva tal cual: es lo que ve el dueño y lo que se empuja al CRM.
       // Idempotente (ON CONFLICT DO NOTHING) — correrlo sobre un lead que ya
       // existía no duplica nada.
-      await registerLeadContacts(db, botId, leadId, effectiveContact, conv).catch((e) =>
+      await registerLeadContacts(db, botId, leadId, [correo?.addressRaw, telefono?.addressRaw], conv).catch((e) =>
         console.error("[captureLead] no se pudieron registrar los contactos tipados:", e),
       );
 
@@ -134,6 +143,10 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
         await pushToCrmIfConnected(env, db, botId, leadId, {
           name: name ?? null,
           contact: effectiveContact ?? null,
+          // Los dos por separado, para que el CRM los guarde en su campo
+          // correcto en vez de que el adaptador tenga que adivinar cuál es.
+          email: correo?.addressRaw ?? null,
+          phone: telefono?.addressRaw ?? convPhone ?? null,
           intent,
           notes: notes ?? null,
           company: company ?? null,
@@ -161,10 +174,22 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
         ).catch((e) => console.error("[captureLead] no se pudo avisar al dueño:", e));
       }
 
+      // La empresa NO bloquea la captura (perder el lead sería peor, y un
+      // cliente que no la quiere dar existe), pero sí se le recuerda al modelo
+      // que la pida: sin ella la oportunidad queda sin empresa en el CRM y el
+      // equipo de ventas pierde con quién está tratando. Volver a llamar la
+      // tool con el dato la completa — mergeCapture rellena huecos sin pisar.
+      const yaTeniaEmpresa = existing ? Boolean(leadMetadata(existing).empresa) : false;
+      const faltaEmpresa = !company && !yaTeniaEmpresa;
+      const base = isNew ? "Lead capturado." : "Ya teníamos este lead — se actualizó con lo nuevo.";
+
       return {
         leadId,
         captured: true,
-        message: isNew ? "Lead capturado." : "Ya teníamos este lead — se actualizó con lo nuevo.",
+        faltaEmpresa,
+        message: faltaEmpresa
+          ? `${base} FALTA la empresa: pregúntale desde qué empresa nos contacta y vuelve a llamar esta tool con ese dato.`
+          : base,
       };
     },
   });

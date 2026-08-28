@@ -123,10 +123,13 @@ export const vinquliaConnector: CrmConnector = {
     const existente = lead.contact ? await buscarContacto(creds, base, lead.contact, lead.name) : null;
 
     const body: Record<string, unknown> = splitName(lead.name);
-    if (lead.contact) {
-      if (isEmail(lead.contact)) body.email_jsonb = [{ email: lead.contact, type: "Work" }];
-      else if (isPhone(lead.contact)) body.phone_jsonb = [{ number: lead.contact, type: "Work" }];
-    }
+    // Correo Y teléfono cuando los hay: se piden los dos por separado, así que
+    // ya no hay que adivinar cuál es cuál. `contact` es el respaldo para los
+    // llamadores viejos que solo mandan uno.
+    const correo = lead.email ?? (lead.contact && isEmail(lead.contact) ? lead.contact : null);
+    const telefono = lead.phone ?? (lead.contact && !isEmail(lead.contact) ? lead.contact : null);
+    if (correo && isEmail(correo)) body.email_jsonb = [{ email: correo, type: "Work" }];
+    if (telefono && isPhone(telefono)) body.phone_jsonb = [{ number: telefono, type: "Work" }];
     if (sales !== undefined) body.sales_id = sales;
     if (companyId !== undefined) body.company_id = companyId;
 
