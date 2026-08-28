@@ -55,24 +55,35 @@ export class CrmProposalsRepo {
 
   /**
    * Encola una propuesta. Si ya existe una con la misma llave, NO la duplica ni
-   * la pisa: la primera conserva su estado (si el dueño ya la rechazó, no se le
-   * vuelve a poner enfrente).
+   * la pisa: la primera conserva su estado — si el dueño ya la rechazó, no se
+   * le vuelve a poner enfrente; si ya se aplicó, no se escribe dos veces.
+   *
+   * La excepción son las FALLIDAS, que vuelven a la cola. Mientras todo se
+   * aprobaba a mano eso no importaba: el dueño veía el error y reintentaba.
+   * Aplicándose solas, un fallo pasajero (el CRM caído, un timeout) dejaría el
+   * dato perdido para siempre y sin que nadie se entere, porque el dedupe
+   * impide volver a proponerlo. Un fallo es "todavía no", no "ya no".
    */
   async propose(p: NuevaPropuesta): Promise<string | null> {
-    const id = crypto.randomUUID();
-    const res = await this.db.run(
+    const fila = await this.db.first<{ id: string }>(
       `INSERT INTO crm_proposals (
          id, bot_id, conversation_id, lead_id, kind, operation, summary, payload,
          current_value, proposed_value, reason, confidence, risk, status, dedupe_key, created_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, 'pendiente', ?, ?)
-       ON CONFLICT (bot_id, dedupe_key) DO NOTHING`,
+       ON CONFLICT (bot_id, dedupe_key) DO UPDATE
+         SET status = 'pendiente', result = NULL, decided_at = NULL,
+             conversation_id = EXCLUDED.conversation_id, created_at = EXCLUDED.created_at
+         WHERE crm_proposals.status = 'fallida'
+       RETURNING id`,
       [
-        id, this.botId, p.conversationId, p.leadId, p.kind, p.operation, p.summary,
+        crypto.randomUUID(), this.botId, p.conversationId, p.leadId, p.kind, p.operation, p.summary,
         JSON.stringify(p.payload ?? {}), p.currentValue ?? null, p.proposedValue ?? null,
         p.reason, p.confidence, p.risk, p.dedupeKey, Date.now(),
       ],
     );
-    return res.rowsAffected > 0 ? id : null;
+    // Sin fila: ya existía y no estaba fallida. El id devuelto es el de la
+    // propuesta que quedó viva, que en el reintento es la ORIGINAL, no la nueva.
+    return fila?.id ?? null;
   }
 
   async listPendientes(limit = 50): Promise<CrmProposal[]> {

@@ -32,6 +32,36 @@ export interface ResultadoEjecucion {
   detalle: string;
 }
 
+/** El payload se guarda como jsonb, pero llega como texto según el driver. */
+function leerPayload(p: Pick<CrmProposal, "payload">): Record<string, unknown> {
+  const bruto = typeof p.payload === "string" ? JSON.parse(p.payload) : p.payload;
+  // Doble codificado en filas viejas: JSON.stringify sobre un string ya
+  // serializado deja `"{\"campo\":...}"`. Se desenvuelve en vez de romperse.
+  return (typeof bruto === "string" ? JSON.parse(bruto) : bruto) as Record<string, unknown>;
+}
+
+/**
+ * Qué sabe escribir este archivo HOY.
+ *
+ * Es la lista que consulta el aplicado automático para no "fallar" propuestas
+ * que en realidad nadie intentó: marcarlas como fallidas las sacaría de la cola
+ * y el dueño perdería la oportunidad de hacerlas a mano. `aplicar()` la usa
+ * como guarda, así que las dos no pueden separarse en la dirección peligrosa.
+ */
+export function sabemosAplicar(p: Pick<CrmProposal, "kind" | "operation" | "payload">): boolean {
+  if (p.operation === "revisar_contradiccion") return true; // no toca el CRM
+  let campo = "";
+  try {
+    campo = String(leerPayload(p).campo ?? "");
+  } catch {
+    return false; // payload ilegible: no se adivina
+  }
+  if (p.kind === "nota" || p.kind === "tarea") return true;
+  if (p.kind === "contacto") return campo in CAMPOS_CONTACTO;
+  if (p.kind === "empresa") return campo in CAMPOS_EMPRESA;
+  return false;
+}
+
 /**
  * Aplica una propuesta ya aprobada. Nunca lanza — el resultado se guarda en la
  * propia propuesta para que el dueño vea qué pasó.
@@ -41,17 +71,77 @@ export async function ejecutarPropuesta(
   db: Db,
   botId: string,
   propuesta: CrmProposal,
+  opts: { automatica?: boolean } = {},
 ): Promise<ResultadoEjecucion> {
   const repo = new CrmProposalsRepo(db, botId);
+  // El origen queda escrito en el resultado: en el historial no da lo mismo
+  // "esto lo aprobaste tú" que "esto se aplicó solo".
+  const marca = (d: string) => (opts.automatica ? `Automática · ${d}` : d);
   try {
     const resultado = await aplicar(env, db, botId, propuesta);
-    await repo.marcarResultado(propuesta.id, resultado.ok ? "aplicada" : "fallida", resultado.detalle);
+    await repo.marcarResultado(propuesta.id, resultado.ok ? "aplicada" : "fallida", marca(resultado.detalle));
     return resultado;
   } catch (e) {
     const detalle = String((e as Error)?.message ?? e);
-    await repo.marcarResultado(propuesta.id, "fallida", detalle).catch(() => {});
+    await repo.marcarResultado(propuesta.id, "fallida", marca(detalle)).catch(() => {});
     return { ok: false, detalle };
   }
+}
+
+/** Los riesgos que se escriben solos. El alto SIEMPRE espera al dueño. */
+const RIESGO_AUTOMATICO: ReadonlySet<string> = new Set(["bajo", "medio"]);
+
+/** Una propuesta que se puede escribir sin preguntarle a nadie. */
+export function seAplicaSola(p: CrmProposal): boolean {
+  return RIESGO_AUTOMATICO.has(p.risk) && sabemosAplicar(p);
+}
+
+/**
+ * En qué orden se aplican.
+ *
+ * Una empresa nace con su nombre: hasta que existe, los demás campos no tienen
+ * dónde vivir. Aplicar "industria" antes que "nombre" falla con "este contacto
+ * no tiene empresa en el CRM" — pasó tal cual en producción, con el nombre
+ * esperando dos renglones más abajo en la misma cola. A mano el dueño lo
+ * ordena solo; automático hay que decirlo.
+ */
+function ordenDeAplicacion(p: CrmProposal): number {
+  if (p.kind !== "empresa") return 1;
+  try {
+    return leerPayload(p).campo === "nombre" ? 0 : 1;
+  } catch {
+    return 1;
+  }
+}
+
+/**
+ * Escribe en el CRM todo lo pendiente que no necesita permiso.
+ *
+ * Corre FUERA del turno (lo llama el mismo trabajo que hace el análisis), así
+ * que puede darse el lujo de ir una por una: el orden importa y el cliente ya
+ * fue atendido. Nunca lanza.
+ */
+export async function aplicarAutomaticas(
+  env: Env,
+  db: Db,
+  botId: string,
+  limite = 25,
+): Promise<{ aplicadas: number; fallidas: number; enEspera: number }> {
+  const repo = new CrmProposalsRepo(db, botId);
+  const pendientes = await repo.listPendientes(limite);
+  const candidatas = pendientes.filter(seAplicaSola).sort((a, b) => ordenDeAplicacion(a) - ordenDeAplicacion(b));
+
+  let aplicadas = 0;
+  let fallidas = 0;
+  for (const p of candidatas) {
+    // `decidir` solo avanza desde 'pendiente': si el dueño la aprobó o la
+    // descartó desde el panel mientras esto corría, gana él.
+    if (!(await repo.decidir(p.id, "aprobada").catch(() => false))) continue;
+    const r = await ejecutarPropuesta(env, db, botId, p, { automatica: true });
+    if (r.ok) aplicadas++;
+    else fallidas++;
+  }
+  return { aplicadas, fallidas, enEspera: pendientes.length - candidatas.length };
 }
 
 async function aplicar(env: Env, db: Db, botId: string, p: CrmProposal): Promise<ResultadoEjecucion> {
@@ -78,7 +168,7 @@ async function aplicar(env: Env, db: Db, botId: string, p: CrmProposal): Promise
     return { ok: false, detalle: "No se encontró a esta persona en el CRM. Regístrala primero." };
   }
 
-  const payload = (typeof p.payload === "string" ? JSON.parse(p.payload) : p.payload) as Record<string, unknown>;
+  const payload = leerPayload(p);
   const sales = vinquliaSalesId(creds);
 
   if (p.kind === "nota") {
@@ -157,7 +247,8 @@ async function aplicar(env: Env, db: Db, botId: string, p: CrmProposal): Promise
 
   // Etiquetas: `crm.tags` es un catálogo por organización y `contacts.tags` un
   // arreglo de ids. Hacerlo bien pide leer-modificar-escribir sin pisar las que
-  // ya tiene, y eso merece su propia vuelta.
+  // ya tiene, y eso merece su propia vuelta. `sabemosAplicar` lo sabe, así que
+  // el aplicado automático ni las intenta: se quedan en la cola, visibles.
   return { ok: false, detalle: `Todavía no sé aplicar cambios de tipo "${p.kind}".` };
 }
 

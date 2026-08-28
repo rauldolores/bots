@@ -93,7 +93,7 @@ export async function renderMejoras(
     getLessons(env, botId),
     new SettingsRepo(db, botId).get(SETTING_KEYS.autonomyLevel),
     propuestasRepo.listPendientes().catch(() => []),
-    propuestasRepo.listDecididas(6).catch(() => []),
+    propuestasRepo.listDecididas(12).catch(() => []),
   ]);
   const copilot = autonomyRaw === "copilot";
 
@@ -270,14 +270,19 @@ function seccionCrm(pendientes: CrmProposal[], decididas: CrmProposal[]): string
   const lista = pendientes.length
     ? `<div style="display:flex;flex-direction:column;gap:10px">${pendientes.map(propuestaCard).join("")}</div>`
     : `<div class="bg-panel text-dim text-[12.5px]" style="border:1px solid var(--line);padding:28px;text-align:center">
-         Nada por revisar. Cuando el agente aprenda algo de una conversación, te lo propone aquí.
+         Nada que decidir. Lo de rutina ya se aplicó solo — lo verás abajo en el historial.
        </div>`;
 
   const historial = decididas.length
     ? `<div class="bg-panel border border-line" style="padding:18px;margin-top:16px">
-         <div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:8px">📓 Ya decididas</div>
+         <div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:8px">📓 Ya escritas en el CRM</div>
          ${decididas
            .map((d) => {
+             // El origen viene marcado en el resultado por ejecutarPropuesta.
+             // Importa mostrarlo: el dueño tiene derecho a distinguir de un
+             // vistazo lo que autorizó él de lo que se aplicó solo.
+             const sola = (d.result ?? "").startsWith("Automática · ");
+             const detalle = sola ? d.result!.slice("Automática · ".length) : d.result;
              const est =
                d.status === "aplicada"
                  ? pill("✓ aplicada", "var(--ok)")
@@ -285,9 +290,10 @@ function seccionCrm(pendientes: CrmProposal[], decididas: CrmProposal[]): string
                    ? pill("falló", "var(--bad)")
                    : pill(d.status, "var(--dim)");
              return `<div style="display:flex;align-items:center;gap:8px;border-top:1px solid var(--line);padding:8px 0;font-size:12.5px" class="first:border-t-0">
-                       <span class="text-muted truncate" style="flex:1">${esc(d.summary)}</span>${est}
+                       <span class="text-muted truncate" style="flex:1">${esc(d.summary)}</span>
+                       ${sola ? pill("sola", "var(--dim)") : ""}${est}
                      </div>
-                     ${d.status === "fallida" && d.result ? `<div class="text-[11px]" style="color:var(--bad);padding-bottom:8px">${esc(d.result)}</div>` : ""}`;
+                     ${d.status === "fallida" && detalle ? `<div class="text-[11px]" style="color:var(--bad);padding-bottom:8px">${esc(detalle)}</div>` : ""}`;
            })
            .join("")}
        </div>`
@@ -296,11 +302,12 @@ function seccionCrm(pendientes: CrmProposal[], decididas: CrmProposal[]): string
   return `
     <div style="margin-top:40px;padding-top:28px;border-top:2px solid var(--line)">
       <div style="margin-bottom:16px">
-        <h2 class="font-display font-semibold text-[15px] text-cream">⇄ Cambios al CRM por aprobar</h2>
+        <h2 class="font-display font-semibold text-[15px] text-cream">⇄ Cambios al CRM</h2>
         <p class="text-muted text-[12.5px]" style="margin-top:2px">
-          Lo de arriba mejora cómo responde tu bot. Esto toca los datos de tus clientes, así que
-          <strong style="color:var(--cream)">nada se escribe sin tu clic</strong>. Conforme veas que acierta,
-          iremos soltando categorías a automático.
+          Lo de arriba mejora cómo responde tu bot. Esto toca los datos de tus clientes.
+          Las notas, tareas y datos que solo <strong style="color:var(--cream)">rellenan huecos o corrigen
+          un campo</strong> se escriben solos al terminar la conversación. Aquí abajo llega únicamente lo
+          delicado, que <strong style="color:var(--cream)">no se toca sin tu clic</strong>.
         </p>
       </div>
       ${lista}

@@ -5,8 +5,11 @@
  * completa y nadie la está esperando. Esa fue la clave que destrabó todo esto —
  * el análisis puede darse el lujo de ser caro porque ya nadie mira el reloj.
  *
- * Lo que sale de aquí NO se ejecuta: se encola para que el dueño lo apruebe
- * (src/db/crmProposals.ts). El modelo razona; el código decide.
+ * Lo que sale de aquí no se escribe directo: pasa por la cola de propuestas
+ * (src/db/crmProposals.ts), y de ahí el código decide qué se aplica solo y qué
+ * espera al dueño — riesgo bajo y medio van solos, el alto siempre pregunta
+ * (ver aplicarAutomaticas en ./ejecutar.ts). El modelo razona; el código
+ * decide.
  */
 import { generateObject } from "ai";
 import { z } from "zod";
@@ -18,6 +21,7 @@ import { MessagesRepo } from "../db/messages";
 import { CrmProposalsRepo } from "../db/crmProposals";
 import { buildCustomerContext } from "../customer/context";
 import { proponerDesdeAnalisis } from "./proponer";
+import { aplicarAutomaticas } from "./ejecutar";
 
 /** Tras estos intentos se abandona: el cliente ya fue atendido y la conversación sigue en la bandeja. */
 const MAX_INTENTOS = 3;
@@ -177,6 +181,9 @@ export async function processCrmAnalysisJobs(env: Env, limit: number): Promise<{
   const repo = new WorkJobsRepo(db);
   const trabajos = await repo.claimDue(limit, "crm_analysis");
   let analizadas = 0;
+  // Los bots que tuvieron movimiento en esta corrida. Solo a ellos se les
+  // revisa la cola después: nada de barrer la base entera cada minuto.
+  const conMovimiento = new Set<string>();
 
   for (const t of trabajos) {
     const conversationId = String(t.payload?.conversationId ?? "");
@@ -184,6 +191,7 @@ export async function processCrmAnalysisJobs(env: Env, limit: number): Promise<{
       if (conversationId) {
         await analizarConversacion(env, t.bot_id, conversationId);
         analizadas++;
+        conMovimiento.add(t.bot_id);
       }
       await repo.complete(t.id);
     } catch (e) {
@@ -199,6 +207,23 @@ export async function processCrmAnalysisJobs(env: Env, limit: number): Promise<{
       } else {
         await repo.fail(t.id, msg, REINTENTO_MS).catch(() => {});
       }
+    }
+  }
+
+  // Y se escribe en el CRM lo que no necesita permiso. Va DESPUÉS de analizar
+  // todo, no dentro del bucle: así una sola pasada ordena bien las propuestas
+  // de la misma conversación (la empresa antes que sus campos), y un fallo
+  // escribiendo no le quita su análisis a nadie.
+  for (const botId of conMovimiento) {
+    try {
+      const r = await aplicarAutomaticas(env, db, botId);
+      if (r.aplicadas || r.fallidas || r.enEspera) {
+        console.log(
+          `[crmAnalisis] bot ${botId}: ${r.aplicadas} aplicada(s) sola(s), ${r.fallidas} fallida(s), ${r.enEspera} esperando visto bueno`,
+        );
+      }
+    } catch (e) {
+      console.error(`[crmAnalisis] aplicarAutomaticas de ${botId}:`, e);
     }
   }
   return { analizadas };
