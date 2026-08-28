@@ -19,6 +19,11 @@ import { CrmProposalsRepo } from "../db/crmProposals";
 import { buildCustomerContext } from "../customer/context";
 import { proponerDesdeAnalisis } from "./proponer";
 
+/** Tras estos intentos se abandona: el cliente ya fue atendido y la conversación sigue en la bandeja. */
+const MAX_INTENTOS = 3;
+/** Espera antes de reintentar un análisis fallido. */
+const REINTENTO_MS = 5 * 60_000;
+
 /** Cuántos mensajes del final se analizan. Lo reciente es lo que trae información nueva. */
 const MENSAJES_A_ANALIZAR = 12;
 
@@ -104,7 +109,7 @@ export async function analizarConversacion(
   botId: string,
   conversationId: string,
 ): Promise<{ propuestas: number } | null> {
-  try {
+  {
     const db = new Db(env.DB);
     const historia = await new MessagesRepo(db, botId).lastN(conversationId, MENSAJES_A_ANALIZAR);
     if (historia.length < 2) return null; // un saludo suelto no da para analizar
@@ -145,13 +150,11 @@ Reporta ÚNICAMENTE lo que el cliente dijo de forma explícita. No deduzcas, no 
       conversationId,
       cliente,
     });
-    if (propuestas > 0) {
-      console.log(`[crmAnalisis] conv ${conversationId}: ${propuestas} propuesta(s) en cola de revisión`);
-    }
+    // Se registra SIEMPRE, incluido el cero: "no propuso nada" y "falló en
+    // silencio" se veían idénticos desde fuera, y eso costó una tarde de
+    // diagnóstico a ciegas.
+    console.log(`[crmAnalisis] conv ${conversationId}: ${propuestas} propuesta(s) en cola`);
     return { propuestas };
-  } catch (e) {
-    console.error(`[crmAnalisis] falló el análisis de ${conversationId}:`, e);
-    return null;
   }
 }
 
@@ -177,10 +180,18 @@ export async function processCrmAnalysisJobs(env: Env, limit: number): Promise<{
       }
       await repo.complete(t.id);
     } catch (e) {
-      // Un análisis fallido no vale un reintento eterno: el cliente ya fue
-      // atendido y la conversación sigue en la bandeja para quien quiera leerla.
-      console.error(`[crmAnalisis] trabajo ${t.id} falló:`, e);
-      await repo.complete(t.id).catch(() => {});
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[crmAnalisis] trabajo ${t.id} falló:`, msg);
+      // El error QUEDA en la fila (work_jobs.last_error), no solo en un log
+      // que puede no capturarse. Antes se borraba el trabajo pasara lo que
+      // pasara, así que un análisis roto y uno que no encontró nada se veían
+      // exactamente igual desde fuera: la cola vacía.
+      if (t.attempts >= MAX_INTENTOS) {
+        console.error(`[crmAnalisis] ${t.id} abandonado tras ${t.attempts} intentos`);
+        await repo.complete(t.id).catch(() => {});
+      } else {
+        await repo.fail(t.id, msg, REINTENTO_MS).catch(() => {});
+      }
     }
   }
   return { analizadas };
