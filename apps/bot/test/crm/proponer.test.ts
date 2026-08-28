@@ -38,7 +38,10 @@ function cliente(over: Partial<CustomerContext> = {}): CustomerContext {
   };
 }
 
-function analisis(over: Partial<AnalisisCrm> = {}): AnalisisCrm {
+// `over` va laxo a propósito: cada prueba declara SOLO el campo que ejercita.
+// El esquema real exige todas las llaves (structured outputs), pero rellenarlas
+// con null en cada caso escondería lo que cada prueba está diciendo.
+function analisis(over: Record<string, unknown> = {}): AnalisisCrm {
   return {
     interaccion: { intencion: "ventas", resumen: "Quiere un CRM para 25 vendedores. Objeción: precio." },
     ...over,

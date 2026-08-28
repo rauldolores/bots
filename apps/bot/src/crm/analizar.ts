@@ -35,25 +35,32 @@ const MENSAJES_A_ANALIZAR = 12;
  * presupuesto, decisor…", se le pide que llene campos. Un modelo llena campos
  * mucho mejor de lo que sigue procedimientos.
  *
- * Todo opcional a propósito: una conversación de la que no se aprende nada
- * debe poder devolver un objeto vacío, no inventar.
+ * Todo puede venir en null a propósito: una conversación de la que no se
+ * aprende nada debe poder no reportar nada, en vez de inventar.
+ *
+ * Va `.nullable()` y NO `.optional()`: el modo estricto de OpenAI exige que
+ * TODA propiedad esté en `required`, así que un solo campo opcional tumba la
+ * llamada entera con "Missing 'nombre'". Como el análisis corre fuera del
+ * turno, nadie lo notaba: la cola de propuestas se quedaba vacía para
+ * siempre. "No sé" se dice con null, no con ausencia — lo cuida
+ * test/crm/analisisSchema.test.ts.
  */
 const AnalisisSchema = z.object({
   contacto: z
     .object({
-      nombre: z.string().optional().describe("Nombre completo SOLO si lo dijo en esta conversación"),
-      cargo: z.string().optional().describe("Su puesto, ej. 'Director de operaciones'"),
-      email: z.string().optional(),
-      telefono: z.string().optional(),
+      nombre: z.string().nullable().describe("Nombre completo SOLO si lo dijo en esta conversación"),
+      cargo: z.string().nullable().describe("Su puesto, ej. 'Director de operaciones'"),
+      email: z.string().nullable(),
+      telefono: z.string().nullable(),
     })
-    .optional(),
+    .nullable(),
   empresa: z
     .object({
-      nombre: z.string().optional(),
-      industria: z.string().optional().describe("A qué se dedica, ej. 'distribución de alimentos'"),
-      tamano: z.number().optional().describe("Número de empleados o usuarios, si lo mencionó"),
+      nombre: z.string().nullable(),
+      industria: z.string().nullable().describe("A qué se dedica, ej. 'distribución de alimentos'"),
+      tamano: z.number().nullable().describe("Número de empleados o usuarios, si lo mencionó"),
     })
-    .optional(),
+    .nullable(),
   interaccion: z.object({
     intencion: z
       .enum(["ventas", "soporte", "facturacion", "seguimiento", "queja", "consulta", "otro"])
@@ -66,24 +73,24 @@ const AnalisisSchema = z.object({
   }),
   oportunidad: z
     .object({
-      interes: z.string().optional().describe("Qué producto o servicio le interesa"),
-      valorEstimado: z.number().optional().describe("Presupuesto o monto que él mencionó, nunca inventado"),
-      objeciones: z.array(z.string()).optional().describe("Ej. 'precio', 'no es el momento'"),
+      interes: z.string().nullable().describe("Qué producto o servicio le interesa"),
+      valorEstimado: z.number().nullable().describe("Presupuesto o monto que él mencionó, nunca inventado"),
+      objeciones: z.array(z.string()).nullable().describe("Ej. 'precio', 'no es el momento'"),
     })
-    .optional(),
+    .nullable(),
   compromisos: z
     .array(
       z.object({
         que: z.string().describe("Qué se prometió, ej. 'enviar propuesta'"),
-        cuando: z.string().optional().describe("Cuándo, tal como se dijo: 'el martes', 'mañana'"),
+        cuando: z.string().nullable().describe("Cuándo, tal como se dijo: 'el martes', 'mañana'"),
         deQuien: z.enum(["nosotros", "cliente"]),
       }),
     )
-    .optional()
+    .nullable()
     .describe("Solo compromisos EXPLÍCITOS. 'Lo pienso' no es un compromiso."),
   etiquetas: z
     .array(z.string())
-    .optional()
+    .nullable()
     .describe("2-4 etiquetas comerciales en kebab-case, ej. 'lead-caliente', 'objecion-precio'"),
   contradicciones: z
     .array(
@@ -92,7 +99,7 @@ const AnalisisSchema = z.object({
         loQueDijo: z.string(),
       }),
     )
-    .optional()
+    .nullable()
     .describe("Cuando lo dicho choca con lo que ya sabías del cliente. NO lo resuelvas, solo repórtalo."),
 });
 

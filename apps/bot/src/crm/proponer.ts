@@ -173,8 +173,10 @@ async function proponerCampo(
   o: {
     kind: "contacto" | "empresa";
     campo: string;
-    nuevo: string | undefined;
-    actual: string | undefined;
+    // null y undefined valen lo mismo aquí: el modelo dice "no sé" con null
+    // (lo exige structured outputs), y el CRM dice "vacío" con cualquiera.
+    nuevo: string | null | undefined;
+    actual: string | null | undefined;
     leadId: string | null;
     conversationId: string;
     etiqueta: string;
