@@ -7,6 +7,7 @@ import type {
   ConnectorPushResult,
   PipelineStageListResult,
 } from "../types";
+import { textoDeSeguimiento, vencimientoSeguimiento } from "../followupTask";
 
 const API = "https://api.hubapi.com";
 
@@ -133,8 +134,34 @@ export const hubspotConnector: CrmConnector = {
           console.error(`[hubspot] no se pudo crear la oportunidad: ${res.status} ${await jsonOrText(res)}`);
         }
       }
+
+      // La tarea de seguimiento. Se crea AUNQUE no haya oportunidad (el dueño
+      // puede no haber configurado el pipeline): es la mitad que de verdad
+      // hace que alguien marque.
+      if (contactId) {
+        const res = await fetch(`${API}/crm/v3/objects/tasks`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${creds.apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            properties: {
+              hs_task_subject: textoDeSeguimiento(lead),
+              hs_task_body: [lead.intent, lead.notes].filter(Boolean).join("\n\n"),
+              hs_task_status: "NOT_STARTED",
+              hs_task_type: "CALL",
+              // HubSpot espera epoch en milisegundos para el vencimiento.
+              hs_timestamp: String(vencimientoSeguimiento(creds).getTime()),
+            },
+          }),
+        });
+        if (res.ok) {
+          const taskId = ((await res.json()) as { id?: string }).id;
+          if (taskId) await associateDefault(creds, "tasks", taskId, "contacts", contactId);
+        } else {
+          console.error(`[hubspot] no se pudo crear la tarea: ${res.status} ${await jsonOrText(res)}`);
+        }
+      }
     } catch (e) {
-      console.error("[hubspot] empresa/oportunidad falló (el contacto ya quedó creado):", e);
+      console.error("[hubspot] empresa/oportunidad/tarea falló (el contacto ya quedó creado):", e);
     }
 
     return { ok: true, externalId: contactId };

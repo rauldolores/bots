@@ -53,7 +53,7 @@ describe("hubspotConnector.pushLead", () => {
 // F-CRM-completo: además del contacto, empresa (si se dio) y oportunidad (si
 // hay pipeline/etapa configurados) — asociadas entre sí.
 describe("hubspotConnector.pushLead — empresa y oportunidad", () => {
-  it("sin company ni pipeline configurado: solo crea el contacto (nada rompe lo que ya funcionaba)", async () => {
+  it("sin company ni pipeline configurado: contacto + tarea, pero NINGUNA empresa ni oportunidad", async () => {
     const calls: string[] = [];
     global.fetch = vi.fn(async (url: any) => {
       calls.push(url);
@@ -61,7 +61,12 @@ describe("hubspotConnector.pushLead — empresa y oportunidad", () => {
     }) as any;
     const result = await hubspotConnector.pushLead(creds, { name: "X", contact: null, intent: "y", notes: null });
     expect(result).toEqual({ ok: true, externalId: "1" });
-    expect(calls).toEqual(["https://api.hubapi.com/crm/v3/objects/contacts"]);
+    expect(calls).toContain("https://api.hubapi.com/crm/v3/objects/contacts");
+    // La tarea se crea AUNQUE no haya pipeline: es la mitad que hace que
+    // alguien de verdad marque.
+    expect(calls).toContain("https://api.hubapi.com/crm/v3/objects/tasks");
+    expect(calls.some((u) => u.endsWith("/companies"))).toBe(false);
+    expect(calls.some((u) => u.endsWith("/deals"))).toBe(false);
   });
 
   it("con company: crea la empresa y la asocia al contacto", async () => {
@@ -124,6 +129,65 @@ describe("hubspotConnector.pushLead — empresa y oportunidad", () => {
     const result = await hubspotConnector.pushLead(withStage, { name: "X", contact: null, intent: "y", notes: null });
     expect(result).toEqual({ ok: true, externalId: "999" });
     expect(calls).toContain("https://api.hubapi.com/crm/v4/objects/deals/deal-1/associations/default/contacts/999");
+  });
+});
+
+// La tarea de llamada que acompaña a toda oportunidad nueva — sin ella, la
+// oportunidad se queda en el tablero esperando a que alguien la vea.
+describe("hubspotConnector.pushLead — tarea de seguimiento", () => {
+  it("crea la tarea con el motivo dentro y la asocia al contacto", async () => {
+    const calls: Array<{ url: string; body: any }> = [];
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      calls.push({ url, body: init?.body ? JSON.parse(init.body) : null });
+      if (url.endsWith("/contacts")) return new Response(JSON.stringify({ id: "contact-1" }), { status: 201 });
+      if (url.endsWith("/tasks")) return new Response(JSON.stringify({ id: "task-1" }), { status: 201 });
+      return new Response("{}", { status: 200 });
+    }) as any;
+
+    await hubspotConnector.pushLead(creds, {
+      name: "Ana",
+      contact: null,
+      intent: "quiere una cotización del paquete premium",
+      notes: null,
+    });
+
+    const tarea = calls.find((c) => c.url.endsWith("/tasks"));
+    expect(tarea?.body.properties).toMatchObject({
+      hs_task_subject: "Llamar a Ana — quiere una cotización del paquete premium",
+      hs_task_status: "NOT_STARTED",
+      hs_task_type: "CALL",
+    });
+    expect(Number(tarea?.body.properties.hs_timestamp)).toBeGreaterThan(Date.now());
+    expect(
+      calls.some((c) => c.url === "https://api.hubapi.com/crm/v4/objects/tasks/task-1/associations/default/contacts/contact-1"),
+    ).toBe(true);
+  });
+
+  it("respeta followupHours cuando el dueño lo configuró", async () => {
+    const calls: Array<{ url: string; body: any }> = [];
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      calls.push({ url, body: init?.body ? JSON.parse(init.body) : null });
+      return new Response(JSON.stringify({ id: "1" }), { status: 201 });
+    }) as any;
+
+    const antes = Date.now();
+    await hubspotConnector.pushLead(
+      { apiKey: "pat-fake", config: { followupHours: "2" } },
+      { name: "Ana", contact: null, intent: "y", notes: null },
+    );
+    const vence = Number(calls.find((c) => c.url.endsWith("/tasks"))?.body.properties.hs_timestamp);
+    // ~2h, no las 24h del default.
+    expect(vence).toBeGreaterThanOrEqual(antes + 2 * 3600_000 - 5_000);
+    expect(vence).toBeLessThan(antes + 3 * 3600_000);
+  });
+
+  it("si la tarea falla, el contacto ya creado sigue siendo un push exitoso", async () => {
+    global.fetch = vi.fn(async (url: any) => {
+      if (String(url).endsWith("/tasks")) return new Response("boom", { status: 500 });
+      return new Response(JSON.stringify({ id: "contact-1" }), { status: 201 });
+    }) as any;
+    const result = await hubspotConnector.pushLead(creds, { name: "X", contact: null, intent: "y", notes: null });
+    expect(result).toEqual({ ok: true, externalId: "contact-1" });
   });
 });
 

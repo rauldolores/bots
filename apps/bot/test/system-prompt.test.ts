@@ -22,7 +22,7 @@ describe("renderSystemPrompt", () => {
     expect(prompt).toContain("<identity_and_voice>");
     expect(prompt).toContain("<core_principles>");
     expect(prompt).toContain("<tools>");
-    expect(prompt).toContain("<escalation_rules>");
+    expect(prompt).toContain("<que_registrar>");
     expect(prompt).toContain("<style_guide>");
     expect(prompt).toContain("<anti_patterns>");
   });
@@ -112,6 +112,71 @@ describe("renderSystemPrompt", () => {
   it("sin modo operativo, omite el bloque completo", () => {
     const prompt = renderSystemPrompt(input);
     expect(prompt).not.toContain("<modo_operativo>");
+  });
+});
+
+// Bug real reportado: el cliente pidió una COTIZACIÓN y el bot le abrió un
+// ticket de soporte. El prompt solo tenía <escalation_rules> — o sea, la única
+// instrucción de ruteo que existía empujaba todo hacia el ticket, y nada decía
+// cuándo capturar un lead. Estas pruebas fijan el árbol de decisión completo.
+describe("<que_registrar> — venta vs soporte", () => {
+  it("distingue los cuatro caminos, no solo el del ticket", () => {
+    const prompt = renderSystemPrompt(input);
+    expect(prompt).toContain("VENTA");
+    expect(prompt).toContain("SOPORTE");
+    expect(prompt).toContain("CITA");
+    expect(prompt).toContain("DUDA SIMPLE");
+  });
+
+  it("una cotización es VENTA, y dice explícitamente que NO es un ticket", () => {
+    const prompt = renderSystemPrompt(input);
+    const venta = prompt.slice(prompt.indexOf("VENTA"), prompt.indexOf("SOPORTE"));
+    expect(venta).toContain("cotización");
+    expect(venta).toContain("captureLead");
+    expect(venta).toContain("NUNCA abras un ticket");
+    // Lo que causó el bug: "no puedo dar el precio" no convierte una venta en soporte.
+    expect(venta).toContain("NO lo convierte en un problema de soporte");
+  });
+
+  it("el criterio es qué quiere el cliente, no si el bot puede resolverlo", () => {
+    const prompt = renderSystemPrompt(input);
+    expect(prompt).toContain("QUÉ QUIERE EL CLIENTE");
+    // El viejo principio #4 ("mejor ticket en turno 2") ya no manda todo a ticket.
+    expect(prompt).not.toContain("Mejor ticket en turno 2");
+  });
+
+  it("las palabras de escalamiento del dueño cuelgan de SOPORTE, no de una lista negativa", () => {
+    const prompt = renderSystemPrompt({ ...input, extraEscalationKeywords: ["reembolso", "demanda"] });
+    expect(prompt).toContain("reembolso, demanda");
+    // La regresión concreta: antes se inyectaban dentro de "NO escales cuando:",
+    // o sea que hacían lo contrario de lo que el dueño configuró.
+    expect(prompt).not.toContain("NO escales cuando");
+    const posSoporte = prompt.indexOf("SOPORTE");
+    const posKeywords = prompt.indexOf("reembolso, demanda");
+    const posCita = prompt.indexOf("CITA —");
+    expect(posKeywords).toBeGreaterThan(posSoporte);
+    expect(posKeywords).toBeLessThan(posCita);
+  });
+
+  it("resuelve el caso ambiguo de 'quiero hablar con alguien' por contexto", () => {
+    const prompt = renderSystemPrompt(input);
+    expect(prompt).toContain("hablar con alguien");
+    expect(prompt).toContain("de precios, servicios o una cotización → es VENTA");
+  });
+});
+
+describe("cómo se refiere al equipo", () => {
+  it("dice 'alguien del equipo', nunca 'un humano'", () => {
+    const prompt = renderSystemPrompt(input);
+    expect(prompt).toContain("alguien del equipo");
+    expect(prompt).not.toContain("escalas a un humano");
+    expect(prompt).not.toContain("El dueño humano");
+  });
+
+  it("pero sigue obligado a admitir que es un bot si se lo preguntan", () => {
+    const prompt = renderSystemPrompt(input);
+    expect(prompt).toContain("asistente automatizado");
+    expect(prompt).toContain("Nunca afirmes ser humano");
   });
 });
 

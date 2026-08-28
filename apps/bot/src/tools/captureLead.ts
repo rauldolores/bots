@@ -9,6 +9,7 @@ import { BotsRepo } from "../db/bots";
 import { resolveConnectorCreds } from "../connectors/creds";
 import { CRM_ADAPTERS } from "../connectors/registry";
 import type { CrmLeadInput } from "../connectors/types";
+import { notifyOwner } from "./handoffHuman";
 import { registerLeadContacts } from "../contacts/register";
 import { classifyContact, normalizePhone, phoneVariants, regionForTimezone } from "../contacts/normalize";
 import { SettingsRepo, SETTING_KEYS } from "../db/settings";
@@ -16,7 +17,9 @@ import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 export function captureLeadTool(env: Env, getConversationId: () => string | null, botId: string) {
   return tool({
     description:
-      "Captura un lead (cliente interesado) para que el dueño venda después. Guarda localmente y, si hay un CRM conectado, lo da de alta ahí también. " +
+      "Registra una OPORTUNIDAD de venta. Úsala en cuanto el cliente muestre intención de compra: pide precios, pide una cotización, dice que le interesa, pregunta por un servicio. NO esperes a que cierre ni a tener todos los datos — capturar temprano es el objetivo. " +
+      "Es la tool correcta AUNQUE tú no puedas dar el precio y haya que pasárselo a alguien del equipo: eso es una venta en curso, no un ticket de soporte. " +
+      "Guarda localmente y, si hay un CRM conectado, da de alta ahí el contacto, la empresa, la oportunidad y una tarea de seguimiento para el equipo. " +
       "Necesita un teléfono o correo REAL para poder contactar al lead después — si el cliente escribe por un canal que ya trae su teléfono (WhatsApp, llamada) no hace falta pedirlo aparte, pero si no (Telegram, Messenger, widget web) pídeselo antes de llamar esta tool: sin eso, la captura se rechaza.",
     inputSchema: z.object({
       name: z.string().optional().describe("Nombre del cliente"),
@@ -137,6 +140,25 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
           estimatedValue: estimatedValue ?? null,
           currency: bot?.config.currency || "MXN",
         });
+      }
+
+      // Avisarle al dueño, igual que ya lo hace un ticket. Desde que una
+      // cotización se registra como oportunidad y NO como ticket (ver
+      // <que_registrar> en system-prompt.ts), sin esto un lead caliente
+      // entraría al CRM en silencio. Solo en altas nuevas: si el mismo cliente
+      // sigue escribiendo, ya se avisó. Best-effort, nunca tumba la captura.
+      if (isNew) {
+        await notifyOwner(
+          env,
+          {
+            reason: "nueva oportunidad",
+            summary: `${name || effectiveContact || "Alguien"}: ${intent}`,
+            ticketId: leadId,
+            titulo: "Nueva oportunidad",
+            ruta: "/admin/leads",
+          },
+          botId,
+        ).catch((e) => console.error("[captureLead] no se pudo avisar al dueño:", e));
       }
 
       return {

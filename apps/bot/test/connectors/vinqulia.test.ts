@@ -449,6 +449,48 @@ describe("pushLead", () => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/deals"))).toBe(false);
     });
 
+    it("crea la tarea de llamada, aunque NO haya pipeline configurado", async () => {
+      fetchMock.mockImplementation(byUrl({ "/contacts": [{ id: 42 }] }));
+      await vinquliaConnector.pushLead(creds({ salesId: "1" }), LEAD);
+
+      const tarea = fetchMock.mock.calls.find(
+        ([url, init]: any) => String(url).endsWith("/tasks") && init?.method === "POST",
+      );
+      expect(tarea).toBeTruthy();
+      const body = JSON.parse(tarea![1].body);
+      expect(body).toMatchObject({ contact_id: 42, type: "follow-up", sales_id: 1 });
+      expect(body.text).toContain("Llamar a Jesús Jimenez");
+      expect(body.text).toContain("Quiere facturación");
+      expect(new Date(body.due_date).getTime()).toBeGreaterThan(Date.now());
+      // Sin pipeline no hay oportunidad, pero la tarea sí se creó.
+      expect(fetchMock.mock.calls.some(([url]: any) => String(url).endsWith("/deals"))).toBe(false);
+    });
+
+    it("si el contacto YA tiene una oportunidad viva, no se abre otra tarea (ya lo están trabajando)", async () => {
+      fetchMock.mockImplementation((async (url: string, init?: { method?: string }) => {
+        const metodo = (init?.method ?? "GET").toUpperCase();
+        // La búsqueda de oportunidades abiertas devuelve una.
+        if (metodo === "GET" && url.includes("/deals")) return jsonResponse([{ id: 9 }]);
+        if (metodo === "GET") return jsonResponse([]);
+        return jsonResponse([{ id: 42 }]);
+      }) as unknown as typeof fetch);
+
+      await vinquliaConnector.pushLead(creds({ dealPipeline: "ventas", dealStage: "opportunity" }), LEAD);
+      expect(
+        fetchMock.mock.calls.some(([url, init]: any) => String(url).endsWith("/tasks") && init?.method === "POST"),
+      ).toBe(false);
+    });
+
+    it("si la tarea falla, el contacto ya creado sigue siendo un push exitoso", async () => {
+      fetchMock.mockImplementation((async (url: string, init?: { method?: string }) => {
+        if ((init?.method ?? "GET").toUpperCase() === "GET") return jsonResponse([]);
+        if (url.endsWith("/tasks")) return jsonResponse({ message: "boom" }, 500);
+        return jsonResponse([{ id: 42 }]);
+      }) as unknown as typeof fetch);
+      const result = await vinquliaConnector.pushLead(creds(), LEAD);
+      expect(result).toEqual({ ok: true, externalId: "42" });
+    });
+
     it("si la oportunidad falla, el contacto ya creado sigue siendo un push exitoso", async () => {
       fetchMock.mockImplementation((async (url: string) => {
         if (url.endsWith("/deals")) throw new Error("boom");

@@ -26,8 +26,9 @@ async function buildTranscript(db: Db, botId: string, convId: string): Promise<s
 export function handoffHumanTool(env: Env, getConversationId: () => string | null, botId: string) {
   return tool({
     description:
-      "Crea un ticket para el dueño + le manda email. Usalo cuando el bot no puede resolver o el cliente pide humano explícitamente. " +
-      "Necesita un teléfono o correo REAL para que el dueño pueda dar seguimiento después — si el canal ya lo trae (WhatsApp, llamada) no hace falta pedirlo, pero si no (Telegram, Messenger, el widget web) pídeselo antes de llamar esta tool: sin eso, el ticket se rechaza.",
+      "Abre un ticket de SOPORTE y le avisa al dueño. Es para problemas POST-VENTA: algo no le funciona, un cobro mal hecho, lleva días esperando, una queja o un reclamo, un bug, algo legal. " +
+      "NO la uses para pedidos de cotización, precios ni interés comercial — eso es captureLead, aunque tú no puedas dar el precio y haya que pasárselo a alguien del equipo. " +
+      "Necesita un teléfono o correo REAL para poder darle seguimiento — si el canal ya lo trae (WhatsApp, llamada) no hace falta pedirlo, pero si no (Telegram, Messenger, el widget web) pídeselo antes de llamar esta tool: sin eso, el ticket se rechaza.",
     inputSchema: z.object({
       reason: z.string().describe("Categoría corta del problema"),
       summary: z.string().max(300).describe("Resumen en 1 frase del contexto"),
@@ -166,6 +167,15 @@ interface HandoffNotice {
   reason: string;
   summary: string;
   ticketId: string;
+  /**
+   * Cómo se anuncia y a dónde manda el link. Default: un ticket, a
+   * /admin/tickets. Una oportunidad nueva (captureLead) usa
+   * `{ titulo: "Nueva oportunidad", ruta: "/admin/leads" }` — desde que las
+   * cotizaciones dejaron de abrir tickets, sin esto el dueño ya no se
+   * enteraría al instante de un lead caliente.
+   */
+  titulo?: string;
+  ruta?: string;
 }
 
 /**
@@ -208,7 +218,8 @@ export async function notifyOwner(rawEnv: Env, notice: HandoffNotice, botIdOverr
     notifyBotId,
     "twilio",
   );
-  const ticketUrl = `${env.ADMIN_BASE_URL ?? env.DASHBOARD_BASE_URL}/admin/tickets`;
+  const ticketUrl = `${env.ADMIN_BASE_URL ?? env.DASHBOARD_BASE_URL}${notice.ruta ?? "/admin/tickets"}`;
+  const titulo = notice.titulo ?? "Nuevo ticket";
   const tier = (await new BotsRepo(notifyDb).getById(notifyBotId))?.tier;
 
   // El SID de la plantilla puede venir del secret O del setting que escribe el
@@ -251,7 +262,7 @@ export async function notifyOwner(rawEnv: Env, notice: HandoffNotice, botIdOverr
           body: JSON.stringify({
             chat_id: env.OWNER_TELEGRAM_CHAT_ID,
             text:
-              `🚨 Nuevo ticket [${notice.reason}]\n${notice.summary}\n\nVer: ${ticketUrl}`,
+              `🚨 ${titulo} [${notice.reason}]\n${notice.summary}\n\nVer: ${ticketUrl}`,
           }),
         },
       );

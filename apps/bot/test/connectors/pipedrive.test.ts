@@ -106,6 +106,45 @@ describe("pipedriveConnector.pushLead — organización y trato", () => {
   });
 });
 
+describe("pipedriveConnector.pushLead — actividad de seguimiento", () => {
+  it("crea la actividad de llamada ligada a la persona, aunque no haya etapa configurada", async () => {
+    const calls: Array<{ url: string; body: any }> = [];
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      calls.push({ url, body: JSON.parse(init.body) });
+      if (url.includes("/persons?")) return new Response(JSON.stringify({ data: { id: 42 } }), { status: 201 });
+      return new Response(JSON.stringify({ data: { id: 1 } }), { status: 201 });
+    }) as any;
+
+    await pipedriveConnector.pushLead(creds, {
+      name: "Ana",
+      contact: null,
+      intent: "quiere cotización",
+      notes: null,
+    });
+
+    const act = calls.find((c) => c.url.includes("/activities?"));
+    expect(act?.body).toMatchObject({
+      subject: "Llamar a Ana — quiere cotización",
+      type: "call",
+      person_id: 42,
+    });
+    // Pipedrive parte fecha y hora en dos campos.
+    expect(act?.body.due_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(act?.body.due_time).toMatch(/^\d{2}:\d{2}$/);
+    // Sin etapa configurada no hay trato, pero la actividad sí se creó.
+    expect(calls.some((c) => c.url.includes("/deals?"))).toBe(false);
+  });
+
+  it("si la actividad falla, la persona ya creada sigue siendo un push exitoso", async () => {
+    global.fetch = vi.fn(async (url: any) => {
+      if (String(url).includes("/activities?")) return new Response("boom", { status: 500 });
+      return new Response(JSON.stringify({ data: { id: 42 } }), { status: 201 });
+    }) as any;
+    const result = await pipedriveConnector.pushLead(creds, { name: "Ana", contact: null, intent: "y", notes: null });
+    expect(result).toEqual({ ok: true, externalId: "42" });
+  });
+});
+
 describe("pipedriveConnector.listPipelineStages", () => {
   it("combina /stages con /pipelines para el label", async () => {
     global.fetch = vi.fn(async (url: any) => {

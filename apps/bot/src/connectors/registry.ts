@@ -43,6 +43,19 @@ export interface ConnectorMeta {
   postAuthFields?: ConnectorFieldSpec[];
 }
 
+/**
+ * En cuántas horas vence la tarea de llamada que acompaña a cada oportunidad
+ * nueva. Igual en los tres CRMs, así que se declara una vez — ver
+ * src/connectors/followupTask.ts para por qué la tarea es automática.
+ */
+const SEGUIMIENTO_FIELD: ConnectorFieldSpec = {
+  name: "followupHours",
+  label: "Horas para llamar a un lead nuevo (opcional)",
+  placeholder: "24",
+  isConfig: true,
+  optional: true,
+};
+
 export const CRM_PROVIDERS: Record<string, ConnectorMeta> = {
   vinqulia: {
     id: "vinqulia",
@@ -67,6 +80,7 @@ export const CRM_PROVIDERS: Record<string, ConnectorMeta> = {
     fields: [
       { name: "url", label: "Dirección de tu Vinqulia", placeholder: "https://crm.miempresa.com", isConfig: true },
       { name: "salesId", label: "ID del vendedor (opcional)", placeholder: "1", isConfig: true, optional: true },
+      SEGUIMIENTO_FIELD,
     ],
   },
   hubspot: {
@@ -81,6 +95,7 @@ export const CRM_PROVIDERS: Record<string, ConnectorMeta> = {
     ],
     apiKeyLabel: "Token de la app privada",
     apiKeyPlaceholder: "pat-na1-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    fields: [SEGUIMIENTO_FIELD],
   },
   pipedrive: {
     id: "pipedrive",
@@ -94,7 +109,10 @@ export const CRM_PROVIDERS: Record<string, ConnectorMeta> = {
     ],
     apiKeyLabel: "API token",
     apiKeyPlaceholder: "········",
-    fields: [{ name: "domain", label: "Subdominio de tu empresa", placeholder: "miempresa", isConfig: true }],
+    fields: [
+      { name: "domain", label: "Subdominio de tu empresa", placeholder: "miempresa", isConfig: true },
+      SEGUIMIENTO_FIELD,
+    ],
   },
   twenty: {
     id: "twenty",

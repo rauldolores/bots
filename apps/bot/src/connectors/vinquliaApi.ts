@@ -247,3 +247,38 @@ export async function buscarOCrearEmpresa(
     return undefined;
   }
 }
+
+/**
+ * Una tarea colgada de un contacto (`crm.tasks`).
+ *
+ * Es lo que hace que alguien de verdad marque: una oportunidad sin tarea se
+ * queda en el tablero esperando a que alguien la vea. Best-effort como todo lo
+ * secundario — devuelve false y lo loguea, nunca tumba el alta del lead.
+ */
+export async function crearTarea(
+  creds: ConnectorCreds,
+  base: string,
+  tarea: { contactId: number | string; texto: string; tipo?: string; vence?: Date; salesId?: number },
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${base}/tasks`, {
+      method: "POST",
+      headers: vinquliaHeaders(creds, { "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        contact_id: tarea.contactId,
+        type: tarea.tipo ?? "follow-up",
+        text: tarea.texto,
+        ...(tarea.vence ? { due_date: tarea.vence.toISOString() } : {}),
+        ...(tarea.salesId !== undefined ? { sales_id: tarea.salesId } : {}),
+      }),
+    });
+    if (!res.ok) {
+      console.error(`[vinqulia] no se pudo crear la tarea: ${res.status} ${(await res.text()).slice(0, 200)}`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("[vinqulia] no se pudo crear la tarea:", e);
+    return false;
+  }
+}

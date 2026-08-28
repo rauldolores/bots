@@ -85,10 +85,14 @@ async function initSchema() {
     await admin.close();
   }
 
-  // `public` va en el search_path porque ahí vive el tipo `vector` de pgvector:
-  // sin él, `vector(1024)` no resuelve y la migración de kb_chunks falla.
+  // `public` y `extensions` van en el search_path por el tipo `vector` de
+  // pgvector: sin él, `vector(1024)` no resuelve y la migración de kb_chunks
+  // falla. En la Supabase local la extensión vive en `public`; en un proyecto
+  // hosted, en `extensions`. Se listan las dos para que la misma suite corra
+  // contra cualquiera de los dos — sin esto, apuntar TEST_DATABASE_URL a un
+  // proyecto real truena con 'type "vector" does not exist'.
   const driver = createPostgresDriver({
-    url: `${BASE_URL}${BASE_URL.includes("?") ? "&" : "?"}options=-c%20search_path%3D${SCHEMA}%2Cpublic`,
+    url: `${BASE_URL}${BASE_URL.includes("?") ? "&" : "?"}options=-c%20search_path%3D${SCHEMA}%2Cextensions%2Cpublic`,
   });
   const db = new Db(driver);
 

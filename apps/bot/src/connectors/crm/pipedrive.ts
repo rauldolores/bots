@@ -7,6 +7,7 @@ import type {
   ConnectorPushResult,
   PipelineStageListResult,
 } from "../types";
+import { textoDeSeguimiento, vencimientoSeguimiento } from "../followupTask";
 
 function isEmail(v: string): boolean {
   return /.+@.+\..+/.test(v);
@@ -103,8 +104,32 @@ export const pipedriveConnector: CrmConnector = {
           console.error(`[pipedrive] no se pudo crear el trato: ${res.status} ${(await res.text()).slice(0, 200)}`);
         }
       }
+
+      // La actividad de seguimiento — el equivalente de la tarea. Se crea
+      // AUNQUE no haya trato (el dueño puede no haber configurado la etapa):
+      // es la mitad que de verdad hace que alguien marque.
+      if (personId) {
+        const vence = vencimientoSeguimiento(creds);
+        const res = await fetch(`${base}/activities?api_token=${token}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject: textoDeSeguimiento(lead),
+            type: "call",
+            person_id: personId,
+            ...(orgId ? { org_id: orgId } : {}),
+            // Pipedrive parte la fecha y la hora en dos campos, en la zona de
+            // la cuenta. Se manda en UTC: aproximar es mejor que no agendar.
+            due_date: vence.toISOString().slice(0, 10),
+            due_time: vence.toISOString().slice(11, 16),
+          }),
+        });
+        if (!res.ok) {
+          console.error(`[pipedrive] no se pudo crear la actividad: ${res.status} ${(await res.text()).slice(0, 200)}`);
+        }
+      }
     } catch (e) {
-      console.error("[pipedrive] organización/trato falló (la persona ya quedó creada):", e);
+      console.error("[pipedrive] organización/trato/actividad falló (la persona ya quedó creada):", e);
     }
 
     return { ok: true, externalId: personId ? String(personId) : undefined };

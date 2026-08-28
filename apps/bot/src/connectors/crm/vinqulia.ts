@@ -23,7 +23,9 @@ import {
   vinquliaBuscar,
   buscarContacto,
   buscarOCrearEmpresa,
+  crearTarea,
 } from "../vinquliaApi";
+import { textoDeSeguimiento, vencimientoSeguimiento } from "../followupTask";
 
 /**
  * Vinqulia — CRM self-hosted, API REST estilo PostgREST.
@@ -173,8 +175,8 @@ export const vinquliaConnector: CrmConnector = {
         }).catch(() => {});
       }
 
-      // La oportunidad: best-effort, igual que la nota — un contacto ya creado
-      // nunca se pierde porque esto falle.
+      // La oportunidad y su tarea: best-effort, igual que la nota — un contacto
+      // ya creado nunca se pierde porque esto falle.
       try {
         const dealStage = dealPipelineStageFrom(creds);
         // Si el contacto ya tiene una oportunidad viva, se le agrega la nota
@@ -201,8 +203,22 @@ export const vinquliaConnector: CrmConnector = {
             console.error(`[vinqulia] no se pudo crear la oportunidad: ${res.status} ${(await res.text()).slice(0, 200)}`);
           }
         }
+
+        // La tarea de llamada. Se crea AUNQUE no haya oportunidad (el dueño
+        // puede no haber configurado el pipeline todavía): es la mitad que de
+        // verdad hace que alguien marque. Lo único que la frena es que el
+        // contacto ya tenga una oportunidad viva — ahí ya lo están trabajando,
+        // y una tarea nueva por cada mensaje sería ruido.
+        if (contactId !== undefined && !yaTieneDeal) {
+          await crearTarea(creds, base, {
+            contactId,
+            texto: textoDeSeguimiento(lead),
+            vence: vencimientoSeguimiento(creds),
+            salesId: sales,
+          });
+        }
       } catch (e) {
-        console.error("[vinqulia] empresa/oportunidad falló (el contacto ya quedó creado):", e);
+        console.error("[vinqulia] oportunidad/tarea falló (el contacto ya quedó creado):", e);
       }
 
       return { ok: true, externalId: contactId !== undefined ? String(contactId) : undefined };

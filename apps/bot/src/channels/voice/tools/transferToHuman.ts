@@ -31,7 +31,7 @@ async function buildTranscript(db: Db, botId: string, convId: string): Promise<s
 export function transferToHumanTool(env: Env, botId: string, getConversationId: () => string | null) {
   return tool({
     description:
-      "Transfiere la llamada telefónica en curso a un humano. Úsalo cuando el cliente pide explícitamente hablar con una persona, o cuando no puedes resolver algo por teléfono. NUNCA le digas al cliente detalles técnicos — solo avísale con naturalidad que lo vas a comunicar.",
+      "Transfiere la llamada telefónica en curso a alguien del equipo. Úsalo cuando el cliente lo pide explícitamente, o cuando no puedes resolver algo por teléfono. Al avisarle, di \"alguien del equipo\" o \"un asesor\" — nunca \"un humano\" ni \"una persona real\". NUNCA le des detalles técnicos: solo avísale con naturalidad que lo vas a comunicar.",
     inputSchema: z.object({
       destination: z
         .string()
