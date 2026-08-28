@@ -83,6 +83,9 @@ import {
   saveWidgetConfig,
   renderPipelineStageModal,
   savePipelineStage,
+  renderEmailConnectModal,
+  connectEmailChannel,
+  disconnectEmailChannel,
 } from "./views/conexiones";
 import { startOAuth, handleOAuthCallback } from "./oauthConnect";
 import { startMcpOAuth, handleMcpOAuthCallback } from "./mcpOAuthConnect";
@@ -1243,6 +1246,36 @@ adminApp.post("/conexiones/:channel/connect", async (c) => {
   return c.html(modalHtml + gridHtml);
 });
 
+// Correo entrante (Resend/Mailgun) — caso especial: dos proveedores para el
+// MISMO canal (bot_channels sigue siendo "email" para ambos), por eso no
+// pasa por las rutas genéricas de :channel. "/conexiones/email/disconnect"
+// tiene la MISMA forma que "/conexiones/:channel/disconnect" de abajo — va
+// ANTES a propósito (mismo motivo que /habilidades/llaves antes de
+// /habilidades/:id): si no, el genérico la interceptaría con channel="email"
+// y la rechazaría en su allow-list antes de llegar aquí.
+adminApp.post("/conexiones/email/disconnect", async (c) => {
+  await disconnectEmailChannel(c.env, c.get("botId"));
+  return c.redirect("/admin/conexiones", 302);
+});
+
+// Estas SÍ pueden ir en cualquier orden respecto al genérico: tienen 3
+// segmentos ("email/:provider/connect"), el genérico tiene 2
+// ("_:channel/connect_"), formas distintas, sin ambigüedad de ruteo.
+adminApp.get("/conexiones/email/:provider/connect", (c) => {
+  const provider = c.req.param("provider");
+  if (provider !== "resend" && provider !== "mailgun") return c.text("Proveedor desconocido", 404);
+  return c.html(renderEmailConnectModal(c.env, c.get("botId"), provider));
+});
+
+adminApp.post("/conexiones/email/:provider/connect", async (c) => {
+  const provider = c.req.param("provider");
+  if (provider !== "resend" && provider !== "mailgun") return c.text("Proveedor desconocido", 404);
+  const form = await c.req.formData();
+  const modalHtml = await connectEmailChannel(c.env, c.get("botId"), provider, form);
+  const gridHtml = await renderConexionesGrid(c.env, c.get("botId"));
+  return c.html(modalHtml + gridHtml);
+});
+
 adminApp.post("/conexiones/:channel/disconnect", async (c) => {
   const channel = c.req.param("channel");
   if (channel !== "telegram" && channel !== "twilio" && channel !== "voice" && channel !== "manychat" && channel !== "widget") {
@@ -1757,6 +1790,31 @@ adminApp.post("/config", async (c) => {
     const voiceKeyRaw = form.get(SETTING_KEYS.voiceOpenAiApiKey);
     if (voiceKeyRaw !== null && String(voiceKeyRaw).trim() !== "") {
       await repo.set(SETTING_KEYS.voiceOpenAiApiKey, String(voiceKeyRaw).trim());
+    }
+  }
+
+  // Correo saliente (/admin/config → Correo saliente) — DECIDIDO APARTE de
+  // quién recibe (eso es /admin/conexiones → bot_channels canal "email").
+  // Proveedor con allow-list (mismo criterio que llmProvider arriba);
+  // dominio/remitente texto libre; API key con el mismo patrón de
+  // clear-checkbox que la de BYO-LLM y la de Voz.
+  const emailProviderRaw = form.get(SETTING_KEYS.emailOutboundProvider);
+  if (emailProviderRaw !== null) {
+    const v = String(emailProviderRaw).trim().toLowerCase();
+    await repo.set(SETTING_KEYS.emailOutboundProvider, v === "resend" || v === "mailgun" ? v : "");
+  }
+  const emailDomainRaw = form.get(SETTING_KEYS.emailOutboundDomain);
+  if (emailDomainRaw !== null) await repo.set(SETTING_KEYS.emailOutboundDomain, String(emailDomainRaw).trim());
+  const emailFromAddressRaw = form.get(SETTING_KEYS.emailFromAddress);
+  if (emailFromAddressRaw !== null) await repo.set(SETTING_KEYS.emailFromAddress, String(emailFromAddressRaw).trim());
+  const emailFromNameRaw = form.get(SETTING_KEYS.emailFromName);
+  if (emailFromNameRaw !== null) await repo.set(SETTING_KEYS.emailFromName, String(emailFromNameRaw).trim());
+  if (form.get("email_outbound_api_key_clear") === "1") {
+    await repo.set(SETTING_KEYS.emailOutboundApiKey, "");
+  } else {
+    const emailKeyRaw = form.get(SETTING_KEYS.emailOutboundApiKey);
+    if (emailKeyRaw !== null && String(emailKeyRaw).trim() !== "") {
+      await repo.set(SETTING_KEYS.emailOutboundApiKey, String(emailKeyRaw).trim());
     }
   }
 

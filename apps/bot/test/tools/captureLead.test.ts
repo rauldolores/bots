@@ -186,6 +186,30 @@ describe("captureLeadTool — el contacto es obligatorio", () => {
     // normalizePhone quita el "1" móvil legacy de México (ver contacts/normalize.ts)
     expect(rows[0].contact).toBe("+525512345678");
   });
+
+  it("por el canal 'email' (F9) NO hace falta contact explícito — la dirección del canal ya sirve", async () => {
+    const db = new Db(env.DB);
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("email", "cliente@ejemplo.com");
+    const tool = captureLeadTool(env, () => conv.id, TEST_BOT_ID);
+
+    const result = (await tool.execute!({ name: "Cliente por correo", intent: "pregunta por el servicio" }, {} as any)) as {
+      captured: boolean;
+      leadId: string;
+    };
+
+    expect(result.captured).toBe(true);
+    const rows = await leads.list(10);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].contact).toBe("cliente@ejemplo.com");
+
+    const tipados = await new Db(env.DB).all<{ kind: string; address_norm: string }>(
+      "SELECT kind, address_norm FROM lead_contacts WHERE bot_id = ? AND lead_id = ?",
+      [TEST_BOT_ID, rows[0].id],
+    );
+    // Antes caía como kind='channel' (opaco) — un correo SÍ es un contacto
+    // real, no solo un identificador de conversación.
+    expect(tipados).toContainEqual({ kind: "email", address_norm: "cliente@ejemplo.com" });
+  });
 });
 
 // "a veces inserta 2 veces lo mismo" — el mismo cliente insistiendo, o el

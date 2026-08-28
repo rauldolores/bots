@@ -139,6 +139,202 @@ function webhookUrlFor(env: Env, channel: string, botId: string): string {
   return `${base}/webhooks/${channel}/${botId}`;
 }
 
+// ── Correo entrante (Resend / Mailgun) ────────────────────────────────────
+//
+// Caso especial deliberado: a diferencia de CHANNEL_META de arriba (una
+// tarjeta = un canal = una fila de bot_channels), Resend y Mailgun son DOS
+// formas de conectar el MISMO canal — comparten la fila bot_channels(canal
+// "email"); conectar el segundo reemplaza al primero ("una u otra", ver F9).
+// Por eso viven en su propia estructura y su propia tarjeta, no en
+// CHANNEL_META/renderConnectableCard (que asumen 1 id ↔ 1 fila).
+type EmailProvider = "resend" | "mailgun";
+
+interface EmailProviderMeta {
+  id: EmailProvider;
+  name: string;
+  icon: string;
+  steps: string[];
+  fields: FieldSpec[];
+}
+
+const EMAIL_PROVIDER_META: Record<EmailProvider, EmailProviderMeta> = {
+  resend: {
+    id: "resend",
+    name: "Resend",
+    icon: "mail",
+    steps: [
+      'En <span class="font-mono">resend.com</span>: verifica un dominio propio (Domains → Add Domain) — Resend necesita un dominio tuyo para poder RECIBIR correo, un correo genérico no sirve.',
+      'En ese dominio, activa <b>Inbound</b> y copia la dirección que te asigna (algo como <span class="font-mono">soporte@tudominio.com</span>) — ahí es donde tus clientes van a escribir.',
+      'Ve a <span class="font-mono">Webhooks → Add Webhook</span>, pega la URL de abajo, y suscribe SOLO el evento <span class="font-mono">email.received</span>.',
+      "Copia el <b>Signing Secret</b> que te muestra al crear el webhook (empieza con \"whsec_\") — es de un solo vistazo, cópialo antes de salir de esa pantalla.",
+      "Copia también tu <b>API Key</b> (Settings → API Keys) — la necesitamos para poder leer el cuerpo completo de cada correo que llegue.",
+    ],
+    fields: [
+      { name: "api_key", label: "API Key de Resend", placeholder: "re_xxxxxxxxxxxxxxxxxxxxxxxx", type: "password" },
+      { name: "signing_secret", label: "Signing Secret del webhook", placeholder: "whsec_xxxxxxxxxxxxxxxxxxxxxxxx", type: "password" },
+    ],
+  },
+  mailgun: {
+    id: "mailgun",
+    name: "Mailgun",
+    icon: "mail",
+    steps: [
+      'En <span class="font-mono">mailgun.com</span>: verifica un dominio propio (Sending → Domains) — igual que con cualquier proveedor, Mailgun necesita un dominio tuyo para poder recibir correo.',
+      'Ve a <span class="font-mono">Receiving → Routes → Create Route</span>, condición "Match Recipient" con tu dirección (ej. <span class="font-mono">soporte@tudominio.com</span>), y como acción "Forward" pega la URL de abajo.',
+      'Copia tu <b>HTTP webhook signing key</b> — está en <span class="font-mono">Sending → API Keys</span>, es DISTINTA de tu API key normal de envío.',
+    ],
+    fields: [
+      { name: "signing_key", label: "HTTP webhook signing key", placeholder: "········", type: "password" },
+    ],
+  },
+};
+
+function emailWebhookUrlFor(env: Env, provider: EmailProvider, botId: string): string {
+  const base = (env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
+  return `${base}/webhooks/email/${provider}/${botId}`;
+}
+
+/** Diálogo de conexión de correo entrante — mismo molde visual que renderConnectModal, pasos/campos propios por proveedor. */
+export function renderEmailConnectModal(env: Env, botId: string, provider: EmailProvider, opts?: { error?: string }): string {
+  const meta = EMAIL_PROVIDER_META[provider];
+  const steps = meta.steps
+    .map((s, i) => `<li style="margin-bottom:6px"><span class="font-mono" style="color:var(--accent-2)">${i + 1}.</span> ${s}</li>`)
+    .join("");
+  const fields = meta.fields
+    .map(
+      (f) => `
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+        <label for="${f.name}" class="font-display font-semibold text-[12.5px] text-cream">${esc(f.label)}</label>
+        <input type="${f.type ?? "text"}" id="${f.name}" name="${f.name}" ${f.optional ? "" : "required"}
+               placeholder="${esc(f.placeholder)}"
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
+      </div>`,
+    )
+    .join("");
+  const error = opts?.error
+    ? `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;margin-bottom:14px">${esc(opts.error)}</div>`
+    : "";
+  const webhookRow = copyRow("URL del webhook (pégala en el paso de arriba)", emailWebhookUrlFor(env, provider, botId));
+
+  return modalShell(
+    meta.icon,
+    `Conectar correo entrante — ${meta.name}`,
+    `
+    <ol class="text-[12.5px]" style="color:var(--muted);line-height:1.6;padding-left:0;list-style:none;margin:0 0 14px">${steps}</ol>
+    <div style="margin-bottom:16px">${webhookRow}</div>
+    ${error}
+    <form hx-post="/admin/conexiones/email/${provider}/connect" hx-target="#modal-root" hx-swap="innerHTML">
+      ${fields}
+      <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:10px">Conectar</button>
+    </form>`,
+  );
+}
+
+function renderEmailConnectedModal(env: Env, botId: string, provider: EmailProvider): string {
+  const meta = EMAIL_PROVIDER_META[provider];
+  return modalShell(
+    meta.icon,
+    "Correo entrante conectado",
+    `<div class="text-[13px]" style="color:var(--ok);font-weight:600;margin-bottom:12px">✓ ${esc(meta.name)} conectado como tu correo de entrada</div>
+     <p class="text-[12.5px]" style="color:var(--muted);margin:0 0 12px">Cada correo que llegue a la dirección que configuraste va a entrar como cualquier otro mensaje: se puede convertir en lead, abrir un ticket, o darse de alta en tu CRM — mismo flujo de siempre.</p>
+     <p class="text-[11.5px]" style="color:var(--dim);margin:0 0 12px">Para que el bot pueda RESPONDER esos correos, falta configurar el correo de salida en <a href="/admin/config" class="text-accent" style="text-decoration:none">/admin/config → Correo saliente</a> — es una decisión aparte, puede ser este mismo proveedor u otro.</p>
+     <button type="button" class="ghostbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;margin-top:2px;background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:9px"
+             onclick="document.getElementById('modal-root').innerHTML=''">Listo</button>`,
+  );
+}
+
+/**
+ * Conecta correo entrante — SIEMPRE upsert sobre la MISMA fila (canal
+ * "email"): conectar Mailgun mientras Resend está activo lo reemplaza sin
+ * que quede ninguna de las dos a medias ("una u otra", F9).
+ */
+export async function connectEmailChannel(env: Env, botId: string, provider: EmailProvider, form: FormData): Promise<string> {
+  const db = new Db(env.DB);
+  const repo = new BotChannelsRepo(db);
+  const str = (name: string) => String(form.get(name) ?? "").trim();
+  const existing = await repo.getByBotAndChannel(botId, "email");
+
+  if (provider === "resend") {
+    const apiKey = str("api_key");
+    const signingSecret = str("signing_secret");
+    if (!apiKey || !signingSecret) {
+      return renderEmailConnectModal(env, botId, "resend", { error: "Faltan datos — los dos campos son obligatorios." });
+    }
+    // Reusa el secret_ref/verify_token_ref YA existente si el bot ya tenía
+    // ESTE MISMO proveedor conectado (rotar credenciales); si venía de
+    // Mailgun o de ninguno, crea ambos de cero.
+    const secretRef =
+      existing?.config.inboundProvider === "resend" && existing.secret_ref
+        ? (await updateSecret(db, existing.secret_ref, apiKey), existing.secret_ref)
+        : await createSecret(db, apiKey, `email-resend-key:${botId}`);
+    const verifyTokenRef =
+      existing?.config.inboundProvider === "resend" && existing.verify_token_ref
+        ? (await updateSecret(db, existing.verify_token_ref, signingSecret), existing.verify_token_ref)
+        : await createSecret(db, signingSecret, `email-resend-signing:${botId}`);
+    await repo.upsert({ botId, channel: "email", secretRef, verifyTokenRef, config: { inboundProvider: "resend" } });
+    return renderEmailConnectedModal(env, botId, "resend");
+  }
+
+  // mailgun — solo necesita la signing key (el contenido ya viene completo en el POST, sin llamada aparte).
+  const signingKey = str("signing_key");
+  if (!signingKey) return renderEmailConnectModal(env, botId, "mailgun", { error: "Falta la signing key." });
+  const verifyTokenRef =
+    existing?.config.inboundProvider === "mailgun" && existing.verify_token_ref
+      ? (await updateSecret(db, existing.verify_token_ref, signingKey), existing.verify_token_ref)
+      : await createSecret(db, signingKey, `email-mailgun-signing:${botId}`);
+  // secretRef explícito null: si el bot tenía Resend antes, su API key debe
+  // dejar de ser válida para este canal — Mailgun no la usa para nada.
+  await repo.upsert({ botId, channel: "email", secretRef: null, verifyTokenRef, config: { inboundProvider: "mailgun" } });
+  return renderEmailConnectedModal(env, botId, "mailgun");
+}
+
+export async function disconnectEmailChannel(env: Env, botId: string): Promise<void> {
+  const db = new Db(env.DB);
+  const repo = new BotChannelsRepo(db);
+  const row = await repo.getByBotAndChannel(botId, "email");
+  if (row?.secret_ref) await deleteSecret(db, row.secret_ref).catch(() => {});
+  if (row?.verify_token_ref) await deleteSecret(db, row.verify_token_ref).catch(() => {});
+  await repo.disable(botId, "email");
+}
+
+async function renderEmailCard(env: Env, db: Db, botId: string): Promise<string> {
+  const row = await new BotChannelsRepo(db).getByBotAndChannel(botId, "email");
+  const activeProvider = row?.config.inboundProvider;
+  const ok = Boolean(row && activeProvider);
+  const badge = ok
+    ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO — ${esc(EMAIL_PROVIDER_META[activeProvider!].name).toUpperCase()}</span>`
+    : `<span style="font-size:10px;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);padding:3px 10px;font-weight:600">○ SIN CONECTAR</span>`;
+
+  const connectButtons = (["resend", "mailgun"] as const)
+    .map((p) => {
+      const isActive = activeProvider === p;
+      return `<button type="button" class="text-[12px]" style="border:1px solid ${isActive ? "var(--ok)" : "var(--accent)"};color:${isActive ? "var(--ok)" : "var(--accent-2)"};background:${isActive ? "rgba(127,183,126,.08)" : "var(--accent-soft)"};padding:7px 14px;cursor:pointer;font-weight:600"
+                      hx-get="/admin/conexiones/email/${p}/connect" hx-target="#modal-root" hx-swap="innerHTML">${isActive ? `✓ ${EMAIL_PROVIDER_META[p].name}` : `Conectar ${EMAIL_PROVIDER_META[p].name}`}</button>`;
+    })
+    .join("");
+
+  const disconnect = ok
+    ? `<form method="POST" action="/admin/conexiones/email/disconnect" style="margin-top:4px" onsubmit="return confirm('¿Desconectar el correo entrante? El bot dejará de recibir correos por esta vía.')">
+         <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Desconectar</button>
+       </form>`
+    : "";
+
+  return `
+    <div class="bg-panel border ${ok ? "" : "border-line"}" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;${ok ? "border-color:rgba(127,183,126,.45)" : ""}">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div class="font-display font-semibold text-[13.5px] text-cream" style="display:flex;align-items:center;gap:9px">
+          <i data-lucide="mail" width="16" height="16" class="${ok ? "text-accent" : "text-dim"}"></i>
+          Correo entrante
+        </div>
+        ${badge}
+      </div>
+      <p class="text-dim text-[12px]" style="margin:0">Correos que te escriban tus clientes entran al mismo flujo que cualquier canal — leads, tickets, CRM. Elige un proveedor (solo uno activo a la vez; conectar el otro lo reemplaza). El correo de SALIDA se configura aparte, en <a href="/admin/config" class="text-accent" style="text-decoration:none">/admin/config → Correo saliente</a>.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${connectButtons}</div>
+      ${ok ? copyRow("Webhook activo", emailWebhookUrlFor(env, activeProvider!, botId)) : ""}
+      ${disconnect}
+    </div>`;
+}
+
 function copyRow(label: string, value: string): string {
   return `<div style="display:flex;flex-direction:column;gap:4px">
     <span class="text-[10.5px]" style="color:var(--dim)">${esc(label)}</span>
@@ -1161,7 +1357,8 @@ async function connectableCards(env: Env, botId: string): Promise<string> {
   const cards = await Promise.all(
     (Object.values(CHANNEL_META) as ChannelMeta[]).map((meta) => renderConnectableCard(env, db, botId, meta)),
   );
-  return cards.join("") + envChannelCards(env);
+  const emailCard = await renderEmailCard(env, db, botId);
+  return cards.join("") + emailCard + envChannelCards(env);
 }
 
 export async function renderConexionesGrid(env: Env, botId: string): Promise<string> {

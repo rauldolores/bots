@@ -10,6 +10,10 @@ import { parseMetaEvents, verifyMetaSignature } from "./channels/meta";
 import { parseWhatsAppEvents, serveWhatsAppMedia } from "./channels/whatsapp";
 import { handleIncomingVoiceCall } from "./channels/voice/webhook";
 import { handleTransferStatusCallback } from "./channels/voice/transfer";
+import { verifyResendSignature, parseResendInbound } from "./channels/email/resend";
+import { verifyMailgunSignature, parseMailgunInbound } from "./channels/email/mailgun";
+import { BotChannelsRepo } from "./db/botChannels";
+import { readSecret } from "./db/vault";
 import { adminApp } from "./admin/routes";
 import { purgeOldMessages } from "./crons/purgeOldMessages";
 import { purgeOldVoiceCalls } from "./crons/purgeOldVoiceCalls";
@@ -161,6 +165,91 @@ app.post("/webhooks/voice/:botId", (c) => handleIncomingVoiceCall(c.req.raw, c.e
 // F7 fase 9: adónde Twilio reporta cómo terminó un intento de transferencia
 // a humano (contestó, ocupado, no contestó, falló) — ver channels/voice/transfer.ts.
 app.post("/webhooks/voice/:botId/transfer-status", (c) => handleTransferStatusCallback(c.req.raw, c.env, c.req.param("botId")));
+
+// --- Correo (Resend / Mailgun) ------------------------------------------
+// F9: un correo de entrada entra al MISMO flujo que cualquier otro canal —
+// captureLead/handoffHuman/CRM ya son channel-agnostic (operan sobre
+// conversationId, nunca sobre el canal), así que llegar aquí es suficiente
+// para que se den de alta leads/tickets como con cualquier otro canal.
+//
+// "Una u otra" (F9): el dueño conecta UN proveedor a la vez desde
+// /admin/conexiones — ambos escriben en la MISMA fila de bot_channels
+// (canal "email"), así que conectar el segundo reemplaza al primero.
+// Nace ya multi-tenant, sin ruta legacy sin :botId (mismo criterio que Voice).
+//
+// El proveedor de SALIDA (cómo el bot responde) es una decisión APARTE,
+// configurada en /admin/config → Correo saliente — ver
+// channels/effectiveEnv.ts → resolveChannelEnv(..., "email").
+async function routeEmailToAgent(
+  c: { req: { raw: Request }; env: Env; executionCtx?: unknown },
+  provider: "resend" | "mailgun",
+  botId: string,
+): Promise<Response> {
+  const db = new Db(c.env.DB);
+  const bot = await new BotsRepo(db).getById(botId);
+  if (!bot) return new Response("bot not found", { status: 404 });
+
+  const row = await new BotChannelsRepo(db).getByBotAndChannel(botId, "email");
+  if (!row || row.config.inboundProvider !== provider) {
+    // El dueño conectó el OTRO proveedor (o ninguno) — este webhook ya no es
+    // el activo. Falla rápido y claro, sin intentar verificar una firma que
+    // de todos modos no va a coincidir.
+    return new Response("email channel not connected for this provider", { status: 401 });
+  }
+
+  if (provider === "resend") {
+    const rawBody = await c.req.raw.text();
+    const signingSecret = row.verify_token_ref ? await readSecret(db, row.verify_token_ref) : null;
+    const validSignature = signingSecret
+      ? await verifyResendSignature(
+          rawBody,
+          {
+            svixId: c.req.raw.headers.get("svix-id"),
+            svixTimestamp: c.req.raw.headers.get("svix-timestamp"),
+            svixSignature: c.req.raw.headers.get("svix-signature"),
+          },
+          signingSecret,
+        )
+      : false;
+    if (!validSignature) return new Response("invalid signature", { status: 401 });
+
+    const apiKey = row.secret_ref ? await readSecret(db, row.secret_ref) : null;
+    if (!apiKey) return new Response("email channel misconfigured (missing api key)", { status: 500 });
+
+    const msg = await parseResendInbound(rawBody, apiKey);
+    // Resend manda MÁS eventos que email.received (delivered/bounced/etc.) al
+    // mismo webhook si el dueño no filtró la suscripción — se ignoran en vez
+    // de tratarlos como error, para no reintentar de más del lado de Resend.
+    if (!msg) return new Response("ok", { status: 200 });
+    const r = await ingestMessage(c.env, msg, botId);
+    if (r.scheduledInMs !== null) wakeTickAfter(c.env, ctxOpcional(c), r.scheduledInMs, r.warm);
+    return new Response("ok", { status: 200 });
+  }
+
+  // Mailgun: la firma NO va en un header — son tres campos del propio POST.
+  const signingKey = row.verify_token_ref ? await readSecret(db, row.verify_token_ref) : null;
+  const form = await c.req.raw.formData();
+  const validSignature = signingKey
+    ? await verifyMailgunSignature(
+        {
+          timestamp: form.get("timestamp") as string | null,
+          token: form.get("token") as string | null,
+          signature: form.get("signature") as string | null,
+        },
+        signingKey,
+      )
+    : false;
+  if (!validSignature) return new Response("invalid signature", { status: 401 });
+
+  const msg = parseMailgunInbound(form);
+  if (!msg) return new Response("ok", { status: 200 });
+  const r = await ingestMessage(c.env, msg, botId);
+  if (r.scheduledInMs !== null) wakeTickAfter(c.env, ctxOpcional(c), r.scheduledInMs, r.warm);
+  return new Response("ok", { status: 200 });
+}
+
+app.post("/webhooks/email/resend/:botId", (c) => routeEmailToAgent(c, "resend", c.req.param("botId")));
+app.post("/webhooks/email/mailgun/:botId", (c) => routeEmailToAgent(c, "mailgun", c.req.param("botId")));
 
 // --- Meta oficial (Facebook Messenger + Instagram DMs, sin ManyChat) --------
 // GET = handshake de verificación de Meta: devuelve hub.challenge si el

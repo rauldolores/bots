@@ -11,7 +11,7 @@ import { CRM_ADAPTERS } from "../connectors/registry";
 import type { CrmLeadInput } from "../connectors/types";
 import { notifyOwner } from "./handoffHuman";
 import { registerLeadContacts } from "../contacts/register";
-import { classifyContact, normalizePhone, phoneVariants, regionForTimezone } from "../contacts/normalize";
+import { classifyContact, normalizePhone, normalizeEmail, phoneVariants, regionForTimezone } from "../contacts/normalize";
 import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 
 export function captureLeadTool(env: Env, getConversationId: () => string | null, botId: string) {
@@ -21,7 +21,7 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
       "Es la tool correcta AUNQUE tú no puedas dar el precio y haya que pasárselo a alguien del equipo: eso es una venta en curso, no un ticket de soporte. " +
       "Guarda localmente y, si hay un CRM conectado, da de alta ahí el contacto, la empresa, la oportunidad y una tarea de seguimiento para el equipo. " +
       "Pídele SIEMPRE las tres cosas: correo, teléfono y empresa. Si solo te da uno de los dos medios de contacto, no insistas más de una vez — con uno basta para guardar. " +
-      "Sin NINGÚN medio de contacto la captura se rechaza (salvo que el canal ya traiga su teléfono, como WhatsApp o una llamada).",
+      "Sin NINGÚN medio de contacto la captura se rechaza (salvo que el canal ya traiga su contacto de por sí, como el teléfono en WhatsApp/una llamada, o la dirección en un correo).",
     inputSchema: z.object({
       name: z.string().optional().describe("Nombre del cliente"),
       email: z.string().optional().describe("Su correo. Pídeselo aunque ya tengas el teléfono."),
@@ -61,16 +61,18 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
       const correo = clasificados.find((c) => c.kind === "email") ?? null;
       const telefono = clasificados.find((c) => c.kind === "phone") ?? null;
 
-      // Si el canal por el que escribe YA es un teléfono (WhatsApp, voz), ese
-      // número cuenta como medio de contacto aunque el LLM no haya llenado
-      // nada — ya sabemos cómo llegarle. Un canal opaco (Telegram, Messenger,
-      // widget) no cuenta: solo sirve dentro de esa conversación.
+      // Si el canal por el que escribe YA es un teléfono (WhatsApp, voz) o un
+      // correo (canal "email", F9), ese dato cuenta como medio de contacto
+      // aunque el LLM no haya llenado nada — ya sabemos cómo llegarle. Un
+      // canal opaco (Telegram, Messenger, widget) no cuenta: solo sirve
+      // dentro de esa conversación.
       const convPhone = conv ? normalizePhone(conv.channel_user_id, region) : null;
+      const convEmail = conv && !convPhone ? normalizeEmail(conv.channel_user_id) : null;
 
       // Obligatorio: sin un teléfono o correo real no hay forma de contactar
       // al lead después de esta conversación. Mejor no guardar nada que
       // guardar un lead al que nadie le puede volver a escribir.
-      if (!correo && !telefono && !convPhone) {
+      if (!correo && !telefono && !convPhone && !convEmail) {
         return {
           leadId: null,
           captured: false,
@@ -82,7 +84,7 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
       // Lo que se guarda en leads.contact (lo que el dueño VE en /admin/leads y
       // en el CSV): el correo si lo hay, si no el teléfono. Los DOS quedan
       // completos y tipados en lead_contacts — esa tabla existe justo para eso.
-      const effectiveContact = correo?.addressRaw ?? telefono?.addressRaw ?? convPhone;
+      const effectiveContact = correo?.addressRaw ?? telefono?.addressRaw ?? convPhone ?? convEmail;
 
       // Evita duplicados: si este mismo contacto ya tiene un lead ABIERTO
       // (el cliente insiste en la misma conversación, o el modelo llamó la
@@ -93,6 +95,7 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
         ...(correo ? [correo.addressNorm] : []),
         ...(telefono ? phoneVariants(telefono.addressNorm) : []),
         ...(convPhone ? phoneVariants(convPhone) : []),
+        ...(convEmail ? [convEmail] : []),
       ];
       const existing = await leads.findOpenByContactAddress(addressNorms);
 
@@ -145,7 +148,7 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
           contact: effectiveContact ?? null,
           // Los dos por separado, para que el CRM los guarde en su campo
           // correcto en vez de que el adaptador tenga que adivinar cuál es.
-          email: correo?.addressRaw ?? null,
+          email: correo?.addressRaw ?? convEmail ?? null,
           phone: telefono?.addressRaw ?? convPhone ?? null,
           intent,
           notes: notes ?? null,

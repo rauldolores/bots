@@ -73,6 +73,20 @@ export const SETTING_KEYS = {
   // elegido, <modo_operativo> se omite del prompt. Se inyecta a TODOS los
   // canales (system-prompt.ts es compartido) — voz incluida, vía ctx.basePrompt.
   agentMode: "agent_mode",
+  // Correo saliente (/admin/config → Correo saliente) — DECIDIDO APARTE de
+  // qué proveedor recibe los correos entrantes (eso es /admin/conexiones →
+  // bot_channels canal "email"). El dueño puede recibir por Mailgun y
+  // responder por Resend, o cualquier combinación — dos decisiones
+  // independientes, cada una en su pantalla. Mismo patrón de API key en
+  // texto plano que ya usa el BYO-LLM (llmApiKey) — /admin/config nunca pasó
+  // por Vault, esa indirección es de los flujos guiados de Conexiones.
+  emailOutboundProvider: "email_outbound_provider", // "resend" | "mailgun" | ""
+  emailOutboundApiKey: "email_outbound_api_key",
+  // Solo Mailgun: su API de envío es por dominio (`/v3/{domain}/messages`) —
+  // Resend no lo necesita (la key ya trae el remitente verificado implícito).
+  emailOutboundDomain: "email_outbound_domain",
+  emailFromAddress: "email_from_address",
+  emailFromName: "email_from_name",
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

@@ -53,6 +53,17 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   OPENAI_API_KEY?: string;  // proveedor LLM alterno (ver src/llm/provider.ts)
   RESEND_API_KEY?: string;
+  // Canal "email" — SOLO para responder (sendReply); nunca se leen de
+  // despliegue, resolveChannelEnv() los mete aquí desde settings.email_*
+  // (/admin/config → Correo saliente) para el bot de cada turno. Distinto
+  // de RESEND_API_KEY de arriba: ese es la key de NOTIFICACIÓN AL DUEÑO
+  // (handoffHuman.ts), de despliegue — esto es la key con la que el bot le
+  // contesta AL CLIENTE, por bot y elegida por el dueño en el panel.
+  EMAIL_OUTBOUND_PROVIDER?: "resend" | "mailgun";
+  EMAIL_OUTBOUND_API_KEY?: string;
+  EMAIL_OUTBOUND_DOMAIN?: string;
+  EMAIL_FROM_ADDRESS?: string;
+  EMAIL_FROM_NAME?: string;
   TELEGRAM_BOT_TOKEN?: string;
   MANYCHAT_API_KEY?: string;
   MANYCHAT_CONTENT_TYPE?: "instagram" | "whatsapp" | "telegram" | "messenger"; // ManyChat channel for sendContent; defaults to "instagram"

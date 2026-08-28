@@ -11,7 +11,7 @@ import { LeadsRepo } from "../db/leads";
 import { BotConnectorsRepo } from "../db/botConnectors";
 import { resolveConnectorCreds } from "../connectors/creds";
 import { TICKET_ADAPTERS } from "../connectors/registry";
-import { classifyContact, normalizePhone, regionForTimezone } from "../contacts/normalize";
+import { classifyContact, normalizePhone, normalizeEmail, regionForTimezone } from "../contacts/normalize";
 import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 import { resolveBotId } from "../tenant";
 import { isProTier } from "../config";
@@ -51,19 +51,22 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
       let requesterName: string | null = null;
       let transcript = "";
       let convPhone: string | null = null;
+      let convEmail: string | null = null;
       const region = regionForTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
       if (convId) {
         const conv = await new ConversationsRepo(db, botId).getById(convId);
         requesterName = conv?.display_name ?? null;
         transcript = await buildTranscript(db, botId, convId);
-        // Si el canal YA es un teléfono (WhatsApp, voz), ese número cuenta como
-        // contacto real aunque el LLM no haya llenado `contact` — ya sabemos
-        // cómo llegarle. Un canal opaco (Telegram, Messenger, el widget) no.
+        // Si el canal YA es un teléfono (WhatsApp, voz) o un correo (canal
+        // "email", F9), ese dato cuenta como contacto real aunque el LLM no
+        // haya llenado `contact` — ya sabemos cómo llegarle. Un canal opaco
+        // (Telegram, Messenger, el widget) no.
         convPhone = conv ? normalizePhone(conv.channel_user_id, region) : null;
+        convEmail = conv && !convPhone ? normalizeEmail(conv.channel_user_id) : null;
       }
 
       const classified = classifyContact(contact, region);
-      let requesterContact = convPhone ?? classified?.addressNorm ?? null;
+      let requesterContact = convPhone ?? convEmail ?? classified?.addressNorm ?? null;
 
       // Antes de pedirlo de nuevo: ¿ya se capturó un contacto real en esta
       // MISMA conversación (ej. captureLead ya lo pidió hace un momento)?

@@ -223,6 +223,76 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
     </div>`;
 }
 
+/**
+ * "Correo saliente" — DECIDIDO APARTE de qué proveedor recibe los correos
+ * (eso es /admin/conexiones → Correo entrante). El dueño puede recibir por
+ * un proveedor y responder por el otro; esta pantalla es 100% independiente.
+ * Mismo patrón de API key en texto plano + máscara que la de BYO-LLM arriba.
+ */
+function renderCorreoSalienteSection(settings: Record<string, string>): string {
+  const provider = settings[SETTING_KEYS.emailOutboundProvider] ?? "";
+  const hasKey = (settings[SETTING_KEYS.emailOutboundApiKey] ?? "").trim() !== "";
+  const keyTail = hasKey ? (settings[SETTING_KEYS.emailOutboundApiKey] ?? "").trim().slice(-4) : "";
+
+  return `
+    <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:18px">
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <h3 class="font-display font-semibold text-[13.5px] text-cream">✉️ Correo saliente</h3>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:9px;background:var(--accent-soft);border:1px solid rgba(245,197,24,.35);border-radius:var(--radius-sm);padding:13px 15px">
+        <span style="color:var(--accent-2);flex:none;line-height:1">◆</span>
+        <p class="text-[12px]" style="color:var(--muted);margin:0">Con qué proveedor y desde qué dirección responde tu bot los correos que le lleguen. Es independiente de quién los RECIBE (eso se conecta en <a href="/admin/conexiones" style="color:var(--accent-2)">Conexiones → Correo entrante</a>) — puedes recibir por un proveedor y responder por otro.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="font-display font-semibold text-[12.5px] text-cream">Proveedor de envío</label>
+        <select name="${SETTING_KEYS.emailOutboundProvider}" style="${SELECT_STYLE}">
+          <option value="" ${provider === "" ? "selected" : ""}>Sin configurar — el bot no puede responder correos todavía</option>
+          <option value="resend" ${provider === "resend" ? "selected" : ""}>Resend</option>
+          <option value="mailgun" ${provider === "mailgun" ? "selected" : ""}>Mailgun</option>
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        ${renderTextField({
+          name: SETTING_KEYS.emailFromName,
+          label: "Nombre del remitente",
+          help: "Cómo se ve el remitente en el correo del cliente.",
+          value: settings[SETTING_KEYS.emailFromName] ?? "",
+          placeholder: "Ej. Soporte Mi Negocio",
+        })}
+        ${renderTextField({
+          name: SETTING_KEYS.emailFromAddress,
+          label: "Correo del remitente",
+          help: "Debe ser una dirección de un dominio verificado en tu proveedor.",
+          value: settings[SETTING_KEYS.emailFromAddress] ?? "",
+          placeholder: "soporte@tunegocio.com",
+        })}
+      </div>
+      <div id="email-mailgun-domain-block" style="display:${provider === "mailgun" ? "flex" : "none"};flex-direction:column;gap:6px">
+        ${renderTextField({
+          name: SETTING_KEYS.emailOutboundDomain,
+          label: "Dominio de envío (Mailgun)",
+          help: "El dominio que verificaste en Mailgun — solo el dominio, sin \"https://\" ni rutas.",
+          value: settings[SETTING_KEYS.emailOutboundDomain] ?? "",
+          placeholder: "tunegocio.com",
+        })}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="font-display font-semibold text-[12.5px] text-cream">API key</label>
+        <p class="text-dim text-[11px]">${hasKey ? `Hay una key guardada (termina en …${esc(keyTail)}). Escribe una nueva para reemplazarla, o marca la casilla para quitarla.` : "La API key de envío del proveedor que elegiste arriba — no la de recibir, si son distintas."}</p>
+        <input type="password" name="${SETTING_KEYS.emailOutboundApiKey}" value="" autocomplete="off"
+               placeholder="${hasKey ? "••••••••••••" : "········"}" style="${INPUT_STYLE}">
+        ${hasKey ? `<label class="text-dim text-[11.5px]" style="display:flex;align-items:center;gap:7px;cursor:pointer"><input type="checkbox" name="email_outbound_api_key_clear" value="1"> Quitar esta key</label>` : ""}
+      </div>
+    </div>
+    <script>
+    (function () {
+      var sel = document.currentScript.previousElementSibling.querySelector('select[name="${SETTING_KEYS.emailOutboundProvider}"]');
+      var block = document.getElementById("email-mailgun-domain-block");
+      if (sel && block) sel.addEventListener("change", function () { block.style.display = sel.value === "mailgun" ? "flex" : "none"; });
+    })();
+    </script>`;
+}
+
 /** Sección "Voz": API key de OpenAI para Realtime — detecta si ya hay una utilizable antes de pedirla (channels/voice/openaiKey.ts). */
 function renderVoiceSection(settings: Record<string, string>, hasEnvOpenAiKey: boolean): string {
   const source = resolveKeySource(settings, hasEnvOpenAiKey);
@@ -314,6 +384,7 @@ const SECTIONS = [
   { id: "personalidad", label: "Personalidad" },
   { id: "modelo", label: "Modelo de IA" },
   { id: "negocio", label: "Información del negocio" },
+  { id: "correo", label: "Correo saliente" },
   { id: "instrucciones", label: "Instrucciones avanzadas" },
 ] as const;
 
@@ -592,6 +663,10 @@ export function renderConfig(
                 rows: 4,
               })}
             </div>
+          </div>
+
+          <div class="cfg-pane" data-pane="correo" style="display:none;flex-direction:column;gap:24px">
+            ${renderCorreoSalienteSection(settings)}
           </div>
 
           <div class="cfg-pane" data-pane="instrucciones" style="display:none;flex-direction:column;gap:24px">

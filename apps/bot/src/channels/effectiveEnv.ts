@@ -3,6 +3,7 @@ import type { ChannelId } from "./shared";
 import { Db } from "../db/client";
 import { BotChannelsRepo, type BotChannel } from "../db/botChannels";
 import { readSecret } from "../db/vault";
+import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 
 // F4 de docs/multitenancy.md: qué variable de env reemplaza el secreto de
 // cada canal cuando el bot YA se conectó vía bot_channels + Vault. Falta a
@@ -41,6 +42,28 @@ function applyChannelConfig(env: Env, channel: ChannelId, config: BotChannel["co
 }
 
 /**
+ * "email" es asimétrico a propósito: quién RECIBE (bot_channels, ver
+ * resend.ts/mailgun.ts) puede ser un proveedor distinto de quién MANDA
+ * (settings.email_outbound_*, /admin/config → Correo saliente) — decisión
+ * explícita del dueño, no un descuido. Por eso no vive en SECRET_ENV_KEY
+ * (eso es "un secreto de bot_channels reemplaza una env var") ni en
+ * applyChannelConfig: sale de `settings`, no de bot_channels.
+ */
+async function applyOutboundEmailSettings(env: Env, botId: string): Promise<Env> {
+  const settings = await new SettingsRepo(new Db(env.DB), botId).all();
+  const get = (key: string): string | undefined => settings[key]?.trim() || undefined;
+  const provider = get(SETTING_KEYS.emailOutboundProvider);
+  return {
+    ...env,
+    ...(provider === "resend" || provider === "mailgun" ? { EMAIL_OUTBOUND_PROVIDER: provider } : {}),
+    ...(get(SETTING_KEYS.emailOutboundApiKey) ? { EMAIL_OUTBOUND_API_KEY: get(SETTING_KEYS.emailOutboundApiKey) } : {}),
+    ...(get(SETTING_KEYS.emailOutboundDomain) ? { EMAIL_OUTBOUND_DOMAIN: get(SETTING_KEYS.emailOutboundDomain) } : {}),
+    ...(get(SETTING_KEYS.emailFromAddress) ? { EMAIL_FROM_ADDRESS: get(SETTING_KEYS.emailFromAddress) } : {}),
+    ...(get(SETTING_KEYS.emailFromName) ? { EMAIL_FROM_NAME: get(SETTING_KEYS.emailFromName) } : {}),
+  };
+}
+
+/**
  * El env efectivo para ESTE bot en ESTE canal: si ya está conectado vía
  * bot_channels, su token (Vault) y su config no-secreta (SID, número) pisan
  * al del despliegue. Si no, devuelve el env tal cual — el bot sigue
@@ -48,6 +71,8 @@ function applyChannelConfig(env: Env, channel: ChannelId, config: BotChannel["co
  * verdad, así que nunca es un cambio disruptivo.
  */
 export async function resolveChannelEnv(env: Env, botId: string, channel: ChannelId): Promise<Env> {
+  if (channel === "email") return applyOutboundEmailSettings(env, botId);
+
   const key = SECRET_ENV_KEY[channel];
   if (!key) return env;
 

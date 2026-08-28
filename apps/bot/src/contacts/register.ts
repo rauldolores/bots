@@ -4,7 +4,7 @@
 // las dos rutas guarden exactamente lo mismo.
 import type { Db } from "../db/client";
 import { LeadContactsRepo } from "../db/leadContacts";
-import { classifyContact, normalizePhone, regionForTimezone } from "./normalize";
+import { classifyContact, normalizePhone, normalizeEmail, regionForTimezone } from "./normalize";
 import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 
 export interface ConversationRef {
@@ -52,6 +52,11 @@ export async function registerLeadContacts(
 
   if (conv) {
     const telefono = normalizePhone(conv.channel_user_id, region);
+    // Canal "email" (F9): channel_user_id ES el correo del cliente — igual
+    // de "ya sabemos cómo contactarlo" que un teléfono en WhatsApp/voz. Sin
+    // esto caía en la rama 'channel' de abajo (opaco, solo sirve sobre esta
+    // conversación), que es justo lo que NO es un correo real.
+    const correoDelCanal = !telefono ? normalizeEmail(conv.channel_user_id) : null;
     await repo.add(
       telefono
         ? {
@@ -63,15 +68,25 @@ export async function registerLeadContacts(
             // Llegó por su propio número: no hace falta que nos lo confirme.
             verified: true,
           }
-        : {
-            leadId,
-            kind: "channel",
-            channel: conv.channel,
-            addressRaw: conv.channel_user_id,
-            addressNorm: `${conv.channel}:${conv.channel_user_id}`,
-            consent: "inbound",
-            verified: true,
-          },
+        : correoDelCanal
+          ? {
+              leadId,
+              kind: "email",
+              addressRaw: conv.channel_user_id,
+              addressNorm: correoDelCanal,
+              consent: "inbound",
+              // Llegó por su propio correo: no hace falta que nos lo confirme.
+              verified: true,
+            }
+          : {
+              leadId,
+              kind: "channel",
+              channel: conv.channel,
+              addressRaw: conv.channel_user_id,
+              addressNorm: `${conv.channel}:${conv.channel_user_id}`,
+              consent: "inbound",
+              verified: true,
+            },
     );
   }
 }

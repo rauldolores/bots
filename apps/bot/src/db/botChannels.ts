@@ -15,6 +15,13 @@ export interface BotChannelConfig {
   bubbleColor?: string;
   position?: "bottom-right" | "bottom-left";
   greeting?: string;
+  // canal "email" (F9): cuál de los dos proveedores está activo hoy — "una u
+  // otra" (conectar el segundo reemplaza al primero, misma fila). Resend
+  // necesita secret_ref (API key, para pedir el cuerpo completo del correo)
+  // Y verify_token_ref (Signing Secret de Svix); Mailgun solo necesita
+  // verify_token_ref (su "HTTP webhook signing key") — el correo completo ya
+  // viaja en el POST, sin llamada aparte. Ver channels/email/{resend,mailgun}.ts.
+  inboundProvider?: "resend" | "mailgun";
 }
 
 export interface BotChannel {

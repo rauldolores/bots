@@ -3,7 +3,7 @@
 // vivo) llega en una fase posterior. Se agrega aquí primero porque
 // conversations.channel / agent_state.channel ya necesitan el valor para que
 // una llamada comparta memoria con los demás canales (ver channels/voice/).
-export type ChannelId = "manychat" | "telegram" | "twilio" | "messenger" | "instagram" | "whatsapp" | "widget" | "voice";
+export type ChannelId = "manychat" | "telegram" | "twilio" | "messenger" | "instagram" | "whatsapp" | "widget" | "voice" | "email";
 
 export interface IncomingMessage {
   channel: ChannelId;
