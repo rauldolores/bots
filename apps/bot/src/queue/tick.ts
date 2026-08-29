@@ -14,6 +14,7 @@ import { processCampaignJobs } from "../campaigns";
 import { processSkillJobs } from "../skills/routes";
 import { processNurtureJobs } from "../nurture/run";
 import { processCrmAnalysisJobs } from "../crm/analizar";
+import { processLeadCapturedJobs } from "../leads/postCaptura";
 
 /** Cuántas conversaciones atiende un tick. */
 const DEFAULT_LIMIT = 10;
@@ -29,6 +30,9 @@ const NURTURE_BATCH_LIMIT = 5;
 
 /** Cuántas conversaciones se analizan para el CRM por corrida. Cada una es una llamada al LLM. */
 const CRM_ANALYSIS_BATCH_LIMIT = 5;
+
+/** Cuántos leads recién capturados se terminan de procesar por corrida (CRM + aviso). */
+const LEAD_CAPTURED_BATCH_LIMIT = 10;
 
 /** Tras este número de intentos fallidos, el trabajo se abandona. */
 const MAX_ATTEMPTS = 5;
@@ -161,6 +165,16 @@ export async function tick(
     }
   });
   await Promise.all(trabajadores);
+
+  // Leads recién capturados: empujarlos al CRM y avisarle al dueño. Va PRIMERO
+  // de los trabajos de fondo porque es lo más cercano a "el cliente acaba de
+  // hablar" — un lead caliente que tarda en llegar al CRM pierde valor rápido.
+  try {
+    const leads = await processLeadCapturedJobs(env, LEAD_CAPTURED_BATCH_LIMIT);
+    if (leads.procesados > 0) console.log(`[tick] ${leads.procesados} lead(s) empujados al CRM`);
+  } catch (e) {
+    console.error("[tick] processLeadCapturedJobs:", e);
+  }
 
   // Campañas (F6): un lote chico de envíos pendientes por corrida — nunca
   // debe tumbar el tick de turnos, que es lo que de verdad no puede esperar.

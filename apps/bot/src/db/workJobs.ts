@@ -21,7 +21,7 @@ const NOW_MS = "(EXTRACT(EPOCH FROM now()) * 1000)::bigint";
  * ya terminada y propone qué actualizar en el CRM. Va por la cola justamente
  * para que su costo (una llamada al LLM) no lo pague nadie esperando.
  */
-export type WorkJobKind = "skill_run" | "nurture_touch" | "crm_analysis";
+export type WorkJobKind = "skill_run" | "nurture_touch" | "crm_analysis" | "lead_captured";
 
 export interface WorkJob {
   id: string;

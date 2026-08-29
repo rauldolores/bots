@@ -36,8 +36,22 @@ export interface RealtimeClientHandlers {
   onSpeechStarted: () => void;
   onSpeechStopped: () => void;
   onResponseCreated: (responseId: string | undefined) => void;
-  /** status: "completed" | "cancelled" | "failed" | "incomplete" — "cancelled" es la confirmación de que un barge-in sí cortó la generación en el servidor (ver interruption_latency). */
-  onResponseDone: (responseId: string | undefined, status: string | undefined, usage?: unknown) => void;
+  /**
+   * status: "completed" | "cancelled" | "failed" | "incomplete" — "cancelled" es
+   * la confirmación de que un barge-in sí cortó la generación en el servidor
+   * (ver interruption_latency).
+   *
+   * `details` es `response.status_details`, que es DONDE OpenAI pone el motivo
+   * cuando algo falla. Antes se descartaba, y un "failed" quedaba indistinguible
+   * de otro: 19 de 36 respuestas fallaron en una llamada real y no había forma
+   * de saber por qué.
+   */
+  onResponseDone: (
+    responseId: string | undefined,
+    status: string | undefined,
+    usage?: unknown,
+    details?: unknown,
+  ) => void;
   onFunctionCall: (call: { callId: string; name: string; argumentsJson: string }) => void;
   /** Lo que Realtime transcribió de lo que dijo el LLAMANTE — para persistir el turno vía el mismo MessagesRepo que usan los demás canales (session context real, no solo audio). */
   onUserTranscript: (transcript: string) => void;
@@ -260,7 +274,7 @@ export class RealtimeClient {
         this.handlers.onResponseCreated(evt.response?.id);
         return;
       case "response.done":
-        this.handlers.onResponseDone(evt.response?.id, evt.response?.status, evt.response?.usage);
+        this.handlers.onResponseDone(evt.response?.id, evt.response?.status, evt.response?.usage, evt.response?.status_details);
         return;
       case "response.function_call_arguments.done":
         this.handlers.onFunctionCall({ callId: evt.call_id, name: evt.name, argumentsJson: evt.arguments ?? "{}" });

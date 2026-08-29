@@ -56,6 +56,15 @@ const DEFAULT_MAX_CALL_DURATION_MS = 30 * 60_000;
  */
 const TOOL_TIMEOUT_MS = 8_000;
 
+/**
+ * Cuántas veces se vuelve a pedir una respuesta que falló sin emitir audio.
+ *
+ * Dos: la primera cubre el fallo puntual, que es el caso real observado. Más
+ * allá de eso el problema no es puntual, y seguir pidiendo solo alargaría el
+ * silencio en vez de romperlo.
+ */
+const MAX_REINTENTOS_POR_TURNO = 2;
+
 /** Cuánto silencio del cliente (sin hablar, sin que el bot esté respondiendo) antes de sondear si sigue en la línea. Configurable (env.VOICE_SILENCE_NUDGE_MS) — un negocio con clientes que piensan en voz alta antes de contestar puede querer más margen. */
 const DEFAULT_SILENCE_NUDGE_MS = 15_000;
 /** Cuánto silencio del cliente DESPUÉS de la última actividad (el sondeo incluido: que el bot termine de decir "¿sigues ahí?" también cuenta) antes de colgar, en vez de dejar la sesión de Realtime consumiendo minutos con nadie del otro lado. Configurable (env.VOICE_SILENCE_HANGUP_MS). */
@@ -81,6 +90,10 @@ export class RealtimeCallBridge {
   private responseActive = false;
   /** true entre pedir response.create y que Realtime confirme response.created — el guard central que evita pedir una respuesta nueva dos veces (tool calls en paralelo, el sondeo de silencio, etc.). */
   private responseRequested = false;
+  /** Reintentos de respuesta gastados en el turno actual — ver debeReintentar(). */
+  private reintentosDelTurno = 0;
+  /** El cliente tiene el micrófono abierto ahora mismo (entre speech_started y speech_stopped). */
+  private clienteHablando = false;
   /** El id de la respuesta que Realtime confirmó más recientemente (response.created) — se usa para descartar audio/eventos tardíos de una respuesta que YA se canceló, aunque hayan salido de OpenAI antes de que el cancel le llegara. */
   private activeResponseId: string | null = null;
   /** El conversation item (item_id) de la respuesta activa — llega con su primer audio delta, no con response.created. Necesario para truncateResponse() en un barge-in: sin el item_id correcto, OpenAI no sabe QUÉ truncar. */
@@ -213,7 +226,8 @@ export class RealtimeCallBridge {
         onSpeechStarted: () => this.handleSpeechStarted(),
         onSpeechStopped: () => this.handleSpeechStopped(),
         onResponseCreated: (responseId) => this.handleResponseCreated(responseId),
-        onResponseDone: (responseId, status, usage) => this.handleResponseDone(responseId, status, usage),
+        onResponseDone: (responseId, status, usage, details) =>
+          this.handleResponseDone(responseId, status, usage, details),
         onFunctionCall: (call) => void this.handleFunctionCall(call),
         onUserTranscript: (t) => void this.persistTurn("user", t),
         onAssistantTranscript: (t) => void this.persistTurn("assistant", t),
@@ -269,6 +283,11 @@ export class RealtimeCallBridge {
   private handleSpeechStarted(): void {
     this.lastActivityAt = Date.now();
     this.silenceNudgedAt = null;
+    this.clienteHablando = true;
+    // Turno nuevo del cliente: los reintentos vuelven a cero. El tope es POR
+    // turno, no por llamada — si no, un mal momento al principio dejaría el
+    // resto de la conversación sin red.
+    this.reintentosDelTurno = 0;
     logVoiceEvent("user_turn_started", { botId: this.deps.botId, callSid: maskId(this.deps.callSid) });
 
     if (this.responseActive || this.responseRequested) {
@@ -304,6 +323,7 @@ export class RealtimeCallBridge {
   /** Fin del turno del cliente — AQUÍ se marca userTurnDetectedAt (no en speech_started): turn_latency mide desde que el cliente TERMINÓ de hablar, que es lo que se siente como "¿me está escuchando?". Con turn_detection server_vad, Realtime confirma el turno y dispara su propia respuesta solo — no hace falta mandar response.create a mano. */
   private handleSpeechStopped(): void {
     this.metrics.currentTurn.userTurnDetectedAt = Date.now();
+    this.clienteHablando = false;
     logVoiceEvent("user_turn_detected", { botId: this.deps.botId, callSid: maskId(this.deps.callSid) });
   }
 
@@ -376,7 +396,12 @@ export class RealtimeCallBridge {
     this.deps.sendToTwilio(buildMarkMessage(this.deps.streamSid, "response-audio-end"));
   }
 
-  private handleResponseDone(responseId: string | undefined, status: string | undefined, usage?: unknown): void {
+  private handleResponseDone(
+    responseId: string | undefined,
+    status: string | undefined,
+    usage?: unknown,
+    details?: unknown,
+  ): void {
     // F7 fase 10: uso REAL de tokens de esta respuesta — se acumula sin
     // importar si la respuesta se canceló a medias (lo que sí se haya
     // generado, igual costó).
@@ -434,7 +459,28 @@ export class RealtimeCallBridge {
       status,
       turnLatencyMs: latencyMs,
       responseDurationMs: durationMs,
+      // Solo cuando algo salió mal: en un turno normal es ruido, y en uno
+      // fallido es la única pista de por qué.
+      ...(status === "failed" || status === "incomplete" ? { motivo: motivoDeFallo(details) } : {}),
     });
+
+    // Una respuesta que falla NO produce una sola muestra de audio: el cliente
+    // se queda en silencio. Antes no se reintentaba, así que lo único que
+    // rescataba la llamada era el sondeo de silencio — 15 s de umbral más
+    // hasta 5 de intervalo. En una llamada real eso fueron 19 turnos fallidos
+    // y silencios medidos de 15 a 25 segundos, que se leían como "el bot se
+    // trabó". Reintentar cuesta una petición y devuelve la voz en <1 s.
+    if (this.debeReintentar(status)) {
+      this.reintentosDelTurno++;
+      logVoiceEvent("response_retry", {
+        botId: this.deps.botId,
+        callSid: maskId(this.deps.callSid),
+        intento: this.reintentosDelTurno,
+        motivo: motivoDeFallo(details),
+      });
+      this.requestResponse();
+      return;
+    }
 
     // F7 fase 9: la respuesta que ACABA de terminar es la que le avisó al
     // cliente ("te comunico con un asesor") — recién ahora, con el audio ya
@@ -454,6 +500,26 @@ export class RealtimeCallBridge {
         void this.performTransfer(transfer);
       }
     }
+  }
+
+  /**
+   * ¿Vale la pena volver a pedir esta respuesta?
+   *
+   * Solo si falló SIN decir nada. Una que alcanzó a emitir audio ya le llegó
+   * al cliente aunque terminara mal: repetirla sonaría a tartamudeo.
+   *
+   * El tope por turno es lo que impide un bucle: si la sesión está en un
+   * estado que hace fallar todo, dos intentos lo dejan claro y el sondeo de
+   * silencio sigue ahí como última red.
+   */
+  private debeReintentar(status: string | undefined): boolean {
+    if (status !== "failed") return false;
+    if (this.closed || this.pendingTransfer) return false;
+    // Si el cliente está hablando ahora, callarse es lo correcto: su turno
+    // generará la respuesta siguiente sin que nadie la pida.
+    if (this.clienteHablando) return false;
+    if (this.metrics.currentTurn.firstAudioDeltaAt != null) return false;
+    return this.reintentosDelTurno < MAX_REINTENTOS_POR_TURNO;
   }
 
   /**
@@ -792,4 +858,18 @@ export class RealtimeCallBridge {
     }
     await Promise.all(writes);
   }
+}
+
+/**
+ * El motivo legible de un `response.done` con status "failed"/"incomplete".
+ *
+ * OpenAI lo manda en `response.status_details`, con forma
+ * `{type, reason?, error?: {type, code, message}}`. Se guarda acortado: lo que
+ * sirve para diagnosticar es el código, no el párrafo.
+ */
+export function motivoDeFallo(details: unknown): string {
+  const d = details as { reason?: string; error?: { code?: string; type?: string; message?: string } } | null;
+  if (!d) return "sin detalle";
+  const e = d.error;
+  return (e?.code || e?.type || d.reason || "sin detalle") + (e?.message ? `: ${e.message.slice(0, 160)}` : "");
 }

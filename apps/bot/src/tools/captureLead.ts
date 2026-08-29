@@ -10,8 +10,8 @@ import { BotsRepo } from "../db/bots";
 import { resolveConnectorCreds } from "../connectors/creds";
 import { CRM_ADAPTERS } from "../connectors/registry";
 import type { CrmLeadInput } from "../connectors/types";
-import { notifyOwner } from "./handoffHuman";
 import { registerLeadContacts } from "../contacts/register";
+import { encolarPostCaptura } from "../leads/postCaptura";
 import { classifyContact, normalizePhone, normalizeEmail, phoneVariants, regionForTimezone } from "../contacts/normalize";
 import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 
@@ -136,32 +136,19 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
         console.error("[captureLead] no se pudieron registrar los contactos tipados:", e),
       );
 
-      // Si el dueño marcó una secuencia como automática, el lead entra solo —
-      // que era el punto: nadie va a abrir el detalle de cada lead para
-      // asignársela a mano.
+      // Lo que sigue —inscribir el seguimiento, empujar al CRM, avisarle al
+      // dueño— se ENCOLA en vez de esperarse. Las dos últimas son de red, y
+      // esperarlas costó una llamada real: el puente de voz corta cualquier
+      // tool a los 8 s, así que al modelo se le respondió "timeout" cuando el
+      // lead YA estaba guardado. Volvió a pedirle los datos al cliente y lo
+      // guardó otra vez. Ver src/leads/postCaptura.ts.
       //
-      // SOLO para leads nuevos. En el camino de fusión (un lead que ya
-      // existía y vuelve a escribir) volver a inscribirlo lo regresaría al
-      // paso 0 cada vez, y la misma persona recibiría el primer mensaje de la
-      // secuencia una y otra vez.
-      //
-      // Best-effort: que falle no puede tumbar la captura del lead, que es lo
-      // que de verdad no se puede perder.
-      if (isNew) {
-        await inscribirEnSecuenciaAutomatica(env, db, botId, leadId).catch((e) =>
-          console.error("[captureLead] no se pudo inscribir en la secuencia automática:", e),
-        );
-      }
-
-      // El lead SIEMPRE queda local primero (es la fuente interna — conserva
-      // el link a la conversación y no depende de que el CRM esté disponible).
-      // Si hay un CRM conectado, además se empuja ahí, best-effort: si falla,
-      // el lead no se pierde, solo no llegó todavía al CRM del cliente. Si ya
-      // se había exportado (es el lead existente reencontrado), no se vuelve
-      // a empujar — evitaría crear un segundo registro duplicado allá.
-      if (isNew || !existing?.exported_to) {
-        const bot = await new BotsRepo(db).getById(botId);
-        await pushToCrmIfConnected(env, db, botId, leadId, {
+      // Aquí adentro solo queda lo que toca NUESTRA base y es lo único que de
+      // verdad no se puede perder.
+      await encolarPostCaptura(db, botId, {
+        leadId,
+        isNew,
+        crm: {
           name: name ?? null,
           contact: effectiveContact ?? null,
           // Los dos por separado, para que el CRM los guarde en su campo
@@ -172,28 +159,15 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
           notes: notes ?? null,
           company: company ?? null,
           estimatedValue: estimatedValue ?? null,
-          currency: bot?.config.currency || "MXN",
-        });
-      }
-
-      // Avisarle al dueño, igual que ya lo hace un ticket. Desde que una
-      // cotización se registra como oportunidad y NO como ticket (ver
-      // <que_registrar> en system-prompt.ts), sin esto un lead caliente
-      // entraría al CRM en silencio. Solo en altas nuevas: si el mismo cliente
-      // sigue escribiendo, ya se avisó. Best-effort, nunca tumba la captura.
-      if (isNew) {
-        await notifyOwner(
-          env,
-          {
-            reason: "nueva oportunidad",
-            summary: `${name || effectiveContact || "Alguien"}: ${intent}`,
-            ticketId: leadId,
-            titulo: "Nueva oportunidad",
-            ruta: "/admin/leads",
-          },
-          botId,
-        ).catch((e) => console.error("[captureLead] no se pudo avisar al dueño:", e));
-      }
+          // La moneda la resuelve el trabajo diferido: es una consulta más y
+          // aquí lo que se busca es devolver cuanto antes.
+          currency: "",
+        },
+        aviso: {
+          titulo: "Nueva oportunidad",
+          resumen: `${name || effectiveContact || "Alguien"}: ${intent}`,
+        },
+      });
 
       // La empresa NO bloquea la captura (perder el lead sería peor, y un
       // cliente que no la quiere dar existe), pero sí se le recuerda al modelo
@@ -216,7 +190,7 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
   });
 }
 
-async function pushToCrmIfConnected(
+export async function pushToCrmIfConnected(
   env: Env,
   db: Db,
   botId: string,
@@ -253,7 +227,7 @@ async function pushToCrmIfConnected(
  * Cada una se inscribe por separado y un fallo no frena a las siguientes: que
  * una secuencia esté mal armada no puede dejar al lead fuera de las demás.
  */
-async function inscribirEnSecuenciaAutomatica(
+export async function inscribirEnSecuenciaAutomatica(
   env: Env,
   db: Db,
   botId: string,
