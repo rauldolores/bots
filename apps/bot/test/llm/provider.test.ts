@@ -6,13 +6,15 @@ vi.mock("@ai-sdk/anthropic", () => ({
   createAnthropic: () => (modelId: string) => ({ p: "anthropic", modelId }),
 }));
 vi.mock("@ai-sdk/openai", () => ({
-  createOpenAI: () => (modelId: string) => ({ p: "openai", modelId }),
+  // DeepSeek entra por aquí (API compatible con OpenAI) usando `.chat()`, así
+  // que el simulado tiene que ofrecer las dos formas — ver createModel.
+  createOpenAI: (opts: { baseURL?: string } = {}) =>
+    Object.assign((modelId: string) => ({ p: "openai", modelId, baseURL: opts.baseURL }), {
+      chat: (modelId: string) => ({ p: "openai.chat", modelId, baseURL: opts.baseURL }),
+    }),
 }));
 vi.mock("@ai-sdk/xai", () => ({
   createXai: () => (modelId: string) => ({ p: "xai", modelId }),
-}));
-vi.mock("@ai-sdk/deepseek", () => ({
-  createDeepSeek: () => (modelId: string) => ({ p: "deepseek", modelId }),
 }));
 
 import { resolveProvider, modelIdFor, createModel, degradedModelFor, otherTierModel, fallbackModel } from "../../src/llm/provider";
@@ -160,17 +162,43 @@ describe("fallbackModel", () => {
     expect(fallbackModel(env(), "fast", "anthropic", { apiKey: "sk-owner" })).toBeNull();
   });
 
-  // Bug real (visto en producción): @ai-sdk/deepseek instalado (3.0.30) trae
-  // una @ai-sdk/provider incompatible con el resto del stack (ai@6 +
-  // @ai-sdk/anthropic|openai|xai) — cualquier llamada revienta con
-  // AI_UnsupportedModelVersionError. Un bot que ya tenía "deepseek" guardado
-  // como respaldo (de antes de saberse del bug) no debe intentarlo — mejor
-  // caer al "sin respaldo" que reventar el turno.
-  it("ignora un respaldo a deepseek aunque esté guardado — incompatible con el stack instalado", () => {
-    expect(fallbackModel(env(), "fast", "anthropic", { provider: "deepseek", apiKey: "sk-ds" })).toBeNull();
+  it("acepta deepseek como respaldo del dueño", () => {
+    const r = fallbackModel(env(), "fast", "anthropic", { provider: "deepseek", apiKey: "sk-ds" });
+    expect(r?.provider).toBe("deepseek");
   });
 
-  it("tampoco ofrece deepseek como respaldo de sistema", () => {
-    expect(fallbackModel(env({ DEEPSEEK_API_KEY: "sk-ds" }), "fast", "anthropic")).toBeNull();
+  it("y también como respaldo de sistema, si hay llave en el env", () => {
+    const r = fallbackModel(env({ DEEPSEEK_API_KEY: "sk-ds" }), "fast", "anthropic");
+    expect(r?.provider).toBe("deepseek");
+  });
+});
+
+// El bug que originó todo esto: @ai-sdk/deepseek depende de
+// @ai-sdk/provider@4.x mientras ai@6 y el resto del stack están en 3.0.15, así
+// que TODA llamada reventaba con AI_UnsupportedModelVersionError. Sigue roto en
+// todas sus versiones publicadas (verificado hasta la 3.0.36), así que DeepSeek
+// se conecta por su API compatible con OpenAI.
+describe("deepseek va por la API compatible con OpenAI", () => {
+  it("usa el cliente de OpenAI apuntado al dominio de DeepSeek", () => {
+    const m = createModel(env({ DEEPSEEK_API_KEY: "sk-ds" }), "fast", { provider: "deepseek" });
+    expect(m.provider).toBe("deepseek");
+    expect(m.modelId).toBe("deepseek-chat");
+    expect(m.model.baseURL).toBe("https://api.deepseek.com/v1");
+  });
+
+  it("por CHAT y no por la Responses API, que DeepSeek no implementa", () => {
+    const m = createModel(env({ DEEPSEEK_API_KEY: "sk-ds" }), "fast", { provider: "deepseek" });
+    expect(m.model.p).toBe("openai.chat");
+  });
+
+  it("deduce el proveedor por el id del modelo, sin que lo elijan a mano", () => {
+    const m = createModel(env({ DEEPSEEK_API_KEY: "sk-ds" }), "fast", { model: "deepseek-reasoner" });
+    expect(m.provider).toBe("deepseek");
+    expect(m.modelId).toBe("deepseek-reasoner");
+  });
+
+  it("sin llave de deepseek cae al default en vez de quedarse mudo", () => {
+    const m = createModel(env(), "fast", { provider: "deepseek" });
+    expect(m.provider).toBe("anthropic");
   });
 });

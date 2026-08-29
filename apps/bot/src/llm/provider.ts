@@ -1,7 +1,6 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createXai } from "@ai-sdk/xai";
-import { createDeepSeek } from "@ai-sdk/deepseek";
 import type { Env } from "../env";
 import type { Tier } from "../upgrade/modelSelector";
 
@@ -36,6 +35,9 @@ const DEEPSEEK_DEFAULTS: Record<Tier, string> = {
   fast: "deepseek-chat",
   smart: "deepseek-reasoner",
 };
+
+/** DeepSeek habla el protocolo de OpenAI — ver createModel() para por qué importa. */
+const DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
 
 /**
  * Owner overrides from the dashboard (D1 `settings`): provider, BYO API key
@@ -152,8 +154,18 @@ export function createModel(env: Env, tier: Tier, ov?: LlmOverrides): ResolvedMo
   }
 
   if (provider === "deepseek") {
-    const deepseek = createDeepSeek({ apiKey });
-    return { provider, modelId, model: deepseek(modelId), supportsPromptCache: false };
+    // DeepSeek NO se conecta con @ai-sdk/deepseek: ese paquete depende de
+    // @ai-sdk/provider@4.x mientras ai@6 y el resto del stack están en 3.0.15,
+    // y toda llamada revienta con AI_UnsupportedModelVersionError (bug real en
+    // producción). Sigue roto en TODAS sus versiones publicadas — verificado
+    // hasta la 3.0.36.
+    //
+    // Pero la API de DeepSeek es compatible con la de OpenAI, así que se
+    // conecta con @ai-sdk/openai —que ya está instalado y en la versión
+    // correcta— apuntándolo a su dominio. `.chat()` es obligatorio: sin él,
+    // createOpenAI usa la Responses API, que DeepSeek no implementa.
+    const deepseek = createOpenAI({ apiKey, baseURL: DEEPSEEK_BASE_URL });
+    return { provider, modelId, model: deepseek.chat(modelId), supportsPromptCache: false };
   }
 
   const anthropic = createAnthropic({ apiKey });
@@ -222,21 +234,22 @@ export function fallbackModel(
   // El respaldo del dueño manda: es SU llave, vale para su bot aunque el
   // despliegue entero no tenga una llave de sistema de ese proveedor — el
   // caso normal en una instalación BYO-LLM de un solo dueño.
-  // "deepseek" queda fuera del allow-list a propósito, aquí también: si un
-  // bot ya tiene guardado ese valor (de antes de que se supiera del bug),
-  // este chequeo lo ignora en vez de intentarlo y volver a tronar — ver el
-  // comentario de arriba y admin/views/config.ts renderLlmSection.
   const backupProvider = (backup?.provider ?? "").trim().toLowerCase();
   const backupKey = (backup?.apiKey ?? "").trim();
   const backupEsValido =
     backupKey !== "" &&
-    (backupProvider === "anthropic" || backupProvider === "openai" || backupProvider === "xai") &&
+    (backupProvider === "anthropic" ||
+      backupProvider === "openai" ||
+      backupProvider === "xai" ||
+      backupProvider === "deepseek") &&
     backupProvider !== failedProvider;
   if (backupEsValido) {
     return createModel(env, tier, { provider: backupProvider, apiKey: backupKey });
   }
 
-  const order: LlmProvider[] = ["anthropic", "openai", "xai"];
+  // Sin respaldo elegido se prueba por llave de sistema. DeepSeek va al final
+  // solo porque es el menos habitual de tener configurado, no por confianza.
+  const order: LlmProvider[] = ["anthropic", "openai", "xai", "deepseek"];
   for (const p of order) {
     if (p === failedProvider) continue;
     if (!envKeyFor(env, p)) continue;

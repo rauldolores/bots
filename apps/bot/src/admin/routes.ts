@@ -1763,13 +1763,13 @@ adminApp.post("/config", async (c) => {
   }
 
   // BYO-LLM: proveedor y modelo se guardan tal cual (allow-list de valores).
-  // "deepseek" queda fuera a propósito: @ai-sdk/deepseek instalado (3.0.30)
-  // trae una @ai-sdk/provider incompatible con el resto del stack — ver el
-  // comentario en admin/views/config.ts renderLlmSection.
   const provRaw = form.get(SETTING_KEYS.llmProvider);
   if (provRaw !== null) {
     const v = String(provRaw).trim().toLowerCase();
-    await repo.set(SETTING_KEYS.llmProvider, v === "anthropic" || v === "openai" || v === "xai" ? v : "");
+    await repo.set(
+      SETTING_KEYS.llmProvider,
+      v === "anthropic" || v === "openai" || v === "xai" || v === "deepseek" ? v : "",
+    );
   }
   const modelRaw = form.get(SETTING_KEYS.llmModel);
   if (modelRaw !== null) {
@@ -1789,12 +1789,14 @@ adminApp.post("/config", async (c) => {
     }
   }
 
-  // Respaldo de otro proveedor (mismo patrón que el BYO-LLM de arriba, mismo
-  // motivo para excluir "deepseek").
+  // Respaldo de otro proveedor (mismo patrón que el BYO-LLM de arriba).
   const backupProvRaw = form.get(SETTING_KEYS.llmBackupProvider);
   if (backupProvRaw !== null) {
     const v = String(backupProvRaw).trim().toLowerCase();
-    await repo.set(SETTING_KEYS.llmBackupProvider, v === "anthropic" || v === "openai" || v === "xai" ? v : "");
+    await repo.set(
+      SETTING_KEYS.llmBackupProvider,
+      v === "anthropic" || v === "openai" || v === "xai" || v === "deepseek" ? v : "",
+    );
   }
   if (form.get("llm_backup_api_key_clear") === "1") {
     await repo.set(SETTING_KEYS.llmBackupApiKey, "");
