@@ -12,6 +12,7 @@ import { BotConnectorsRepo, type BotConnector } from "../../db/botConnectors";
 import { VoiceNumbersRepo, DuplicateVoiceNumberError } from "../../db/voiceNumbers";
 import { createSecret, updateSecret, deleteSecret } from "../../db/vault";
 import { setTelegramWebhook } from "../../channels/telegram";
+import { registerKapsoWebhook } from "../../channels/kapso";
 import { listMcpConnectorTools } from "../../tools/mcpTools";
 import { mcpToolPrefixes } from "../../connectors/mcpNaming";
 import { resolveConnectorCreds } from "../../connectors/creds";
@@ -36,7 +37,7 @@ function esc(s: string): string {
   );
 }
 
-type ConnectableChannel = "telegram" | "twilio" | "voice" | "manychat" | "widget";
+type ConnectableChannel = "telegram" | "twilio" | "kapso" | "voice" | "manychat" | "widget";
 
 interface FieldSpec {
   name: string;
@@ -87,6 +88,23 @@ const CHANNEL_META: Record<ConnectableChannel, ChannelMeta> = {
     ],
     webhookNote:
       "Después de guardar, copia la URL del webhook que aparece en la tarjeta y pégala en Twilio → tu número de WhatsApp → \"WHEN A MESSAGE COMES IN\".",
+  },
+  kapso: {
+    id: "kapso",
+    name: "WhatsApp (Kapso)",
+    icon: "message-circle",
+    desc: "WhatsApp Business vía Kapso — se conecta solo, sin pegar URLs en ningún lado.",
+    steps: [
+      'Entra a <span class="font-mono">kapso.ai</span> y conecta tu número en <b>WhatsApp → Phone numbers</b>. Copia el <b>Phone number ID</b> que te muestra (son puros números, ej. <span class="font-mono">647015955153740</span>).',
+      'Ve a <b>Integrations → API keys</b> y crea una API key del proyecto. Cópiala.',
+      "Pega los dos datos aquí abajo — del webhook nos encargamos nosotros.",
+    ],
+    fields: [
+      { name: "api_key", label: "API Key de Kapso", placeholder: "········", type: "password" },
+      { name: "phone_number_id", label: "Phone number ID", placeholder: "647015955153740" },
+    ],
+    webhookNote:
+      "No tienes que hacer nada más: el webhook se registra solo en tu cuenta de Kapso al guardar, con su propia llave de seguridad.",
   },
   voice: {
     id: "voice",
@@ -426,10 +444,19 @@ function renderConnectedModal(
   const url = webhookUrlFor(env, channel, botId);
   const autoRegistered = webhookResult !== undefined;
 
+  // Telegram y Kapso registran su webhook solos (sus APIs lo permiten); los
+  // demás canales muestran la URL para pegarla en el panel del proveedor. Por
+  // eso el nombre sale de la metadata y no está escrito a mano.
+  const donde = esc(meta.name);
   const status = autoRegistered
     ? webhookResult!.ok
-      ? `<div class="text-[12.5px]" style="color:var(--ok);margin-bottom:14px">✓ El webhook ya quedó registrado en Telegram — no falta nada más.</div>`
-      : `<div class="text-[12.5px]" style="color:var(--bad);margin-bottom:14px">El token se guardó, pero registrar el webhook en Telegram falló: ${esc(webhookResult!.error ?? "error desconocido")}. Puedes reintentar volviendo a pegar el mismo token.</div>`
+      ? `<div class="text-[12.5px]" style="color:var(--ok);margin-bottom:14px">✓ El webhook ya quedó registrado en ${donde} — no falta nada más.</div>`
+      : // Si el alta automática falla, la conexión YA quedó guardada: se
+        // enseña la URL para que el dueño la pegue a mano y no se quede
+        // atorado por algo que sí tiene salida.
+        `<div class="text-[12.5px]" style="color:var(--bad);margin-bottom:14px">Se guardaron tus datos, pero registrar el webhook automáticamente en ${donde} falló: ${esc(webhookResult!.error ?? "error desconocido")}.</div>
+         <p class="text-[12.5px]" style="color:var(--muted);margin:0 0 12px">Puedes reintentar volviendo a pegar los mismos datos, o darlo de alta a mano con esta URL:</p>
+         ${copyRow("URL del webhook", url)}`
     : `<p class="text-[12.5px]" style="color:var(--muted);margin:0 0 12px">${meta.webhookNote}</p>${copyRow("URL del webhook", url)}`;
 
   return modalShell(
@@ -518,6 +545,43 @@ export async function connectChannel(
     return renderConnectedModal("twilio", env, botId);
   }
 
+  if (channel === "kapso") {
+    const apiKey = str("api_key");
+    const phoneNumberId = str("phone_number_id");
+    if (!apiKey || !phoneNumberId) {
+      return renderConnectModal("kapso", { error: "Faltan datos — los dos campos son obligatorios." });
+    }
+
+    // El secreto del webhook lo generamos NOSOTROS y se lo mandamos a Kapso
+    // al registrarlo — el dueño nunca lo ve ni lo copia. Es lo que permite
+    // que este canal se conecte con dos datos y sin pegar URLs, y aun así
+    // llegue firmado (Kapso no lo genera por su cuenta: si no mandamos uno,
+    // el webhook queda sin firmar y cualquiera podría hacerse pasar por él).
+    const webhookSecret = crypto.randomUUID().replace(/-/g, "");
+    const secretRef = await saveChannelSecret(db, botId, "kapso", apiKey);
+    const existing = await connectedRow(db, botId, "kapso");
+    const verifyRef = existing?.verify_token_ref
+      ? (await updateSecret(db, existing.verify_token_ref, webhookSecret), existing.verify_token_ref)
+      : await createSecret(db, webhookSecret, `kapso-webhook:${botId}`);
+
+    await repo.upsert({
+      botId,
+      channel: "kapso",
+      externalId: phoneNumberId,
+      secretRef,
+      verifyTokenRef: verifyRef,
+      config: { phoneNumberId },
+    });
+
+    const result = await registerKapsoWebhook(
+      apiKey,
+      phoneNumberId,
+      webhookUrlFor(env, "kapso", botId),
+      webhookSecret,
+    );
+    return renderConnectedModal("kapso", env, botId, result);
+  }
+
   if (channel === "voice") {
     const accountSid = str("account_sid");
     const authToken = str("auth_token");
@@ -553,6 +617,9 @@ export async function disconnectChannel(env: Env, botId: string, channel: Connec
   const repo = new BotChannelsRepo(db);
   const row = await connectedRow(db, botId, channel);
   if (row?.secret_ref) await deleteSecret(db, row.secret_ref).catch(() => {});
+  // Kapso guarda un SEGUNDO secreto (el del webhook, que generamos nosotros).
+  // Sin esto quedaría huérfano en Vault al desconectar.
+  if (row?.verify_token_ref) await deleteSecret(db, row.verify_token_ref).catch(() => {});
   await repo.disable(botId, channel);
   // El webhook YA rechaza llamadas sin la fila de bot_channels (arriba), pero
   // también se apagan los números para que /admin no los siga mostrando

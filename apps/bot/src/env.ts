@@ -65,6 +65,12 @@ export interface Env {
   EMAIL_FROM_ADDRESS?: string;
   EMAIL_FROM_NAME?: string;
   TELEGRAM_BOT_TOKEN?: string;
+  // Canal "kapso": WhatsApp vía kapso.ai (proxy sobre la Cloud API de Meta).
+  // Ambas se resuelven POR BOT desde bot_channels (ver channels/effectiveEnv.ts) —
+  // aquí están para que el adaptador las lea igual que las de cualquier otro
+  // canal, y para poder configurarlo a nivel de despliegue si alguien quiere.
+  KAPSO_API_KEY?: string;
+  KAPSO_PHONE_NUMBER_ID?: string;
   MANYCHAT_API_KEY?: string;
   MANYCHAT_CONTENT_TYPE?: "instagram" | "whatsapp" | "telegram" | "messenger"; // ManyChat channel for sendContent; defaults to "instagram"
   TWILIO_ACCOUNT_SID?: string;

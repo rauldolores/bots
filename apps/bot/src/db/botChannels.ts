@@ -22,6 +22,11 @@ export interface BotChannelConfig {
   // verify_token_ref (su "HTTP webhook signing key") — el correo completo ya
   // viaja en el POST, sin llamada aparte. Ver channels/email/{resend,mailgun}.ts.
   inboundProvider?: "resend" | "mailgun";
+  // canal "kapso" (WhatsApp vía kapso.ai): el id del número en Meta, que es
+  // parte de la URL para enviar mensajes. No es secreto — los dos secretos
+  // del canal (API key y secreto del webhook) van a Vault, en secret_ref y
+  // verify_token_ref respectivamente.
+  phoneNumberId?: string;
 }
 
 export interface BotChannel {

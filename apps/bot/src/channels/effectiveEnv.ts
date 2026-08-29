@@ -14,6 +14,12 @@ const SECRET_ENV_KEY: Partial<Record<ChannelId, keyof Env>> = {
   telegram: "TELEGRAM_BOT_TOKEN",
   manychat: "MANYCHAT_API_KEY",
   twilio: "TWILIO_AUTH_TOKEN",
+  // Kapso guarda DOS secretos: la API key (secret_ref, la que manda mensajes)
+  // y el secreto del webhook (verify_token_ref, con el que verificamos su
+  // firma). Aquí solo se mapea la primera — la segunda no reemplaza ninguna
+  // env var: la lee el webhook directo de Vault (ver app.ts), igual que hace
+  // el canal de correo con su signing secret.
+  kapso: "KAPSO_API_KEY",
   // F7 fase 2: mismo Auth Token que "twilio" (WhatsApp) — Twilio firma TODOS
   // sus webhooks (mensajería o voz) con el Auth Token de la cuenta, no hay
   // uno distinto por producto. Lo que sí puede diferir por bot es el NÚMERO
@@ -36,6 +42,14 @@ function applyChannelConfig(env: Env, channel: ChannelId, config: BotChannel["co
       ...env,
       ...(config.accountSid ? { TWILIO_ACCOUNT_SID: config.accountSid } : {}),
       ...(config.voiceNumber ? { TWILIO_VOICE_NUMBER: config.voiceNumber } : {}),
+    };
+  }
+  // El phone_number_id de Kapso no es secreto (es el id del número en Meta),
+  // así que vive en config y no en Vault — mismo criterio que el SID de Twilio.
+  if (channel === "kapso") {
+    return {
+      ...env,
+      ...(config.phoneNumberId ? { KAPSO_PHONE_NUMBER_ID: config.phoneNumberId } : {}),
     };
   }
   return env;

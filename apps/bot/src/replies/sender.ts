@@ -7,6 +7,7 @@ import { metaAdapter } from "../channels/meta";
 import { whatsappAdapter } from "../channels/whatsapp";
 import { widgetAdapter } from "../channels/widget";
 import { emailAdapter } from "../channels/email/channel";
+import { kapsoAdapter } from "../channels/kapso";
 
 const MIN_DELAY_MS = 800;
 const MAX_DELAY_MS = 1500;
@@ -45,5 +46,6 @@ export function pickAdapter(channel: ChannelId): ChannelAdapter {
   if (channel === "messenger" || channel === "instagram") return metaAdapter;
   if (channel === "widget") return widgetAdapter;
   if (channel === "email") return emailAdapter;
+  if (channel === "kapso") return kapsoAdapter;
   throw new Error(`unknown channel: ${channel}`);
 }

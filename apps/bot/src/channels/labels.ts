@@ -9,6 +9,10 @@ import type { Env } from "../env";
 export const CHANNEL_LABELS: Record<string, string> = {
   twilio: "WhatsApp",
   whatsapp: "WhatsApp", // legacy rows
+  // Se distingue del de Twilio a propósito: los dos son WhatsApp, y en las
+  // pantallas donde se ven mezclados (leads, conversaciones) el dueño
+  // necesita saber por cuál de sus dos conexiones llegó cada quien.
+  kapso: "WhatsApp (Kapso)",
   telegram: "Telegram",
   instagram: "Instagram",
   messenger: "Messenger",

@@ -12,6 +12,7 @@ import { handleIncomingVoiceCall } from "./channels/voice/webhook";
 import { handleTransferStatusCallback } from "./channels/voice/transfer";
 import { verifyResendSignature, parseResendInbound } from "./channels/email/resend";
 import { verifyMailgunSignature, parseMailgunInbound } from "./channels/email/mailgun";
+import { verifyKapsoSignature, parseKapsoInbound } from "./channels/kapso";
 import { BotChannelsRepo } from "./db/botChannels";
 import { readSecret } from "./db/vault";
 import { adminApp } from "./admin/routes";
@@ -250,6 +251,39 @@ async function routeEmailToAgent(
 
 app.post("/webhooks/email/resend/:botId", (c) => routeEmailToAgent(c, "resend", c.req.param("botId")));
 app.post("/webhooks/email/mailgun/:botId", (c) => routeEmailToAgent(c, "mailgun", c.req.param("botId")));
+
+// --- WhatsApp vía Kapso ----------------------------------------------------
+// No pasa por routeToAgent() genérico por lo mismo que el correo: la firma se
+// verifica sobre el body CRUDO y con un secreto que vive en bot_channels, y
+// ese contrato no recibe ninguna de las dos cosas. Nace ya multi-tenant (solo
+// ruta con :botId — no hay una "legacy" que mantener).
+app.post("/webhooks/kapso/:botId", async (c) => {
+  const botId = c.req.param("botId");
+  const db = new Db(c.env.DB);
+  if (!(await new BotsRepo(db).getById(botId))) return c.text("bot not found", 404);
+
+  const row = await new BotChannelsRepo(db).getByBotAndChannel(botId, "kapso");
+  if (!row || !row.enabled) return c.text("kapso channel not connected", 404);
+
+  // El body se lee como TEXTO y se verifica antes de parsear — volver a
+  // serializar el objeto ya parseado rompería la firma (ver kapso.ts).
+  const rawBody = await c.req.raw.text();
+  const secret = row.verify_token_ref ? await readSecret(db, row.verify_token_ref) : null;
+  const firmaValida = secret
+    ? await verifyKapsoSignature(rawBody, c.req.raw.headers.get("x-webhook-signature"), secret)
+    : false;
+  if (!firmaValida) return c.text("invalid signature", 401);
+
+  const env = await resolveChannelEnv(c.env, botId, "kapso");
+  // Vacío = el evento no era un mensaje que nos toque atender. Se responde 200
+  // igual: un error haría que Kapso reintente y, con suficientes fallos,
+  // AUTO-PAUSE el webhook — y reactivarlo exige que el dueño entre a su panel.
+  for (const msg of parseKapsoInbound(rawBody)) {
+    const r = await ingestMessage(env, msg, botId);
+    if (r.scheduledInMs !== null) wakeTickAfter(env, ctxOpcional(c), r.scheduledInMs, r.warm);
+  }
+  return c.text("ok", 200);
+});
 
 // --- Meta oficial (Facebook Messenger + Instagram DMs, sin ManyChat) --------
 // GET = handshake de verificación de Meta: devuelve hub.challenge si el

@@ -1233,7 +1233,7 @@ adminApp.get("/conexiones", async (c) =>
 // terminal (F5/F4: cada bot conecta sus propios canales desde el panel).
 adminApp.get("/conexiones/:channel/connect", (c) => {
   const channel = c.req.param("channel");
-  if (channel !== "telegram" && channel !== "twilio" && channel !== "voice" && channel !== "manychat" && channel !== "widget") {
+  if (channel !== "telegram" && channel !== "twilio" && channel !== "kapso" && channel !== "voice" && channel !== "manychat" && channel !== "widget") {
     return c.text("Canal desconocido", 404);
   }
   return c.html(renderConnectModal(channel));
@@ -1241,7 +1241,7 @@ adminApp.get("/conexiones/:channel/connect", (c) => {
 
 adminApp.post("/conexiones/:channel/connect", async (c) => {
   const channel = c.req.param("channel");
-  if (channel !== "telegram" && channel !== "twilio" && channel !== "voice" && channel !== "manychat" && channel !== "widget") {
+  if (channel !== "telegram" && channel !== "twilio" && channel !== "kapso" && channel !== "voice" && channel !== "manychat" && channel !== "widget") {
     return c.text("Canal desconocido", 404);
   }
   const form = await c.req.formData();
@@ -1284,7 +1284,7 @@ adminApp.post("/conexiones/email/:provider/connect", async (c) => {
 
 adminApp.post("/conexiones/:channel/disconnect", async (c) => {
   const channel = c.req.param("channel");
-  if (channel !== "telegram" && channel !== "twilio" && channel !== "voice" && channel !== "manychat" && channel !== "widget") {
+  if (channel !== "telegram" && channel !== "twilio" && channel !== "kapso" && channel !== "voice" && channel !== "manychat" && channel !== "widget") {
     return c.text("Canal desconocido", 404);
   }
   await disconnectChannel(c.env, c.get("botId"), channel);
