@@ -44,6 +44,22 @@ export const RESOLUTION_BADGE: Record<string, { txt: string; cls: string }> = {
   abandoned: { txt: "Abandonada", cls: "border border-line text-dim bg-panel2" },
 };
 
+/**
+ * ¿Se logró el objetivo que el dueño le puso a ESTE bot? Lo juzga el mismo
+ * analizador que califica la conversación (src/insights/analyzer.ts).
+ *
+ * Un bot SIN objetivo definido no muestra nada: la columna queda NULL y
+ * badge() ya ignora lo que no está en el mapa. "No se juzgó" no debe verse
+ * como un resultado.
+ */
+export const OBJECTIVE_BADGE: Record<string, { txt: string; cls: string }> = {
+  logrado: { txt: "◎ Objetivo logrado", cls: "border border-ok text-ok bg-ok/10" },
+  no_logrado: { txt: "◎ Objetivo no logrado", cls: "border border-accent2 text-accent2 bg-accent2/10" },
+  // Gris a propósito: que el cliente solo saludara no es una falla del bot, y
+  // pintarlo de rojo haría que el dueño persiguiera un número que no significa nada.
+  no_aplica: { txt: "◎ No aplicaba", cls: "border border-line text-dim bg-panel2" },
+};
+
 function badge(map: Record<string, { txt: string; cls: string }>, key: string | null): string {
   if (!key || !map[key]) return "";
   const b = map[key];
@@ -173,6 +189,7 @@ export async function renderInsights(env: Env, botId: string, analyzedParam?: st
           <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">
             ${badge(SENTIMENT_BADGE, r.sentiment)}
             ${badge(RESOLUTION_BADGE, r.resolution)}
+            ${badge(OBJECTIVE_BADGE, (r as { objective_met?: string | null }).objective_met ?? null)}
           </div>
           <div>${scoreStars(r.bot_score)}</div>
         </div>

@@ -1,0 +1,17 @@
+-- ¿Esta conversación logró el objetivo del bot?
+--
+-- El objetivo lo define el dueño por bot (settings.bot_objective) porque no es
+-- el mismo para uno de ventas que para uno de soporte. Hasta ahora el sistema
+-- sabía QUÉ debía lograr el bot, pero no tenía forma de saber si lo LOGRÓ: la
+-- única señal de resultado era leads.status, que se marca a mano desde
+-- /admin/leads — o sea, casi nunca.
+--
+-- Lo llena el analizador que ya califica cada conversación cuando queda
+-- inactiva (src/insights/analyzer.ts), en la MISMA llamada al modelo que ya
+-- se hacía: un criterio más en la rúbrica, sin costo extra.
+--
+-- Valores: 'logrado' | 'no_logrado' | 'no_aplica'.
+-- NULL a propósito para las filas viejas y para los bots que todavía no
+-- definieron objetivo — "no sabemos" es distinto de "no se logró", y
+-- confundirlos ensuciaría cualquier medición que se haga encima.
+ALTER TABLE conversation_insights ADD COLUMN IF NOT EXISTS objective_met TEXT;

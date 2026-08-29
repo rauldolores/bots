@@ -34,6 +34,7 @@ import {
   IDLE_MS,
 } from "../../src/insights/analyzer";
 import type { Env } from "../../src/env";
+import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
 
 let env: Env;
 let db: Db;
@@ -212,5 +213,86 @@ describe("customer facts (flywheel memory)", () => {
     await db.run("UPDATE conversation_insights SET analyzed_at = 0 WHERE conversation_id = ?", [convId]);
     await analyzeConversations(env);
     expect(await new CustomerFactsRepo(db, TEST_BOT_ID).forConversation(convId)).toHaveLength(2);
+  });
+});
+
+/**
+ * ¿La conversación logró el objetivo del bot?
+ *
+ * Es la señal que faltaba para cerrar el ciclo: el dueño ya podía decir QUÉ
+ * debía lograr el bot (settings.bot_objective), pero nada medía si lo LOGRÓ —
+ * la única señal de resultado era leads.status, que se marca a mano.
+ *
+ * Va dentro de la MISMA llamada al modelo que ya se hacía, así que no cuesta
+ * una llamada extra.
+ */
+describe("objetivo del bot: ¿se logró?", () => {
+  const conObjetivo = async (objetivo: string) =>
+    new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.botObjective, objetivo);
+
+  it("sin objetivo definido: no se le pregunta al modelo y la columna queda NULL", async () => {
+    const convId = await seedIdleConversation("obj-1");
+    await analyzeConversations(env, { limit: 10 });
+
+    const prompt = (generateTextMock.mock.calls[0][0] as { prompt: string }).prompt;
+    expect(prompt).not.toContain("objective_met");
+
+    const row = await insights.getByConversation(convId);
+    // NULL = "no se juzgó", que NO es lo mismo que "no se logró".
+    expect(row?.objective_met ?? null).toBeNull();
+  });
+
+  it("con objetivo: se lo pone al modelo en la rúbrica, textual", async () => {
+    await conObjetivo("Que el cliente agende una llamada de diagnóstico");
+    await seedIdleConversation("obj-2");
+    await analyzeConversations(env, { limit: 10 });
+
+    const prompt = (generateTextMock.mock.calls[0][0] as { prompt: string }).prompt;
+    expect(prompt).toContain("objective_met");
+    expect(prompt).toContain("Que el cliente agende una llamada de diagnóstico");
+  });
+
+  it("guarda el veredicto del modelo", async () => {
+    await conObjetivo("Que el cliente agende una llamada");
+    generateTextMock.mockResolvedValue({ text: JSON.stringify({ ...GRADE, objective_met: "logrado" }) });
+    const convId = await seedIdleConversation("obj-3");
+    await analyzeConversations(env, { limit: 10 });
+
+    expect((await insights.getByConversation(convId))?.objective_met).toBe("logrado");
+  });
+
+  it("acepta los tres veredictos", async () => {
+    await conObjetivo("Que el cliente agende una llamada");
+    for (const veredicto of ["logrado", "no_logrado", "no_aplica"] as const) {
+      generateTextMock.mockResolvedValue({ text: JSON.stringify({ ...GRADE, objective_met: veredicto }) });
+      const convId = await seedIdleConversation(`obj-${veredicto}`);
+      await analyzeConversations(env, { limit: 10 });
+      expect((await insights.getByConversation(convId))?.objective_met).toBe(veredicto);
+    }
+  });
+
+  // El resto de la calificación es demasiado útil para tirarla porque el
+  // modelo se saltó UN campo — y el campo es opcional en el esquema justamente
+  // para eso.
+  it("si el modelo omite el veredicto, el resto de la calificación igual se guarda", async () => {
+    await conObjetivo("Que el cliente agende una llamada");
+    generateTextMock.mockResolvedValue({ text: JSON.stringify(GRADE) }); // sin objective_met
+    const convId = await seedIdleConversation("obj-4");
+    const r = await analyzeConversations(env, { limit: 10 });
+
+    expect(r.analyzed).toBe(1);
+    const row = await insights.getByConversation(convId);
+    expect(row?.objective_met ?? null).toBeNull();
+    expect(row?.bot_score).toBe(3);
+  });
+
+  it("un veredicto inventado que no es de los tres no rompe el análisis", async () => {
+    await conObjetivo("Que el cliente agende una llamada");
+    generateTextMock.mockResolvedValue({ text: JSON.stringify({ ...GRADE, objective_met: "mas o menos" }) });
+    await seedIdleConversation("obj-5");
+    const r = await analyzeConversations(env, { limit: 10 });
+    // El esquema lo rechaza entero (como cualquier salida inválida) en vez de
+    // guardar un valor que después nadie sabría interpretar.
+    expect(r.analyzed + r.errors).toBe(1);
   });
 });

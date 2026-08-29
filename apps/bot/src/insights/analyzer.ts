@@ -22,6 +22,7 @@ import { BotsRepo } from "../db/bots";
 import { resolveBotId } from "../tenant";
 import { createModel } from "../llm/provider";
 import { loadLlmOverrides } from "../settings-loader";
+import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 
 /** A conversation counts as "closed" after this much silence. */
 export const IDLE_MS = 3 * 60 * 60 * 1000; // 3h
@@ -39,6 +40,10 @@ const insightSchema = z.object({
   missed_kb: z.string().nullable().default(null),
   sale_opportunity: z.boolean().default(false),
   customer_facts: z.array(z.string()).max(8).default([]),
+  // Solo se PIDE cuando el bot tiene objetivo definido (ver gradingPrompt).
+  // Va nullable+default para que un bot sin objetivo —donde el criterio ni
+  // siquiera aparece en el prompt— no falle el parseo por un campo ausente.
+  objective_met: z.enum(["logrado", "no_logrado", "no_aplica"]).nullable().default(null),
 });
 
 export interface AnalyzeOptions {
@@ -115,7 +120,20 @@ function buildTranscript(msgs: { role: string; content: string }[]): string {
     .join("\n");
 }
 
-function gradingPrompt(businessName: string, transcript: string, hasOpenTicket: boolean): string {
+function gradingPrompt(
+  businessName: string,
+  transcript: string,
+  hasOpenTicket: boolean,
+  objetivo?: string,
+): string {
+  // El criterio del objetivo se agrega SOLO si el dueño definió uno. Sin él,
+  // preguntarlo obligaría al modelo a inventarse contra qué mide.
+  const campoObjetivo = objetivo ? `,
+  "objective_met": "logrado" | "no_logrado" | "no_aplica"` : "";
+  const criterioObjetivo = objetivo
+    ? `
+- objective_met: el dueño definió este objetivo para el bot: «${objetivo}». Responde "logrado" solo si la conversación SÍ llegó a eso; "no_logrado" si se buscó y no se consiguió; "no_aplica" si la conversación no daba lugar (ej. el cliente solo saludó, se equivocó de número, o venía por algo ajeno). Juzga el RESULTADO, no el esfuerzo del bot.`
+    : "";
   return `Eres un auditor de calidad del chatbot de atención a clientes de ${businessName}.
 Analiza la conversación completa y responde SOLO con un objeto JSON válido, sin markdown ni explicación:
 
@@ -127,7 +145,7 @@ Analiza la conversación completa y responde SOLO con un objeto JSON válido, si
   "summary": "...",
   "missed_kb": "..." | null,
   "sale_opportunity": true | false,
-  "customer_facts": ["hecho1", "hecho2"]
+  "customer_facts": ["hecho1", "hecho2"]${campoObjetivo}
 }
 
 Criterios:
@@ -138,7 +156,7 @@ Criterios:
 - summary: 1-2 frases en español — qué quería el cliente y cómo terminó.
 - missed_kb: si el bot NO supo responder algo concreto del negocio, la pregunta del cliente tal cual; si no, null.
 - sale_opportunity: true SOLO si el cliente mostró intención real de contratar/comprar algo de PAGO y quedó sin cerrar. NO cuentes como oportunidad: registros a eventos gratuitos, saludos, dudas informativas, ni interés vago sin un negocio o necesidad de pago detrás.
-- customer_facts: 0 a 5 datos del CLIENTE útiles para recordarlo en futuras conversaciones (nombre, preferencias, qué compró, qué le molestó). En español, cortos. NUNCA datos sensibles (tarjetas, passwords, direcciones exactas). Lista vacía si no hay nada memorable.
+- customer_facts: 0 a 5 datos del CLIENTE útiles para recordarlo en futuras conversaciones (nombre, preferencias, qué compró, qué le molestó). En español, cortos. NUNCA datos sensibles (tarjetas, passwords, direcciones exactas). Lista vacía si no hay nada memorable.${criterioObjetivo}
 
 Dato: la conversación ${hasOpenTicket ? "SÍ" : "NO"} tiene ticket abierto.
 
@@ -176,6 +194,10 @@ export async function analyzeConversations(
   const insights = new InsightsRepo(db, botId);
   const bot = await new BotsRepo(db).getById(botId);
   const businessName = bot?.business_name ?? env.BUSINESS_NAME;
+  // Una sola lectura por corrida: el objetivo es del BOT, no de cada
+  // conversación, así que no tiene sentido releerlo en cada vuelta.
+  const objetivo =
+    (await new SettingsRepo(db, botId).get(SETTING_KEYS.botObjective))?.trim() || undefined;
 
   const pending = await pickPending(db, botId, now, limit);
   let analyzed = 0;
@@ -191,7 +213,7 @@ export async function analyzeConversations(
 
       const result = await generateText({
         model,
-        prompt: gradingPrompt(businessName, transcript, conv.open_tickets > 0),
+        prompt: gradingPrompt(businessName, transcript, conv.open_tickets > 0, objetivo),
       });
 
       const insight = parseInsightJson(result.text);
@@ -211,6 +233,9 @@ export async function analyzeConversations(
         summary: insight.summary,
         missedKb: insight.missed_kb,
         saleOpportunity: insight.sale_opportunity,
+        // Sin objetivo definido no se guarda un juicio: la columna queda NULL
+        // ("no se juzgó"), que es distinto de "no_logrado".
+        objectiveMet: objetivo ? insight.objective_met : null,
       };
       await insights.upsert(input);
       if (insight.customer_facts.length > 0) {

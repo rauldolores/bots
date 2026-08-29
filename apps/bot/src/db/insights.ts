@@ -2,6 +2,14 @@ import { Db } from "./client";
 
 export type Sentiment = "positive" | "neutral" | "frustrated" | "angry";
 export type Resolution = "resolved" | "unresolved" | "escalated" | "abandoned";
+/**
+ * ¿La conversación logró el objetivo que el dueño le puso a ESTE bot
+ * (settings.bot_objective)? null = no se juzgó — porque el bot no tiene
+ * objetivo definido, o porque la fila es anterior a esta función. "No
+ * sabemos" NO es lo mismo que "no se logró": mezclarlos ensuciaría cualquier
+ * medición hecha encima.
+ */
+export type ObjectiveMet = "logrado" | "no_logrado" | "no_aplica";
 
 export interface ConversationInsight {
   conversation_id: string;
@@ -14,6 +22,7 @@ export interface ConversationInsight {
   summary: string | null;
   missed_kb: string | null;
   sale_opportunity: number; // 0 | 1
+  objective_met: ObjectiveMet | null;
 }
 
 export interface UpsertInsightInput {
@@ -26,6 +35,8 @@ export interface UpsertInsightInput {
   summary: string;
   missedKb: string | null;
   saleOpportunity: boolean;
+  /** null = no se juzgó (bot sin objetivo definido). Ver ObjectiveMet. */
+  objectiveMet?: ObjectiveMet | null;
 }
 
 /** Aggregates for the Insights tab header cards. */
@@ -54,8 +65,8 @@ export class InsightsRepo {
     await this.db.run(
       `INSERT INTO conversation_insights
          (conversation_id, bot_id, analyzed_at, sentiment, resolution, bot_score,
-          topics, summary, missed_kb, sale_opportunity)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          topics, summary, missed_kb, sale_opportunity, objective_met)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(conversation_id) DO UPDATE SET
          analyzed_at = excluded.analyzed_at,
          sentiment = excluded.sentiment,
@@ -64,7 +75,8 @@ export class InsightsRepo {
          topics = excluded.topics,
          summary = excluded.summary,
          missed_kb = excluded.missed_kb,
-         sale_opportunity = excluded.sale_opportunity`,
+         sale_opportunity = excluded.sale_opportunity,
+         objective_met = excluded.objective_met`,
       [
         input.conversationId,
         this.botId,
@@ -76,6 +88,7 @@ export class InsightsRepo {
         input.summary,
         input.missedKb,
         input.saleOpportunity ? 1 : 0,
+        input.objectiveMet ?? null,
       ],
     );
   }
