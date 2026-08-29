@@ -164,6 +164,10 @@ export function createModel(env: Env, tier: Tier, ov?: LlmOverrides): ResolvedMo
     // conecta con @ai-sdk/openai —que ya está instalado y en la versión
     // correcta— apuntándolo a su dominio. `.chat()` es obligatorio: sin él,
     // createOpenAI usa la Responses API, que DeepSeek no implementa.
+    //
+    // Verificado de extremo a extremo contra la API real (2026-08-29), no solo
+    // en tipos: deepseek-chat y deepseek-reasoner responden y reportan tokens
+    // —los de razonamiento incluidos, así que el tope de presupuesto los ve.
     const deepseek = createOpenAI({ apiKey, baseURL: DEEPSEEK_BASE_URL });
     return { provider, modelId, model: deepseek.chat(modelId), supportsPromptCache: false };
   }
