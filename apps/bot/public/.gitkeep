@@ -1,0 +1,6 @@
+Vercel necesita un directorio de salida estático aunque este proyecto no
+publique ni un solo archivo: todo se sirve desde la función api/index.js (ver
+el rewrite en vercel.json). Sin esta carpeta el build falla con "No Output
+Directory named public found".
+
+Vacío A PROPÓSITO. Lo que se ponga aquí queda accesible sin autenticación.
