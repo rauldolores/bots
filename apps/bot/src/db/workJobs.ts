@@ -118,7 +118,20 @@ export class WorkJobsRepo {
    * cuenta de que el lead ya no apunta a esa secuencia — funciona, pero deja
    * un intento fallido innecesario en los logs cada vez.
    */
-  async cancelNurtureTouchesForLead(botId: string, leadId: string): Promise<void> {
+  /**
+   * Borra los toques pendientes de un lead. Con `sequenceId`, SOLO los de esa
+   * secuencia — un lead puede estar en varios seguimientos, y cancelar uno no
+   * puede llevarse por delante a los otros.
+   */
+  async cancelNurtureTouchesForLead(botId: string, leadId: string, sequenceId?: string): Promise<void> {
+    if (sequenceId) {
+      await this.db.run(
+        `DELETE FROM work_jobs WHERE bot_id = ? AND kind = 'nurture_touch'
+           AND payload->>'leadId' = ? AND payload->>'sequenceId' = ?`,
+        [botId, leadId, sequenceId],
+      );
+      return;
+    }
     await this.db.run(
       `DELETE FROM work_jobs WHERE bot_id = ? AND kind = 'nurture_touch' AND payload->>'leadId' = ?`,
       [botId, leadId],

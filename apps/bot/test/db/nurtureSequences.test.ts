@@ -45,6 +45,7 @@ describe("NurtureSequencesRepo", () => {
       steps: [{ afterHours: 5, instruction: "b" }],
       enabled: false,
       autoEnroll: false,
+      stopOnConversion: true,
     });
     const seq = await repo.getById(id);
     expect(seq).toMatchObject({ name: "X2", goal: "Y2", enabled: false, auto_enroll: false });
@@ -54,7 +55,7 @@ describe("NurtureSequencesRepo", () => {
   it("list() trae todas, listEnabled() solo las activas", async () => {
     await repo.create({ name: "Activa", goal: "g", steps: [{ afterHours: 1, instruction: "a" }] });
     const idApagada = await repo.create({ name: "Apagada", goal: "g", steps: [{ afterHours: 1, instruction: "a" }] });
-    await repo.update(idApagada, { name: "Apagada", goal: "g", steps: [{ afterHours: 1, instruction: "a" }], enabled: false, autoEnroll: false });
+    await repo.update(idApagada, { name: "Apagada", goal: "g", steps: [{ afterHours: 1, instruction: "a" }], enabled: false, autoEnroll: false, stopOnConversion: true });
 
     expect(await repo.list()).toHaveLength(2);
     const enabled = await repo.listEnabled();
@@ -76,46 +77,53 @@ describe("NurtureSequencesRepo", () => {
 });
 
 // Asignar la secuencia a mano, lead por lead, era inviable en cuanto entran
-// leads a diario. Una secuencia puede marcarse como la automática — y solo UNA,
-// porque un lead vive en una sola secuencia a la vez (leads.sequence_id) y con
-// dos marcadas cuál gana sería arbitrario.
-describe("secuencia automática", () => {
+// leads a diario. Una o VARIAS secuencias pueden marcarse como automáticas: un
+// lead puede estar en varios seguimientos a la vez, así que entra a todas.
+describe("secuencias automáticas", () => {
   const paso = [{ afterHours: 1, instruction: "a" }];
 
-  it("getAutoEnroll devuelve la marcada", async () => {
+  it("listAutoEnroll devuelve las marcadas", async () => {
     await repo.create({ name: "Normal", goal: "g", steps: paso });
     await repo.create({ name: "Auto", goal: "g", steps: paso, autoEnroll: true });
-    expect((await repo.getAutoEnroll())?.name).toBe("Auto");
+    expect((await repo.listAutoEnroll()).map((s) => s.name)).toEqual(["Auto"]);
   });
 
-  it("sin ninguna marcada, devuelve null — el caso normal", async () => {
+  it("sin ninguna marcada devuelve vacío — el caso normal", async () => {
     await repo.create({ name: "Normal", goal: "g", steps: paso });
-    expect(await repo.getAutoEnroll()).toBeNull();
+    expect(await repo.listAutoEnroll()).toEqual([]);
   });
 
-  it("marcar una SEGUNDA le quita la marca a la primera", async () => {
+  it("pueden ser VARIAS a la vez, y ninguna le quita la marca a la otra", async () => {
+    // Justo lo que se corrigió: al principio un índice único dejaba solo una,
+    // pero eso venía de que un lead solo podía estar en un seguimiento. Ya no.
     await repo.create({ name: "Primera", goal: "g", steps: paso, autoEnroll: true });
     await repo.create({ name: "Segunda", goal: "g", steps: paso, autoEnroll: true });
-
-    expect((await repo.getAutoEnroll())?.name).toBe("Segunda");
-    const todas = await repo.list();
-    expect(todas.filter((s) => s.auto_enroll)).toHaveLength(1);
-  });
-
-  it("y lo mismo al editar una existente", async () => {
-    await repo.create({ name: "Primera", goal: "g", steps: paso, autoEnroll: true });
-    const otra = await repo.create({ name: "Otra", goal: "g", steps: paso });
-    await repo.update(otra, { name: "Otra", goal: "g", steps: paso, enabled: true, autoEnroll: true });
-
-    expect((await repo.getAutoEnroll())?.name).toBe("Otra");
-    expect((await repo.list()).filter((s) => s.auto_enroll)).toHaveLength(1);
+    expect((await repo.listAutoEnroll()).map((s) => s.name)).toEqual(["Primera", "Segunda"]);
   });
 
   it("una automática APAGADA no inscribe a nadie", async () => {
     // Marcarla automática y dejarla apagada es una contradicción; ante la duda,
     // no perseguir a nadie por accidente.
     const id = await repo.create({ name: "Auto", goal: "g", steps: paso, autoEnroll: true });
-    await repo.update(id, { name: "Auto", goal: "g", steps: paso, enabled: false, autoEnroll: true });
-    expect(await repo.getAutoEnroll()).toBeNull();
+    await repo.update(id, {
+      name: "Auto", goal: "g", steps: paso,
+      enabled: false, autoEnroll: true, stopOnConversion: true,
+    });
+    expect(await repo.listAutoEnroll()).toEqual([]);
+  });
+});
+
+// Además de agotar sus pasos, una secuencia puede cortarse sola al convertir.
+describe("salida por conversión", () => {
+  const paso = [{ afterHours: 1, instruction: "a" }];
+
+  it("viene encendida por default — es lo que hacía siempre", async () => {
+    const id = await repo.create({ name: "S", goal: "g", steps: paso });
+    expect((await repo.getById(id))?.stop_on_conversion).toBe(true);
+  });
+
+  it("se puede apagar para seguimientos que EMPIEZAN con la venta", async () => {
+    const id = await repo.create({ name: "Onboarding", goal: "g", steps: paso, stopOnConversion: false });
+    expect((await repo.getById(id))?.stop_on_conversion).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { LeadsRepo, leadMetadata } from "../../src/db/leads";
 import { NurtureSequencesRepo } from "../../src/db/nurtureSequences";
+import { NurtureEnrollmentsRepo } from "../../src/db/nurtureEnrollments";
 import { BotConnectorsRepo } from "../../src/db/botConnectors";
 import { captureLeadTool } from "../../src/tools/captureLead";
 
@@ -433,8 +434,24 @@ describe("captureLeadTool — secuencia automática", () => {
     await capturar("+5215512345678");
 
     const [lead] = await leads.list(10);
-    expect(lead.sequence_id).toBe(seqId);
-    expect(lead.next_touch_at).toBeGreaterThan(Date.now());
+    const e = await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).getActive(lead.id, seqId);
+    expect(e).not.toBeNull();
+    expect(e!.next_touch_at).toBeGreaterThan(Date.now());
+  });
+
+  it("y entra a TODAS las marcadas, no solo a una", async () => {
+    // El caso que motivó el rediseño: un lead puede estar en varios
+    // seguimientos, así que marcar dos como automáticas mete al lead en las dos.
+    const db = new Db(env.DB);
+    const seqs = new NurtureSequencesRepo(db, TEST_BOT_ID);
+    const a = await seqs.create({ name: "Cotización", goal: "Cerrar", steps: paso, autoEnroll: true });
+    const b = await seqs.create({ name: "Webinar", goal: "Invitar", steps: paso, autoEnroll: true });
+
+    await capturar("+5215512345678");
+
+    const [lead] = await leads.list(10);
+    const activas = await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).listActiveByLead(lead.id);
+    expect(activas.map((e) => e.sequence_id).sort()).toEqual([a, b].sort());
   });
 
   it("sin secuencia automática el lead queda suelto, como siempre", async () => {
@@ -444,7 +461,8 @@ describe("captureLeadTool — secuencia automática", () => {
 
     await capturar("+5215512345678");
 
-    expect((await leads.list(10))[0].sequence_id).toBeNull();
+    const [lead] = await leads.list(10);
+    expect(await new NurtureEnrollmentsRepo(new Db(env.DB), TEST_BOT_ID).listActiveByLead(lead.id)).toEqual([]);
   });
 
   it("volver a capturar al MISMO lead no lo regresa al paso 0", async () => {
@@ -457,13 +475,17 @@ describe("captureLeadTool — secuencia automática", () => {
     });
 
     await capturar("+5215512345678");
-    const primerToque = (await leads.list(10))[0].next_touch_at;
+    const enrollments = new NurtureEnrollmentsRepo(db, TEST_BOT_ID);
+    const primero = (await leads.list(10))[0];
+    const primerToque = (await enrollments.listActiveByLead(primero.id))[0].next_touch_at;
 
     await capturar("+5215512345678");
 
     const todos = await leads.list(10);
     expect(todos).toHaveLength(1); // se fusionó, no se duplicó
-    expect(todos[0].next_touch_at).toBe(primerToque); // y no se reprogramó
+    const activas = await enrollments.listActiveByLead(todos[0].id);
+    expect(activas).toHaveLength(1);
+    expect(activas[0].next_touch_at).toBe(primerToque); // y no se reprogramó
     const pendientes = await db.all(
       "SELECT id FROM work_jobs WHERE bot_id = ? AND kind = 'nurture_touch'",
       [TEST_BOT_ID],

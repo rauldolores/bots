@@ -30,6 +30,7 @@ import { AppointmentsRepo, type Appointment } from "../db/appointments";
 import { LeadTouchesRepo, type LeadTouch } from "../db/leadTouches";
 import { ConversationsRepo, type Conversation } from "../db/conversations";
 import { NurtureSequencesRepo } from "../db/nurtureSequences";
+import { NurtureEnrollmentsRepo } from "../db/nurtureEnrollments";
 import { readCrmSnapshot, renderCrmSnapshot } from "./crmSnapshot";
 import type { CrmCustomerSnapshot } from "../connectors/types";
 
@@ -172,8 +173,16 @@ async function seguimientoDelLead(
   botId: string,
   lead: Lead,
 ): Promise<CustomerContext["seguimiento"]> {
-  if (!lead.sequence_id) return null;
-  const secuencia = await new NurtureSequencesRepo(db, botId).getById(lead.sequence_id).catch(() => null);
+  // Un lead puede estar en varios seguimientos; al modelo se le cuenta el más
+  // reciente. Meterle los tres sería ruido en un bloque que ya compite por
+  // espacio, y el que acaba de empezar es el que explica el mensaje de hoy.
+  const activas = await new NurtureEnrollmentsRepo(db, botId)
+    .listActiveByLead(lead.id)
+    .catch(() => []);
+  if (activas.length === 0) return null;
+  const secuencia = await new NurtureSequencesRepo(db, botId)
+    .getById(activas[0].sequence_id)
+    .catch(() => null);
   if (!secuencia) return null;
   const toques = await new LeadTouchesRepo(db, botId).listByLead(lead.id).catch(() => []);
   return {

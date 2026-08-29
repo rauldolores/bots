@@ -14,11 +14,15 @@ export interface Lead {
   external_id: string | null;
   /** JSON con los campos propios del nicho (o null). Ver leadMetadata(). */
   metadata: string | null;
-  /** F8 fase C: secuencia de seguimiento activa (null = no está en ninguna). */
+  /**
+   * OBSOLETAS. La inscripción a seguimientos vive en `nurture_enrollments`
+   * desde la migración 20260828180000 — una fila por seguimiento, porque un
+   * lead puede estar en varios a la vez y estas tres columnas solo alcanzaban
+   * para uno. Nadie las lee ni las escribe ya; se eliminan en la migración de
+   * contracción, cuando el despliegue esté verificado. No las uses.
+   */
   sequence_id: string | null;
-  /** Informativo — quien de verdad decide cuándo se procesa un toque es work_jobs.run_after. */
   next_touch_at: number | null;
-  /** Por qué se frenó la última secuencia (o esta, si sigue detenida). Ver la migración f8c. */
   stopped_reason: string | null;
   created_at: number;
   updated_at: number;
@@ -173,34 +177,6 @@ export class LeadsRepo {
         id,
         this.botId,
       ],
-    );
-  }
-
-  /** Inscribe (o reinscribe) un lead en una secuencia — arranca desde el paso 0. */
-  async startSequence(id: string, sequenceId: string, nextTouchAt: number): Promise<void> {
-    await this.db.run(
-      `UPDATE leads SET sequence_id = ?, next_touch_at = ?, stopped_reason = NULL, updated_at = ?
-       WHERE id = ? AND bot_id = ?`,
-      [sequenceId, nextTouchAt, Date.now(), id, this.botId],
-    );
-  }
-
-  /** Avanza al siguiente toque programado (o null si la secuencia ya terminó). */
-  async setNextTouch(id: string, nextTouchAt: number | null): Promise<void> {
-    await this.db.run("UPDATE leads SET next_touch_at = ?, updated_at = ? WHERE id = ? AND bot_id = ?", [
-      nextTouchAt,
-      Date.now(),
-      id,
-      this.botId,
-    ]);
-  }
-
-  /** Frena la persecución — por brake, por completarse, o porque el dueño la detuvo a mano. */
-  async stopSequence(id: string, reason: string): Promise<void> {
-    await this.db.run(
-      `UPDATE leads SET sequence_id = NULL, next_touch_at = NULL, stopped_reason = ?, updated_at = ?
-       WHERE id = ? AND bot_id = ?`,
-      [reason, Date.now(), id, this.botId],
     );
   }
 

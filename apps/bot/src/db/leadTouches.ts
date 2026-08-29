@@ -78,6 +78,21 @@ export class LeadTouchesRepo {
     );
   }
 
+  /**
+   * El último toque que este lead recibió DE CUALQUIER secuencia.
+   *
+   * Sirve para atribuir una respuesta: con varios seguimientos encima de la
+   * misma persona, contestar es contestarle a quien habló al final — no a
+   * todos. Sin esto, una respuesta apagaría los tres.
+   */
+  async lastSentTouch(leadId: string): Promise<LeadTouch | null> {
+    return this.db.first<LeadTouch>(
+      `SELECT * FROM lead_touches WHERE bot_id = ? AND lead_id = ? AND status = 'sent'
+        ORDER BY sent_at DESC LIMIT 1`,
+      [this.botId, leadId],
+    );
+  }
+
   /** Cuántos toques 'sent' lleva el bot en las últimas 24h — el tope diario (F2.3: por bot). */
   async sentLast24h(now = Date.now()): Promise<number> {
     const row = await this.db.first<{ n: number }>(

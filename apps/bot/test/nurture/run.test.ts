@@ -39,6 +39,8 @@ import { NurtureSequencesRepo } from "../../src/db/nurtureSequences";
 import { LeadTouchesRepo } from "../../src/db/leadTouches";
 import { OptOutsRepo } from "../../src/db/optOuts";
 import { enrollLeadInSequence, stopSequenceForLead, processNurtureJobs } from "../../src/nurture/run";
+import { NurtureEnrollmentsRepo } from "../../src/db/nurtureEnrollments";
+import { WorkJobsRepo } from "../../src/db/workJobs";
 
 let db: Db;
 let env: Env;
@@ -103,9 +105,9 @@ describe("enrollLeadInSequence / stopSequenceForLead", () => {
     const r = await enrollLeadInSequence(env, TEST_BOT_ID, leadId, seqId, NOON);
     expect(r.ok).toBe(true);
 
-    const lead = await new LeadsRepo(db, TEST_BOT_ID).getById(leadId);
-    expect(lead?.sequence_id).toBe(seqId);
-    expect(lead?.next_touch_at).toBe(NOON + 5 * 3600_000); // aritmética pura, sin tocar el reloj de postgres
+    const e = await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).getActive(leadId, seqId);
+    expect(e?.step_index).toBe(0);
+    expect(e?.next_touch_at).toBe(NOON + 5 * 3600_000); // aritmética pura, sin tocar el reloj de postgres
 
     const jobs = await pendingNurtureJobs(TEST_BOT_ID);
     expect(jobs).toHaveLength(1);
@@ -130,10 +132,90 @@ describe("enrollLeadInSequence / stopSequenceForLead", () => {
 
     await stopSequenceForLead(env, TEST_BOT_ID, leadId);
 
-    const lead = await new LeadsRepo(db, TEST_BOT_ID).getById(leadId);
-    expect(lead?.sequence_id).toBeNull();
-    expect(lead?.stopped_reason).toBe("detenido_manual");
+    expect(await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).getActive(leadId, seqId)).toBeNull();
+    const [e] = await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).listByLead(leadId);
+    expect(e.stopped_reason).toBe("detenido_manual");
     expect(await pendingNurtureJobs(TEST_BOT_ID)).toHaveLength(0);
+  });
+});
+
+// El modelo cambió: la inscripción dejó de ser una columna del lead
+// (leads.sequence_id, una sola) y pasó a ser una fila por seguimiento. Sin
+// esto, meter a alguien en "invitación al webinar" lo sacaba en silencio de
+// "cotización sin respuesta".
+describe("un lead en VARIOS seguimientos", () => {
+  const nuevoLead = () =>
+    new LeadsRepo(db, TEST_BOT_ID).create({ conversationId: null, channelUserId: null, intent: "x" });
+
+  it("inscribirlo en una segunda NO lo saca de la primera", async () => {
+    const a = await new NurtureSequencesRepo(db, TEST_BOT_ID).create({
+      name: "Cotización", goal: "Cerrar", steps: [{ afterHours: 5, instruction: "a" }],
+    });
+    const b = await new NurtureSequencesRepo(db, TEST_BOT_ID).create({
+      name: "Webinar", goal: "Invitar", steps: [{ afterHours: 8, instruction: "b" }],
+    });
+    const leadId = await nuevoLead();
+
+    await enrollLeadInSequence(env, TEST_BOT_ID, leadId, a, NOON);
+    await enrollLeadInSequence(env, TEST_BOT_ID, leadId, b, NOON);
+
+    const repo = new NurtureEnrollmentsRepo(db, TEST_BOT_ID);
+    expect(await repo.getActive(leadId, a)).not.toBeNull();
+    expect(await repo.getActive(leadId, b)).not.toBeNull();
+    expect(await pendingNurtureJobs(TEST_BOT_ID)).toHaveLength(2);
+  });
+
+  it("detener UNO deja al otro corriendo", async () => {
+    const a = await new NurtureSequencesRepo(db, TEST_BOT_ID).create({
+      name: "A", goal: "g", steps: [{ afterHours: 5, instruction: "a" }],
+    });
+    const b = await new NurtureSequencesRepo(db, TEST_BOT_ID).create({
+      name: "B", goal: "g", steps: [{ afterHours: 8, instruction: "b" }],
+    });
+    const leadId = await nuevoLead();
+    await enrollLeadInSequence(env, TEST_BOT_ID, leadId, a, NOON);
+    await enrollLeadInSequence(env, TEST_BOT_ID, leadId, b, NOON);
+
+    await stopSequenceForLead(env, TEST_BOT_ID, leadId, "detenido_manual", a);
+
+    const repo = new NurtureEnrollmentsRepo(db, TEST_BOT_ID);
+    expect(await repo.getActive(leadId, a)).toBeNull();
+    expect(await repo.getActive(leadId, b)).not.toBeNull();
+    // Y solo se canceló SU trabajo pendiente, no el del otro.
+    const jobs = await pendingNurtureJobs(TEST_BOT_ID);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].payload).toMatchObject({ sequenceId: b });
+  });
+
+  it("sin decir cuál, se detienen todos — lo que aplica a la persona", async () => {
+    const a = await new NurtureSequencesRepo(db, TEST_BOT_ID).create({
+      name: "A", goal: "g", steps: [{ afterHours: 5, instruction: "a" }],
+    });
+    const b = await new NurtureSequencesRepo(db, TEST_BOT_ID).create({
+      name: "B", goal: "g", steps: [{ afterHours: 8, instruction: "b" }],
+    });
+    const leadId = await nuevoLead();
+    await enrollLeadInSequence(env, TEST_BOT_ID, leadId, a, NOON);
+    await enrollLeadInSequence(env, TEST_BOT_ID, leadId, b, NOON);
+
+    await stopSequenceForLead(env, TEST_BOT_ID, leadId);
+
+    const repo = new NurtureEnrollmentsRepo(db, TEST_BOT_ID);
+    expect(await repo.listActiveByLead(leadId)).toHaveLength(0);
+    expect(await pendingNurtureJobs(TEST_BOT_ID)).toHaveLength(0);
+  });
+
+  it("reinscribirlo en la MISMA la reinicia, no la duplica", async () => {
+    const a = await new NurtureSequencesRepo(db, TEST_BOT_ID).create({
+      name: "A", goal: "g", steps: [{ afterHours: 5, instruction: "a" }],
+    });
+    const leadId = await nuevoLead();
+    await enrollLeadInSequence(env, TEST_BOT_ID, leadId, a, NOON);
+    await enrollLeadInSequence(env, TEST_BOT_ID, leadId, a, NOON + 1000);
+
+    // Dos guiones idénticos en paralelo sobre la misma persona serían spam.
+    expect(await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).listByLead(leadId)).toHaveLength(1);
+    expect(await pendingNurtureJobs(TEST_BOT_ID)).toHaveLength(1);
   });
 });
 
@@ -165,9 +247,9 @@ describe("processNurtureJobs — el toque se manda", () => {
     expect(jobs[0].run_after).toBeGreaterThan(ref + 23 * 3600_000);
     expect(jobs[0].run_after).toBeLessThan(ref + 25 * 3600_000);
 
-    const lead = await new LeadsRepo(db, TEST_BOT_ID).getById(leadId);
-    expect(lead?.sequence_id).toBe(seqId); // sigue en la secuencia — falta el paso 1
-    expect(lead?.next_touch_at).toBe(NOON + 24 * 3600_000); // este campo SÍ es aritmética pura sobre `now`
+    const e = await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).getActive(leadId, seqId);
+    expect(e?.step_index).toBe(1); // sigue en la secuencia — falta el paso 1
+    expect(e?.next_touch_at).toBe(NOON + 24 * 3600_000); // este campo SÍ es aritmética pura sobre `now`
   });
 
   it("último paso: al mandarlo, la secuencia se marca 'completado'", async () => {
@@ -179,9 +261,9 @@ describe("processNurtureJobs — el toque se manda", () => {
 
     await processNurtureJobs(env, 5, { now: NOON });
 
-    const lead = await new LeadsRepo(db, TEST_BOT_ID).getById(leadId);
-    expect(lead?.sequence_id).toBeNull();
-    expect(lead?.stopped_reason).toBe("completado");
+    const [e] = await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).listByLead(leadId);
+    expect(e.status).toBe("detenida");
+    expect(e.stopped_reason).toBe("completado");
     expect(await pendingNurtureJobs(TEST_BOT_ID)).toHaveLength(0);
   });
 
@@ -211,8 +293,8 @@ describe("processNurtureJobs — sin conversación existente (sin contacto en fr
     const touchesList = await new LeadTouchesRepo(db, TEST_BOT_ID).listByLead(leadId);
     expect(touchesList[0]).toMatchObject({ status: "skipped" });
 
-    const lead = await new LeadsRepo(db, TEST_BOT_ID).getById(leadId);
-    expect(lead?.sequence_id).toBe(seqId); // no se detiene — puede que el próximo paso sí encuentre canal
+    const e = await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).getActive(leadId, seqId);
+    expect(e).not.toBeNull(); // no se detiene — puede que el próximo paso sí encuentre canal
   });
 });
 
@@ -233,8 +315,8 @@ describe("processNurtureJobs — frenos que detienen la secuencia", () => {
     const result = await processNurtureJobs(env, 5, { now: NOON });
     expect(result.stopped).toBe(1);
     expect(sendReply).not.toHaveBeenCalled();
-    const lead = await new LeadsRepo(db, TEST_BOT_ID).getById(leadId);
-    expect(lead?.stopped_reason).toBe("convertido");
+    const [e] = await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).listByLead(leadId);
+    expect(e.stopped_reason).toBe("convertido");
   });
 
   it("opt-out registrado: se detiene sin mandar nada", async () => {
@@ -244,20 +326,74 @@ describe("processNurtureJobs — frenos que detienen la secuencia", () => {
     const result = await processNurtureJobs(env, 5, { now: NOON });
     expect(result.stopped).toBe(1);
     expect(sendReply).not.toHaveBeenCalled();
-    const lead = await new LeadsRepo(db, TEST_BOT_ID).getById(leadId);
-    expect(lead?.stopped_reason).toBe("opt_out");
+    const [e] = await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).listByLead(leadId);
+    expect(e.stopped_reason).toBe("opt_out");
   });
 
-  it("el cliente ya respondió desde que se inscribió: se detiene sin mandar nada", async () => {
-    const { conv, leadId } = await setupEnrolled();
-    // Respondió DESPUÉS de la inscripción (NOON).
+  it("el cliente ya venía conversando: se salta el paso 0, pero NO se detiene", async () => {
+    // Cambió a propósito con los seguimientos múltiples. En el paso 0 este
+    // guion todavía no ha abierto la boca, así que el mensaje del cliente no
+    // le contesta a él — detenerlo sería matar un seguimiento por algo que no
+    // tiene que ver. Tampoco se le habla encima: se salta y sigue.
+    const { conv, leadId, seqId } = await setupEnrolled();
     await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "ya no me interesa, gracias");
 
     const result = await processNurtureJobs(env, 5, { now: NOON + 60_000 });
-    expect(result.stopped).toBe(1);
+    expect(result.skipped).toBe(1);
+    expect(result.stopped).toBe(0);
     expect(sendReply).not.toHaveBeenCalled();
-    const lead = await new LeadsRepo(db, TEST_BOT_ID).getById(leadId);
-    expect(lead?.stopped_reason).toBe("respondio");
+    expect(await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).getActive(leadId, seqId)).not.toBeNull();
+  });
+
+  // Con varios seguimientos encima de la misma persona, una respuesta contesta
+  // a QUIEN HABLÓ AL FINAL — no a los tres. Sin atribuir, contestarle a la
+  // cotización apagaría también el del webinar, que nunca le escribió.
+  it("responder detiene SOLO al seguimiento que le escribió", async () => {
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("twilio", "+5215512345678");
+    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "hola");
+    const leadId = await new LeadsRepo(db, TEST_BOT_ID).create({
+      conversationId: conv.id, channelUserId: conv.channel_user_id, intent: "x",
+    });
+    const seqs = new NurtureSequencesRepo(db, TEST_BOT_ID);
+    const dosPasos = [
+      { afterHours: 0, instruction: "primer toque" },
+      { afterHours: 24, instruction: "segundo toque" },
+    ];
+    const cotizacion = await seqs.create({ name: "Cotización", goal: "Cerrar", steps: dosPasos });
+    const webinar = await seqs.create({ name: "Webinar", goal: "Invitar", steps: dosPasos });
+    await enrollLeadInSequence(env, TEST_BOT_ID, leadId, cotizacion, NOON);
+    await enrollLeadInSequence(env, TEST_BOT_ID, leadId, webinar, NOON);
+
+    // Solo la cotización alcanza a mandar su paso 0.
+    const touches = new LeadTouchesRepo(db, TEST_BOT_ID);
+    await touches.claim({
+      leadId, sequenceId: cotizacion, stepIndex: 0,
+      channel: "twilio", addressNorm: conv.channel_user_id, status: "sent",
+    });
+    // El cliente contesta DESPUÉS de ese toque.
+    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "sí, mándamela");
+
+    // Y ahora vence el paso 1 de cada una.
+    const jobs = new WorkJobsRepo(db);
+    for (const sequenceId of [cotizacion, webinar]) {
+      await jobs.enqueue({
+        botId: TEST_BOT_ID,
+        kind: "nurture_touch",
+        payload: { leadId, sequenceId, stepIndex: 1, enrolledAt: NOON },
+        delayMs: 0,
+      });
+      await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).advance(
+        (await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).getActive(leadId, sequenceId))!.id,
+        1,
+        NOON,
+      );
+    }
+
+    await processNurtureJobs(env, 10, { now: NOON + 60_000 });
+
+    const repo = new NurtureEnrollmentsRepo(db, TEST_BOT_ID);
+    expect((await repo.getActive(leadId, cotizacion))).toBeNull(); // le contestó a esta
+    expect((await repo.getActive(leadId, webinar))).not.toBeNull(); // esta nunca le escribió
   });
 
   it("secuencia desactivada mientras tanto: se detiene sin mandar nada", async () => {
@@ -268,13 +404,14 @@ describe("processNurtureJobs — frenos que detienen la secuencia", () => {
       steps: [{ afterHours: 0, instruction: "a" }, { afterHours: 24, instruction: "b" }],
       enabled: false,
       autoEnroll: false,
+      stopOnConversion: true,
     });
 
     const result = await processNurtureJobs(env, 5, { now: NOON });
     expect(result.stopped).toBe(1);
     expect(sendReply).not.toHaveBeenCalled();
-    const lead = await new LeadsRepo(db, TEST_BOT_ID).getById(leadId);
-    expect(lead?.stopped_reason).toBe("secuencia_desactivada");
+    const [e] = await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).listByLead(leadId);
+    expect(e.stopped_reason).toBe("secuencia_desactivada");
   });
 });
 
@@ -302,8 +439,7 @@ describe("processNurtureJobs — frenos que solo reprograman (no detienen ni con
     expect(result.rescheduled).toBe(1);
     expect(sendReply).not.toHaveBeenCalled();
 
-    const lead = await new LeadsRepo(db, TEST_BOT_ID).getById(leadId);
-    expect(lead?.sequence_id).toBe(seqId); // sigue inscrito, no se detuvo
+    expect(await new NurtureEnrollmentsRepo(db, TEST_BOT_ID).getActive(leadId, seqId)).not.toBeNull(); // sigue inscrito
 
     const jobs = await pendingNurtureJobs(TEST_BOT_ID);
     const thisLeadsJob = jobs.find((j) => j.payload.leadId === leadId);

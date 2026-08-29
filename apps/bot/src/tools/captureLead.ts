@@ -242,13 +242,16 @@ async function pushToCrmIfConnected(
 }
 
 /**
- * Mete al lead recién creado en la secuencia que el dueño marcó como
- * automática, si hay una.
+ * Mete al lead recién creado en TODAS las secuencias marcadas como
+ * automáticas. Pueden ser varias: un lead puede estar en varios seguimientos
+ * a la vez, y una inscripción no cancela a la otra.
  *
- * La consulta va antes que la inscripción a propósito: sin secuencia
+ * La consulta va antes que las inscripciones a propósito: sin ninguna
  * automática —el caso normal— esto es UNA consulta barata y se acaba, en vez
- * de arrancar la maquinaria de inscripción para descubrir que no había nada
- * que hacer.
+ * de arrancar la maquinaria para descubrir que no había nada que hacer.
+ *
+ * Cada una se inscribe por separado y un fallo no frena a las siguientes: que
+ * una secuencia esté mal armada no puede dejar al lead fuera de las demás.
  */
 async function inscribirEnSecuenciaAutomatica(
   env: Env,
@@ -256,14 +259,20 @@ async function inscribirEnSecuenciaAutomatica(
   botId: string,
   leadId: string,
 ): Promise<void> {
-  const secuencia = await new NurtureSequencesRepo(db, botId).getAutoEnroll();
-  if (!secuencia) return;
+  const secuencias = await new NurtureSequencesRepo(db, botId).listAutoEnroll();
+  if (secuencias.length === 0) return;
 
   const { enrollLeadInSequence } = await import("../nurture/run");
-  const r = await enrollLeadInSequence(env, botId, leadId, secuencia.id);
-  if (!r.ok) {
-    console.warn(`[captureLead] lead ${leadId} no entró a "${secuencia.name}": ${r.error}`);
-    return;
+  const entro: string[] = [];
+  for (const secuencia of secuencias) {
+    const r = await enrollLeadInSequence(env, botId, leadId, secuencia.id).catch((e) => ({
+      ok: false as const,
+      error: String((e as Error)?.message ?? e),
+    }));
+    if (r.ok) entro.push(secuencia.name);
+    else console.warn(`[captureLead] lead ${leadId} no entró a "${secuencia.name}": ${r.error}`);
   }
-  console.log(`[captureLead] lead ${leadId} inscrito automáticamente en "${secuencia.name}"`);
+  if (entro.length) {
+    console.log(`[captureLead] lead ${leadId} inscrito automáticamente en: ${entro.join(", ")}`);
+  }
 }

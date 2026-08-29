@@ -15,6 +15,7 @@ import type { Env } from "../env";
 import { Db } from "../db/client";
 import { LeadsRepo, type Lead } from "../db/leads";
 import { NurtureSequencesRepo, type NurtureSequence } from "../db/nurtureSequences";
+import { NurtureEnrollmentsRepo } from "../db/nurtureEnrollments";
 import { LeadTouchesRepo } from "../db/leadTouches";
 import { WorkJobsRepo, type WorkJob } from "../db/workJobs";
 import { OptOutsRepo } from "../db/optOuts";
@@ -37,7 +38,13 @@ export interface EnrollResult {
   error?: string;
 }
 
-/** Inscribe a un lead en una secuencia desde el paso 0 — reemplaza cualquier inscripción previa. */
+/**
+ * Inscribe a un lead en una secuencia desde el paso 0.
+ *
+ * NO toca sus otras inscripciones: un lead puede estar en varios seguimientos
+ * a la vez. Solo se reinicia si ya estaba en ESTA misma secuencia — dos
+ * guiones idénticos en paralelo sobre la misma persona serían spam.
+ */
 export async function enrollLeadInSequence(
   env: Env,
   botId: string,
@@ -55,29 +62,49 @@ export async function enrollLeadInSequence(
   if (sequence.steps.length === 0) return { ok: false, error: "La secuencia no tiene pasos." };
 
   const jobs = new WorkJobsRepo(db);
-  await jobs.cancelNurtureTouchesForLead(botId, leadId);
+  // Solo se cancelan los toques pendientes DE ESTA secuencia: los de las otras
+  // siguen su camino. Antes se borraban todos, que es lo que hacía imposible
+  // tener dos seguimientos vivos a la vez.
+  await jobs.cancelNurtureTouchesForLead(botId, leadId, sequenceId);
 
   const delayMs = sequence.steps[0].afterHours * 3600_000;
-  await leads.startSequence(leadId, sequenceId, now + delayMs);
+  const enrollmentId = await new NurtureEnrollmentsRepo(db, botId).start(
+    leadId, sequenceId, now, now + delayMs,
+  );
   await jobs.enqueue({
     botId,
     kind: "nurture_touch",
-    payload: { leadId, sequenceId, stepIndex: 0, enrolledAt: now },
+    payload: { leadId, sequenceId, enrollmentId, stepIndex: 0, enrolledAt: now },
     delayMs,
   });
   return { ok: true };
 }
 
-/** Detiene la persecución de un lead — a mano, desde el panel. */
+/**
+ * Detiene la persecución de un lead — a mano, desde el panel.
+ *
+ * Con `sequenceId`, solo ese seguimiento; sin él, TODOS los del lead. Se pide
+ * explícito a propósito: "ya no le escriban de la cotización" y "ya no le
+ * escriban de nada" son decisiones distintas, y antes no había forma de
+ * expresar la primera.
+ */
 export async function stopSequenceForLead(
   env: Env,
   botId: string,
   leadId: string,
   reason = "detenido_manual",
+  sequenceId?: string,
 ): Promise<void> {
   const db = new Db(env.DB);
-  await new WorkJobsRepo(db).cancelNurtureTouchesForLead(botId, leadId);
-  await new LeadsRepo(db, botId).stopSequence(leadId, reason);
+  const enrollments = new NurtureEnrollmentsRepo(db, botId);
+  await new WorkJobsRepo(db).cancelNurtureTouchesForLead(botId, leadId, sequenceId);
+
+  if (sequenceId) {
+    const e = await enrollments.getActive(leadId, sequenceId);
+    if (e) await enrollments.stop(e.id, reason);
+    return;
+  }
+  await enrollments.stopAllForLead(leadId, reason);
 }
 
 export interface ProcessNurtureResult {
@@ -116,6 +143,8 @@ export async function processNurtureJobs(
 interface NurtureTouchPayload {
   leadId: string;
   sequenceId: string;
+  /** Ausente en trabajos encolados antes de que existieran las inscripciones. */
+  enrollmentId?: string;
   stepIndex: number;
   enrolledAt: number;
 }
@@ -133,35 +162,41 @@ async function processOneTouch(
   const botId = job.bot_id;
 
   const leads = new LeadsRepo(db, botId);
+  const enrollments = new NurtureEnrollmentsRepo(db, botId);
   const lead = await leads.getById(leadId);
-  // El lead se borró, o se reinscribió/detuvo en otra secuencia desde entonces
-  // (startSequence/stopSequence ya cancelan los work_jobs viejos, pero esto
-  // cubre la carrera de un job que ya estaba en vuelo cuando eso pasó).
-  if (!lead || lead.sequence_id !== sequenceId) {
+
+  // La inscripción manda, no el lead: es lo que distingue "sigue en ESTE
+  // seguimiento" de "sigue en alguno". Si se detuvo o se reinició mientras
+  // este trabajo estaba en vuelo, aquí se descarta.
+  const enrollment = lead ? await enrollments.getActive(leadId, sequenceId) : null;
+  if (!lead || !enrollment) {
     await jobs.complete(job.id);
     return;
   }
-  if (lead.status === "sold" || lead.status === "lost") {
-    await leads.stopSequence(leadId, "convertido");
+  // Reinscrito desde entonces: este trabajo es de la corrida anterior.
+  if (enrollment.step_index !== stepIndex) {
     await jobs.complete(job.id);
-    result.stopped++;
     return;
   }
 
+  const detener = async (motivo: string) => {
+    await enrollments.stop(enrollment.id, motivo);
+    await jobs.complete(job.id);
+    result.stopped++;
+  };
+
   const sequence = await new NurtureSequencesRepo(db, botId).getById(sequenceId);
-  if (!sequence || !sequence.enabled) {
-    await leads.stopSequence(leadId, "secuencia_desactivada");
-    await jobs.complete(job.id);
-    result.stopped++;
-    return;
+  if (!sequence || !sequence.enabled) return void (await detener("secuencia_desactivada"));
+
+  // Salida por conversión — configurable por secuencia. Apagada, el guion
+  // corre completo aunque el lead ya se haya marcado vendido: hay seguimientos
+  // (onboarding, post-venta) donde vender es justo cuando EMPIEZAN.
+  if (sequence.stop_on_conversion && (lead.status === "sold" || lead.status === "lost")) {
+    return void (await detener("convertido"));
   }
+
   const step = sequence.steps[stepIndex];
-  if (!step) {
-    await leads.stopSequence(leadId, "completado");
-    await jobs.complete(job.id);
-    result.stopped++;
-    return;
-  }
+  if (!step) return void (await detener("completado"));
 
   // Freno: tope diario del bot — no es un fallo, solo hay que esperar cupo.
   const dailyCap = opts.dailyCap ?? DEFAULT_DAILY_CAP;
@@ -184,39 +219,60 @@ async function processOneTouch(
   const ctx = await gatherContactContext(db, botId, lead);
 
   // Freno: opt-out — consulta TODAS las formas conocidas de esta persona.
+  // Este SÍ apaga todos sus seguimientos: "no me escriban" es sobre la
+  // persona, no sobre un guion. Es el único que nunca se puede configurar.
   if (await new OptOutsRepo(db, botId).isOptedOut(ctx.optOutVariants)) {
-    await leads.stopSequence(leadId, "opt_out");
+    await enrollments.stopAllForLead(leadId, "opt_out");
     await jobs.complete(job.id);
     result.stopped++;
     return;
   }
 
-  // Freno: ya respondió desde el toque anterior (o desde que se inscribió, en el paso 0).
+  // Freno: ya respondió.
+  //
+  // Con varios seguimientos encima de la misma persona, una respuesta contesta
+  // a QUIEN HABLÓ AL FINAL — no a los tres. Sin atribuir, responderle al
+  // seguimiento de la cotización apagaría también el del webinar, que nunca
+  // llegó a escribirle.
   const previous = await touches.previousTouch(leadId, sequenceId, stepIndex);
-  const sinceMs = previous?.sent_at ?? enrolledAt ?? now;
-  if (await hasRepliedSince(db, ctx.conversations, sinceMs)) {
-    await leads.stopSequence(leadId, "respondio");
-    await jobs.complete(job.id);
-    result.stopped++;
-    return;
+  if (previous) {
+    const ultimo = await touches.lastSentTouch(leadId);
+    const hablamosNosotrosAlFinal = !ultimo || ultimo.sequence_id === sequenceId;
+    if (hablamosNosotrosAlFinal && (await hasRepliedSince(db, ctx.conversations, previous.sent_at))) {
+      return void (await detener("respondio"));
+    }
   }
 
   const conv = ctx.sendConversation;
   const nextStep = sequence.steps[stepIndex + 1];
   const scheduleNext = async () => {
     if (!nextStep) {
-      await leads.stopSequence(leadId, "completado");
+      await enrollments.stop(enrollment.id, "completado");
       return;
     }
     const nextAt = now + nextStep.afterHours * 3600_000;
-    await leads.setNextTouch(leadId, nextAt);
+    await enrollments.advance(enrollment.id, stepIndex + 1, nextAt);
     await jobs.enqueue({
       botId,
       kind: "nurture_touch",
-      payload: { leadId, sequenceId, stepIndex: stepIndex + 1, enrolledAt },
+      payload: { leadId, sequenceId, enrollmentId: enrollment.id, stepIndex: stepIndex + 1, enrolledAt },
       delayMs: nextStep.afterHours * 3600_000,
     });
   };
+
+  // Paso 0 con el cliente ya conversando: no se detiene el seguimiento (no
+  // hay nada que "responder" todavía, este guion no ha abierto la boca), pero
+  // tampoco se le habla encima. Se salta el paso y sigue con el siguiente.
+  if (!previous && (await hasRepliedSince(db, ctx.conversations, enrolledAt ?? now))) {
+    await touches.claim({
+      leadId, sequenceId, stepIndex, channel: "none", addressNorm: "none",
+      status: "skipped", detail: "el cliente ya venía conversando",
+    });
+    await scheduleNext();
+    await jobs.complete(job.id);
+    result.skipped++;
+    return;
+  }
 
   // Sin conversación ya abierta = sin forma de contactarlo sin ser un
   // contacto en frío. Se salta este toque y se sigue con el guion — puede que

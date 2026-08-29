@@ -56,9 +56,9 @@ function stepRow(s: Partial<NurtureStep>, i: number): string {
     </div>`;
 }
 
-/** `otraAutomatica`: nombre de la secuencia automática vigente, si es OTRA — para
- *  que marcar esta no le quite la suya al dueño sin avisar. */
-function sequenceForm(seq: NurtureSequence | null, error?: string, otraAutomatica?: string): string {
+/** `otrasAutomaticas`: las que ya inscriben solas, para que el dueño vea en
+ *  cuántas va a caer cada lead nuevo — se suman, no se reemplazan. */
+function sequenceForm(seq: NurtureSequence | null, error?: string, otrasAutomaticas: string[] = []): string {
   const isNew = !seq;
   const steps = seq?.steps ?? [{ afterHours: 3, instruction: "" }];
   const action = isNew ? "/admin/seguimientos/nueva" : `/admin/seguimientos/${seq!.id}`;
@@ -110,14 +110,25 @@ function sequenceForm(seq: NurtureSequence | null, error?: string, otraAutomatic
       </label>
       <p class="text-dim text-[11px]">
         En cuanto el agente capture un lead, empieza esta secuencia sin que tengas que
-        asignarla a mano. Solo una secuencia puede ser la automática: si ya hay otra,
-        al guardar esta toma su lugar.${
-          otraAutomatica
-            ? ` <span style="color:var(--accent-2)">Hoy la automática es <b>${esc(otraAutomatica)}</b>.</span>`
+        asignarla a mano. Puedes marcar varias: un lead puede estar en más de un
+        seguimiento a la vez, y cada uno corre su propio guion.${
+          otrasAutomaticas.length
+            ? ` <span style="color:var(--accent-2)">Ya entran solas: <b>${esc(otrasAutomaticas.join(", "))}</b> — cada lead nuevo caerá también en ${otrasAutomaticas.length === 1 ? "esa" : "esas"}.</span>`
             : ""
         }
       </p>
     </div>
+
+    <label class="text-[12px]" style="display:flex;align-items:start;gap:8px;color:var(--muted);cursor:pointer">
+      <input type="hidden" name="stop_on_conversion" value="0">
+      <input type="checkbox" name="stop_on_conversion" value="1" style="margin-top:2px"
+             ${seq === null || seq.stop_on_conversion ? "checked" : ""}>
+      <span>Detener este seguimiento si el lead se marca como vendido o perdido.
+        <span class="text-dim">Apágalo para seguimientos que EMPIEZAN con la venta —
+        onboarding, post-venta. Se detiene igual al terminar los pasos, si el cliente
+        responde, o si pide que no le escriban.</span>
+      </span>
+    </label>
 
     <div style="display:flex;gap:8px;align-items:center">
       <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
@@ -290,15 +301,17 @@ export async function renderSequenceForm(
   const db = new Db(env.DB);
   const repo = new NurtureSequencesRepo(db, botId);
   const seq = sequenceId ? await repo.getById(sequenceId) : null;
-  const actual = await repo.getAutoEnroll().catch(() => null);
-  const otraAutomatica = actual && actual.id !== seq?.id ? actual.name : undefined;
+  // Cuántas más ya entran solas — informativo, ya no excluyente.
+  const otras = (await repo.listAutoEnroll().catch(() => []))
+    .filter((s) => s.id !== seq?.id)
+    .map((s) => s.name);
   const body = `
     <div style="display:flex;flex-direction:column;gap:18px;max-width:820px">
       <div style="display:flex;flex-direction:column;gap:2px">
         <h2 class="font-display font-semibold text-[15px] text-cream">${seq ? "Editar secuencia" : "Nueva secuencia"}</h2>
         <p class="text-muted text-[12.5px]">Define el guion de seguimiento que tu agente va a seguir con quien inscribas en ella.</p>
       </div>
-      ${sequenceForm(seq, error, otraAutomatica)}
+      ${sequenceForm(seq, error, otras)}
     </div>`;
   return layout({ title: "Seguimientos", activeTab: "seguimientos", body, pro: true });
 }

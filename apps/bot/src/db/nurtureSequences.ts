@@ -18,12 +18,19 @@ export interface NurtureSequence {
   steps: NurtureStep[];
   enabled: boolean;
   /**
-   * Se asigna sola a cada lead nuevo (ver captureLead). Solo UNA secuencia por
-   * bot puede tenerlo: un lead vive en una sola secuencia a la vez, así que con
-   * dos automáticas cuál gana sería arbitrario. Lo impide un índice único
-   * parcial en la base — ver la migración 20260828160000.
+   * Se asigna sola a cada lead nuevo (ver captureLead). Pueden ser VARIAS: un
+   * lead puede estar en varios seguimientos a la vez, así que entra a todas
+   * las marcadas. La restricción de "solo una" se quitó con la migración
+   * 20260828180000, junto con su índice único.
    */
   auto_enroll: boolean;
+  /**
+   * Se corta sola cuando el lead se marca vendido o perdido. Encendida por
+   * default — es lo que hacía siempre. Apagada, el guion corre completo: hay
+   * seguimientos (onboarding, post-venta) donde vender es cuando EMPIEZAN.
+   * La baja del cliente nunca se ignora, esté como esté esto.
+   */
+  stop_on_conversion: boolean;
   created_at: number;
   updated_at: number;
 }
@@ -68,57 +75,57 @@ export class NurtureSequencesRepo {
     goal: string;
     steps: NurtureStep[];
     autoEnroll?: boolean;
+    stopOnConversion?: boolean;
   }): Promise<string> {
     const id = crypto.randomUUID();
     const now = Date.now();
-    if (input.autoEnroll) await this.clearAutoEnroll(id);
     await this.db.run(
-      `INSERT INTO nurture_sequences (id, bot_id, name, goal, steps, auto_enroll, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?)`,
-      [id, this.botId, input.name, input.goal, JSON.stringify(input.steps), input.autoEnroll ?? false, now, now],
+      `INSERT INTO nurture_sequences
+         (id, bot_id, name, goal, steps, auto_enroll, stop_on_conversion, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?)`,
+      [
+        id, this.botId, input.name, input.goal, JSON.stringify(input.steps),
+        input.autoEnroll ?? false, input.stopOnConversion ?? true, now, now,
+      ],
     );
     return id;
   }
 
   async update(
     id: string,
-    input: { name: string; goal: string; steps: NurtureStep[]; enabled: boolean; autoEnroll: boolean },
+    input: {
+      name: string;
+      goal: string;
+      steps: NurtureStep[];
+      enabled: boolean;
+      autoEnroll: boolean;
+      stopOnConversion: boolean;
+    },
   ): Promise<void> {
-    // Apagar las demás va PRIMERO: al revés violaría el índice único parcial
-    // mientras las dos estuvieran encendidas. Al derecho, el peor caso es un
-    // instante sin ninguna automática, que no rompe nada.
-    if (input.autoEnroll) await this.clearAutoEnroll(id);
     await this.db.run(
       `UPDATE nurture_sequences
-          SET name = ?, goal = ?, steps = ?::jsonb, enabled = ?, auto_enroll = ?, updated_at = ?
+          SET name = ?, goal = ?, steps = ?::jsonb, enabled = ?, auto_enroll = ?,
+              stop_on_conversion = ?, updated_at = ?
         WHERE id = ? AND bot_id = ?`,
       [
         input.name, input.goal, JSON.stringify(input.steps),
-        input.enabled, input.autoEnroll, Date.now(), id, this.botId,
+        input.enabled, input.autoEnroll, input.stopOnConversion, Date.now(), id, this.botId,
       ],
     );
   }
 
-  /** Quita la marca de automática a todas las del bot, menos a `exceptoId`. */
-  private async clearAutoEnroll(exceptoId: string): Promise<void> {
-    await this.db.run(
-      "UPDATE nurture_sequences SET auto_enroll = false, updated_at = ? WHERE bot_id = ? AND id <> ? AND auto_enroll",
-      [Date.now(), this.botId, exceptoId],
-    );
-  }
-
   /**
-   * La secuencia que se asigna sola a los leads nuevos, si hay una.
+   * Las secuencias en las que entra solo cada lead nuevo. Pueden ser varias.
    *
    * Exige `enabled`: marcar una secuencia como automática y dejarla apagada es
    * una contradicción, y prefiero no perseguir a nadie por accidente.
    */
-  async getAutoEnroll(): Promise<NurtureSequence | null> {
-    const row = await this.db.first<NurtureSequenceRow>(
-      "SELECT * FROM nurture_sequences WHERE bot_id = ? AND auto_enroll AND enabled LIMIT 1",
+  async listAutoEnroll(): Promise<NurtureSequence[]> {
+    const rows = await this.db.all<NurtureSequenceRow>(
+      "SELECT * FROM nurture_sequences WHERE bot_id = ? AND auto_enroll AND enabled ORDER BY name ASC",
       [this.botId],
     );
-    return row ? toSequence(row) : null;
+    return rows.map(toSequence);
   }
 
   async getById(id: string): Promise<NurtureSequence | null> {

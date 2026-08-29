@@ -792,6 +792,7 @@ adminApp.post("/seguimientos/nueva", async (c) => {
   await new NurtureSequencesRepo(new Db(c.env.DB), botId).create({
     name, goal, steps,
     autoEnroll: form.getAll("auto_enroll").includes("1"),
+    stopOnConversion: form.getAll("stop_on_conversion").includes("1"),
   });
   return c.redirect("/admin/seguimientos", 302);
 });
@@ -817,6 +818,7 @@ adminApp.post("/seguimientos/:id", async (c) => {
     // handler de /habilidades/:id, mismo patrón exacto y misma causa.
     enabled: form.getAll("enabled").includes("1"),
     autoEnroll: form.getAll("auto_enroll").includes("1"),
+    stopOnConversion: form.getAll("stop_on_conversion").includes("1"),
   });
   return c.redirect("/admin/seguimientos", 302);
 });
@@ -1883,7 +1885,12 @@ adminApp.post("/leads/:id/seguimiento/iniciar", async (c) => {
 adminApp.post("/leads/:id/seguimiento/detener", async (c) => {
   const denied = requirePermission(c, "nodia-agents.seguimientos.administrar");
   if (denied) return denied;
-  await stopSequenceForLead(c.env, c.get("botId"), c.req.param("id"));
+  // Cuál detener. El panel siempre lo manda (cada seguimiento trae su propio
+  // botón); sin él se detienen TODOS, que es lo que hacía antes de que un lead
+  // pudiera estar en varios.
+  const form = await c.req.formData();
+  const sequenceId = String(form.get("sequence_id") ?? "").trim() || undefined;
+  await stopSequenceForLead(c.env, c.get("botId"), c.req.param("id"), "detenido_manual", sequenceId);
   return c.redirect("/admin/leads");
 });
 
