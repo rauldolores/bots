@@ -13,6 +13,18 @@ const input: SystemPromptInput = {
   toolList: ["searchKb", "handoffHuman", "pauseBot"],
 };
 
+/**
+ * Un bot con TODAS las tools de registro encendidas.
+ *
+ * <que_registrar> se arma según lo que el bot puede hacer de verdad, así que
+ * las pruebas de la rama de VENTA necesitan un bot que efectivamente venda —
+ * antes daba igual porque el bloque era texto fijo para todos.
+ */
+const ventas: SystemPromptInput = {
+  ...input,
+  toolList: [...input.toolList, "captureLead", "scheduleAppointment"],
+};
+
 describe("renderSystemPrompt", () => {
   it("contains all 10 sections", () => {
     const prompt = renderSystemPrompt(input);
@@ -121,7 +133,7 @@ describe("renderSystemPrompt", () => {
 // cuándo capturar un lead. Estas pruebas fijan el árbol de decisión completo.
 describe("<que_registrar> — venta vs soporte", () => {
   it("distingue los cuatro caminos, no solo el del ticket", () => {
-    const prompt = renderSystemPrompt(input);
+    const prompt = renderSystemPrompt(ventas);
     expect(prompt).toContain("VENTA");
     expect(prompt).toContain("SOPORTE");
     expect(prompt).toContain("CITA");
@@ -129,7 +141,7 @@ describe("<que_registrar> — venta vs soporte", () => {
   });
 
   it("una cotización es VENTA, y dice explícitamente que NO es un ticket", () => {
-    const prompt = renderSystemPrompt(input);
+    const prompt = renderSystemPrompt(ventas);
     const venta = prompt.slice(prompt.indexOf("VENTA"), prompt.indexOf("SOPORTE"));
     expect(venta).toContain("cotización");
     expect(venta).toContain("captureLead");
@@ -139,14 +151,14 @@ describe("<que_registrar> — venta vs soporte", () => {
   });
 
   it("el criterio es qué quiere el cliente, no si el bot puede resolverlo", () => {
-    const prompt = renderSystemPrompt(input);
+    const prompt = renderSystemPrompt(ventas);
     expect(prompt).toContain("QUÉ QUIERE EL CLIENTE");
     // El viejo principio #4 ("mejor ticket en turno 2") ya no manda todo a ticket.
     expect(prompt).not.toContain("Mejor ticket en turno 2");
   });
 
   it("las palabras de escalamiento del dueño cuelgan de SOPORTE, no de una lista negativa", () => {
-    const prompt = renderSystemPrompt({ ...input, extraEscalationKeywords: ["reembolso", "demanda"] });
+    const prompt = renderSystemPrompt({ ...ventas, extraEscalationKeywords: ["reembolso", "demanda"] });
     expect(prompt).toContain("reembolso, demanda");
     // La regresión concreta: antes se inyectaban dentro de "NO escales cuando:",
     // o sea que hacían lo contrario de lo que el dueño configuró.
@@ -159,7 +171,7 @@ describe("<que_registrar> — venta vs soporte", () => {
   });
 
   it("resuelve el caso ambiguo de 'quiero hablar con alguien' por contexto", () => {
-    const prompt = renderSystemPrompt(input);
+    const prompt = renderSystemPrompt(ventas);
     expect(prompt).toContain("hablar con alguien");
     expect(prompt).toContain("de precios, servicios o una cotización → es VENTA");
   });
@@ -193,5 +205,64 @@ describe("systemPromptFromEnv", () => {
     expect(prompt).toContain("en");
     expect(prompt).toContain("- searchKb");
     expect(prompt).toContain("ctx here");
+  });
+});
+
+// El bloque <que_registrar> era texto FIJO: un bot tutor, moderador u operador
+// de software vía MCP recibía igual la rama de VENTA, con su "pídele el correo,
+// el teléfono y la empresa desde la que nos contacta". Eso contradecía a
+// <modo_operativo> en el mismo prompt, y el modelo tenía que resolverlo solo en
+// cada turno. Ahora cada rama depende de la tool que invoca.
+describe("<que_registrar> se adapta a lo que el bot realmente puede hacer", () => {
+  const sinTool = (t: string) => ({ ...ventas, toolList: ventas.toolList.filter((x) => x !== t) });
+
+  it("sin captureLead no le pide a nadie su correo, teléfono ni empresa", () => {
+    const prompt = renderSystemPrompt(sinTool("captureLead"));
+    expect(prompt).not.toContain("VENTA");
+    expect(prompt).not.toContain("captureLead");
+    expect(prompt).not.toContain("empresa desde la que nos contacta");
+  });
+
+  it("y tampoco lo mete en el principio de escalamiento", () => {
+    // El principio 4 afirmaba "una venta se captura como oportunidad" aunque el
+    // bot no tuviera con qué capturarla.
+    expect(renderSystemPrompt(sinTool("captureLead"))).not.toContain("se captura como oportunidad");
+    expect(renderSystemPrompt(ventas)).toContain("se captura como oportunidad");
+  });
+
+  it("sin captureLead sigue sabiendo escalar: eso no es un concepto comercial", () => {
+    const prompt = renderSystemPrompt(sinTool("captureLead"));
+    expect(prompt).toContain("SOPORTE");
+    expect(prompt).toContain("handoffHuman");
+    // La aclaración "NUNCA registres esto como oportunidad" pierde sentido sin
+    // la rama de venta con la que se contrasta.
+    expect(prompt).not.toContain("NUNCA registres esto como oportunidad");
+  });
+
+  it("sin scheduleAppointment no le manda llamar una tool que no existe", () => {
+    // El plan gratuito NO tiene scheduleAppointment (ver buildTools), y aun así
+    // el prompt le decía "→ Llama scheduleAppointment".
+    const prompt = renderSystemPrompt(sinTool("scheduleAppointment"));
+    expect(prompt).not.toContain("scheduleAppointment");
+    expect(prompt).not.toContain("CITA —");
+  });
+
+  it("sin nada que registrar, omite el bloque entero en vez de dejarlo vacío", () => {
+    // Un bot puramente informativo — un tutor, un moderador.
+    const prompt = renderSystemPrompt({ ...ventas, toolList: ["searchKb"] });
+    expect(prompt).not.toContain("<que_registrar>");
+    expect(prompt).not.toContain("{{");
+    // Y el resto del prompt sigue completo: honestidad, idioma, anti-patrones.
+    expect(prompt).toContain("<anti_patterns>");
+    expect(prompt).toContain("<core_principles>");
+  });
+
+  it("con todo encendido el texto no cambió respecto de antes", () => {
+    const prompt = renderSystemPrompt(ventas);
+    expect(prompt).toContain("VENTA");
+    expect(prompt).toContain("SOPORTE");
+    expect(prompt).toContain("CITA —");
+    expect(prompt).toContain("DUDA SIMPLE");
+    expect(prompt).toContain("NUNCA abras un ticket");
   });
 });

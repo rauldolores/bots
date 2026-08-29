@@ -86,9 +86,7 @@ convierte, tú solo usas la hora tal cual la dice el cliente.
 1. Diagnostica con data, no adivines. Usa tools antes de explicar.
 2. Una pregunta a la vez. No mandes formularios de 4 campos.
 3. Respuestas cortas por default. 2-4 oraciones. Solo expandes si amerita.
-4. Escala temprano cuando no puedes resolver, pero al lugar CORRECTO: una venta
-   se captura como oportunidad, un problema se abre como ticket. Ver <que_registrar>.
-5. Nunca inventes features. Si dudas, llama searchKb; si KB no lo sabe, escala.
+{{PRINCIPIO_ESCALAR}}5. Nunca inventes features. Si dudas, llama searchKb; si KB no lo sabe, escala.
 6. No contradigas al cliente con su propia data. Si dice "no me deja X" y data
    muestra "X disponible", investiga OTRA dimensión (sub-cap, daily cap, error)
    antes de decir "te equivocas".
@@ -106,48 +104,7 @@ convierte, tú solo usas la hora tal cual la dice el cliente.
 
 {{LECCIONES}}
 
-<que_registrar>
-Antes de registrar algo, pregúntate QUÉ QUIERE EL CLIENTE — nunca "¿puedo
-resolverlo yo?". No son la misma pregunta, y confundirlas ensucia el CRM.
-
-VENTA — quiere comprar, cotizar, saber precios, o le interesa un servicio.
-Señales: "cuánto cuesta", "quiero una cotización", "me interesa", "qué
-servicios manejan", "necesito X para mi negocio".
-→ Antes de llamar captureLead pídele TRES cosas: su correo, su teléfono y
-  la empresa desde la que nos contacta. Una a la vez, en el hilo de la
-  conversación — no como formulario.
-  · Correo y teléfono: pídele los dos. Si solo te da uno, está bien, no
-    insistas más de una vez.
-  · La empresa: pregúntala SIEMPRE. Si no la mencionó, pregúntale desde qué
-    empresa nos contacta. Sin ella la oportunidad queda coja.
-→ Llama captureLead. Queda como oportunidad y alguien del equipo le da
-  seguimiento.
-→ NUNCA abras un ticket por esto. Que TÚ no puedas dar el precio y haya que
-  pasárselo a alguien del equipo NO lo convierte en un problema de soporte:
-  es una venta en curso.
-
-SOPORTE — ya es cliente y algo está mal. Señales: "no funciona", "me cobraron
-de más", "llevo días esperando", "quiero cancelar", una queja, un reclamo,
-un bug confirmado, algo legal.
-→ Intenta resolverlo con searchKb. Si no se puede, o llevas >3 turnos sin
-  avanzar, llama handoffHuman.
-→ NUNCA registres esto como oportunidad.{{EXTRA_ESCALATION}}
-
-CITA — quiere verse o hablar en una fecha y hora concretas ("agendemos el
-martes", "puedo el jueves a las 5").
-→ Llama scheduleAppointment. Si es una reunión de venta y todavía no lo has
-  capturado, captura primero el lead.
-
-DUDA SIMPLE — una pregunta que sí puedes contestar con lo que sabes.
-→ Contéstala. No registres nada.
-
-Si pide "hablar con alguien", fíjate DE QUÉ venían hablando:
-- de precios, servicios o una cotización → es VENTA (captureLead).
-- de algo que no le funciona → es SOPORTE (handoffHuman).
-
-No registres nada mientras el cliente todavía no te haya dado información
-suficiente para saber qué quiere.
-</que_registrar>
+{{QUE_REGISTRAR}}
 
 <style_guide>
 - Markdown OK para pasos numerados / código inline.
@@ -170,6 +127,107 @@ NUNCA:
 - Confirmar acción que no ejecutaste.
 - Ignorar la directiva <output_language>. Es la #1 prioridad.
 </anti_patterns>`;
+
+/**
+ * Qué debe REGISTRAR el agente, según lo que este bot realmente puede hacer.
+ *
+ * Antes era texto fijo: TODO bot —un tutor, un moderador, un operador de
+ * software vía MCP— recibía la rama de VENTA, con su "pídele correo, teléfono
+ * y la empresa desde la que nos contacta". Eso choca de frente con
+ * <modo_operativo>, y el modelo tenía que resolver la contradicción solo en
+ * cada turno. También le decía a los bots del plan gratuito que llamaran a
+ * `scheduleAppointment`, que solo existe en Pro.
+ *
+ * La señal es la lista de tools REALMENTE habilitadas (respeta el tier y los
+ * toggles de /admin/agente), así que apagar "Capturar lead" ahora sí deja de
+ * ser un bot de ventas, en vez de solo quitarle la herramienta y seguir
+ * pidiéndole que venda. Un bot con todo encendido recibe exactamente el mismo
+ * texto que antes.
+ */
+function queRegistrar(
+  input: SystemPromptInput,
+  extraEscalation: string,
+): { bloque: string; principio: string } {
+  const tiene = (t: string) => input.toolList.includes(t);
+  const venta = tiene("captureLead");
+  const soporte = tiene("handoffHuman");
+  const cita = tiene("scheduleAppointment");
+
+  const ramas: string[] = [];
+
+  if (venta) {
+    ramas.push(`VENTA — quiere comprar, cotizar, saber precios, o le interesa un servicio.
+Señales: "cuánto cuesta", "quiero una cotización", "me interesa", "qué
+servicios manejan", "necesito X para mi negocio".
+→ Antes de llamar captureLead pídele TRES cosas: su correo, su teléfono y
+  la empresa desde la que nos contacta. Una a la vez, en el hilo de la
+  conversación — no como formulario.
+  · Correo y teléfono: pídele los dos. Si solo te da uno, está bien, no
+    insistas más de una vez.
+  · La empresa: pregúntala SIEMPRE. Si no la mencionó, pregúntale desde qué
+    empresa nos contacta. Sin ella la oportunidad queda coja.
+→ Llama captureLead. Queda como oportunidad y alguien del equipo le da
+  seguimiento.${soporte ? `
+→ NUNCA abras un ticket por esto. Que TÚ no puedas dar el precio y haya que
+  pasárselo a alguien del equipo NO lo convierte en un problema de soporte:
+  es una venta en curso.` : ""}`);
+  }
+
+  if (soporte) {
+    // Escalar a una persona no es un concepto comercial: le sirve igual a un
+    // tutor y a un moderador. Por eso esta rama no depende de la de venta.
+    ramas.push(`SOPORTE — algo está mal o necesita a una persona. Señales: "no funciona",
+"me cobraron de más", "llevo días esperando", "quiero cancelar", una queja,
+un reclamo, un bug confirmado, algo legal.
+→ Intenta resolverlo con searchKb. Si no se puede, o llevas >3 turnos sin
+  avanzar, llama handoffHuman.${venta ? "\n→ NUNCA registres esto como oportunidad." : ""}${extraEscalation}`);
+  }
+
+  if (cita) {
+    ramas.push(`CITA — quiere verse o hablar en una fecha y hora concretas ("agendemos el
+martes", "puedo el jueves a las 5").
+→ Llama scheduleAppointment.${venta ? `
+  Si es una reunión de venta y todavía no lo has capturado, captura primero
+  el lead.` : ""}`);
+  }
+
+  // Sin ninguna rama no hay nada que registrar: el bloque entero se omite,
+  // igual que <contexto_regional> o <lecciones_aprendidas>.
+  if (ramas.length === 0) return { bloque: "", principio: "" };
+
+  ramas.push(`DUDA SIMPLE — una pregunta que sí puedes contestar con lo que sabes.
+→ Contéstala. No registres nada.`);
+
+  const desambiguar =
+    venta && soporte
+      ? `
+
+Si pide "hablar con alguien", fíjate DE QUÉ venían hablando:
+- de precios, servicios o una cotización → es VENTA (captureLead).
+- de algo que no le funciona → es SOPORTE (handoffHuman).`
+      : "";
+
+  const principio = venta
+    ? `4. Escala temprano cuando no puedes resolver, pero al lugar CORRECTO: una venta
+   se captura como oportunidad, un problema se abre como ticket. Ver <que_registrar>.
+`
+    : `4. Escala temprano cuando no puedes resolver, y al lugar CORRECTO.
+   Ver <que_registrar>.
+`;
+
+  return {
+    principio,
+    bloque: `<que_registrar>
+Antes de registrar algo, pregúntate QUÉ QUIERE EL CLIENTE — nunca "¿puedo
+resolverlo yo?". No son la misma pregunta, y confundirlas ensucia el registro.
+
+${ramas.join("\n\n")}${desambiguar}
+
+No registres nada mientras el cliente todavía no te haya dado información
+suficiente para saber qué quiere.
+</que_registrar>`,
+  };
+}
 
 export function renderSystemPrompt(input: SystemPromptInput): string {
   const toolList = input.toolList.map((t) => `- ${t}`).join("\n");
@@ -241,6 +299,8 @@ cuándo tomar la iniciativa, y a quién/cuándo escalar.
   // /admin/calendario por quedar en el pasado. "Hoy" es en la zona horaria
   // del NEGOCIO (no UTC) — si el tick corre a media noche UTC, para un
   // negocio en México todavía puede ser "ayer".
+  const registrar = queRegistrar(input, extraEscalation);
+
   const now = input.now ?? new Date();
   const timezone = input.timezone || DEFAULT_TIMEZONE;
   const fechaHoy = formatTodayLong(now, timezone);
@@ -257,7 +317,8 @@ cuándo tomar la iniciativa, y a quién/cuándo escalar.
     .replaceAll("{{LECCIONES}}", lessonsBlock)
     .replaceAll("{{CONTEXTO_REGIONAL}}", contextoRegional)
     .replaceAll("{{TONE_LINE}}", toneLine)
-    .replaceAll("{{EXTRA_ESCALATION}}", extraEscalation)
+    .replaceAll("{{QUE_REGISTRAR}}", registrar.bloque)
+    .replaceAll("{{PRINCIPIO_ESCALAR}}", registrar.principio)
     .replaceAll("{{FECHA_HOY}}", fechaHoy);
 }
 
