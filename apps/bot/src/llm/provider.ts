@@ -222,17 +222,21 @@ export function fallbackModel(
   // El respaldo del dueño manda: es SU llave, vale para su bot aunque el
   // despliegue entero no tenga una llave de sistema de ese proveedor — el
   // caso normal en una instalación BYO-LLM de un solo dueño.
+  // "deepseek" queda fuera del allow-list a propósito, aquí también: si un
+  // bot ya tiene guardado ese valor (de antes de que se supiera del bug),
+  // este chequeo lo ignora en vez de intentarlo y volver a tronar — ver el
+  // comentario de arriba y admin/views/config.ts renderLlmSection.
   const backupProvider = (backup?.provider ?? "").trim().toLowerCase();
   const backupKey = (backup?.apiKey ?? "").trim();
   const backupEsValido =
     backupKey !== "" &&
-    (backupProvider === "anthropic" || backupProvider === "openai" || backupProvider === "xai" || backupProvider === "deepseek") &&
+    (backupProvider === "anthropic" || backupProvider === "openai" || backupProvider === "xai") &&
     backupProvider !== failedProvider;
   if (backupEsValido) {
     return createModel(env, tier, { provider: backupProvider, apiKey: backupKey });
   }
 
-  const order: LlmProvider[] = ["anthropic", "openai", "xai", "deepseek"];
+  const order: LlmProvider[] = ["anthropic", "openai", "xai"];
   for (const p of order) {
     if (p === failedProvider) continue;
     if (!envKeyFor(env, p)) continue;

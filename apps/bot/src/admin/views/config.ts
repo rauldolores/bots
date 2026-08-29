@@ -141,12 +141,19 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
   const backupProvider = settings[SETTING_KEYS.llmBackupProvider] ?? "";
   const hasBackupKey = (settings[SETTING_KEYS.llmBackupApiKey] ?? "").trim() !== "";
   const backupKeyTail = hasBackupKey ? (settings[SETTING_KEYS.llmBackupApiKey] ?? "").trim().slice(-4) : "";
+  // DeepSeek NO se ofrece aquí a propósito (ni como proveedor principal, ni de
+  // respaldo, ni como modelo concreto): bug real visto en producción — el
+  // paquete @ai-sdk/deepseek instalado (3.0.30) trae una versión de
+  // @ai-sdk/provider (4.x) incompatible con la que usa el resto del stack
+  // (ai@6 + @ai-sdk/anthropic|openai|xai, todos en @ai-sdk/provider 3.0.15) —
+  // cualquier llamada revienta con "AI_UnsupportedModelVersionError". No es
+  // algo que el dueño configuró mal; es una incompatibilidad de librerías
+  // pendiente de arreglar (requiere subir todo el stack de AI SDK a la vez).
   const backupProviderOpts = [
     { v: "", l: "Ninguno" },
     { v: "anthropic", l: "Claude (Anthropic)" },
     { v: "openai", l: "ChatGPT (OpenAI)" },
     { v: "xai", l: "Grok (xAI)" },
-    { v: "deepseek", l: "DeepSeek" },
   ]
     .map((o) => `<option value="${o.v}" ${backupProvider === o.v ? "selected" : ""}>${o.l}</option>`)
     .join("");
@@ -156,7 +163,6 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
     { v: "anthropic", l: "Claude (Anthropic)" },
     { v: "openai", l: "ChatGPT (OpenAI)" },
     { v: "xai", l: "Grok (xAI)" },
-    { v: "deepseek", l: "DeepSeek" },
   ]
     .map((o) => `<option value="${o.v}" ${provider === o.v ? "selected" : ""}>${o.l}</option>`)
     .join("");
@@ -168,9 +174,6 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
     .map((m) => `<option value="${esc(m.id)}" ${model === m.id ? "selected" : ""}>${esc(m.label)}</option>`)
     .join("");
   const xaiOpts = CURATED_MODELS.filter((m) => m.provider === "xai")
-    .map((m) => `<option value="${esc(m.id)}" ${model === m.id ? "selected" : ""}>${esc(m.label)}</option>`)
-    .join("");
-  const deepseekOpts = CURATED_MODELS.filter((m) => m.provider === "deepseek")
     .map((m) => `<option value="${esc(m.id)}" ${model === m.id ? "selected" : ""}>${esc(m.label)}</option>`)
     .join("");
 
@@ -220,7 +223,6 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
             <optgroup label="Claude (Anthropic)">${anthropicOpts}</optgroup>
             <optgroup label="ChatGPT (OpenAI)">${openaiOpts}</optgroup>
             <optgroup label="Grok (xAI)">${xaiOpts}</optgroup>
-            <optgroup label="DeepSeek">${deepseekOpts}</optgroup>
           </select>
         </div>
       </div>

@@ -159,4 +159,18 @@ describe("fallbackModel", () => {
     expect(fallbackModel(env(), "fast", "anthropic", { provider: "openai" })).toBeNull();
     expect(fallbackModel(env(), "fast", "anthropic", { apiKey: "sk-owner" })).toBeNull();
   });
+
+  // Bug real (visto en producción): @ai-sdk/deepseek instalado (3.0.30) trae
+  // una @ai-sdk/provider incompatible con el resto del stack (ai@6 +
+  // @ai-sdk/anthropic|openai|xai) — cualquier llamada revienta con
+  // AI_UnsupportedModelVersionError. Un bot que ya tenía "deepseek" guardado
+  // como respaldo (de antes de saberse del bug) no debe intentarlo — mejor
+  // caer al "sin respaldo" que reventar el turno.
+  it("ignora un respaldo a deepseek aunque esté guardado — incompatible con el stack instalado", () => {
+    expect(fallbackModel(env(), "fast", "anthropic", { provider: "deepseek", apiKey: "sk-ds" })).toBeNull();
+  });
+
+  it("tampoco ofrece deepseek como respaldo de sistema", () => {
+    expect(fallbackModel(env({ DEEPSEEK_API_KEY: "sk-ds" }), "fast", "anthropic")).toBeNull();
+  });
 });
