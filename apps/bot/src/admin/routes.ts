@@ -601,12 +601,26 @@ adminApp.get("/costs", async (c) =>
 );
 
 // Monthly AI budget (Costos tab). Empty value clears the cap.
+// El tope se guarda en USD porque es la moneda en que facturan los proveedores
+// y en la que lo compara el guard de presupuesto (budget.ts); el tipo de cambio
+// que viaja en el mismo formulario es SOLO para mostrar en pesos (src/fx.ts).
 adminApp.post("/costs/budget", async (c) => {
   const form = await c.req.formData();
+  const settings = await settingsFor(c);
+
   const raw = String(form.get("monthly_budget") ?? "").trim();
   const n = Number.parseFloat(raw);
   const value = raw !== "" && Number.isFinite(n) && n > 0 ? String(n) : "";
-  await (await settingsFor(c)).set(SETTING_KEYS.monthlyBudget, value);
+  await settings.set(SETTING_KEYS.monthlyBudget, value);
+
+  // Vacío = volver a consultarlo solo. Se valida el rango aquí y no solo al
+  // leerlo: un 17000 escrito de más (o un 0.17) haría que TODA la pantalla
+  // mintiera, y es más fácil de entender si se rechaza al guardar.
+  const fxRaw = String(form.get("fx_usd_mxn") ?? "").trim();
+  const fx = Number.parseFloat(fxRaw);
+  const fxValue = fxRaw !== "" && Number.isFinite(fx) && fx >= 5 && fx <= 60 ? String(fx) : "";
+  await settings.set(SETTING_KEYS.fxUsdMxn, fxValue);
+
   return c.redirect("/admin/costs?saved=1");
 });
 

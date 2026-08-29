@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
+import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
 import { VoiceSessionsRepo } from "../../src/db/voiceSessions";
 import { renderCosts } from "../../src/admin/views/costs";
 import { renderStats } from "../../src/admin/views/stats";
@@ -48,14 +49,28 @@ describe("renderCosts — integra el costo estimado de Voice", () => {
   });
 
   it("con llamadas, suma el costo de IA + telefonía al total y a la tarjeta de Voz", async () => {
+    // Los costos se GUARDAN en dólares (así facturan los proveedores) pero la
+    // pantalla los MUESTRA en pesos. Se fija el tipo de cambio a mano para que
+    // la prueba no dependa de la red ni del peso del día: con override, fx.ts
+    // ni siquiera intenta consultar (ver test/fx.test.ts).
+    await new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.fxUsdMxn, "20");
     await makeCall({ calledNumber: "+18005551212", durationMs: 60_000, aiCost: 0.05, telCost: 0.01 });
     await makeCall({ calledNumber: "+18005551212", durationMs: 30_000, aiCost: 0.02, telCost: 0.005 });
 
     const html = await renderCosts(env, TEST_BOT_ID);
     expect(html).toContain("2 llamadas");
-    // El desglose de Voz aparece con el subtotal correcto (0.07 IA, 0.015 tel).
-    expect(html).toContain("0.0700");
-    expect(html).toContain("0.0150");
+    // 0.07 USD de IA y 0.015 de telefonía, a 20 pesos por dólar.
+    expect(html).toContain("1.40");
+    expect(html).toContain("0.30");
+    // Y en ningún lado queda la cifra en dólares haciéndose pasar por pesos.
+    expect(html).not.toContain("0.0700");
+  });
+
+  it("el tipo de cambio se muestra, para que la cifra en pesos sea auditable", async () => {
+    await new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.fxUsdMxn, "20");
+    const html = await renderCosts(env, TEST_BOT_ID);
+    expect(html).toContain("$20.00 MXN por dólar");
+    expect(html).toContain("pesos mexicanos");
   });
 });
 

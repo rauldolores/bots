@@ -16,6 +16,12 @@ export const SETTING_KEYS = {
   disabledTools: "disabled_tools", // comma-separated tool names turned off from the dashboard
   temperature: "temperature", // LLM sampling temperature 0-1; empty = provider default
   monthlyBudget: "monthly_budget", // USD cap for monthly AI spend; empty = no cap
+  // Tipo de cambio USD -> MXN para MOSTRAR los costos en pesos (ver src/fx.ts).
+  // Los proveedores facturan en dolares y el tope de arriba SIGUE siendo USD:
+  // esto es solo presentacion. Vacio = se consulta solo y se cachea.
+  fxUsdMxn: "fx_usd_mxn", // lo fija el dueno a mano; gana sobre la consulta
+  fxUsdMxnCache: "fx_usd_mxn_cache", // ultima consulta al BCE
+  fxUsdMxnCacheAt: "fx_usd_mxn_cache_at", // epoch ms de esa consulta
   learnedLessons: "learned_lessons", // JSON array of rules distilled from owner takeovers
   twilioHandoffContentSid: "twilio_handoff_content_sid", // HSM del aviso de handoff (fallback del secret)
   autonomyLevel: "autonomy_level", // flywheel: manual (default) | copilot (auto-aplica lo seguro de noche)

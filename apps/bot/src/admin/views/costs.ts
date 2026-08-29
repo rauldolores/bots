@@ -1,4 +1,13 @@
-// Tab "Costos" — cuánto cuesta operar el bot. Dos fuentes:
+// Tab "Costos" — cuánto cuesta operar el bot, EN PESOS.
+//
+// Todo lo de abajo se cobra en dólares (los proveedores de IA facturan en USD,
+// la Usage Records API de Twilio devuelve USD, y las columnas de voz se llaman
+// estimated_*_cost_usd). Esta pantalla convierte al final, para mostrar —
+// antes decía "$12.50" a secas, que en México se lee como doce pesos y no como
+// los ~215 que en realidad eran. El tope mensual SIGUE guardándose y
+// aplicándose en USD a propósito: ver src/fx.ts.
+//
+// Dos fuentes:
 //  • IA (Claude/GPT): EXACTO, calculado desde los tokens que guardamos por
 //    mensaje (input/output/cached × precio del modelo).
 //  • Twilio (WhatsApp + renta de números): REAL, jalado de la Usage Records API
@@ -10,9 +19,19 @@ import { costOfUsage, type ModelId } from "../../pricing";
 import { fetchTwilioUsage } from "../twilioUsage";
 import { monthIaCostUsd } from "../../budget";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
+import { resolverUsdMxn, explicarTipoCambio } from "../../fx";
 
-const money = (n: number) => `$${n.toFixed(2)}`;
-const money4 = (n: number) => `$${n.toFixed(n < 0.1 ? 4 : 2)}`;
+// Los montos llegan SIEMPRE en dólares; estos son los dos únicos lugares donde
+// se convierte a pesos, así que ninguna cifra de la pantalla se puede quedar
+// en dólares por olvido.
+const pesos = (usd: number, tc: number) => `$${(usd * tc).toFixed(2)}`;
+// Para cifras chicas: 4 decimales solo si en PESOS sigue siendo chica. Antes el
+// umbral se evaluaba en dólares, así que un gasto de 0.05 USD (≈ $0.85) se
+// mostraba con 4 decimales sin necesidad.
+const pesos4 = (usd: number, tc: number) => {
+  const mxn = usd * tc;
+  return `$${mxn.toFixed(mxn < 0.1 ? 4 : 2)}`;
+};
 
 function esc(s: string): string {
   return s.replace(
@@ -23,6 +42,12 @@ function esc(s: string): string {
 
 export async function renderCosts(env: Env, botId: string, saved = false, visibleNavIds: Set<string> | null = null): Promise<string> {
   const db = new Db(env.DB);
+  // Una sola resolucion por carga: el resto de la pantalla la reusa, asi que
+  // no hay forma de que dos cifras de la MISMA vista usen tipos de cambio
+  // distintos (que es como se ven los reportes que nadie vuelve a creer).
+  const tc = await resolverUsdMxn(db, botId);
+  const money = (usd: number) => pesos(usd, tc.valor);
+  const money4 = (usd: number) => pesos4(usd, tc.valor);
   const thirtyDays = Date.now() - 30 * 86_400_000;
   const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
 
@@ -91,14 +116,26 @@ export async function renderCosts(env: Env, botId: string, saved = false, visibl
       </div>`
         : `<p class="text-[12.5px] text-muted mb-2 leading-relaxed">Sin límite configurado. Ponle un tope: al alcanzarlo, el bot sigue contestando pero solo con el modelo económico — nunca se queda callado ni te lleva sorpresas.</p>`}
       <p class="text-[11px] text-dim mt-2.5 mb-[14px]">Al ritmo actual, terminarás el mes en <b class="text-muted">${money(projected)}</b> de IA.</p>
-      <form method="POST" action="/admin/costs/budget" class="flex items-center gap-2 flex-wrap">
-        <span class="text-[12px] text-muted">Límite mensual: $</span>
+      <form id="cfg-costos" method="POST" action="/admin/costs/budget" class="flex items-center gap-2 flex-wrap">
+        <span class="text-[12px] text-muted">Límite mensual: US$</span>
         <input type="number" name="monthly_budget" min="0" step="0.5" value="${hasBudget ? budget : ""}" placeholder="25"
                style="width:90px;background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:8px 10px;font-size:12.5px;outline:none">
-        <span class="text-[10.5px] text-dim">USD · deja vacío para quitar el límite</span>
+        <span class="text-[10.5px] text-dim">${
+          hasBudget ? `dólares (≈ ${money(budget)} MXN)` : "dólares"
+        } · deja vacío para quitar el límite</span>
         <button class="bigbtn font-display font-bold text-[12px] cursor-pointer"
           style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:8px 16px">Guardar</button>
       </form>
+      <div class="mt-3 pt-3 flex items-center gap-2 flex-wrap" style="border-top:1px solid var(--linelit)">
+        <span class="text-[11px] text-dim">${esc(explicarTipoCambio(tc))}</span>
+        <label class="text-[11px] text-muted flex items-center gap-1.5">
+          Fijarlo a mano:
+          <input type="number" name="fx_usd_mxn" form="cfg-costos" min="5" max="60" step="0.01"
+                 value="${tc.origen === "manual" ? tc.valor : ""}" placeholder="${tc.valor.toFixed(2)}"
+                 style="width:78px;background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:5px 8px;font-size:11.5px;outline:none">
+        </label>
+        <span class="text-[10.5px] text-dim">déjalo vacío para que se actualice solo</span>
+      </div>
     </div>`;
 
   // --- Voz (F7 fase 10): estimado, NO exacto — ver channels/voice/callCost.ts.
@@ -135,7 +172,7 @@ export async function renderCosts(env: Env, botId: string, saved = false, visibl
     <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
       <div class="card bg-panel border border-line border-l-[3px] border-l-accent p-5">
         <div class="text-muted text-[11px]">Total este mes</div>
-        <div class="font-display font-bold text-[30px] mt-1 leading-none">${money(totalMonth)}</div>
+        <div class="font-display font-bold text-[30px] mt-1 leading-none">${money(totalMonth)} <span class="text-[13px] text-dim font-normal">MXN</span></div>
         <div class="text-[10px] text-dim mt-1">IA + Twilio + Voz</div>
       </div>
       <div class="card bg-panel border border-line p-5">
@@ -246,6 +283,12 @@ export async function renderCosts(env: Env, botId: string, saved = false, visibl
       WhatsApp aparecen dentro de las categorías de Twilio. El de <b class="text-muted">Llamadas</b>
       es un ESTIMADO: la IA usa tokens reales de Realtime (igual de exacto que el resto), pero la
       telefonía es minutos × una tarifa configurable, no tu factura real de Twilio Voice.
+    </p>
+    <p class="text-[10.5px] text-dim leading-relaxed">
+      Todas las cifras están en <b class="text-muted">pesos mexicanos</b>. Tus proveedores
+      (Anthropic, OpenAI, Twilio) facturan en dólares, así que esto es una conversión —
+      ${esc(explicarTipoCambio(tc))} Lo que termines pagando puede variar un poco según
+      el tipo de cambio que aplique tu banco o tu tarjeta el día del cargo.
     </p>`;
 
   const body = `
