@@ -180,15 +180,58 @@ export function degradedModelFor(
 }
 
 /**
- * Plan C ante fallo del proveedor primario (rate limit, 5xx, red): el primer
- * proveedor DISTINTO al que falló que tenga API key en el env, con sus modelos
- * default del tier. null = no hay respaldo configurado.
+ * Plan B-bis ante un fallo puntual del modelo automático (no del proveedor):
+ * bug real visto en producción, gpt-4o-mini devolvió un turno vacío
+ * (finishReason=length) sin que la cuenta ni el proveedor tuvieran nada
+ * caído — un tropiezo del MODELO, no de la llave. Dos modelos del mismo
+ * proveedor casi nunca fallan al mismo tiempo, así que antes de saltar de
+ * proveedor (que necesita otra llave configurada) vale la pena probar el
+ * otro nivel automático (fast⇄smart) de este MISMO proveedor — ya existe,
+ * ya funciona, y usa la misma llave que el primario.
+ *
+ * Solo aplica a la selección automática: un modelo fijado a mano (`ov.model`)
+ * ya tiene su propio plan B en `degradedModelFor` (el automático del mismo
+ * nivel), y saltar de NIVEL ahí sería una decisión que el dueño no pidió.
+ */
+export function otherTierModel(
+  env: Env,
+  tier: Tier,
+  ov: LlmOverrides | undefined,
+  primary: ResolvedModel,
+): ResolvedModel | null {
+  if ((ov?.model ?? "").trim()) return null;
+  const otroTier: Tier = tier === "fast" ? "smart" : "fast";
+  const otro = createModel(env, otroTier, ov);
+  if (otro.provider !== primary.provider || otro.modelId === primary.modelId) return null;
+  return otro;
+}
+
+/**
+ * Plan C ante fallo del proveedor primario (rate limit, 5xx, red, o que el
+ * Plan B-bis de arriba también haya fallado): el respaldo que el dueño
+ * configuró en /admin/config, o si no configuró ninguno, el primer proveedor
+ * DISTINTO al que falló que tenga API key en el env, con sus modelos default
+ * del tier. null = no hay respaldo configurado.
  */
 export function fallbackModel(
   env: Env,
   tier: Tier,
   failedProvider: LlmProvider,
+  backup?: { provider?: string; apiKey?: string },
 ): ResolvedModel | null {
+  // El respaldo del dueño manda: es SU llave, vale para su bot aunque el
+  // despliegue entero no tenga una llave de sistema de ese proveedor — el
+  // caso normal en una instalación BYO-LLM de un solo dueño.
+  const backupProvider = (backup?.provider ?? "").trim().toLowerCase();
+  const backupKey = (backup?.apiKey ?? "").trim();
+  const backupEsValido =
+    backupKey !== "" &&
+    (backupProvider === "anthropic" || backupProvider === "openai" || backupProvider === "xai" || backupProvider === "deepseek") &&
+    backupProvider !== failedProvider;
+  if (backupEsValido) {
+    return createModel(env, tier, { provider: backupProvider, apiKey: backupKey });
+  }
+
   const order: LlmProvider[] = ["anthropic", "openai", "xai", "deepseek"];
   for (const p of order) {
     if (p === failedProvider) continue;

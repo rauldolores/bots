@@ -1789,6 +1789,24 @@ adminApp.post("/config", async (c) => {
     }
   }
 
+  // Respaldo de otro proveedor (mismo patrón que el BYO-LLM de arriba).
+  const backupProvRaw = form.get(SETTING_KEYS.llmBackupProvider);
+  if (backupProvRaw !== null) {
+    const v = String(backupProvRaw).trim().toLowerCase();
+    await repo.set(
+      SETTING_KEYS.llmBackupProvider,
+      v === "anthropic" || v === "openai" || v === "xai" || v === "deepseek" ? v : "",
+    );
+  }
+  if (form.get("llm_backup_api_key_clear") === "1") {
+    await repo.set(SETTING_KEYS.llmBackupApiKey, "");
+  } else {
+    const backupKeyRaw = form.get(SETTING_KEYS.llmBackupApiKey);
+    if (backupKeyRaw !== null && String(backupKeyRaw).trim() !== "") {
+      await repo.set(SETTING_KEYS.llmBackupApiKey, String(backupKeyRaw).trim());
+    }
+  }
+
   // API key de OpenAI para Voz (Realtime) — mismo patrón que la de arriba.
   if (form.get("voice_openai_api_key_clear") === "1") {
     await repo.set(SETTING_KEYS.voiceOpenAiApiKey, "");

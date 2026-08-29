@@ -30,6 +30,8 @@ export interface AgentConfig {
   monthlyBudgetUsd?: number;
   /** BYO-LLM del dashboard (proveedor / API key / modelo). */
   llm: LlmOverrides;
+  /** Respaldo de otro proveedor si el principal falla — ver otherTierModel/fallbackModel en llm/provider.ts. */
+  llmBackup?: { provider?: string; apiKey?: string };
   /** Voz de OpenAI Realtime para llamadas — undefined = default de realtimeClient.ts ("marin"). */
   voiceName?: string;
   /** Plantilla del saludo de llamada — undefined = DEFAULT_VOICE_GREETING_TEMPLATE (voiceGreeting.ts). */
@@ -46,6 +48,18 @@ export function llmOverridesFrom(settings: Record<string, string>): LlmOverrides
     provider: pick(SETTING_KEYS.llmProvider),
     apiKey: pick(SETTING_KEYS.llmApiKey),
     model: pick(SETTING_KEYS.llmModel),
+  };
+}
+
+/** Extract the backup-provider overrides from a settings snapshot. */
+export function llmBackupFrom(settings: Record<string, string>): { provider?: string; apiKey?: string } {
+  const pick = (key: string): string | undefined => {
+    const v = settings[key];
+    return v !== undefined && v.trim() !== "" ? v.trim() : undefined;
+  };
+  return {
+    provider: pick(SETTING_KEYS.llmBackupProvider),
+    apiKey: pick(SETTING_KEYS.llmBackupApiKey),
   };
 }
 
@@ -271,6 +285,7 @@ export async function resolveAgentConfig(
     temperature,
     monthlyBudgetUsd,
     llm: llmOverridesFrom(settings),
+    llmBackup: llmBackupFrom(settings),
     voiceName,
     voiceGreeting,
   };

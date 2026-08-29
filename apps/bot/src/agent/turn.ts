@@ -227,6 +227,12 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
       messages: aiMessages,
       tools: enabledTools,
       stopWhen: ({ steps }) => steps.length >= 6,
+      // Red de seguridad para el "turno vacío" (finishReason=length, visto en
+      // producción con gpt-4o-mini): sin este límite, el tope de salida queda
+      // a lo que el proveedor decida por su cuenta ese momento. Un límite
+      // explícito y generoso (de sobra para cualquier respuesta de chat) hace
+      // que el comportamiento sea el mismo turno tras turno.
+      maxOutputTokens: 2048,
       ...(cfg.temperature !== undefined ? { temperature: cfg.temperature } : {}),
     });
 
@@ -340,10 +346,11 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
     // se prueba el proveedor alterno (también con un segundo intento).
     console.error("[runAgentTurnCore] streamText failed:", e);
     const backoff = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    const { fallbackModel, degradedModelFor } = await import("../llm/provider");
+    const { fallbackModel, degradedModelFor, otherTierModel } = await import("../llm/provider");
     const primary = createModel(env, tier, cfg.llm);
-    const fb = fallbackModel(env, tier, primary.provider);
+    const fb = fallbackModel(env, tier, primary.provider, cfg.llmBackup);
     const degraded = degradedModelFor(env, tier, cfg.llm, primary);
+    const otroNivel = otherTierModel(env, tier, cfg.llm, primary);
     let ok = false;
 
     await backoff(2000 + Math.floor(Math.random() * 1500));
@@ -370,6 +377,25 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
           .catch((e) => console.warn("[runAgentTurnCore] no se pudo guardar el aviso de modelo degradado:", e));
       } catch (e1b: any) {
         console.error("[runAgentTurnCore] same-provider degrade failed:", e1b);
+      }
+    }
+
+    // Bug real (ver otherTierModel en llm/provider.ts): un tropiezo del
+    // MODELO automático (gpt-4o-mini devolviendo un turno vacío sin que la
+    // cuenta ni el proveedor tuvieran nada caído) no se repite necesariamente
+    // en el otro nivel del MISMO proveedor — y ese ya funciona con la misma
+    // llave, sin pedirle nada nuevo al dueño. Se prueba antes que el salto de
+    // proveedor porque es más barato y más probable que resuelva ESTE caso.
+    if (!ok && otroNivel) {
+      try {
+        await attempt(otroNivel.model);
+        usedModelId = otroNivel.modelId;
+        ok = true;
+        console.warn(
+          `[runAgentTurnCore] "${primary.modelId}" falló — resolvió con "${otroNivel.modelId}" (mismo proveedor, otro nivel)`,
+        );
+      } catch (e1c: any) {
+        console.error("[runAgentTurnCore] mismo proveedor / otro nivel también falló:", e1c);
       }
     }
 

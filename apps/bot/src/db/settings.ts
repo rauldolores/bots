@@ -24,6 +24,15 @@ export const SETTING_KEYS = {
   llmProvider: "llm_provider", // "" (auto) | anthropic | openai
   llmApiKey: "llm_api_key", // owner's API key; empty = use the env key
   llmModel: "llm_model", // concrete model id; empty = auto tiers (fast⇄smart)
+  // Respaldo de OTRO proveedor para cuando el principal falla dos veces
+  // seguidas (mismo modelo Y el automático del otro nivel, ver
+  // degradedModelFor/otherTierModel en llm/provider.ts). Sin esto, un bot
+  // BYO-LLM (que solo trae la llave de UN proveedor) no tiene ningún plan C
+  // real: fallbackModel() solo mira llaves de SISTEMA del despliegue, que en
+  // una instalación de un solo dueño normalmente no existen. Mismo patrón de
+  // texto plano que llmApiKey — sin Vault, ver esa llave para el porqué.
+  llmBackupProvider: "llm_backup_provider", // "" | anthropic | openai | xai | deepseek
+  llmBackupApiKey: "llm_backup_api_key",
   // JSON {modelId, provider, at} — se escribe cuando el modelo fijado en
   // "llm_model" falla en producción y el turno tuvo que degradarse al modelo
   // automático del mismo proveedor (ver src/agent/runner.ts). Es la señal

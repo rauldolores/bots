@@ -138,6 +138,19 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
   const hasKey = (settings[SETTING_KEYS.llmApiKey] ?? "").trim() !== "";
   const keyTail = hasKey ? (settings[SETTING_KEYS.llmApiKey] ?? "").trim().slice(-4) : "";
 
+  const backupProvider = settings[SETTING_KEYS.llmBackupProvider] ?? "";
+  const hasBackupKey = (settings[SETTING_KEYS.llmBackupApiKey] ?? "").trim() !== "";
+  const backupKeyTail = hasBackupKey ? (settings[SETTING_KEYS.llmBackupApiKey] ?? "").trim().slice(-4) : "";
+  const backupProviderOpts = [
+    { v: "", l: "Ninguno" },
+    { v: "anthropic", l: "Claude (Anthropic)" },
+    { v: "openai", l: "ChatGPT (OpenAI)" },
+    { v: "xai", l: "Grok (xAI)" },
+    { v: "deepseek", l: "DeepSeek" },
+  ]
+    .map((o) => `<option value="${o.v}" ${backupProvider === o.v ? "selected" : ""}>${o.l}</option>`)
+    .join("");
+
   const providerOpts = [
     { v: "", l: "Automático (recomendado)" },
     { v: "anthropic", l: "Claude (Anthropic)" },
@@ -220,6 +233,25 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
       </div>
       <a href="/admin/config/llm-test" class="text-[12px] font-display font-semibold"
          style="width:fit-content;border:1px solid var(--line);color:var(--cream);padding:9px 14px;text-decoration:none">⚡ Probar mi configuración (guarda primero)</a>
+
+      <div style="border-top:1px solid var(--line);padding-top:16px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <label class="font-display font-semibold text-[12.5px] text-cream">Respaldo si el proveedor de arriba falla (opcional)</label>
+          <p class="text-dim text-[11px]">Si dos intentos con tu proveedor fallan, el bot ya prueba solo con otro modelo del MISMO proveedor. Si quieres que además pueda saltar a un proveedor totalmente distinto, captura aquí su API key — sin esto, un fallo del proveedor principal termina en "Algo falló de mi lado" en vez de una respuesta real.</p>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <label class="font-display font-semibold text-[12.5px] text-cream">Proveedor de respaldo</label>
+            <select name="${SETTING_KEYS.llmBackupProvider}" style="${SELECT_STYLE}">${backupProviderOpts}</select>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <label class="font-display font-semibold text-[12.5px] text-cream">Su API key</label>
+            <input type="password" name="${SETTING_KEYS.llmBackupApiKey}" value="" autocomplete="off"
+                   placeholder="${hasBackupKey ? "••••••••••••" : "sk-ant-… o sk-…"}" style="${INPUT_STYLE}">
+          </div>
+        </div>
+        ${hasBackupKey ? `<label class="text-dim text-[11.5px]" style="display:flex;align-items:center;gap:7px;cursor:pointer"><input type="checkbox" name="llm_backup_api_key_clear" value="1"> Quitar la API key de respaldo (termina en …${esc(backupKeyTail)})</label>` : ""}
+      </div>
     </div>`;
 }
 

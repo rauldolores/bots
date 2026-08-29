@@ -15,7 +15,7 @@ vi.mock("@ai-sdk/deepseek", () => ({
   createDeepSeek: () => (modelId: string) => ({ p: "deepseek", modelId }),
 }));
 
-import { resolveProvider, modelIdFor, createModel, degradedModelFor } from "../../src/llm/provider";
+import { resolveProvider, modelIdFor, createModel, degradedModelFor, otherTierModel, fallbackModel } from "../../src/llm/provider";
 import type { Env } from "../../src/env";
 
 function env(over: Partial<Env> = {}): Env {
@@ -106,5 +106,57 @@ describe("degradedModelFor", () => {
     const primary = createModel(env({ OPENAI_API_KEY: "sk-oa" }), "smart", ov);
     const d = degradedModelFor(env({ OPENAI_API_KEY: "sk-oa" }), "smart", ov, primary);
     expect(d?.provider).toBe("anthropic");
+  });
+});
+
+// Bug real: gpt-4o-mini devolvió un turno vacío (finishReason=length) sin que
+// la cuenta ni el proveedor tuvieran nada caído — un tropiezo del MODELO, no
+// de la llave. otherTierModel prueba el otro nivel automático (fast⇄smart)
+// del MISMO proveedor antes de saltar de proveedor.
+describe("otherTierModel", () => {
+  it("salta de fast a smart del MISMO proveedor cuando no hay modelo fijado a mano", () => {
+    const primary = createModel(env(), "fast");
+    const otro = otherTierModel(env(), "fast", undefined, primary);
+    expect(otro?.provider).toBe("anthropic");
+    expect(otro?.modelId).toBe("claude-sonnet-4-5-20250929");
+  });
+
+  it("salta de smart a fast igual", () => {
+    const primary = createModel(env({ OPENAI_API_KEY: "sk-oa" }), "smart", { provider: "openai" });
+    const otro = otherTierModel(env({ OPENAI_API_KEY: "sk-oa" }), "smart", { provider: "openai" }, primary);
+    expect(otro?.provider).toBe("openai");
+    expect(otro?.modelId).toBe("gpt-4o-mini");
+  });
+
+  it("null si el dueño fijó un modelo a mano (ese caso ya lo cubre degradedModelFor)", () => {
+    const ov = { model: "claude-sonnet-4-5-20250929" };
+    const primary = createModel(env(), "smart", ov);
+    expect(otherTierModel(env(), "smart", ov, primary)).toBeNull();
+  });
+});
+
+describe("fallbackModel", () => {
+  it("null si no hay ninguna otra llave configurada", () => {
+    expect(fallbackModel(env(), "fast", "anthropic")).toBeNull();
+  });
+
+  it("usa la llave de sistema de otro proveedor si existe", () => {
+    const fb = fallbackModel(env({ OPENAI_API_KEY: "sk-oa" }), "fast", "anthropic");
+    expect(fb?.provider).toBe("openai");
+  });
+
+  it("el respaldo del dueño (/admin/config) manda aunque el despliegue no tenga llave de sistema de ese proveedor", () => {
+    const fb = fallbackModel(env(), "fast", "anthropic", { provider: "openai", apiKey: "sk-owner" });
+    expect(fb?.provider).toBe("openai");
+    expect(fb?.modelId).toBe("gpt-4o-mini");
+  });
+
+  it("ignora el respaldo si apunta al mismo proveedor que ya falló", () => {
+    expect(fallbackModel(env(), "fast", "anthropic", { provider: "anthropic", apiKey: "sk-owner" })).toBeNull();
+  });
+
+  it("ignora un respaldo a medio capturar (proveedor sin key, o key sin proveedor)", () => {
+    expect(fallbackModel(env(), "fast", "anthropic", { provider: "openai" })).toBeNull();
+    expect(fallbackModel(env(), "fast", "anthropic", { apiKey: "sk-owner" })).toBeNull();
   });
 });
