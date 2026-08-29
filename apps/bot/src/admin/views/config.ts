@@ -141,6 +141,33 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
   const backupProvider = settings[SETTING_KEYS.llmBackupProvider] ?? "";
   const hasBackupKey = (settings[SETTING_KEYS.llmBackupApiKey] ?? "").trim() !== "";
   const backupKeyTail = hasBackupKey ? (settings[SETTING_KEYS.llmBackupApiKey] ?? "").trim().slice(-4) : "";
+  // Saber de un vistazo si una API key YA está guardada.
+  //
+  // Antes solo cambiaba el placeholder del campo a "••••••••••••", que se ve
+  // igual que un campo vacío con placeholder — y la de respaldo ni siquiera
+  // decía nada. Se reusa el mismo distintivo de /admin/conexiones (● CONECTADO)
+  // para que se lea igual en todo el panel: el dueño ya sabe interpretarlo.
+  const keyBadge = (has: boolean, tail: string) =>
+    has
+      ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700;white-space:nowrap">● GUARDADA ····${esc(tail)}</span>`
+      : `<span style="font-size:10px;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);padding:3px 10px;font-weight:600;white-space:nowrap">○ SIN GUARDAR</span>`;
+
+  /** Una etiqueta con su distintivo a la derecha, en la misma línea. */
+  const labelConBadge = (texto: string, badge: string) =>
+    `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+       <label class="font-display font-semibold text-[12.5px] text-cream">${texto}</label>
+       ${badge}
+     </div>`;
+
+  // Una llave de respaldo guardada SIN proveedor elegido no sirve de nada:
+  // fallbackModel la ignora y el bot se queda sin respaldo, en silencio. Pasó
+  // de verdad — al quitar DeepSeek de los selectores, guardar la config dejó el
+  // proveedor vacío y la llave huérfana, sin que nada lo dijera.
+  const respaldoHuerfano =
+    hasBackupKey && backupProvider.trim() === ""
+      ? `<div style="border:1px solid var(--accent-2);background:var(--accent-soft);color:var(--accent-2);border-radius:var(--radius-sm);padding:9px 12px;font-size:12px;font-weight:600">⚠ Guardaste una API key de respaldo pero no elegiste proveedor, así que no se está usando. Elige uno arriba y guarda.</div>`
+      : "";
+
   const backupProviderOpts = [
     { v: "", l: "Ninguno" },
     { v: "anthropic", l: "Claude (Anthropic)" },
@@ -225,10 +252,10 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
         </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
-        <label class="font-display font-semibold text-[12.5px] text-cream">Tu API key (opcional)</label>
-        <p class="text-dim text-[11px]">${hasKey ? `Hay una key guardada (termina en …${esc(keyTail)}). Escribe una nueva para reemplazarla, o marca la casilla para quitarla.` : "Pégala aquí para que el consumo se cobre a tu cuenta. Vacío = usar la key incluida del sistema."}</p>
+        ${labelConBadge("Tu API key (opcional)", keyBadge(hasKey, keyTail))}
+        <p class="text-dim text-[11px]">${hasKey ? "Ya está guardada y en uso. Déjala en blanco para conservarla, escribe una nueva para reemplazarla, o marca la casilla de abajo para quitarla." : "Pégala aquí para que el consumo se cobre a tu cuenta. Vacío = usar la key incluida del sistema."}</p>
         <input type="password" name="${SETTING_KEYS.llmApiKey}" value="" autocomplete="off"
-               placeholder="${hasKey ? "••••••••••••" : "sk-ant-… o sk-…"}" style="${INPUT_STYLE}">
+               placeholder="${hasKey ? "Déjalo vacío para conservar la que ya guardaste" : "sk-ant-… o sk-…"}" style="${INPUT_STYLE}">
         ${hasKey ? `<label class="text-dim text-[11.5px]" style="display:flex;align-items:center;gap:7px;cursor:pointer"><input type="checkbox" name="llm_api_key_clear" value="1"> Quitar mi API key y volver a la del sistema</label>` : ""}
       </div>
       <a href="/admin/config/llm-test" class="text-[12px] font-display font-semibold"
@@ -245,11 +272,12 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
             <select name="${SETTING_KEYS.llmBackupProvider}" style="${SELECT_STYLE}">${backupProviderOpts}</select>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px">
-            <label class="font-display font-semibold text-[12.5px] text-cream">Su API key</label>
+            ${labelConBadge("Su API key", keyBadge(hasBackupKey, backupKeyTail))}
             <input type="password" name="${SETTING_KEYS.llmBackupApiKey}" value="" autocomplete="off"
-                   placeholder="${hasBackupKey ? "••••••••••••" : "sk-ant-… o sk-…"}" style="${INPUT_STYLE}">
+                   placeholder="${hasBackupKey ? "Déjalo vacío para conservarla" : "sk-ant-… o sk-…"}" style="${INPUT_STYLE}">
           </div>
         </div>
+        ${respaldoHuerfano}
         ${hasBackupKey ? `<label class="text-dim text-[11.5px]" style="display:flex;align-items:center;gap:7px;cursor:pointer"><input type="checkbox" name="llm_backup_api_key_clear" value="1"> Quitar la API key de respaldo (termina en …${esc(backupKeyTail)})</label>` : ""}
       </div>
     </div>`;

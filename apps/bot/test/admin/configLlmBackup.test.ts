@@ -83,3 +83,63 @@ describe("POST /admin/config — respaldo de otro proveedor", () => {
     expect(settings[SETTING_KEYS.llmBackupApiKey]).toBe("");
   });
 });
+
+// Saber si una llave YA está guardada era confuso: la principal lo decía en un
+// párrafo gris del mismo peso que el texto de ayuda, y la de RESPALDO no lo
+// decía en ningún lado — solo cambiaba el placeholder a "••••••••••••", que se
+// ve igual que un campo vacío. Ahora ambas llevan el mismo distintivo que
+// /admin/conexiones.
+describe("GET /admin/config — se ve si una API key ya está guardada", () => {
+  async function html() {
+    return (await adminApp.request("/config", { headers: AUTH }, env)).text();
+  }
+
+  it("sin llaves, las dos dicen SIN GUARDAR", async () => {
+    const h = await html();
+    expect(h.match(/○ SIN GUARDAR/g) ?? []).toHaveLength(2); // principal y respaldo
+    expect(h).not.toContain("● GUARDADA");
+  });
+
+  it("con la llave principal, la marca en verde con sus últimos 4 caracteres", async () => {
+    await postConfig({ [SETTING_KEYS.llmApiKey]: "sk-ant-secreta-1234" });
+    const h = await html();
+    expect(h).toContain("● GUARDADA ····1234");
+    // Y nunca la llave completa, solo la cola.
+    expect(h).not.toContain("sk-ant-secreta-1234");
+  });
+
+  it("con la de respaldo, también — antes esta no avisaba de ninguna forma", async () => {
+    await postConfig({
+      [SETTING_KEYS.llmBackupProvider]: "openai",
+      [SETTING_KEYS.llmBackupApiKey]: "sk-backup-9876",
+    });
+    const h = await html();
+    expect(h).toContain("● GUARDADA ····9876");
+    expect(h).not.toContain("sk-backup-9876");
+  });
+
+  it("el campo ya no finge tener contenido: dice qué pasa si lo dejas vacío", async () => {
+    await postConfig({ [SETTING_KEYS.llmApiKey]: "sk-ant-secreta-1234" });
+    const h = await html();
+    expect(h).toContain("Déjalo vacío para conservar la que ya guardaste");
+    expect(h).not.toContain('placeholder="••••••••••••"');
+  });
+
+  // El caso que se vivió de verdad: al quitar DeepSeek de los selectores,
+  // guardar la config dejó el proveedor vacío y la llave huérfana — sin que
+  // nada lo dijera, y el bot sin respaldo.
+  it("avisa cuando hay llave de respaldo pero NADIE eligió proveedor", async () => {
+    await postConfig({ [SETTING_KEYS.llmBackupApiKey]: "sk-huerfana-1111" });
+    const h = await html();
+    expect(h).toContain("no elegiste proveedor");
+  });
+
+  it("y no molesta cuando el respaldo está completo", async () => {
+    await postConfig({
+      [SETTING_KEYS.llmBackupProvider]: "deepseek",
+      [SETTING_KEYS.llmBackupApiKey]: "sk-completa-2222",
+    });
+    const h = await html();
+    expect(h).not.toContain("no elegiste proveedor");
+  });
+});
