@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Env } from "../env";
 import { Db } from "../db/client";
 import { LeadsRepo, leadMetadata } from "../db/leads";
+import { NurtureSequencesRepo } from "../db/nurtureSequences";
 import { ConversationsRepo } from "../db/conversations";
 import { BotConnectorsRepo } from "../db/botConnectors";
 import { BotsRepo } from "../db/bots";
@@ -135,6 +136,23 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
         console.error("[captureLead] no se pudieron registrar los contactos tipados:", e),
       );
 
+      // Si el dueño marcó una secuencia como automática, el lead entra solo —
+      // que era el punto: nadie va a abrir el detalle de cada lead para
+      // asignársela a mano.
+      //
+      // SOLO para leads nuevos. En el camino de fusión (un lead que ya
+      // existía y vuelve a escribir) volver a inscribirlo lo regresaría al
+      // paso 0 cada vez, y la misma persona recibiría el primer mensaje de la
+      // secuencia una y otra vez.
+      //
+      // Best-effort: que falle no puede tumbar la captura del lead, que es lo
+      // que de verdad no se puede perder.
+      if (isNew) {
+        await inscribirEnSecuenciaAutomatica(env, db, botId, leadId).catch((e) =>
+          console.error("[captureLead] no se pudo inscribir en la secuencia automática:", e),
+        );
+      }
+
       // El lead SIEMPRE queda local primero (es la fuente interna — conserva
       // el link a la conversación y no depende de que el CRM esté disponible).
       // Si hay un CRM conectado, además se empuja ahí, best-effort: si falla,
@@ -221,4 +239,31 @@ async function pushToCrmIfConnected(
   } catch (e) {
     console.error(`[captureLead] push al CRM falló para lead ${leadId}:`, e);
   }
+}
+
+/**
+ * Mete al lead recién creado en la secuencia que el dueño marcó como
+ * automática, si hay una.
+ *
+ * La consulta va antes que la inscripción a propósito: sin secuencia
+ * automática —el caso normal— esto es UNA consulta barata y se acaba, en vez
+ * de arrancar la maquinaria de inscripción para descubrir que no había nada
+ * que hacer.
+ */
+async function inscribirEnSecuenciaAutomatica(
+  env: Env,
+  db: Db,
+  botId: string,
+  leadId: string,
+): Promise<void> {
+  const secuencia = await new NurtureSequencesRepo(db, botId).getAutoEnroll();
+  if (!secuencia) return;
+
+  const { enrollLeadInSequence } = await import("../nurture/run");
+  const r = await enrollLeadInSequence(env, botId, leadId, secuencia.id);
+  if (!r.ok) {
+    console.warn(`[captureLead] lead ${leadId} no entró a "${secuencia.name}": ${r.error}`);
+    return;
+  }
+  console.log(`[captureLead] lead ${leadId} inscrito automáticamente en "${secuencia.name}"`);
 }

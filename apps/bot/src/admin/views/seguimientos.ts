@@ -56,7 +56,9 @@ function stepRow(s: Partial<NurtureStep>, i: number): string {
     </div>`;
 }
 
-function sequenceForm(seq: NurtureSequence | null, error?: string): string {
+/** `otraAutomatica`: nombre de la secuencia automática vigente, si es OTRA — para
+ *  que marcar esta no le quite la suya al dueño sin avisar. */
+function sequenceForm(seq: NurtureSequence | null, error?: string, otraAutomatica?: string): string {
   const isNew = !seq;
   const steps = seq?.steps ?? [{ afterHours: 3, instruction: "" }];
   const action = isNew ? "/admin/seguimientos/nueva" : `/admin/seguimientos/${seq!.id}`;
@@ -99,6 +101,23 @@ function sequenceForm(seq: NurtureSequence | null, error?: string): string {
            </label>`
         : ""
     }
+
+    <div style="border:1px solid var(--line);background:var(--panel2);padding:12px 14px;display:flex;flex-direction:column;gap:6px">
+      <label class="text-[12px]" style="display:flex;align-items:center;gap:8px;color:var(--cream);cursor:pointer">
+        <input type="hidden" name="auto_enroll" value="0">
+        <input type="checkbox" name="auto_enroll" value="1" ${seq?.auto_enroll ? "checked" : ""}>
+        Inscribir aquí a todo lead nuevo, automáticamente
+      </label>
+      <p class="text-dim text-[11px]">
+        En cuanto el agente capture un lead, empieza esta secuencia sin que tengas que
+        asignarla a mano. Solo una secuencia puede ser la automática: si ya hay otra,
+        al guardar esta toma su lugar.${
+          otraAutomatica
+            ? ` <span style="color:var(--accent-2)">Hoy la automática es <b>${esc(otraAutomatica)}</b>.</span>`
+            : ""
+        }
+      </p>
+    </div>
 
     <div style="display:flex;gap:8px;align-items:center">
       <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
@@ -202,6 +221,7 @@ export async function renderSeguimientos(env: Env, botId: string, opts: { error?
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
           <span class="font-display font-semibold text-[13.5px] text-cream">${esc(s.name)}</span>
           <span style="font-size:10px;letter-spacing:.14em;color:${s.enabled ? "var(--ok)" : "var(--dim)"};border:1px solid ${s.enabled ? "var(--ok)" : "var(--line)"};padding:3px 10px;font-weight:700">${s.enabled ? "● ACTIVA" : "○ APAGADA"}</span>
+          ${s.auto_enroll ? `<span title="Cada lead nuevo entra aquí sin que la asignes" style="font-size:10px;letter-spacing:.14em;color:var(--accent-2);border:1px solid var(--accent-2);padding:3px 10px;font-weight:700">⚡ AUTOMÁTICA</span>` : ""}
         </div>
         <p class="text-dim text-[12px]" style="margin:0">${esc(s.goal)}</p>
         <div style="display:flex;flex-direction:column;gap:4px">
@@ -268,14 +288,17 @@ export async function renderSequenceForm(
   error?: string,
 ): Promise<string> {
   const db = new Db(env.DB);
-  const seq = sequenceId ? await new NurtureSequencesRepo(db, botId).getById(sequenceId) : null;
+  const repo = new NurtureSequencesRepo(db, botId);
+  const seq = sequenceId ? await repo.getById(sequenceId) : null;
+  const actual = await repo.getAutoEnroll().catch(() => null);
+  const otraAutomatica = actual && actual.id !== seq?.id ? actual.name : undefined;
   const body = `
     <div style="display:flex;flex-direction:column;gap:18px;max-width:820px">
       <div style="display:flex;flex-direction:column;gap:2px">
         <h2 class="font-display font-semibold text-[15px] text-cream">${seq ? "Editar secuencia" : "Nueva secuencia"}</h2>
         <p class="text-muted text-[12.5px]">Define el guion de seguimiento que tu agente va a seguir con quien inscribas en ella.</p>
       </div>
-      ${sequenceForm(seq, error)}
+      ${sequenceForm(seq, error, otraAutomatica)}
     </div>`;
   return layout({ title: "Seguimientos", activeTab: "seguimientos", body, pro: true });
 }

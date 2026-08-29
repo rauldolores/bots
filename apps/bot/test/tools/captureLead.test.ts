@@ -3,6 +3,7 @@ import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { LeadsRepo, leadMetadata } from "../../src/db/leads";
+import { NurtureSequencesRepo } from "../../src/db/nurtureSequences";
 import { BotConnectorsRepo } from "../../src/db/botConnectors";
 import { captureLeadTool } from "../../src/tools/captureLead";
 
@@ -409,5 +410,64 @@ describe("captureLeadTool — correo, teléfono y empresa", () => {
       faltaEmpresa: boolean;
     };
     expect(segunda.faltaEmpresa).toBe(false);
+  });
+});
+
+// El punto de todo esto: que nadie tenga que abrir el detalle de cada lead
+// para asignarle la secuencia a mano.
+describe("captureLeadTool — secuencia automática", () => {
+  const paso = [{ afterHours: 24, instruction: "Pregúntale si vio la propuesta" }];
+
+  const capturar = (tel: string) =>
+    captureLeadTool(env, () => convId, TEST_BOT_ID).execute!(
+      { name: "María", phone: tel, email: "maria@x.com", company: "ACME", intent: "Cotización" } as any,
+      {} as any,
+    );
+
+  it("un lead nuevo entra solo a la secuencia marcada", async () => {
+    const db = new Db(env.DB);
+    const seqId = await new NurtureSequencesRepo(db, TEST_BOT_ID).create({
+      name: "Auto", goal: "Cerrar", steps: paso, autoEnroll: true,
+    });
+
+    await capturar("+5215512345678");
+
+    const [lead] = await leads.list(10);
+    expect(lead.sequence_id).toBe(seqId);
+    expect(lead.next_touch_at).toBeGreaterThan(Date.now());
+  });
+
+  it("sin secuencia automática el lead queda suelto, como siempre", async () => {
+    await new NurtureSequencesRepo(new Db(env.DB), TEST_BOT_ID).create({
+      name: "Manual", goal: "Cerrar", steps: paso,
+    });
+
+    await capturar("+5215512345678");
+
+    expect((await leads.list(10))[0].sequence_id).toBeNull();
+  });
+
+  it("volver a capturar al MISMO lead no lo regresa al paso 0", async () => {
+    // El camino de fusión: la misma persona vuelve a escribir. Si se
+    // reinscribiera, recibiría el primer mensaje de la secuencia una y otra
+    // vez — que es exactamente el spam que un seguimiento debe evitar.
+    const db = new Db(env.DB);
+    await new NurtureSequencesRepo(db, TEST_BOT_ID).create({
+      name: "Auto", goal: "Cerrar", steps: paso, autoEnroll: true,
+    });
+
+    await capturar("+5215512345678");
+    const primerToque = (await leads.list(10))[0].next_touch_at;
+
+    await capturar("+5215512345678");
+
+    const todos = await leads.list(10);
+    expect(todos).toHaveLength(1); // se fusionó, no se duplicó
+    expect(todos[0].next_touch_at).toBe(primerToque); // y no se reprogramó
+    const pendientes = await db.all(
+      "SELECT id FROM work_jobs WHERE bot_id = ? AND kind = 'nurture_touch'",
+      [TEST_BOT_ID],
+    );
+    expect(pendientes).toHaveLength(1);
   });
 });

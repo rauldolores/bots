@@ -267,6 +267,7 @@ describe("processNurtureJobs — frenos que detienen la secuencia", () => {
       goal: "Cerrar la venta",
       steps: [{ afterHours: 0, instruction: "a" }, { afterHours: 24, instruction: "b" }],
       enabled: false,
+      autoEnroll: false,
     });
 
     const result = await processNurtureJobs(env, 5, { now: NOON });

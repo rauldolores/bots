@@ -673,8 +673,8 @@ export function renderConfig(
             <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:18px">
               ${renderTextArea({
                 name: SETTING_KEYS.salesPlaybook,
-                label: "Cómo vende / atiende tu negocio",
-                help: "Se AGREGA a las instrucciones automáticas del bot (personalidad, negocio, herramientas) — no las reemplaza. Ej. cómo recomendar entre opciones, cuándo ofrecer agendar una cita, qué nunca prometer.",
+                label: "Cómo atiende tu negocio",
+                help: "Se AGREGA a las instrucciones automáticas del bot (personalidad, negocio, herramientas) — no las reemplaza. Sirva para lo que sirva tu agente: cómo recomendar entre opciones, cómo explicar un tema, cuándo ofrecer agendar, qué nunca prometer.",
                 value: settings[SETTING_KEYS.salesPlaybook] ?? "",
                 placeholder: "Ej. Si preguntan qué curso tomar, primero pregunta su nivel actual antes de recomendar uno.",
                 rows: 6,

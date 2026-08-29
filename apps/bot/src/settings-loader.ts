@@ -153,8 +153,8 @@ export async function resolveAgentConfig(
   const agentModeSlug = get(SETTING_KEYS.agentMode);
   const operatingMode = isAgentModeSlug(agentModeSlug) ? AGENT_MODES[agentModeSlug] : undefined;
 
-  // Instrucciones de venta/trato del dueño (nuevo, /admin/config →
-  // Instrucciones avanzadas) ganan sobre el playbook del niche pack — no se
+  // Instrucciones de trato del dueño (/admin/config → Instrucciones
+  // avanzadas) ganan sobre el playbook del niche pack — no se
   // concatenan: si algún día hay niche packs reales con playbook propio,
   // mezclar dos guiones potencialmente contradictorios en un slot sin tag
   // propio ({{NICHO_PLAYBOOK}}) es más riesgoso que "gana lo que el dueño

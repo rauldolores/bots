@@ -789,7 +789,10 @@ adminApp.post("/seguimientos/nueva", async (c) => {
       await renderSequenceForm(c.env, botId, null, "Falta el nombre, el objetivo, o al menos un paso."),
     );
   }
-  await new NurtureSequencesRepo(new Db(c.env.DB), botId).create({ name, goal, steps });
+  await new NurtureSequencesRepo(new Db(c.env.DB), botId).create({
+    name, goal, steps,
+    autoEnroll: form.getAll("auto_enroll").includes("1"),
+  });
   return c.redirect("/admin/seguimientos", 302);
 });
 
@@ -813,6 +816,7 @@ adminApp.post("/seguimientos/:id", async (c) => {
     // Bug real: "activar" nunca se guardaba — ver el comentario igual en el
     // handler de /habilidades/:id, mismo patrón exacto y misma causa.
     enabled: form.getAll("enabled").includes("1"),
+    autoEnroll: form.getAll("auto_enroll").includes("1"),
   });
   return c.redirect("/admin/seguimientos", 302);
 });

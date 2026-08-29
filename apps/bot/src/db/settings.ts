@@ -55,9 +55,12 @@ export const SETTING_KEYS = {
   // resto del bot); Twilio no da tokens, así que su lado sigue siendo
   // minutos × tarifa configurable. Vacío = default razonable.
   voiceTelephonyCostPerMinuteUsd: "voice_telephony_cost_per_minute_usd",
-  // Instrucciones de venta/trato del dueño — llena {{NICHO_PLAYBOOK}} en
+  // Instrucciones de trato del dueño — llena {{NICHO_PLAYBOOK}} en
   // system-prompt.ts (antes siempre vacío: no había forma de escribirlo sin
   // pasar por systemPromptOverride, que reemplaza TODO el prompt).
+  // El nombre quedó de cuando todo bot se suponía de ventas; sirve para
+  // cualquier agente (un tutor, un moderador). No se renombra la clave porque
+  // ya tiene datos de clientes en producción — el panel dice lo correcto.
   salesPlaybook: "sales_playbook",
   // Voz de OpenAI Realtime para llamadas telefónicas — el panel solo ofrece
   // marin/cedar (las únicas dos que suenan bien en español); sin configurar,
