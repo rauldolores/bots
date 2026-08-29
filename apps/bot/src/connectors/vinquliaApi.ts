@@ -282,3 +282,93 @@ export async function crearTarea(
     return false;
   }
 }
+
+/**
+ * El id de una etiqueta por nombre, creándola si no existe.
+ *
+ * Esquema real de `crm.tags` (introspeccionado, no supuesto): `id` es
+ * IDENTITY (no se manda), `organization_id` se llena solo con un DEFAULT que
+ * sale del JWT, y `color` es NOT NULL SIN default — o sea, hay que darle uno
+ * o el INSERT truena.
+ *
+ * `ilike` sin comodines = igualdad sin distinguir mayúsculas, igual que en
+ * buscarOCrearEmpresa: "Lead caliente" y "lead caliente" son la MISMA
+ * etiqueta, no dos — si no, el catálogo del dueño se llena de duplicados que
+ * solo difieren en una mayúscula.
+ */
+export async function buscarOCrearEtiqueta(
+  creds: ConnectorCreds,
+  base: string,
+  nombre: string,
+): Promise<number | string | undefined> {
+  const limpio = nombre.trim();
+  if (!limpio) return undefined;
+
+  const existentes = await vinquliaBuscar<{ id: number | string }>(
+    creds,
+    base,
+    `/tags?name=ilike.${encodeURIComponent(limpio)}&limit=1`,
+  );
+  if (existentes[0]?.id !== undefined) return existentes[0].id;
+
+  try {
+    const res = await fetch(`${base}/tags`, {
+      method: "POST",
+      headers: vinquliaHeaders(creds, { "Content-Type": "application/json", Prefer: "return=representation" }),
+      // Gris neutro para todo lo que crea el bot: el color es obligatorio pero
+      // no significa nada aquí, y elegir uno llamativo por nuestra cuenta
+      // pisaría el código de colores que el dueño ya use en su tablero.
+      body: JSON.stringify({ name: limpio, color: "#94a3b8" }),
+    });
+    if (!res.ok) {
+      console.error(`[vinqulia] no se pudo crear la etiqueta: ${res.status} ${(await res.text()).slice(0, 200)}`);
+      return undefined;
+    }
+    return firstRowId(await res.json().catch(() => null));
+  } catch (e) {
+    console.error("[vinqulia] no se pudo crear la etiqueta:", e);
+    return undefined;
+  }
+}
+
+/**
+ * Le agrega una etiqueta a un contacto SIN pisar las que ya tiene.
+ *
+ * `crm.contacts.tags` es un `bigint[]`, así que esto es leer-modificar-
+ * escribir: sin leer primero, un PATCH dejaría al contacto con UNA etiqueta y
+ * borraría todas las que el dueño le haya puesto a mano. Ese riesgo es lo que
+ * tenía este caso sin implementar.
+ *
+ * Devuelve `ya_tenia` cuando la etiqueta ya estaba: no es un error, es que no
+ * había nada que hacer.
+ */
+export async function agregarEtiquetaAContacto(
+  creds: ConnectorCreds,
+  base: string,
+  contactId: number | string,
+  tagId: number | string,
+): Promise<{ ok: true; yaTenia: boolean } | { ok: false; error: string }> {
+  const filas = await vinquliaBuscar<{ tags: unknown }>(
+    creds,
+    base,
+    `/contacts?id=eq.${encodeURIComponent(String(contactId))}&select=tags&limit=1`,
+  );
+  if (filas.length === 0) return { ok: false, error: "No se encontró a esta persona en el CRM." };
+
+  // La columna puede venir NULL (contacto sin etiquetas) — no es lo mismo que
+  // un arreglo vacío para Postgres, pero aquí se trata igual.
+  const actuales = Array.isArray(filas[0]?.tags) ? (filas[0].tags as Array<number | string>) : [];
+  if (actuales.some((t) => String(t) === String(tagId))) return { ok: true, yaTenia: true };
+
+  try {
+    const res = await fetch(`${base}/contacts?id=eq.${encodeURIComponent(String(contactId))}`, {
+      method: "PATCH",
+      headers: vinquliaHeaders(creds, { "Content-Type": "application/json" }),
+      body: JSON.stringify({ tags: [...actuales, tagId] }),
+    });
+    if (!res.ok) return { ok: false, error: `El CRM respondió ${res.status}: ${(await res.text()).slice(0, 180)}` };
+    return { ok: true, yaTenia: false };
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e) };
+  }
+}

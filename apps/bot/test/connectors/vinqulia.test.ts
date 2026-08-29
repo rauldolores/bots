@@ -788,3 +788,73 @@ describe("no fusionar personas distintas que comparten teléfono", () => {
     expect(r.externalId).toBe("7");
   });
 });
+
+/**
+ * Etiquetas — el caso que llevaba tiempo SIN implementar y por eso dejaba
+ * propuestas de riesgo BAJO atoradas para siempre en /admin/mejoras: se veían
+ * como "esperando visto bueno" cuando en realidad nadie podía aplicarlas, ni
+ * a mano.
+ *
+ * Esquema real (introspeccionado): `crm.tags` tiene id IDENTITY,
+ * organization_id con DEFAULT del JWT, y `color` NOT NULL SIN default.
+ * `crm.contacts.tags` es bigint[].
+ */
+describe("etiquetas", () => {
+  const cambioEtiqueta = {
+    kind: "etiqueta" as const,
+    operation: "agregar",
+    contacto: { idEnCrm: "7", dato: null },
+    payload: { etiqueta: "lead-caliente" },
+    valorPropuesto: "lead-caliente",
+  };
+
+  it("el adaptador declara que SÍ sabe aplicarlas", () => {
+    expect(vinquliaConnector.sabeAplicarCambio?.(cambioEtiqueta as any)).toBe(true);
+  });
+
+  it("crea la etiqueta con un color (es NOT NULL) y sin mandar id ni organization_id", async () => {
+    fetchMock.mockImplementation(api({ crea: { "/tags": [{ id: 42 }] }, busca: { "/contacts": [{ tags: null }] } }));
+    const r = await vinquliaConnector.aplicarCambio!(creds(), cambioEtiqueta as any);
+    expect(r.ok).toBe(true);
+    const body = cuerpo("/tags");
+    expect(body.name).toBe("lead-caliente");
+    expect(typeof body.color).toBe("string");
+    // id es IDENTITY y organization_id sale del JWT — mandarlos rompería el alta.
+    expect(body).not.toHaveProperty("id");
+    expect(body).not.toHaveProperty("organization_id");
+  });
+
+  // Lo que hacía peligroso implementarlo a la ligera: `tags` es un ARREGLO, y
+  // un PATCH sin leer antes borraría las etiquetas que el dueño puso a mano.
+  it("CONSERVA las etiquetas que el contacto ya tenía", async () => {
+    fetchMock.mockImplementation(
+      api({ busca: { "/tags": [{ id: 42 }], "/contacts": [{ tags: [7, 9] }] } }),
+    );
+    const r = await vinquliaConnector.aplicarCambio!(creds(), cambioEtiqueta as any);
+    expect(r.ok).toBe(true);
+    expect(cuerpo("/contacts", "PATCH").tags).toEqual([7, 9, 42]);
+  });
+
+  it("reusa la etiqueta existente en vez de duplicarla (aunque cambie la mayúscula)", async () => {
+    fetchMock.mockImplementation(api({ busca: { "/tags": [{ id: 5 }], "/contacts": [{ tags: [] }] } }));
+    await vinquliaConnector.aplicarCambio!(creds(), cambioEtiqueta as any);
+    expect(llamada("/tags", "POST")).toBeUndefined(); // no se creó una segunda
+    expect(cuerpo("/contacts", "PATCH").tags).toEqual([5]);
+  });
+
+  // Si se marcara fallida, volvería a la cola para siempre (las fallidas se
+  // reproponen) — y el CRM ya está exactamente como la propuesta pedía.
+  it("si el contacto YA tenía esa etiqueta es ÉXITO, y no vuelve a escribir", async () => {
+    fetchMock.mockImplementation(api({ busca: { "/tags": [{ id: 42 }], "/contacts": [{ tags: [42] }] } }));
+    const r = await vinquliaConnector.aplicarCambio!(creds(), cambioEtiqueta as any);
+    expect(r.ok).toBe(true);
+    expect(llamada("/contacts", "PATCH")).toBeUndefined();
+  });
+
+  it("un contacto que ya no existe en el CRM falla con un motivo legible", async () => {
+    fetchMock.mockImplementation(api({ busca: { "/tags": [{ id: 42 }], "/contacts": [] } }));
+    const r = await vinquliaConnector.aplicarCambio!(creds(), cambioEtiqueta as any);
+    expect(r.ok).toBe(false);
+    expect(r.detalle).toContain("No se encontró");
+  });
+});

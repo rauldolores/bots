@@ -25,6 +25,8 @@ import {
   vinquliaBuscar,
   buscarContacto,
   buscarOCrearEmpresa,
+  buscarOCrearEtiqueta,
+  agregarEtiquetaAContacto,
   crearTarea,
 } from "../vinquliaApi";
 import { textoDeSeguimiento, vencimientoSeguimiento } from "../followupTask";
@@ -382,12 +384,10 @@ export const vinquliaConnector: CrmConnector = {
   sabeAplicarCambio(cambio) {
     if (cambio.operation === "revisar_contradiccion") return true; // no toca el CRM
     if (cambio.kind === "nota" || cambio.kind === "tarea") return true;
+    if (cambio.kind === "etiqueta") return true;
     const campo = String(cambio.payload?.campo ?? "");
     if (cambio.kind === "contacto") return campo in CAMPOS_CONTACTO;
     if (cambio.kind === "empresa") return campo in CAMPOS_EMPRESA;
-    // Etiquetas: `crm.tags` es un catálogo por organización y `contacts.tags`
-    // un arreglo de ids. Hacerlo bien pide leer-modificar-escribir sin pisar
-    // las que ya tiene, y eso merece su propia vuelta.
     return false;
   },
 
@@ -455,6 +455,23 @@ export const vinquliaConnector: CrmConnector = {
         }),
         "Empresa actualizada.",
       );
+    }
+
+    if (cambio.kind === "etiqueta") {
+      const nombre = String(payload.etiqueta ?? cambio.valorPropuesto ?? "").trim();
+      if (!nombre) return { ok: false, detalle: "La etiqueta venía vacía." };
+      const tagId = await buscarOCrearEtiqueta(creds, base, nombre);
+      if (tagId === undefined) return { ok: false, detalle: `No se pudo crear la etiqueta "${nombre}" en el CRM.` };
+      const r = await agregarEtiquetaAContacto(creds, base, contactId, tagId);
+      if (!r.ok) return { ok: false, detalle: r.error };
+      // "Ya la tenía" se reporta como ÉXITO: el estado final del CRM es
+      // exactamente el que la propuesta pedía. Marcarla fallida la devolvería
+      // a la cola para siempre (ver el reintento de las fallidas en
+      // CrmProposalsRepo.propose).
+      return {
+        ok: true,
+        detalle: r.yaTenia ? `Ya tenía la etiqueta "${nombre}".` : `Etiqueta "${nombre}" agregada.`,
+      };
     }
 
     if (cambio.kind === "tarea") {
