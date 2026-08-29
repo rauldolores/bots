@@ -22,14 +22,18 @@ import { LeadsRepo } from "../../src/db/leads";
 import * as senderMod from "../../src/replies/sender";
 import type { Db } from "../../src/db/client";
 
+// runAgentTurnCore recorre `fullStream` (no `textStream`) para poder ver el
+// momento exacto en que el modelo llama a una herramienta — ver turn.ts.
 function makeStreamResult(text: string) {
   async function* gen() {
-    yield text;
+    yield { type: "text-delta", text };
   }
   return {
-    textStream: gen(),
+    fullStream: gen(),
     usage: Promise.resolve({ inputTokens: 10, outputTokens: 5, cachedInputTokens: 0 }),
     steps: Promise.resolve([{ toolCalls: [] }]),
+    finishReason: Promise.resolve("stop"),
+    warnings: Promise.resolve([]),
   };
 }
 

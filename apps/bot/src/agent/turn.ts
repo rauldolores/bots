@@ -26,6 +26,7 @@ import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 import { AgentStateRepo } from "./state";
 import { buildAgentContext } from "./context";
 import type { AgentConfig } from "../settings-loader";
+import { desglosarContexto, clasificarFalla, registrarDiagnosticoLlm } from "./llmDiagnostics";
 
 export interface AgentTurnInput {
   env: Env;
@@ -187,7 +188,7 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
     tier = guard.tier;
   }
 
-  const { model, modelId, supportsPromptCache } = createModel(env, tier, cfg.llm);
+  const { model, modelId, provider: primaryProvider, supportsPromptCache } = createModel(env, tier, cfg.llm);
 
   // El prompt de sistema (grande y estable) se cachea con un breakpoint
   // efímero. Solo se cachea ese bloque — los bloques de memoria (chicos,
@@ -220,7 +221,52 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
   /** El último aviso que el cliente ya recibió — para no repetírselo si un reintento regenera el mismo preámbulo. */
   let ultimoAvisoEnviado = "";
 
-  const attempt = async (m: any) => {
+  // Instrumentación del "turno vacío" (ver src/agent/llmDiagnostics.ts para
+  // el porqué de cada campo, verificado contra el código fuente del SDK).
+  // `turnId` une todos los intentos de ESTE mensaje del cliente en los logs
+  // (no es el request_id de OpenAI — ese es de ELLOS, por respuesta;
+  // `turnId` es nuestro, por turno) — sin esto, cinco intentos con backoffs
+  // entre medio se ven en Vercel como líneas sueltas sin relación aparente.
+  const turnId = crypto.randomUUID();
+  let numeroIntento = 0;
+  const MAX_OUTPUT_TOKENS = 2048;
+  const toolsSchemaJson = (() => {
+    try {
+      return JSON.stringify(Object.keys(enabledTools ?? {}));
+    } catch {
+      return "[]";
+    }
+  })();
+  // Desglose ESTIMADO (heurística de caracteres, no el tokenizer real) de a
+  // qué sección se fue el contexto — igual para los 6 intentos posibles de
+  // este turno, así que se calcula una sola vez. El total EXACTO de entrada
+  // que de verdad cobró el proveedor va aparte, en `usage.inputTokens` de
+  // cada intento.
+  const contexto = desglosarContexto({
+    systemPrompt: ctx.basePrompt,
+    memoryBlocks: ctx.memoryBlocks,
+    history: aiMessages,
+    userText,
+    toolsSchemaJson,
+  });
+
+  const endpointDe = (p: string): "responses" | "messages" | "chat" | "desconocido (no verificado)" =>
+    p === "openai" ? "responses" : p === "anthropic" ? "messages" : p === "xai" ? "chat" : "desconocido (no verificado)";
+
+  const attempt = async (m: any, provider: string, intentoModelId: string) => {
+    numeroIntento++;
+    const intentoInicio = Date.now();
+
+    // Requisito de diagnóstico: la configuración EFECTIVA justo antes de
+    // llamar al SDK — para poder comparar "lo que creemos que mandamos"
+    // contra lo que el proveedor realmente vio (más abajo, en el request.body
+    // crudo cuando algo falla).
+    console.log(
+      `[llmConfig] turno=${turnId} intento=${numeroIntento} provider=${provider} modelo=${intentoModelId} ` +
+        `maxOutputTokens=${MAX_OUTPUT_TOKENS} temperature=${cfg.temperature ?? "default"} ` +
+        `mensajes=${aiMessages.length} tools=${Object.keys(enabledTools ?? {}).length} contextoEstimado=${contexto.totalEstimado}tok`,
+    );
+
     const result = streamText({
       model: m,
       system,
@@ -232,7 +278,7 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
       // a lo que el proveedor decida por su cuenta ese momento. Un límite
       // explícito y generoso (de sobra para cualquier respuesta de chat) hace
       // que el comportamiento sea el mismo turno tras turno.
-      maxOutputTokens: 2048,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
       ...(cfg.temperature !== undefined ? { temperature: cfg.temperature } : {}),
     });
 
@@ -265,7 +311,24 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
         // "" y el turno se daba por bueno sin que ningún catch se enterara.
         // Lanzar aquí sí activa el reintento/failover de abajo, y de paso
         // conserva el error real del proveedor en vez de perderlo.
-        throw part.error instanceof Error ? part.error : new Error(String(part.error));
+        registrarDiagnosticoLlm({
+          turnId,
+          numeroIntento,
+          timestamp: Date.now(),
+          provider,
+          modelo: intentoModelId,
+          endpoint: endpointDe(provider),
+          tipo: clasificarFalla({ completo, toolCallCount: 0, error: part.error }),
+          errorMensaje: part.error instanceof Error ? part.error.message : String(part.error),
+          maxOutputTokensConfigurado: MAX_OUTPUT_TOKENS,
+          longitudTextoGenerado: completo.length,
+          numeroToolCalls: 0,
+          latenciaMs: Date.now() - intentoInicio,
+          contexto,
+        });
+        const err = part.error instanceof Error ? part.error : new Error(String(part.error));
+        (err as { __llmDiagLogged?: boolean }).__llmDiagLogged = true;
+        throw err;
       } else if (part?.type === "tool-call" && onInterimMessage) {
         const aviso = porEnviar.trim();
         if (aviso && aviso === ultimoAvisoEnviado) {
@@ -321,26 +384,113 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
     // respuesta, en silencio total, sin reintento ni aviso de error. Lanzar
     // aquí activa el MISMO reintento/failover de abajo — un turno vacío es
     // tan inválido como uno que truena.
+    // Bug real (visto en producción, dos veces seguidas): streamText a veces
+    // no lanza ERROR pero tampoco produce NADA — ni un solo text-delta ni una
+    // sola tool call. NO es el caso legítimo de "ya dijo todo antes de la
+    // herramienta" (ahí `completo` SÍ tiene el texto adelantado, aunque
+    // `porEnviar` haya quedado en "" tras mandarlo) — es el modelo devolviendo
+    // un turno vacío de verdad. Sin este chequeo, el turno se daba por bueno:
+    // se guardaba un mensaje "" en el historial y el cliente se quedaba sin
+    // respuesta, en silencio total, sin reintento ni aviso de error. Lanzar
+    // aquí activa el MISMO reintento/failover de abajo — un turno vacío es
+    // tan inválido como uno que truena.
     if (!completo.trim() && toolCallCount === 0) {
-      // Antes no quedaba ningún rastro de POR QUÉ el modelo no dijo nada
-      // (no truena, así que ningún console.error se disparaba). finishReason
-      // y warnings SÍ vienen del proveedor aunque el texto haya salido vacío
-      // — es la única pista real: "length" (se quedó sin tokens),
-      // "content-filter" (lo bloqueó su propio filtro), "error"/"other", etc.
-      const [finishReason, warnings] = await Promise.all([
+      // finishReason y warnings SÍ vienen del proveedor aunque el texto haya
+      // salido vacío. response/request son promesas propias del SDK —
+      // response.id es el id de OpenAI para ESTA respuesta concreta, y
+      // response.headers trae el `x-request-id` crudo si el proveedor lo
+      // expone (sirve para buscarla en el dashboard de OpenAI). request.body
+      // es lo que REALMENTE se mandó — ground truth contra lo que creemos
+      // haber configurado (ver [llmConfig] arriba). Todo esto es best-effort:
+      // si algo de esto no está disponible para el proveedor en turno, no
+      // debe tumbar el diagnóstico del resto.
+      const [finishReason, warnings, responseMeta, requestMeta] = await Promise.all([
         Promise.resolve(result.finishReason).catch(() => "desconocido"),
         Promise.resolve(result.warnings).catch(() => undefined),
+        Promise.resolve(result.response).catch(() => undefined),
+        Promise.resolve(result.request).catch(() => undefined),
       ]);
-      console.error(
-        `[runAgentTurnCore] turno vacío — modelo=${usedModelId} finishReason=${finishReason} warnings=${JSON.stringify(warnings)}`,
+      const finishReasonStr = String(finishReason);
+      const requestBody = (requestMeta as { body?: unknown } | undefined)?.body as
+        | { max_output_tokens?: number; max_tokens?: number; model?: string }
+        | undefined;
+      registrarDiagnosticoLlm({
+        turnId,
+        numeroIntento,
+        timestamp: Date.now(),
+        provider,
+        modelo: intentoModelId,
+        endpoint: endpointDe(provider),
+        tipo: clasificarFalla({ finishReason: finishReasonStr, completo, toolCallCount }),
+        finishReason: finishReasonStr,
+        // Ver el comentario al inicio de llmDiagnostics.ts: finishReason
+        // 'length' en @ai-sdk/openai SOLO se produce cuando OpenAI reportó
+        // incomplete_details.reason === "max_output_tokens" — el SDK traduce
+        // y descarta el string crudo, así que esto es una deducción
+        // verificada contra el código fuente del proveedor, no un dato que
+        // esté literalmente disponible en runtime.
+        incompleteDetailsReasonDeducido: finishReasonStr === "length" ? "max_output_tokens" : undefined,
+        responseId: (responseMeta as { id?: string } | undefined)?.id,
+        requestId: (responseMeta as { headers?: Record<string, string> } | undefined)?.headers?.["x-request-id"],
+        inputTokens,
+        outputTokens,
+        totalTokens: (usage as { totalTokens?: number } | undefined)?.totalTokens,
+        reasoningTokens:
+          (usage as { outputTokenDetails?: { reasoningTokens?: number }; reasoningTokens?: number } | undefined)
+            ?.outputTokenDetails?.reasoningTokens ??
+          (usage as { reasoningTokens?: number } | undefined)?.reasoningTokens,
+        cachedInputTokens: cachedTokens,
+        // Lo que REALMENTE viajó, si el proveedor nos lo devuelve — para
+        // detectar de una vez si nuestra capa de abstracción está mandando
+        // otra cosa de lo que creemos (requisito 1-3: revisar el parámetro
+        // real, no solo el que configuramos).
+        maxOutputTokensConfigurado: requestBody?.max_output_tokens ?? requestBody?.max_tokens ?? MAX_OUTPUT_TOKENS,
+        longitudTextoGenerado: completo.length,
+        numeroToolCalls: toolCallCount,
+        latenciaMs: Date.now() - intentoInicio,
+        contexto,
+        warnings,
+      });
+      const err = new Error(
+        `streamText devolvió un turno vacío (finishReason=${finishReasonStr}, turno=${turnId}, intento=${numeroIntento})`,
       );
-      throw new Error(`streamText devolvió un turno vacío (finishReason=${finishReason})`);
+      (err as { __llmDiagLogged?: boolean }).__llmDiagLogged = true;
+      throw err;
     }
   };
 
+  // Requisito 6/7 del diagnóstico: nunca reintentar a ciegas — cada `attempt()`
+  // YA registra el incidente completo antes de lanzar (dentro de la función,
+  // para los dos casos que sabe distinguir: error a mitad de stream, y turno
+  // vacío). Lo que falta cubrir aquí es la excepción que revienta ANTES de
+  // llegar a esos dos puntos (streamText() mismo tronando: 401, red, etc.) —
+  // esa nunca pasó por el diagnóstico interno, así que se registra aquí,
+  // marcada con el mismo `__llmDiagLogged` para no duplicar las que ya sí.
+  const diagnosticarSiHaceFalta = (e: any, provider: string, modeloIntentado: string, intentoInicio: number) => {
+    if (e?.__llmDiagLogged) return;
+    registrarDiagnosticoLlm({
+      turnId,
+      numeroIntento,
+      timestamp: Date.now(),
+      provider,
+      modelo: modeloIntentado,
+      endpoint: endpointDe(provider),
+      tipo: clasificarFalla({ completo: "", toolCallCount: 0, error: e }),
+      errorMensaje: e?.message ?? String(e),
+      statusCode: typeof e?.statusCode === "number" ? e.statusCode : undefined,
+      maxOutputTokensConfigurado: MAX_OUTPUT_TOKENS,
+      longitudTextoGenerado: 0,
+      numeroToolCalls: 0,
+      latenciaMs: Date.now() - intentoInicio,
+      contexto,
+    });
+  };
+
+  const t0 = Date.now();
   try {
-    await attempt(model);
+    await attempt(model, primaryProvider, modelId);
   } catch (e: any) {
+    diagnosticarSiHaceFalta(e, primaryProvider, modelId, t0);
     // FAILOVER con backoff: en ráfagas el primario suele dar un rate-limit
     // TRANSITORIO — esperar con jitter y reintentar resuelve la mayoría; si no,
     // se prueba el proveedor alterno (también con un segundo intento).
@@ -354,16 +504,19 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
     let ok = false;
 
     await backoff(2000 + Math.floor(Math.random() * 1500));
+    const t1 = Date.now();
     try {
-      await attempt(model);
+      await attempt(model, primaryProvider, modelId);
       ok = true;
     } catch (e1: any) {
+      diagnosticarSiHaceFalta(e1, primaryProvider, modelId, t1);
       console.error("[runAgentTurnCore] primary retry failed:", e1);
     }
 
     if (!ok && degraded) {
+      const t2 = Date.now();
       try {
-        await attempt(degraded.model);
+        await attempt(degraded.model, degraded.provider, degraded.modelId);
         usedModelId = degraded.modelId;
         ok = true;
         console.warn(
@@ -376,6 +529,7 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
           )
           .catch((e) => console.warn("[runAgentTurnCore] no se pudo guardar el aviso de modelo degradado:", e));
       } catch (e1b: any) {
+        diagnosticarSiHaceFalta(e1b, degraded.provider, degraded.modelId, t2);
         console.error("[runAgentTurnCore] same-provider degrade failed:", e1b);
       }
     }
@@ -387,32 +541,38 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
     // llave, sin pedirle nada nuevo al dueño. Se prueba antes que el salto de
     // proveedor porque es más barato y más probable que resuelva ESTE caso.
     if (!ok && otroNivel) {
+      const t3 = Date.now();
       try {
-        await attempt(otroNivel.model);
+        await attempt(otroNivel.model, otroNivel.provider, otroNivel.modelId);
         usedModelId = otroNivel.modelId;
         ok = true;
         console.warn(
           `[runAgentTurnCore] "${primary.modelId}" falló — resolvió con "${otroNivel.modelId}" (mismo proveedor, otro nivel)`,
         );
       } catch (e1c: any) {
+        diagnosticarSiHaceFalta(e1c, otroNivel.provider, otroNivel.modelId, t3);
         console.error("[runAgentTurnCore] mismo proveedor / otro nivel también falló:", e1c);
       }
     }
 
     if (!ok && fb) {
       console.warn(`[runAgentTurnCore] failover ${primary.provider} → ${fb.provider}/${fb.modelId}`);
+      const t4 = Date.now();
       try {
-        await attempt(fb.model);
+        await attempt(fb.model, fb.provider, fb.modelId);
         usedModelId = fb.modelId;
         ok = true;
       } catch (e2: any) {
+        diagnosticarSiHaceFalta(e2, fb.provider, fb.modelId, t4);
         console.error("[runAgentTurnCore] fallback failed:", e2);
         await backoff(2500 + Math.floor(Math.random() * 1500));
+        const t5 = Date.now();
         try {
-          await attempt(fb.model);
+          await attempt(fb.model, fb.provider, fb.modelId);
           usedModelId = fb.modelId;
           ok = true;
         } catch (e3: any) {
+          diagnosticarSiHaceFalta(e3, fb.provider, fb.modelId, t5);
           console.error("[runAgentTurnCore] fallback retry failed:", e3);
         }
       }
@@ -434,7 +594,11 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
   // convierte "creo que es el MCP" en un número.
   console.log(
     `[turno] total=${Date.now() - tTurno}ms contexto=${ctx.timings.totalMs}ms ` +
-      `(mcp=${ctx.timings.mcpMs}ms) llm=${llmMs}ms modelo=${usedModelId} tools=${toolCallCount}`,
+      `(mcp=${ctx.timings.mcpMs}ms) llm=${llmMs}ms modelo=${usedModelId} tools=${toolCallCount} ` +
+      // inputTokens/outputTokens: lo que el proveedor REALMENTE cobró (no la
+      // estimación de [llmConfig]) — para ver la tendencia turno a turno sin
+      // esperar a que algo falle.
+      `inputTokens=${inputTokens} outputTokens=${outputTokens} contextoEstimado=${contexto.totalEstimado}tok`,
   );
 
   // Las dos escrituras son independientes entre sí y ambas están ANTES de que

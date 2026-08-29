@@ -136,14 +136,18 @@ describe("Agent Core — paridad de configuración entre canales", () => {
 });
 
 describe("Agent Core — comparativa de punta a punta: Voice captura, Twilio (texto) lo hereda", () => {
+  // runAgentTurnCore recorre `fullStream` (no `textStream`) para poder ver el
+  // momento exacto en que el modelo llama a una herramienta — ver turn.ts.
   function makeStreamResult(text: string) {
     async function* gen() {
-      yield text;
+      yield { type: "text-delta", text };
     }
     return {
-      textStream: gen(),
+      fullStream: gen(),
       usage: Promise.resolve({ inputTokens: 8, outputTokens: 4, cachedInputTokens: 0 }),
       steps: Promise.resolve([{ toolCalls: [] }]),
+      finishReason: Promise.resolve("stop"),
+      warnings: Promise.resolve([]),
     };
   }
 
