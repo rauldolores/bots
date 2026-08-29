@@ -205,6 +205,7 @@ export class RealtimeCallBridge {
         tools: toolSchemas,
         temperature: ctx.cfg.temperature,
         voice: ctx.cfg.voiceName,
+        vadSilenceMs: Number(settings[SETTING_KEYS.voiceVadSilenceMs]) || undefined,
       },
       {
         onAudioDelta: (base64, responseId, itemId) => this.handleAudioDelta(base64, responseId, itemId),

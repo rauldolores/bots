@@ -9,6 +9,7 @@
 // puente, solo reempacar el mismo base64 entre los dos protocolos JSON.
 import { WebSocket, type RawData } from "ws";
 import type { RealtimeToolSchema } from "./realtimeTools";
+import { normalizeVadSilenceMs } from "./vad";
 
 const REALTIME_URL_BASE = "wss://api.openai.com/v1/realtime";
 export const DEFAULT_MODEL = "gpt-realtime-2.1-mini";
@@ -21,9 +22,12 @@ export interface RealtimeSessionConfig {
   voice?: string;
   tools: RealtimeToolSchema[];
   temperature?: number;
+  /** Cuánto silencio (ms) espera el VAD antes de dar por terminado el turno del cliente. Ver DEFAULT_VAD_SILENCE_MS. */
+  vadSilenceMs?: number;
   /** Override del endpoint — para pruebas (un servidor Realtime falso local). Vacío = wss://api.openai.com/v1/realtime. */
   baseUrl?: string;
 }
+
 
 export interface RealtimeClientHandlers {
   /** responseId viaja en cada delta (response_id del evento) — así el puente puede descartar audio de una respuesta que ya canceló, aunque el delta haya salido de OpenAI antes de que el cancel le llegara (F7 fase 6). itemId identifica el conversation item de OpenAI que representa "lo que el bot está diciendo" — se necesita para truncateResponse() en un barge-in (ver handleSpeechStarted en realtimeBridge.ts). */
@@ -133,17 +137,20 @@ export class RealtimeClient {
             // pensados para no cortar al usuario por ruido de fondo que para
             // colgar de una IA que puede estar hablando de más) el cliente
             // tenía que insistir varias palabras antes de que el bot se
-            // callara. interrupt_response:true (además del cancelResponse()
-            // manual de realtimeBridge.ts — son dos capas, no una carrera:
-            // la que "gana" corta, la otra simplemente confirma con
-            // response_cancel_not_active, que no es un error real) y
-            // silence_duration_ms más corto detectan el fin del turno del
-            // cliente más rápido.
+            // callara. Eso lo resuelve interrupt_response:true (además del
+            // cancelResponse() manual de realtimeBridge.ts — son dos capas, no
+            // una carrera: la que "gana" corta, la otra simplemente confirma
+            // con response_cancel_not_active, que no es un error real).
+            //
+            // silence_duration_ms es OTRA cosa y va aparte: no es "qué tan
+            // rápido se calla el bot" sino "cuánto espero antes de decidir que
+            // el cliente terminó". Ver DEFAULT_VAD_SILENCE_MS: bajarlo también
+            // aquí fue el error que hacía que el bot se contestara solo.
             turn_detection: {
               type: "server_vad",
               threshold: 0.5,
-              prefix_padding_ms: 200,
-              silence_duration_ms: 400,
+              prefix_padding_ms: 300,
+              silence_duration_ms: normalizeVadSilenceMs(this.config.vadSilenceMs),
               create_response: true,
               interrupt_response: true,
             },

@@ -58,6 +58,12 @@ export const SETTING_KEYS = {
   // transcript, si se guardó) antes de purgarse — ver crons/purgeVoiceCalls.ts.
   // Vacío = 90 días por default (ver DEFAULT_VOICE_RETENTION_DAYS).
   voiceCallRetentionDays: "voice_call_retention_days",
+  // Milisegundos de silencio que espera el detector de voz antes de dar por
+  // terminado el turno del cliente. Demasiado bajo y el bot toma el turno en
+  // cuanto el cliente hace una pausa para pensar (parece que se contesta
+  // solo); demasiado alto y se siente lento. Vacío = 700 ms
+  // (ver DEFAULT_VAD_SILENCE_MS en channels/voice/vad.ts).
+  voiceVadSilenceMs: "voice_vad_silence_ms",
   // Tarifa de telefonía para estimar el costo por llamada
   // (channels/voice/callCost.ts) — el costo de IA se calcula con el uso
   // REAL de tokens de Realtime (mismo motor que src/pricing.ts para el
@@ -85,6 +91,14 @@ export const SETTING_KEYS = {
   // elegido, <modo_operativo> se omite del prompt. Se inyecta a TODOS los
   // canales (system-prompt.ts es compartido) — voz incluida, vía ctx.basePrompt.
   agentMode: "agent_mode",
+  // QUÉ tiene que lograr ESTE bot — por bot, porque el objetivo de uno de
+  // ventas no es el de uno de soporte. El modo operativo (agentModes.ts) ya
+  // trae un objetivo GENÉRICO por rol; este lo reemplaza con el concreto del
+  // negocio ("que agende una llamada de diagnóstico", "que el incidente
+  // quede resuelto sin escalar"). Reemplaza, no se suma: dos objetivos
+  // compitiendo en el mismo prompt se contradicen.
+  // Vacío = se usa el genérico del modo operativo.
+  botObjective: "bot_objective",
   // Correo saliente (/admin/config → Correo saliente) — DECIDIDO APARTE de
   // qué proveedor recibe los correos entrantes (eso es /admin/conexiones →
   // bot_channels canal "email"). El dueño puede recibir por Mailgun y

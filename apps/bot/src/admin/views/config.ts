@@ -10,6 +10,7 @@ import { CURATED_MODELS } from "../../llm/provider";
 import { TIMEZONE_OPTIONS, resolveTimezone } from "../../datetime";
 import { resolveKeySource } from "../../channels/voice/openaiKey";
 import { DEFAULT_VOICE_GREETING_TEMPLATE } from "../../channels/voice/voiceGreeting";
+import { DEFAULT_VAD_SILENCE_MS } from "../../channels/voice/vad";
 import { AGENT_MODES } from "../../agentModes";
 import {
   CONTROL_LIST,
@@ -130,6 +131,31 @@ const LANGUAGE_OPTIONS = [
   { value: "en", label: "Inglés" },
   { value: "pt", label: "Portugués" },
 ];
+
+/**
+ * "Qué tiene que lograr" — el objetivo CONCRETO de este bot.
+ *
+ * Va por bot y no global porque el objetivo de uno de ventas no se parece al
+ * de uno de soporte. El modo operativo ya trae uno genérico por rol; este lo
+ * reemplaza (no se suma — dos objetivos en el mismo prompt se contradicen),
+ * así que se muestra el genérico como referencia de lo que está pisando.
+ */
+function renderObjetivoField(settings: Record<string, string>): string {
+  const modo = AGENT_MODES[settings[SETTING_KEYS.agentMode] ?? ""];
+  const valor = settings[SETTING_KEYS.botObjective] ?? "";
+  const ayuda = modo
+    ? `Qué cuenta como conversación exitosa para ESTE bot. Si lo dejas vacío, se usa el objetivo genérico de su modo operativo: «${esc(modo.objetivo)}».`
+    : "Qué cuenta como conversación exitosa para ESTE bot. Escríbelo concreto y verificable — es lo que el bot persigue en cada conversación.";
+  return `
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <label for="${SETTING_KEYS.botObjective}" class="font-display font-semibold text-[12.5px] text-cream">Objetivo de este bot</label>
+      <p class="text-dim text-[11px]">${ayuda}</p>
+      <input type="text" id="${SETTING_KEYS.botObjective}" name="${SETTING_KEYS.botObjective}"
+             value="${esc(valor)}"
+             placeholder="ej. Que el cliente agende una llamada de diagnóstico"
+             style="${INPUT_STYLE}">
+    </div>`;
+}
 
 /** Sección "Modelo de IA": proveedor + API key propia + modelo concreto. */
 function renderLlmSection(settings: Record<string, string>, llmTest?: string): string {
@@ -414,6 +440,26 @@ function renderVoiceSection(settings: Record<string, string>, hasEnvOpenAiKey: b
         <input type="text" name="${SETTING_KEYS.voiceGreeting}" value="${esc(settings[SETTING_KEYS.voiceGreeting] ?? "")}"
                placeholder="${esc(DEFAULT_VOICE_GREETING_TEMPLATE)}" style="${INPUT_STYLE}">
       </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label class="font-display font-semibold text-[12.5px] text-cream">Cuánto espera antes de contestar</label>
+        <p class="text-dim text-[11px]">Cuánto silencio deja pasar el bot para dar por terminado lo que dijo el cliente.
+          Si lo pones muy corto, el bot va a tomar el turno cuando el cliente solo estaba pensando — y va a parecer que
+          se hace preguntas y se las contesta solo. Si lo pones muy largo, se va a sentir lento.
+          <strong>Recomendado: normal.</strong></p>
+        <select name="${SETTING_KEYS.voiceVadSilenceMs}" style="${SELECT_STYLE}">
+          ${[
+            { value: "450", label: "Rápido — contesta casi de inmediato" },
+            { value: String(DEFAULT_VAD_SILENCE_MS), label: "Normal (recomendado)" },
+            { value: "1000", label: "Paciente — para clientes que hablan pausado" },
+          ]
+            .map((o) => {
+              const current = settings[SETTING_KEYS.voiceVadSilenceMs];
+              const selected = (current || String(DEFAULT_VAD_SILENCE_MS)) === o.value;
+              return `<option value="${o.value}" ${selected ? "selected" : ""}>${esc(o.label)}</option>`;
+            })
+            .join("")}
+        </select>
+      </div>
     </div>`;
 }
 
@@ -541,6 +587,7 @@ export function renderConfig(
                     : ""
                 }
               </div>
+              ${renderObjetivoField(settings)}
               ${personalidadCards}
             </div>
           </div>
@@ -758,7 +805,27 @@ export function renderConfig(
               </div>
 
               <div style="border-top:1px solid var(--line);padding-top:16px;display:flex;flex-direction:column;gap:10px">
-                <p class="text-dim text-[11.5px]" style="margin:0">⚠ Modo experto — la casilla de abajo REEMPLAZA POR COMPLETO el prompt de tu bot: se pierde la información del negocio, el giro, el tono, las palabras de escalamiento, lo aprendido de conversaciones pasadas Y la guía de MCP de arriba. Guarda una copia de tu configuración actual antes de usarla.</p>
+                <p class="text-dim text-[11.5px]" style="margin:0">⚠ Modo experto — la casilla de abajo REEMPLAZA POR COMPLETO el prompt de tu bot: se pierde la información del negocio, el giro, el tono, las palabras de escalamiento, lo aprendido de conversaciones pasadas, las reglas de qué registrar (lead / ticket / cita) Y la guía de MCP de arriba. Guarda una copia de tu configuración actual antes de usarla.</p>
+                ${
+                  // El aviso de arriba explica el riesgo en abstracto; este solo
+                  // aparece cuando el reemplazo YA está prendido, y dice qué se
+                  // está tirando AHORA MISMO. Sin esto, un bot podía llevar
+                  // semanas ignorando en silencio un playbook de 50 mil
+                  // caracteres que el dueño creía activo — no había nada en la
+                  // pantalla que lo delatara.
+                  (settings[SETTING_KEYS.systemPromptOverride] ?? "").trim().length > 0
+                    ? `<div style="display:flex;align-items:flex-start;gap:9px;background:rgba(220,60,60,.10);border:1px solid rgba(220,60,60,.45);border-radius:var(--radius-sm);padding:13px 15px">
+                        <span style="color:#e05252;flex:none;line-height:1">●</span>
+                        <p class="text-[12px]" style="color:var(--text);margin:0">
+                          <strong>El reemplazo total está ACTIVO.</strong> Tu bot está usando <em>solo</em> el texto de abajo${
+                            (settings[SETTING_KEYS.salesPlaybook] ?? "").trim().length > 0
+                              ? `, y por lo tanto está <strong>ignorando tus Instrucciones avanzadas de ventas</strong> (${Math.round((settings[SETTING_KEYS.salesPlaybook] ?? "").trim().length / 1000)} mil caracteres)`
+                              : ""
+                          }. Si no era lo que querías, vacía la casilla y guarda: todo vuelve solo.
+                        </p>
+                      </div>`
+                    : ""
+                }
                 ${renderTextArea({
                   name: SETTING_KEYS.systemPromptOverride,
                   label: "Instrucciones personalizadas (reemplazo total)",
