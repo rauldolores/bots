@@ -30,7 +30,18 @@ export function scheduleAppointmentTool(env: Env, getConversationId: () => strin
       "Agenda una cita con el cliente. Necesitas su nombre, email y la fecha/hora deseada EN HORA LOCAL DEL NEGOCIO. Si el horario ya está ocupado en el calendario conectado, devuelve un error — propónle otro horario al cliente.",
     inputSchema: z.object({
       attendeeName: z.string(),
-      attendeeEmail: z.string().email(),
+      // NO uses `.email()` aquí (ni ningún validador de Zod cuyo JSON Schema
+      // lleve un regex con lookaheads). Bug real, reproducido: `z.string().email()`
+      // genera `pattern: "^(?!\\.)(?!.*\\.\\.)…"`, y el motor de regex de OpenAI
+      // (RE2) no soporta lookaheads. En vez de devolver un 400 claro, la
+      // Responses API contesta con `incomplete_details.reason=max_output_tokens`
+      // y CERO tokens — o sea, el turno entero se cae con un "finishReason=length"
+      // engañoso, sin texto y sin tool calls, para CUALQUIER mensaje del cliente
+      // (la tool ni siquiera tiene que usarse: basta con que viaje en el esquema).
+      // Costó horas de diagnóstico porque parecía una falla del modelo.
+      // `.url()`, `.uuid()` y `.datetime()` SÍ pasan (sus regex no llevan
+      // lookaheads). El formato se valida abajo, en execute.
+      attendeeEmail: z.string().describe("Correo electrónico del cliente, ej. ana@ejemplo.com"),
       startTime: z
         .string()
         .describe(
@@ -39,6 +50,18 @@ export function scheduleAppointmentTool(env: Env, getConversationId: () => strin
       notes: z.string().optional(),
     }),
     execute: async ({ attendeeName, attendeeEmail, startTime, notes }) => {
+      // La validación del correo vive aquí y no en el esquema — ver el
+      // comentario en `attendeeEmail` arriba. Mismo criterio que
+      // `invalid_start_time` de abajo: se le devuelve al agente un error
+      // legible para que vuelva a preguntar, en vez de guardar una cita con
+      // un correo al que nunca va a llegar nada.
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((attendeeEmail ?? "").trim())) {
+        return {
+          error: "invalid_email" as const,
+          message: "Ese correo no parece válido — pídeselo de nuevo al cliente antes de reintentar.",
+        };
+      }
+
       const db = new Db(env.DB);
       const connector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "calendar");
       const appts = new AppointmentsRepo(db, botId);
