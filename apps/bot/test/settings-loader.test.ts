@@ -350,3 +350,49 @@ describe("resolveAgentConfig — <herramientas_mcp> (bug real: captureLead/hando
     expect(cfg.systemPrompt).toContain("<herramientas_mcp>");
   });
 });
+
+/**
+ * Objetivo del bot (settings.bot_objective) — por bot, porque el objetivo de
+ * uno de ventas no es el de uno de soporte. Es la pieza que ancla el
+ * "¿se logró?" de cada conversación.
+ */
+describe("resolveAgentConfig — bot_objective (el objetivo concreto de ESTE bot)", () => {
+  it("sin objetivo ni modo: no se inventa ningún bloque", async () => {
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).not.toContain("<objetivo>");
+    expect(cfg.systemPrompt).not.toContain("<modo_operativo>");
+  });
+
+  // REEMPLAZA al genérico del modo, no se suma: dos objetivos compitiendo en
+  // el mismo prompt se contradicen y el modelo elige uno sin criterio.
+  it("con modo Y objetivo: el del dueño PISA al genérico del modo", async () => {
+    await repo.set(SETTING_KEYS.agentMode, "vendedor");
+    await repo.set(SETTING_KEYS.botObjective, "Que el cliente agende una llamada de diagnóstico");
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).toContain("Objetivo: Que el cliente agende una llamada de diagnóstico");
+    // El genérico de "vendedor" ya no aparece — si apareciera, habría dos.
+    expect(cfg.systemPrompt).not.toContain("Objetivo: Detectar la necesidad real del cliente");
+    expect(cfg.systemPrompt).toContain("Rol: Vendedor"); // el resto del modo se conserva
+  });
+
+  it("con modo pero SIN objetivo: se conserva el genérico del modo", async () => {
+    await repo.set(SETTING_KEYS.agentMode, "vendedor");
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).toContain("Objetivo: Detectar la necesidad real del cliente");
+  });
+
+  // Sin modo, <modo_operativo> se omite entero — el objetivo NO puede perderse
+  // por eso: va en su propio bloque.
+  it("con objetivo pero SIN modo: el objetivo igual llega al prompt", async () => {
+    await repo.set(SETTING_KEYS.botObjective, "Que el incidente quede resuelto sin escalar");
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).toContain("<objetivo>");
+    expect(cfg.systemPrompt).toContain("Que el incidente quede resuelto sin escalar");
+  });
+
+  it("un objetivo de puros espacios se trata como vacío", async () => {
+    await repo.set(SETTING_KEYS.botObjective, "   ");
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).not.toContain("<objetivo>");
+  });
+});

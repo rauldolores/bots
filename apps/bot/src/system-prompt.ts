@@ -27,6 +27,9 @@ export interface SystemPromptInput {
    *  agente (vendedor, soporte, recepcionista...), independiente del giro
    *  del negocio. undefined = sin modo elegido, se omite <modo_operativo>. */
   operatingMode?: { rol: string; estilo: string; objetivo: string; iniciativa: string; escalamiento: string };
+  /** El objetivo CONCRETO de este bot (settings.bot_objective). Reemplaza al
+   *  objetivo genérico del modo operativo — ver renderSystemPrompt. */
+  objective?: string;
 }
 
 const TEMPLATE = `<output_language>
@@ -278,12 +281,16 @@ estadounidenses por default.
   // (Agente/Rol/Estilo/Objetivo/Nivel de iniciativa/Escalamiento). Sin modo
   // elegido se omite el bloque completo, igual que contexto_regional/lecciones.
   const om = input.operatingMode;
+  // El objetivo del BOT (concreto, del dueño) REEMPLAZA al genérico del modo
+  // — no se suman. Dos objetivos en el mismo prompt se contradicen, y el
+  // modelo termina eligiendo uno sin criterio.
+  const objetivo = input.objective?.trim();
   const modoOperativo = om
     ? `<modo_operativo>
 Agente: {{BOT_NAME}}
 Rol: ${om.rol}
 Estilo: ${om.estilo}
-Objetivo: ${om.objetivo}
+Objetivo: ${objetivo || om.objetivo}
 Nivel de iniciativa: ${om.iniciativa}
 Escalamiento: ${om.escalamiento}
 
@@ -291,7 +298,17 @@ Actúa de forma consistente con este modo operativo durante TODA la
 conversación — es tu marco de referencia para decidir qué tan proactivo ser,
 cuándo tomar la iniciativa, y a quién/cuándo escalar.
 </modo_operativo>`
-    : "";
+    : // Sin modo elegido el bloque de arriba se omite entero — pero si el dueño
+      // definió un objetivo, ese NO se puede perder: va en su propio bloque.
+      objetivo
+      ? `<objetivo>
+Tu objetivo en cada conversación es: ${objetivo}
+
+No lo anuncies ni lo menciones — es tu criterio interno para decidir hacia
+dónde llevar la conversación. Si el cliente no quiere avanzar hacia ahí,
+respétalo: nunca insistas de más con tal de cumplirlo.
+</objetivo>`
+      : "";
 
   // Sin esto el modelo no tiene forma de saber qué día es "hoy" y adivina —
   // vimos un caso real donde agendó una cita para "mañana" usando 2023 (año
@@ -331,6 +348,9 @@ export interface SystemPromptOverrides {
   country?: string;
   currency?: string;
   operatingMode?: { rol: string; estilo: string; objetivo: string; iniciativa: string; escalamiento: string };
+  /** El objetivo CONCRETO de este bot (settings.bot_objective). Reemplaza al
+   *  objetivo genérico del modo operativo — ver renderSystemPrompt. */
+  objective?: string;
 }
 
 /** F3 de docs/multitenancy.md: identidad ya no es env, es la fila del bot. */
@@ -361,5 +381,6 @@ export function systemPromptFromEnv(
     country: overrides?.country,
     currency: overrides?.currency,
     operatingMode: overrides?.operatingMode,
+    objective: overrides?.objective,
   });
 }

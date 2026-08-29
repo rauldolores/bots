@@ -247,6 +247,7 @@ export async function resolveAgentConfig(
       country,
       currency,
       operatingMode,
+      objective: get(SETTING_KEYS.botObjective),
     });
 
   const bufferSecondsRaw = get(SETTING_KEYS.bufferSeconds);
