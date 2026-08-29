@@ -357,7 +357,7 @@ export async function renderHabilidades(
       </div>
     </div>`;
 
-  return layout({ title: "Habilidades", activeTab: "habilidades", body, pro: true });
+  return layout({ title: "Habilidades", activeTab: "habilidades", body});
 }
 
 export async function renderSkillForm(
@@ -376,7 +376,7 @@ export async function renderSkillForm(
       </div>
       ${skillForm(skill, error)}
     </div>`;
-  return layout({ title: "Habilidades", activeTab: "habilidades", body, pro: true });
+  return layout({ title: "Habilidades", activeTab: "habilidades", body});
 }
 
 export { slugify };

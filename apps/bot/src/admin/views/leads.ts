@@ -8,7 +8,6 @@ import { resolveConnectorCreds } from "../../connectors/creds";
 import { CRM_ADAPTERS, CRM_PROVIDERS } from "../../connectors/registry";
 import type { CrmRecord } from "../../connectors/types";
 import { getNiche, type NichePack } from "../../niches";
-import { isProTier } from "../../config";
 import { resolveTimezone } from "../../datetime";
 import { NurtureSequencesRepo, type NurtureSequence } from "../../db/nurtureSequences";
 import { NurtureEnrollmentsRepo, type NurtureEnrollment } from "../../db/nurtureEnrollments";
@@ -375,7 +374,7 @@ export async function renderLeads(env: Env, botId: string, visibleNavIds: Set<st
         ${rowsHtml || empty}
       </div>
     </div>`;
-  return layout({ title: niche.recordPlural, activeTab: "leads", body, pro: isProTier(bot?.tier), visibleNavIds });
+  return layout({ title: niche.recordPlural, activeTab: "leads", body, visibleNavIds });
 }
 
 export async function exportLeadsCsv(env: Env, botId: string): Promise<string> {

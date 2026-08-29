@@ -319,5 +319,5 @@ export async function renderStats(env: Env, botId: string, visibleNavIds: Set<st
       </div>
     </div>`;
 
-  return layout({ title: "Estadísticas", activeTab: "stats", body, pro: true, visibleNavIds });
+  return layout({ title: "Estadísticas", activeTab: "stats", body, visibleNavIds });
 }

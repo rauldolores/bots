@@ -230,5 +230,5 @@ export async function renderInsights(env: Env, botId: string, analyzedParam?: st
       ${recentCard}
     </div>`;
 
-  return layout({ title: "Insights", activeTab: "insights", body, pro: true, visibleNavIds });
+  return layout({ title: "Insights", activeTab: "insights", body, visibleNavIds });
 }

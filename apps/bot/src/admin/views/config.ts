@@ -1002,5 +1002,5 @@ export function renderConfig(
     })();
     </script>`;
 
-  return layout({ title: "Config", activeTab: "config", body, pro: true, visibleNavIds });
+  return layout({ title: "Config", activeTab: "config", body, visibleNavIds });
 }

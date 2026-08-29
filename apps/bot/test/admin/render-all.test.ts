@@ -47,7 +47,6 @@ const VISTAS = [
   "/campanas",
   "/config",
   "/projects",
-  "/upgrade",
 ];
 
 let db: Db;

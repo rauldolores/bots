@@ -1,10 +1,23 @@
+// Antes esto probaba el gate de planes: un bot "free" recibía 5 tools y uno
+// "pro" 7 (agendar cita y consultar catálogo eran de pago). Ese gate se quitó
+// —este producto no tiene planes, ver src/config.ts— así que ahora lo que se
+// prueba es lo contrario: que TODOS los bots reciban TODAS las tools, sin que
+// nada dependa de bots.tier.
 import { describe, it, expect } from "vitest";
 import { buildTools, type ToolContext } from "../../src/tools/index";
 
-function makeCtx(tier: "free" | "pro", niche?: string): ToolContext {
+const TODAS = [
+  "captureLead",
+  "catalogQuery",
+  "handoffHuman",
+  "pauseBot",
+  "scheduleAppointment",
+  "searchKb",
+  "snoozeUser",
+].sort();
+
+function makeCtx(): ToolContext {
   const env = {
-    BOT_TIER: tier,
-    BOT_NICHE: niche,
     DB: {} as any,
     AI: {} as any,
     BUSINESS_NAME: "Test",
@@ -15,53 +28,26 @@ function makeCtx(tier: "free" | "pro", niche?: string): ToolContext {
     env,
     getConversationId: () => "conv-1",
     botId: "00000000-0000-0000-0000-000000000001",
-    tier,
   };
 }
 
 describe("buildTools", () => {
-  it("registers the 5 free-tier tools (incluye captureLead)", () => {
-    const tools = buildTools(makeCtx("free"));
-    expect(Object.keys(tools).sort()).toEqual([
-      "captureLead",
-      "handoffHuman",
-      "pauseBot",
-      "searchKb",
-      "snoozeUser",
-    ]);
+  it("registra TODAS las tools, sin distinción de plan", () => {
+    expect(Object.keys(buildTools(makeCtx())).sort()).toEqual(TODAS);
   });
 
-  it("free tier captura leads pero excluye las Pro-only avanzadas", () => {
-    const tools = buildTools(makeCtx("free"));
-    expect(tools.captureLead).toBeDefined();
-    expect(tools.scheduleAppointment).toBeUndefined();
-    expect(tools.catalogQuery).toBeUndefined();
+  // Las dos que antes estaban detrás del plan. Se nombran explícitamente para
+  // que, si alguien vuelve a meter un gate comercial, esta prueba lo señale.
+  it("agendar cita y consultar catálogo ya NO dependen de ningún plan", () => {
+    const tools = buildTools(makeCtx());
+    expect(tools).toHaveProperty("scheduleAppointment");
+    expect(tools).toHaveProperty("catalogQuery");
   });
 
-  it("pro tier has the 5 base tools plus the 2 Pro tools", () => {
-    const tools = buildTools(makeCtx("pro"));
-    expect(Object.keys(tools).sort()).toEqual([
-      "captureLead",
-      "catalogQuery",
-      "handoffHuman",
-      "pauseBot",
-      "scheduleAppointment",
-      "searchKb",
-      "snoozeUser",
-    ]);
-    expect(tools.scheduleAppointment).toBeDefined();
-    expect(tools.catalogQuery).toBeDefined();
-  });
-
-  it("el Starter genérico no agrega tools de nicho (aunque BOT_NICHE traiga un giro)", () => {
-    for (const niche of [undefined, "restaurante", "inmobiliaria", "hoteleria"]) {
-      const tools = buildTools(makeCtx("pro", niche));
-      expect(tools.crearReservacion).toBeUndefined();
-      expect(tools.calificarComprador).toBeUndefined();
-      expect(tools.agendarCita).toBeUndefined();
-      expect(tools.registrarPedido).toBeUndefined();
-      expect(tools.registrarProspecto).toBeUndefined();
-      expect(tools.reservarHospedaje).toBeUndefined();
-    }
+  it("el contexto de tools ya no acepta un tier", () => {
+    // Si alguien reintrodujera `tier` en ToolContext, este objeto dejaría de
+    // compilar — la prueba vive tanto en el tipo como en la aserción.
+    const ctx = makeCtx();
+    expect(ctx).not.toHaveProperty("tier");
   });
 });

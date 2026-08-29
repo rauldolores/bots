@@ -13,7 +13,6 @@ import { Db } from "../db/client";
 import { ConversationsRepo } from "../db/conversations";
 import { MessagesRepo } from "../db/messages";
 import { BotsRepo } from "../db/bots";
-import { isProTier } from "../config";
 import { resolveAgentConfig } from "../settings-loader";
 import type { WarmTarget } from "../customer/warm";
 import { chunkReply } from "../replies/chunker";
@@ -192,14 +191,12 @@ export async function ingestMessage(
 
   if (payload.imageUrl) {
     hasImage = true;
-    if (!isProTier(bot?.tier)) {
-      processedText =
-        (processedText || "") +
-        "\n(El cliente mandó una imagen, pero tu plan no soporta análisis de imágenes.)";
-    } else {
-      processedText =
-        (processedText || "(imagen sin caption)") + `\n[IMAGE_URL: ${payload.imageUrl}]`;
-    }
+    // Antes esto dependía del plan: un bot "free" no analizaba la imagen y, en
+    // su lugar, le decía AL CLIENTE "tu plan no soporta análisis de imágenes"
+    // — hablándole de la facturación del dueño a quien venía a preguntar otra
+    // cosa. Ya no hay planes (ver src/config.ts): la imagen siempre se procesa.
+    processedText =
+      (processedText || "(imagen sin caption)") + `\n[IMAGE_URL: ${payload.imageUrl}]`;
   }
 
   // Al buffer (el mensaje del cliente SIEMPRE se guarda).

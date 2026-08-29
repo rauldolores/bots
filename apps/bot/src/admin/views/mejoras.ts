@@ -204,7 +204,7 @@ export async function renderMejoras(
 
     ${seccionCrm(crmPendientes, crmDecididas)}`;
 
-  return layout({ title: "Mejoras", activeTab: "mejoras", body, pro: true, visibleNavIds });
+  return layout({ title: "Mejoras", activeTab: "mejoras", body, visibleNavIds });
 }
 
 // ── Cambios al CRM propuestos por el agente ────────────────────────────────

@@ -11,7 +11,6 @@ import { KbDocsRepo, FIXTURE_CHUNKS } from "../../kb/docs";
 import { InsightsRepo } from "../../db/insights";
 import { SuggestionsRepo } from "../../db/suggestions";
 import { BotsRepo } from "../../db/bots";
-import { isProTier } from "../../config";
 import { channelLabel } from "../../channels/labels";
 import { getNiche } from "../../niches";
 
@@ -53,7 +52,6 @@ const DOW_LETTER = ["D", "L", "M", "M", "J", "V", "S"];
 export async function renderOverview(env: Env, botId: string, visibleNavIds: Set<string> | null = null): Promise<string> {
   const db = new Db(env.DB);
   const bot = await new BotsRepo(db).getById(botId);
-  const tier = bot?.tier ?? "free";
   const niche = getNiche(bot?.niche);
   const conn = await connectionsSummary(env, botId);
   const oneDay = Date.now() - 86_400_000;
@@ -111,7 +109,7 @@ export async function renderOverview(env: Env, botId: string, visibleNavIds: Set
   const activityMax = Math.max(...activityDays.map((d) => d.msgs), 1);
 
   // --- Estado del agente ----------------------------------------------------------
-  const toolNames = Object.keys(buildTools({ env, getConversationId: () => null, botId, tier }));
+  const toolNames = Object.keys(buildTools({ env, getConversationId: () => null, botId }));
   const agentCfg = await resolveAgentConfig(env, toolNames, botId);
   const kbDocs = await new KbDocsRepo(db, botId).list();
   const totalKbDocs = kbDocs.length + FIXTURE_CHUNKS.length;
@@ -316,7 +314,7 @@ export async function renderOverview(env: Env, botId: string, visibleNavIds: Set
           // Cuando el bot escala a humano, ¿alguien se entera? Antes esto
           // fallaba en silencio; ahora es la alerta principal de esta tarjeta
           // si falta configurar, porque un handoff mudo deja tickets huérfanos.
-          const notify = handoffNotifyStatus(env, tier);
+          const notify = handoffNotifyStatus(env);
           if (notify.ok) return "";
           return `
           <div class="mt-3" style="display:flex;align-items:flex-start;gap:10px;background:#fdf4f3;border:1px solid #f0cfc9;border-radius:10px;padding:11px 13px">
@@ -335,7 +333,7 @@ export async function renderOverview(env: Env, botId: string, visibleNavIds: Set
             return `<span class="text-[11.5px]" style="display:flex;align-items:center;gap:6px;color:${ok ? "var(--muted)" : color};border:1px solid ${ok ? "var(--line)" : color};border-radius:8px;padding:6px 10px">${ok ? "✓" : "⚠"} ${openTickets} tickets abiertos</span>`;
           })()}
           ${(() => {
-            const notify = handoffNotifyStatus(env, tier);
+            const notify = handoffNotifyStatus(env);
             if (!notify.ok) return "";
             return `<span class="text-[11.5px]" style="display:flex;align-items:center;gap:6px;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:6px 10px">✓ handoff avisa por ${notify.channels.join(" + ")}</span>`;
           })()}
@@ -358,5 +356,5 @@ export async function renderOverview(env: Env, botId: string, visibleNavIds: Set
       </section>
     </div>`;
 
-  return layout({ title: "Overview", activeTab: "overview", body, pro: isProTier(tier), visibleNavIds });
+  return layout({ title: "Overview", activeTab: "overview", body, visibleNavIds });
 }

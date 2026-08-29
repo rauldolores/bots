@@ -70,7 +70,7 @@ export interface AgentContextTimings {
  * ninguna de esas consultas dependiera de la anterior.
  *
  * Las dependencias reales son solo dos, y por eso hay dos tandas:
- *   - `cfg` necesita los nombres de las tools, que dependen del `tier` del bot.
+ *   - `cfg` necesita los nombres de las tools (para el prompt de sistema).
  *   - el lead conocido necesita el `channelUserId`, que viene del `state`.
  * Lo demás es independiente entre sí.
  */
@@ -103,7 +103,7 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
       : Promise.resolve([]),
   ]);
 
-  const tools = buildTools({ env, getConversationId: () => conversationId, botId, tier: bot?.tier ?? "free" });
+  const tools = buildTools({ env, getConversationId: () => conversationId, botId });
   const toolNames = Object.keys(tools);
 
   // Tanda 2: lo que sí dependía de la anterior.

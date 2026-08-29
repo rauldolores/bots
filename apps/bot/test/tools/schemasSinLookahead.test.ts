@@ -50,14 +50,11 @@ describe("los esquemas de las tools son compatibles con el motor de regex de Ope
     env: {} as any,
     getConversationId: () => null,
     botId: "bot-test",
-    // "pro" para que entren TAMBIÉN las tools de pago (scheduleAppointment,
-    // catalogQuery) — justamente donde estaba el bug.
-    tier: "pro",
   });
 
   const nombres = Object.keys(tools);
 
-  it("incluye las tools de pago (si no, esta prueba no cubriría la que fallaba)", () => {
+  it("incluye scheduleAppointment (si no, esta prueba no cubriría la que fallaba)", () => {
     expect(nombres).toContain("scheduleAppointment");
   });
 

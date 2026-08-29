@@ -289,7 +289,7 @@ export async function renderSeguimientos(env: Env, botId: string, opts: { error?
       </div>
     </div>`;
 
-  return layout({ title: "Seguimientos", activeTab: "seguimientos", body, pro: true });
+  return layout({ title: "Seguimientos", activeTab: "seguimientos", body});
 }
 
 export async function renderSequenceForm(
@@ -313,5 +313,5 @@ export async function renderSequenceForm(
       </div>
       ${sequenceForm(seq, error, otras)}
     </div>`;
-  return layout({ title: "Seguimientos", activeTab: "seguimientos", body, pro: true });
+  return layout({ title: "Seguimientos", activeTab: "seguimientos", body});
 }

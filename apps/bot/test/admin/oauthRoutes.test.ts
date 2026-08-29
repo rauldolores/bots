@@ -344,7 +344,7 @@ describe("GET /admin/projects — selector del header (F5)", () => {
     const otraOrg = body.tenant.organizations.find((o: any) => o.id === otraOrgId);
     expect(miOrg.current).toBe(true);
     expect(miOrg.initials).toBe("MO"); // "Mi Org" → primera letra de cada palabra
-    expect(miOrg.bots).toEqual([{ id: TEST_BOT_ID, name: "Test Bot", paused: false, tier: "pro", current: true }]);
+    expect(miOrg.bots).toEqual([{ id: TEST_BOT_ID, name: "Test Bot", paused: false, current: true }]);
     expect(otraOrg.current).toBe(false);
     expect(otraOrg.bots).toEqual([]); // organización real sin bots todavía — no truena, solo lista vacía
   });

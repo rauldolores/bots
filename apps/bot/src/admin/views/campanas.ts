@@ -393,5 +393,5 @@ export async function renderCampanas(
   })();
   </script>`;
 
-  return layout({ title: "Campañas", activeTab: "campanas", body, pro: true, visibleNavIds });
+  return layout({ title: "Campañas", activeTab: "campanas", body, visibleNavIds });
 }

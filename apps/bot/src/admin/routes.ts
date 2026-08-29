@@ -19,8 +19,7 @@ import { createModel } from "../llm/provider";
 import { loadLlmOverrides } from "../settings-loader";
 import type { Env } from "../env";
 import { adminAuth } from "./auth";
-import { layout, renderUpgrade, renderAccessDenied } from "./views/layout";
-import { isProTier } from "../config";
+import { layout, renderAccessDenied } from "./views/layout";
 import { renderOverview } from "./views/overview";
 import { renderStats } from "./views/stats";
 import { renderCosts } from "./views/costs";
@@ -350,31 +349,10 @@ async function settingsFor(c: HonoContext): Promise<SettingsRepo> {
   return new SettingsRepo(new Db(c.env.DB), c.get("botId"));
 }
 
-// Gate de tier: el panel free ve el nav Pro bloqueado; si aun así navega a una
-// ruta Pro (URL directa, bookmark, click al item bloqueado), servimos la página
-// de upgrade en vez de la vista real. Los datos Pro nunca se exponen en free.
-const PRO_GATE: Array<[string, string]> = [
-  ["/admin/insights", "Insights"],
-  ["/admin/stats", "Estadísticas"],
-  ["/admin/costs", "Costos"],
-  ["/admin/mejoras", "Mejoras"],
-  ["/admin/campanas", "Campañas"],
-];
-adminApp.use("*", async (c, next) => {
-  // botId no existe todavía en /login, /oauth/callback, ni en switch-org/switch-bot
-  // (que corren precisamente ANTES de que haya un bot resuelto — ver arriba).
-  if (isAuthExempt(c.req.path) || isTenantExempt(c.req.path)) return next();
-  const gateDb = new Db(c.env.DB);
-  const gateBot = await new BotsRepo(gateDb).getById(c.get("botId"));
-  if (isProTier(gateBot?.tier)) return next();
-  const path = c.req.path;
-  const hit = PRO_GATE.find(([pre]) => path === pre || path.startsWith(pre + "/"));
-  if (hit) return c.html(renderUpgrade(hit[1]));
-  return next();
-});
 
-// Gate de permisos de KontrolIA Auth (ver admin/permissions.ts): mismo
-// idioma que PRO_GATE de arriba — prefijo de URL → permiso requerido. Solo
+// Gate de permisos de KontrolIA Auth (ver admin/permissions.ts): prefijo de
+// URL → permiso requerido. Es el ÚNICO gate de acceso del panel — el de
+// planes que vivía aquí arriba se quitó (ver src/config.ts). Solo
 // corre para sesiones de KontrolIA (Basic Auth / DASHBOARD_PUBLIC no tienen
 // kontroliaClaims, así que pasan sin cambio); un platform admin nunca se
 // bloquea.
@@ -391,9 +369,6 @@ adminApp.use("*", async (c, next) => {
   if (hit && !hasPermission(claims, hit[1])) return c.html(renderAccessDenied(hit[2], visibleNavIds(claims)));
   return next();
 });
-
-// Página de upgrade (item bloqueado del nav apunta aquí).
-adminApp.get("/upgrade", (c) => c.html(renderUpgrade()));
 
 // Destino del guard de acceso base (Sección 3) y del gate de permisos de
 // arriba — se llega aquí ya AUTENTICADO pero sin el permiso necesario.
@@ -483,7 +458,6 @@ adminApp.get("/projects", async (c) => {
           id: b.id,
           name: b.name,
           paused: b.paused,
-          tier: b.tier,
           current: b.id === botId,
         })),
       })),

@@ -261,5 +261,5 @@ export async function renderCosts(env: Env, botId: string, saved = false, visibl
       ${note}
     </div>`;
 
-  return layout({ title: "Costos", activeTab: "costs", body, pro: true, visibleNavIds });
+  return layout({ title: "Costos", activeTab: "costs", body, visibleNavIds });
 }

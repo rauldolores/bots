@@ -42,5 +42,5 @@ export function renderCreateBotPage(opts?: { error?: string; orgName?: string | 
       <p class="text-dim text-[11.5px]" style="text-align:center;margin-top:14px">¿Buscabas otra organización? Cámbiala arriba, en el selector.</p>
     </div>`;
 
-  return layout({ title: "Crear tu primer bot", activeTab: "overview", body, pro: true });
+  return layout({ title: "Crear tu primer bot", activeTab: "overview", body});
 }

@@ -16,7 +16,6 @@ import type { Env } from "../env";
 import { Db } from "../db/client";
 import { ConversationsRepo } from "../db/conversations";
 import { MessagesRepo } from "../db/messages";
-import { isProTier } from "../config";
 import { buildMultimodalUserMessage } from "../media/vision";
 import { selectModel } from "../upgrade/modelSelector";
 import type { Tier } from "../upgrade/modelSelector";
@@ -152,7 +151,7 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
   const lastUserMsg = history[history.length - 1];
   if (lastUserMsg) {
     const imgMatch = lastUserMsg.content.match(/\[IMAGE_URL: (.+?)\]/);
-    if (imgMatch && isProTier(bot?.tier)) {
+    if (imgMatch) {
       const imageUrl = imgMatch[1];
       const cleanText = lastUserMsg.content.replace(/\n?\[IMAGE_URL: .+?\]/, "").trim();
       aiMessages.push(buildMultimodalUserMessage(cleanText, imageUrl));

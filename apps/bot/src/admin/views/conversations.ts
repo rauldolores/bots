@@ -485,5 +485,5 @@ export async function renderInbox(env: Env, botId: string, p: InboxParams, visib
       </div>
     </div>`;
 
-  return layout({ title: "Conversaciones", activeTab: "conversations", body, pro: true, visibleNavIds });
+  return layout({ title: "Conversaciones", activeTab: "conversations", body, visibleNavIds });
 }

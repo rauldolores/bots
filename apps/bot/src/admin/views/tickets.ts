@@ -214,7 +214,7 @@ export async function renderTickets(env: Env, botId: string, visibleNavIds: Set<
         </div>
         ${renderTicketsExternalList(providerLabel, result.items, timezone, localByExternalId)}
         ${unsyncedBlock}`;
-      return layout({ title: "Tickets", activeTab: "tickets", body, pro: true, visibleNavIds });
+      return layout({ title: "Tickets", activeTab: "tickets", body, visibleNavIds });
     }
     ticketsErrorBanner = `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px;margin-bottom:14px">No se pudo consultar ${esc(providerLabel)} (${esc(result?.error ?? "sin credenciales")}) — mostrando la copia local mientras tanto.</div>`;
   }
@@ -230,7 +230,7 @@ export async function renderTickets(env: Env, botId: string, visibleNavIds: Set<
          </div>`
       : list);
 
-  return layout({ title: "Tickets", activeTab: "tickets", body, pro: true, visibleNavIds });
+  return layout({ title: "Tickets", activeTab: "tickets", body, visibleNavIds });
 }
 
 const VALID_PRIORITIES = ["low", "normal", "high", "urgent"] as const;

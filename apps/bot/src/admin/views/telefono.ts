@@ -210,5 +210,5 @@ export async function renderTelefono(env: Env, botId: string, notice?: { ok?: bo
       ${voiceChannelRow ? transferNumberSection(voiceChannelRow.config.transferNumber ?? null) : ""}
     </div>`;
 
-  return layout({ title: "Tu número", activeTab: "telefono", body, pro: true, visibleNavIds });
+  return layout({ title: "Tu número", activeTab: "telefono", body, visibleNavIds });
 }

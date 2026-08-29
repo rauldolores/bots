@@ -34,14 +34,18 @@ function stubSettings(overrides: Record<string, string> = {}) {
   vi.spyOn(SettingsRepo.prototype, "all").mockResolvedValue(overrides);
 }
 
+// runAgentTurnCore recorre `fullStream` (no `textStream`) para ver el momento
+// exacto en que el modelo llama a una herramienta — ver turn.ts.
 function makeStreamResult(text: string) {
   async function* gen() {
-    yield text;
+    yield { type: "text-delta", text };
   }
   return {
-    textStream: gen(),
+    fullStream: gen(),
     usage: Promise.resolve({ inputTokens: 100, outputTokens: 50, cachedInputTokens: 0 }),
     steps: Promise.resolve([{ toolCalls: [] }]),
+    finishReason: Promise.resolve("stop"),
+    warnings: Promise.resolve([]),
   };
 }
 
@@ -123,7 +127,12 @@ describe("ingestMessage — media", () => {
     expect((await pendientes())[0].text).toBe("(no pude entender el audio)");
   });
 
-  it("free tier: strips the image and informs the bot it's unsupported", async () => {
+  // Antes esto dependía del plan: un bot "free" descartaba la imagen y le
+  // respondía AL CLIENTE "tu plan no soporta análisis de imágenes" —
+  // hablándole de la facturación del dueño a quien venía a preguntar otra
+  // cosa. El gate de planes se quitó (ver src/config.ts), así que la imagen
+  // se procesa siempre, sin importar lo que diga bots.tier.
+  it("la imagen NUNCA se descarta por el plan, ni se le menciona al cliente", async () => {
     await ingestMessage(await makeEnv({ tier: "free" }), {
       channel: "telegram",
       channelUserId: "u1",
@@ -133,11 +142,11 @@ describe("ingestMessage — media", () => {
 
     const buffered = (await pendientes())[0].text;
     expect(buffered).toContain("mira esto");
-    expect(buffered).toContain("no soporta análisis de imágenes");
-    expect(buffered).not.toContain("IMAGE_URL");
+    expect(buffered).toContain("[IMAGE_URL: https://example.com/pic.png]");
+    expect(buffered).not.toContain("plan");
   });
 
-  it("pro tier: keeps the image as an [IMAGE_URL] marker in the buffer", async () => {
+  it("conserva la imagen como marcador [IMAGE_URL] en el buffer", async () => {
     await ingestMessage(await makeEnv({ tier: "pro" }), {
       channel: "telegram",
       channelUserId: "u1",

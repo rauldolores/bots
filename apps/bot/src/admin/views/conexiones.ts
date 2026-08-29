@@ -1497,7 +1497,7 @@ export async function renderConexiones(
       </div>
     </div>`;
 
-  return layout({ title: "Conexiones", activeTab: "conexiones", body, pro: true, visibleNavIds });
+  return layout({ title: "Conexiones", activeTab: "conexiones", body, visibleNavIds });
 }
 
 /** Resumen corto para el badge de salud del Resumen. */

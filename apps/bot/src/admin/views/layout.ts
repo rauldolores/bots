@@ -11,7 +11,6 @@
 // The layout() API is unchanged: views keep their own activeTab id; the group,
 // breadcrumb and page title are derived here.
 
-import { PRO_ONLY_TABS } from "../../config";
 import type { NichePack } from "../../niches";
 import { NAV_PERMISSIONS } from "../permissions";
 
@@ -20,7 +19,6 @@ import { NAV_PERMISSIONS } from "../permissions";
 // una cuenta no tiene ningún permiso todavía) y por eso nunca se oculta.
 const GATED_NAV_IDS = new Set(Object.keys(NAV_PERMISSIONS));
 
-const UPGRADE_URL = "/admin/upgrade";
 
 interface Item {
   id: string;
@@ -284,17 +282,6 @@ function navItem(item: Item, active: boolean): string {
   </a>`;
 }
 
-// Tier free: los tabs Pro se muestran bloqueados (candado + tag PRO) y llevan a
-// la página de upgrade en vez de a la vista real. Se ven, pero invitan a subir.
-function navItemLocked(item: Item): string {
-  const base =
-    "display:flex;align-items:center;gap:11px;padding:9px 12px;font-size:13px;color:var(--sb-dim)";
-  return `<a href="${UPGRADE_URL}" class="navlink" style="${base}" title="Disponible en Pro">
-    <i data-lucide="lock" width="15" height="15" style="color:var(--sb-dim)"></i> ${item.label}
-    <span style="margin-left:auto;font-size:8.5px;letter-spacing:.1em;color:var(--sb-dim);background:#2a2822;border-radius:4px;padding:2px 6px">PRO</span>
-  </a>`;
-}
-
 // El pack de nicho re-etiqueta el item "leads" (ej. "Leads" → "Reservaciones").
 // El id y el href NO cambian (son load-bearing); solo la etiqueta y el ícono.
 function applyNiche(item: Item, niche: NichePack | null): Item {
@@ -302,13 +289,13 @@ function applyNiche(item: Item, niche: NichePack | null): Item {
   return { ...item, label: niche.navLabel, icon: niche.navIcon };
 }
 
-function sidebar(activeTab: string, pro: boolean, niche: NichePack | null, visibleIds: Set<string> | null): string {
-  const locked = (id: string) => !pro && (PRO_ONLY_TABS as readonly string[]).includes(id);
+function sidebar(activeTab: string, niche: NichePack | null, visibleIds: Set<string> | null): string {
   // null = sin sesión de KontrolIA (Basic Auth / DASHBOARD_PUBLIC / no
   // configurado) — sin filtro, todo visible, cero cambio de comportamiento.
-  // Con sesión, un ítem sin el permiso correspondiente se OMITE por completo
-  // (no se bloquea con candado como el tier Pro): no tiene sentido invitar a
-  // un clic que sabemos que va a rebotar a /admin/access-denied.
+  // Con sesión, un ítem sin el permiso correspondiente se OMITE por completo:
+  // no tiene sentido invitar a un clic que sabemos que va a rebotar a
+  // /admin/access-denied. Este es el ÚNICO criterio para esconder algo del
+  // nav — el gate de planes (candado + "PRO") se quitó, ver src/config.ts.
   const visible = (id: string) => visibleIds === null || !GATED_NAV_IDS.has(id) || visibleIds.has(id);
   const sections = NAV.map((sec) => {
     const shown = sec.items.filter((i) => visible(i.id));
@@ -318,7 +305,7 @@ function sidebar(activeTab: string, pro: boolean, niche: NichePack | null, visib
     const items = shown
       .map((raw) => {
         const i = applyNiche(raw, niche);
-        return locked(i.id) ? navItemLocked(i) : navItem(i, i.id === activeTab);
+        return navItem(i, i.id === activeTab);
       })
       .join("");
     return `<div class="sb-sec" style="color:${labelColor}">${sec.label}</div>${items}`;
@@ -344,7 +331,6 @@ function sidebar(activeTab: string, pro: boolean, niche: NichePack | null, visib
         </div>
         <div style="line-height:1.25;overflow:hidden">
           <div style="font-size:12px;font-weight:600;color:#e9e6dd;white-space:nowrap;text-overflow:ellipsis;overflow:hidden">Panel del bot</div>
-          <div style="font-size:10px;color:var(--sb-dim)">Plan ${pro ? "Pro" : "Free"}</div>
         </div>
       </div>
     </div>
@@ -355,13 +341,10 @@ export function layout(opts: {
   title: string;
   activeTab: string;
   body: string;
-  /** bots.tier ya resuelto (F3). Sin dato (ej. notFound) se asume Pro para no ocultar nada por accidente. */
-  pro?: boolean;
   niche?: NichePack | null;
   /** visibleNavIds(claims) de admin/permissions.ts — null (default) = sin sesión de KontrolIA, todo visible. */
   visibleNavIds?: Set<string> | null;
 }): string {
-  const pro = opts.pro ?? true;
   const niche = opts.niche ?? null;
   const visibleNavIds = opts.visibleNavIds ?? null;
   const section = NAV.find((s) => s.items.some((i) => i.id === opts.activeTab)) ?? NAV[0];
@@ -378,7 +361,7 @@ export function layout(opts: {
 </head>
 <body>
   <div class="shell">
-    ${sidebar(opts.activeTab, pro, niche, visibleNavIds)}
+    ${sidebar(opts.activeTab, niche, visibleNavIds)}
     <div style="display:flex;flex-direction:column;min-width:0">
       <header style="position:sticky;top:0;z-index:30;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:14px 28px;display:flex;align-items:center;gap:20px">
         <div style="min-width:0">
@@ -634,49 +617,6 @@ export function layout(opts: {
 </html>`;
 }
 
-// Página de upgrade: se muestra cuando un panel free intenta abrir un tab Pro
-// (o al hacer click en un item bloqueado). Vive dentro del layout para conservar
-// el nav. `feature` es el nombre del tab que pidió (para personalizar el copy).
-export function renderUpgrade(feature?: string): string {
-  const perks = [
-    ["scan-eye", "Analista IA", "Resúmenes automáticos de cada conversación: qué querían, objeciones y oportunidad de venta."],
-    ["bar-chart-3", "Estadísticas", "Métricas de volumen, retención y desempeño de tu bot en el tiempo."],
-    ["receipt", "Costos", "Cuánto gasta tu bot en IA, con tope de presupuesto mensual."],
-    ["sparkles", "Mejoras", "El bot detecta huecos en su conocimiento y se mejora solo (flywheel)."],
-    ["megaphone", "Campañas", "Manda difusiones y seguimientos por WhatsApp a tus segmentos."],
-  ]
-    .map(
-      ([icon, title, desc]) => `<div style="display:flex;gap:12px;padding:14px;border:1px solid var(--line);background:var(--panel)">
-        <i data-lucide="${icon}" width="20" height="20" style="color:var(--accent);flex:none;margin-top:2px"></i>
-        <div><div style="font-family:'Archivo';font-weight:600;font-size:14px;margin-bottom:3px">${title}</div>
-        <div style="font-size:12.5px;color:var(--muted);line-height:1.5">${desc}</div></div>
-      </div>`,
-    )
-    .join("");
-
-  const body = `
-    <div class="card" style="max-width:720px">
-      <div style="border:1px solid var(--linelit);background:var(--panel);box-shadow:var(--shadow-md);padding:28px">
-        <div style="display:inline-flex;align-items:center;gap:8px;border:1px solid var(--accent);color:var(--accent2);font-size:10px;letter-spacing:.16em;padding:4px 10px;text-transform:uppercase">
-          <i data-lucide="lock" width="13" height="13"></i> Función Pro
-        </div>
-        <h2 style="font-family:'Archivo';font-weight:700;font-size:24px;letter-spacing:-.02em;margin:14px 0 6px">
-          ${feature ? `“${feature}” es parte de Pro` : "Desbloquea el panel Pro"}
-        </h2>
-        <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0 0 20px;max-width:560px">
-          Tu bot Starter ya atiende clientes, responde con tu conocimiento y captura leads.
-          El panel <b style="color:var(--cream)">Pro</b> le suma el cerebro analítico y de crecimiento:
-        </p>
-        <div style="display:grid;gap:10px;margin-bottom:22px">${perks}</div>
-        <a href="https://horizontesia.com" target="_blank" rel="noopener" class="bigbtn"
-          style="display:inline-flex;align-items:center;gap:8px;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:12px 20px;font-family:'Archivo';font-weight:700;font-size:14px">
-          <i data-lucide="arrow-up-right" width="17" height="17"></i> Subir a Pro con la comunidad
-        </a>
-      </div>
-    </div>`;
-  return layout({ title: "Pro", activeTab: "overview", body, pro: false });
-}
-
 // Se muestra cuando una cuenta de KontrolIA Auth válida no tiene ningún
 // permiso de Nodia Agents (guard base en routes.ts) o le falta el permiso
 // específico de la pantalla que pidió (PERMISSION_GATE). Nunca aparece para
@@ -706,7 +646,7 @@ export function renderAccessDenied(feature?: string, visibleNavIds: Set<string> 
         </form>
       </div>
     </div>`;
-  return layout({ title: "Acceso restringido", activeTab: "overview", body, pro: false, visibleNavIds });
+  return layout({ title: "Acceso restringido", activeTab: "overview", body, visibleNavIds });
 }
 
 export function loginPage(error?: string): string {

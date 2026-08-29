@@ -14,7 +14,6 @@ import { TICKET_ADAPTERS } from "../connectors/registry";
 import { classifyContact, normalizePhone, normalizeEmail, regionForTimezone } from "../contacts/normalize";
 import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 import { resolveBotId } from "../tenant";
-import { isProTier } from "../config";
 import { resolveChannelEnv } from "../channels/effectiveEnv";
 
 /** Últimos mensajes de la conversación, en texto plano — lo que ve el dueño (o la plataforma de tickets) al abrir el ticket. */
@@ -186,14 +185,10 @@ interface HandoffNotice {
  * (Salud del bot) para hacer VISIBLE cuando un handoff no le avisaría a nadie
  * — antes fallaba en silencio y el ticket se quedaba huérfano.
  */
-export function handoffNotifyStatus(
-  env: Env,
-  tier: string | undefined | null,
-): { ok: boolean; channels: string[] } {
+export function handoffNotifyStatus(env: Env): { ok: boolean; channels: string[] } {
   const channels: string[] = [];
   if (env.TELEGRAM_BOT_TOKEN && env.OWNER_TELEGRAM_CHAT_ID) channels.push("Telegram");
   if (
-    isProTier(tier) &&
     env.OWNER_WA_NUMBER &&
     env.TWILIO_ACCOUNT_SID &&
     env.TWILIO_AUTH_TOKEN &&
@@ -223,7 +218,6 @@ export async function notifyOwner(rawEnv: Env, notice: HandoffNotice, botIdOverr
   );
   const ticketUrl = `${env.ADMIN_BASE_URL ?? env.DASHBOARD_BASE_URL}${notice.ruta ?? "/admin/tickets"}`;
   const titulo = notice.titulo ?? "Nuevo ticket";
-  const tier = (await new BotsRepo(notifyDb).getById(notifyBotId))?.tier;
 
   // El SID de la plantilla puede venir del secret O del setting que escribe el
   // setup del panel. Se resuelve ANTES del guard: si vive solo en settings, el
@@ -246,7 +240,7 @@ export async function notifyOwner(rawEnv: Env, notice: HandoffNotice, botIdOverr
   // Fail-LOUD (en logs) cuando no hay ningún canal de aviso configurado: el
   // ticket existe en el dashboard pero nadie se entera. El dashboard también
   // lo muestra en "Salud del bot" (handoffNotifyStatus).
-  if (!handoffNotifyStatus(env, tier).ok && !waViaSetting) {
+  if (!handoffNotifyStatus(env).ok && !waViaSetting) {
     console.error(
       `[notifyOwner] ticket ${notice.ticketId} creado pero SIN canal de aviso configurado ` +
         "(faltan OWNER_TELEGRAM_CHAT_ID, OWNER_WA_NUMBER+template o RESEND_API_KEY+OWNER_EMAIL) — el dueño no será notificado",
@@ -280,7 +274,6 @@ export async function notifyOwner(rawEnv: Env, notice: HandoffNotice, botIdOverr
   // ContentVariables (the template's {{1}}, {{2}}, {{3}} placeholders), not Body.
   // El SID (secret o setting) ya se resolvió arriba, antes del guard.
   if (
-    isProTier(tier) &&
     env.OWNER_WA_NUMBER &&
     env.TWILIO_ACCOUNT_SID &&
     env.TWILIO_AUTH_TOKEN &&
