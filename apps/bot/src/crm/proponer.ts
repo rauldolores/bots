@@ -106,7 +106,23 @@ export async function proponerDesdeAnalisis(
 
   // Compromisos → tareas. Solo los nuestros: lo que el cliente prometió no es
   // trabajo para nadie del equipo.
-  for (const c of analisis.compromisos ?? []) {
+  //
+  // Bug real (visto en producción): el análisis corre DESPUÉS DE CADA turno
+  // sobre una ventana de los últimos mensajes (ver MENSAJES_A_ANALIZAR en
+  // analizar.ts). Mientras el mismo compromiso ("hay que agendar la llamada")
+  // siga dentro de esa ventana, cada corrida lo vuelve a detectar — y como el
+  // modelo redacta `c.que` de nuevo cada vez, la frase sale ligeramente
+  // distinta en cada pasada. El `dedupeKey` de abajo depende de ese texto, así
+  // que el anti-duplicados de la cola (crm_proposals.dedupe_key) no los
+  // reconoce como el mismo compromiso y cada uno se vuelve una tarea NUEVA en
+  // el CRM (tarea:crear es riesgo "medio" → se aplica sola, sin que el dueño
+  // la revise). Mismo síntoma que `yaTieneDeal` en vinqulia.ts ya resuelve
+  // para oportunidades: una conversación viva no debe abrir una segunda tarea
+  // mientras la primera siga sin resolver.
+  const yaTieneTarea = (analisis.compromisos ?? []).some((c) => c.deQuien === "nosotros")
+    ? await repo.tieneTareaAbierta(conversationId)
+    : false;
+  for (const c of yaTieneTarea ? [] : analisis.compromisos ?? []) {
     if (c.deQuien !== "nosotros") continue;
     await encolar({
       conversationId,

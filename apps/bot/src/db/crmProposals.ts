@@ -127,6 +127,20 @@ export class CrmProposalsRepo {
     ]);
   }
 
+  /**
+   * ¿Esta conversación ya tiene una tarea (propuesta o ya escrita en el CRM)?
+   * Ver el uso en `proponerDesdeAnalisis` — evita la duda de a mano, sin
+   * depender de que el texto del compromiso salga igual dos veces.
+   */
+  async tieneTareaAbierta(conversationId: string): Promise<boolean> {
+    const row = await this.db.first<{ n: number }>(
+      `SELECT count(*)::int AS n FROM crm_proposals
+       WHERE bot_id = ? AND conversation_id = ? AND kind = 'tarea' AND status IN ('pendiente', 'aprobada', 'aplicada')`,
+      [this.botId, conversationId],
+    );
+    return (row?.n ?? 0) > 0;
+  }
+
   async contarPendientes(): Promise<number> {
     const row = await this.db.first<{ n: number }>(
       "SELECT count(*)::int AS n FROM crm_proposals WHERE bot_id = ? AND status = 'pendiente'",

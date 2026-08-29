@@ -250,6 +250,16 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
         const delta: string = part.text ?? part.delta ?? "";
         completo += delta;
         porEnviar += delta;
+      } else if (part?.type === "error") {
+        // La causa real del "turno vacío" visto en producción: ante un error
+        // del proveedor A MITAD del stream (sobrecarga, red, etc.), el SDK
+        // (Vercel AI SDK v6) NO rechaza la promesa ni lanza — lo entrega como
+        // un chunk más de `fullStream` con `type: "error"`. Si nadie lo
+        // revisa, el for-await simplemente termina, `completo` se queda en
+        // "" y el turno se daba por bueno sin que ningún catch se enterara.
+        // Lanzar aquí sí activa el reintento/failover de abajo, y de paso
+        // conserva el error real del proveedor en vez de perderlo.
+        throw part.error instanceof Error ? part.error : new Error(String(part.error));
       } else if (part?.type === "tool-call" && onInterimMessage) {
         const aviso = porEnviar.trim();
         if (aviso && aviso === ultimoAvisoEnviado) {
@@ -294,6 +304,32 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
         ...summarizeToolResult(tc.toolCallId ? byCallId.get(tc.toolCallId) : undefined),
       }));
     });
+
+    // Bug real (visto en producción, dos veces seguidas): streamText a veces
+    // no lanza ERROR pero tampoco produce NADA — ni un solo text-delta ni una
+    // sola tool call. NO es el caso legítimo de "ya dijo todo antes de la
+    // herramienta" (ahí `completo` SÍ tiene el texto adelantado, aunque
+    // `porEnviar` haya quedado en "" tras mandarlo) — es el modelo devolviendo
+    // un turno vacío de verdad. Sin este chequeo, el turno se daba por bueno:
+    // se guardaba un mensaje "" en el historial y el cliente se quedaba sin
+    // respuesta, en silencio total, sin reintento ni aviso de error. Lanzar
+    // aquí activa el MISMO reintento/failover de abajo — un turno vacío es
+    // tan inválido como uno que truena.
+    if (!completo.trim() && toolCallCount === 0) {
+      // Antes no quedaba ningún rastro de POR QUÉ el modelo no dijo nada
+      // (no truena, así que ningún console.error se disparaba). finishReason
+      // y warnings SÍ vienen del proveedor aunque el texto haya salido vacío
+      // — es la única pista real: "length" (se quedó sin tokens),
+      // "content-filter" (lo bloqueó su propio filtro), "error"/"other", etc.
+      const [finishReason, warnings] = await Promise.all([
+        Promise.resolve(result.finishReason).catch(() => "desconocido"),
+        Promise.resolve(result.warnings).catch(() => undefined),
+      ]);
+      console.error(
+        `[runAgentTurnCore] turno vacío — modelo=${usedModelId} finishReason=${finishReason} warnings=${JSON.stringify(warnings)}`,
+      );
+      throw new Error(`streamText devolvió un turno vacío (finishReason=${finishReason})`);
+    }
   };
 
   try {

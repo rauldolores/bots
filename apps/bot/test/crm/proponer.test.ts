@@ -23,6 +23,11 @@ vi.mock("../../src/db/crmProposals", () => ({
       encoladas.push(p);
       return "id";
     }
+    // Imita crm_proposals: "ya hay una tarea" si esta corrida (u otra previa,
+    // simulada por el test dejando algo en `encoladas`) ya encoló una.
+    async tieneTareaAbierta(conversationId: string) {
+      return encoladas.some((e) => e.kind === "tarea" && e.conversationId === conversationId);
+    }
   },
 }));
 
@@ -126,6 +131,18 @@ describe("compromisos", () => {
       }),
     );
     expect(porTipo("tarea")).toHaveLength(2);
+  });
+
+  it("el mismo compromiso redactado distinto en una corrida posterior NO abre otra tarea", async () => {
+    // Bug real: el análisis corre después de cada turno sobre una ventana de
+    // mensajes recientes — mientras el compromiso siga ahí, cada corrida lo
+    // redacta con otras palabras y el dedupeKey (que depende de ese texto) no
+    // lo reconoce como repetido. La tarea ya encolada/aplicada es la señal.
+    await correr(analisis({ compromisos: [{ que: "enviar propuesta", deQuien: "nosotros" }] }));
+    expect(porTipo("tarea")).toHaveLength(1);
+
+    await correr(analisis({ compromisos: [{ que: "mandar la propuesta comercial", deQuien: "nosotros" }] }));
+    expect(porTipo("tarea")).toHaveLength(1);
   });
 });
 
