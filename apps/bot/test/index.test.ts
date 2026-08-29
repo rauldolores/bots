@@ -17,6 +17,15 @@ describe("Worker entry", () => {
     expect(res.status).toBe(200);
   });
 
+  // La raíz devolvía 404 y había que saberse /admin/overview de memoria. Quien
+  // instala esto probablemente no programa, y el dominio a secas es lo primero
+  // que teclea.
+  it("la raíz lleva al panel", async () => {
+    const res = await worker.fetch(new Request("https://test/"), env, {} as any);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/admin");
+  });
+
   it("returns 404 on unknown route", async () => {
     const res = await worker.fetch(new Request("https://test/nope"), env, {} as any);
     expect(res.status).toBe(404);

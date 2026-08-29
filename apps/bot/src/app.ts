@@ -408,6 +408,17 @@ app.post("/webhooks/learn/:channel", async (c) => {
   return c.json({ ok: true, captured: kind, channel }, 200);
 });
 
+// La raíz lleva al panel. Sin esto devolvía 404: quien abría el dominio a
+// secas tenía que saberse la ruta de memoria, y el dueño de un bot
+// probablemente no sabe programar — el README no está a mano cuando alguien
+// teclea el dominio en el celular.
+//
+// Va a /admin y no a /admin/overview a propósito: cuál es la pantalla de
+// entrada del panel lo decide adminApp (hoy overview, mañana lo que sea), y
+// tenerlo escrito en dos lugares es cómo se desincronizan. El costo es un
+// salto extra de 302.
+app.get("/", (c) => c.redirect("/admin"));
+
 // Admin dashboard — Basic Auth guarded sub-app mounted at /admin/*.
 app.route("/admin", adminApp);
 
