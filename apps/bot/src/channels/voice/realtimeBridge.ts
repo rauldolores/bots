@@ -25,7 +25,7 @@ import { buildMediaMessage, buildMarkMessage, buildClearMessage, base64ToBytes }
 import { createCallMetrics, beginTurn, timeToFirstAudioMs, turnLatencyMs, responseDurationMs, type CallMetrics } from "./metrics";
 import { resolveVoiceOpenAiApiKey } from "./openaiKey";
 import { logVoiceEvent, maskId } from "./log";
-import { VOICE_BEHAVIOR_ADDENDUM } from "./voiceInstructions";
+import { VOICE_BEHAVIOR_ADDENDUM, bloqueLlamadaEnCurso } from "./voiceInstructions";
 import { resolveVoiceGreeting } from "./voiceGreeting";
 import { recordOnboardingMilestones } from "./onboarding/milestones";
 import { transferToHumanTool } from "./tools/transferToHuman";
@@ -199,7 +199,16 @@ export class RealtimeCallBridge {
     // reemplaza) — personalidad/idioma/negocio/memoria siguen siendo
     // exactamente los de buildAgentContext(); esto solo instruye cómo hablar
     // de lo que las tools devuelven.
-    const instructions = [ctx.basePrompt, ...ctx.memoryBlocks, VOICE_BEHAVIOR_ADDENDUM].join("\n\n");
+    // El número del que llama va junto a los bloques de memoria (es un hecho
+    // de ESTA conversación, igual que el contexto de cliente) y antes del
+    // addendum, que siempre cierra. Sin esto el modelo no tenía el teléfono:
+    // el cliente pedía "regístrame con este número" y el bot no sabía cuál era.
+    const instructions = [
+      ctx.basePrompt,
+      ...ctx.memoryBlocks,
+      bloqueLlamadaEnCurso(callerId),
+      VOICE_BEHAVIOR_ADDENDUM,
+    ].join("\n\n");
     this.instructions = instructions;
     const toolSchemas = await toolsToRealtimeSchemas(this.tools);
 

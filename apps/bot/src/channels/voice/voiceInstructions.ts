@@ -81,3 +81,43 @@ Estás hablando por TELÉFONO, no chateando por texto. Reglas de esta llamada:
   "ser completo". Si el cliente dice que no necesita nada más, despídete de
   inmediato, sin alargar la despedida.
 </modo_voz>`.trim();
+
+/**
+ * El número desde el que está llamando la persona, para que el bot lo pueda
+ * usar como referencia de contacto.
+ *
+ * Antes esto no existía: `callerId` solo servía para armar la llave de
+ * conversación (gateway.ts) y jamás entraba a las instructions. El resultado
+ * en una llamada real fue que el cliente dijo "regístrame con el número desde
+ * el que estoy llamando" y el bot no supo cuál era — tenía el dato el sistema,
+ * pero no el modelo.
+ *
+ * El número NO se da por bueno solo: se ofrece y se confirma. Quien llama
+ * desde el conmutador de su oficina, desde el celular de alguien más o desde
+ * un número que no revisa, necesita poder decir "mejor apunta este otro".
+ */
+export function bloqueLlamadaEnCurso(callerId: string): string {
+  // Cuando el llamante oculta su número, gateway.ts cae al CallSid de Twilio
+  // (CAxxxxxxxx...). Ese identificador no es un teléfono y decírselo al
+  // cliente sería absurdo — mejor que el modelo sepa que NO lo tiene, a que
+  // lo deduzca o se invente uno.
+  const numero = callerId.trim();
+  const esTelefono = /^\+[0-9]{8,15}$/.test(numero);
+
+  if (!esTelefono) {
+    return `<llamada_en_curso>
+Esta persona llama con el número oculto: NO tienes su teléfono. Si necesitas
+uno, pídeselo — nunca digas que ya lo tienes ni inventes un número.
+</llamada_en_curso>`;
+  }
+
+  return `<llamada_en_curso>
+Esta persona está llamando desde el número ${numero}.
+
+Cuando necesites su teléfono, NO se lo preguntes en frío: ofrécele este y deja
+que él decida. Por ejemplo: "¿te registro con el número desde el que me llamas,
+o prefieres darme otro?". Si te dice que sí, úsalo tal cual; si te da otro,
+usa el que te dio. Nunca registres este número sin haberlo confirmado con él,
+y nunca se lo leas dígito por dígito salvo que te lo pida.
+</llamada_en_curso>`;
+}
