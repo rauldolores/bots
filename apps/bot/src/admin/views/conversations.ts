@@ -340,20 +340,95 @@ export async function renderThreadLive(env: Env, botId: string, convId: string):
       const bubbleBg = isOwner
         ? "background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.4)"
         : "background:var(--panel);border:1px solid var(--line)";
+      // Solo se corrige al BOT: lo que escribió el dueño por su cuenta
+      // (role "owner") no es algo que haya que enseñarle a nadie.
+      const corregir = isOwner
+        ? ""
+        : `<button type="button" title="Enseñarle cómo debió responder"
+             hx-get="/admin/conversations/${encodeURIComponent(convId)}/corregir?msg=${encodeURIComponent(String(m.id))}"
+             hx-target="#modal-root" hx-swap="innerHTML"
+             style="background:none;border:0;padding:0 2px;font-size:9.5px;color:var(--dim);cursor:pointer;font-family:inherit;text-decoration:underline">✎ corregir</button>`;
       return `
       <div style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;max-width:78%">
         ${chips}
         <div style="${bubbleBg};border-radius:14px;padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--cream)">${escapeHtml(m.content)}</div>
-        <span style="font-size:9.5px;color:var(--dim)">${meta}</span>
+        <span style="font-size:9.5px;color:var(--dim);display:inline-flex;gap:8px;align-items:center">${meta} ${corregir}</span>
       </div>`;
     })
     .join("");
 
   return `
   ${header}
-  <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column-reverse;gap:12px;padding:16px;background:var(--bg)">
+  <div id="thread-scroll" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column-reverse;gap:12px;padding:16px;background:var(--bg)">
     ${bubbles || `<div style="text-align:center;font-size:12.5px;color:var(--dim);padding:32px 0">Sin mensajes.</div>`}
   </div>`;
+}
+
+/**
+ * Modo revisión: congela el refresco automático mientras el dueño se
+ * desplaza hacia arriba.
+ *
+ * Sin esto, auditar era imposible: el hilo se REEMPLAZA entero cada 5 s
+ * (hx-trigger del polling), y con `column-reverse` el navegador vuelve a
+ * pegar la vista abajo — o sea, cualquier intento de subir a leer un mensaje
+ * viejo se deshacía solo a los pocos segundos.
+ *
+ * El disparador del polling lleva `[!window.__auditando]`: HTMX evalúa esa
+ * expresión antes de cada disparo, así que basta con levantar la bandera para
+ * que el hilo se quede quieto. No se cancela el polling ni se toca el DOM del
+ * hilo — cuando el dueño vuelve abajo, se reanuda solo.
+ *
+ * Con `column-reverse` el 0 de scrollTop es el FONDO, y según el navegador
+ * subir da valores negativos o positivos; por eso se compara el valor
+ * absoluto y no el signo.
+ */
+function revisionBar(): string {
+  return `
+  <div id="revision-bar" style="display:none;align-items:center;gap:10px;padding:8px 14px;border-top:1px solid var(--line);background:var(--panel2)">
+    <span style="font-size:11.5px;color:var(--accent-2);font-weight:600">⏸ Actualización pausada — estás revisando</span>
+    <button type="button" id="volver-al-final"
+            style="margin-left:auto;background:var(--panel);border:1px solid var(--line);color:var(--cream);font-size:11.5px;padding:5px 10px;cursor:pointer;font-family:inherit">
+      Ir al último mensaje
+    </button>
+  </div>
+  <script>
+  (function () {
+    if (window.__revisionInit) return;
+    window.__revisionInit = true;
+    window.__auditando = false;
+    var UMBRAL = 40; // px de tolerancia: un roce del scroll no cuenta como revisar
+
+    function barra() { return document.getElementById("revision-bar"); }
+
+    function actualizar() {
+      var cont = document.getElementById("thread-scroll");
+      if (!cont) return;
+      var arriba = Math.abs(cont.scrollTop) > UMBRAL;
+      if (arriba === window.__auditando) return;
+      window.__auditando = arriba;
+      var b = barra();
+      if (b) b.style.display = arriba ? "flex" : "none";
+    }
+
+    // El contenedor se reemplaza en cada refresco, así que el listener no se
+    // puede colgar de él: se escucha en captura desde el documento, que
+    // sobrevive a los swaps de HTMX.
+    document.addEventListener("scroll", function (e) {
+      var t = e.target;
+      if (t && t.id === "thread-scroll") actualizar();
+    }, true);
+
+    document.addEventListener("click", function (e) {
+      var btn = e.target && e.target.closest && e.target.closest("#volver-al-final");
+      if (!btn) return;
+      var cont = document.getElementById("thread-scroll");
+      if (cont) cont.scrollTop = 0; // 0 = el fondo, por column-reverse
+      window.__auditando = false;
+      var b = barra();
+      if (b) b.style.display = "none";
+    });
+  })();
+  </script>`;
 }
 
 // --- Composer (static per selection — NOT inside the polled fragment) ---------
@@ -446,9 +521,10 @@ export async function renderInbox(env: Env, botId: string, p: InboxParams, visib
     rightPane = `
       <div id="thread-live" class="flex flex-col flex-1 min-h-0"
            hx-get="/admin/conversations/thread/${encodeURIComponent(p.selectedId)}"
-           hx-trigger="every 5s" hx-swap="innerHTML">
+           hx-trigger="every 5s[!window.__auditando]" hx-swap="innerHTML">
         ${thread}
       </div>
+      ${revisionBar()}
       ${renderComposer(p.selectedId)}`;
   } else {
     rightPane = `

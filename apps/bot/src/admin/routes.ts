@@ -20,6 +20,8 @@ import { loadLlmOverrides } from "../settings-loader";
 import type { Env } from "../env";
 import { adminAuth } from "./auth";
 import { layout, renderAccessDenied } from "./views/layout";
+import { renderCorregirModal, renderReglaPropuesta, renderLeccionGuardada } from "./views/entrenamiento";
+import { proponerLeccion, guardarLeccion } from "../training/corrections";
 import { renderOverview } from "./views/overview";
 import { renderStats } from "./views/stats";
 import { renderCosts } from "./views/costs";
@@ -1018,6 +1020,48 @@ adminApp.get("/conversations/list-fragment", async (c) =>
 adminApp.get("/conversations/thread/:id", async (c) =>
   c.html(await renderThreadLive(c.env, c.get("botId"), c.req.param("id"))),
 );
+
+// --- Entrenamiento: corregir una respuesta concreta del bot ------------------
+// Tres pasos (escribir la corrección → revisar la regla → guardar). El paso
+// intermedio existe porque generalizar es donde el modelo se puede pasar de
+// listo; ver admin/views/entrenamiento.ts.
+//
+// Van ANTES de "/conversations/:id" (más abajo): tienen 3 segmentos contra los
+// 2 de aquélla, así que en realidad no compiten — pero se dejan juntas para
+// que se lean como un flujo.
+adminApp.get("/conversations/:id/corregir", async (c) =>
+  c.html(
+    await renderCorregirModal(c.env, c.get("botId"), c.req.param("id"), String(c.req.query("msg") ?? "")),
+  ),
+);
+
+adminApp.post("/conversations/:id/corregir", async (c) => {
+  const convId = c.req.param("id");
+  const form = await c.req.formData();
+  const correccion = String(form.get("correccion") ?? "").trim();
+  const messageId = String(form.get("message_id") ?? "");
+  if (!correccion) return c.html(await renderCorregirModal(c.env, c.get("botId"), convId, messageId));
+
+  const db = new Db(c.env.DB);
+  const original = await db.first<{ content: string }>(
+    `SELECT m.content FROM messages m JOIN conversations c ON c.id = m.conversation_id
+      WHERE m.id = ? AND m.conversation_id = ? AND c.bot_id = ?`,
+    [messageId, convId, c.get("botId")],
+  );
+  const { regla, generalizada } = await proponerLeccion(c.env, c.get("botId"), {
+    conversationId: convId,
+    respuestaOriginal: original?.content ?? "",
+    correccion,
+  });
+  return c.html(renderReglaPropuesta(convId, regla, generalizada));
+});
+
+adminApp.post("/conversations/:id/corregir/guardar", async (c) => {
+  const form = await c.req.formData();
+  const r = await guardarLeccion(c.env, c.get("botId"), String(form.get("regla") ?? ""));
+  if (!r.ok) return c.html(renderReglaPropuesta(c.req.param("id"), String(form.get("regla") ?? ""), false));
+  return c.html(renderLeccionGuardada(r.regla, r.total, r.desplazada));
+});
 
 // Old detail URLs (linked from Insights, notifications, etc.) → inbox selection.
 adminApp.get("/conversations/:id", (c) =>
