@@ -1,4 +1,5 @@
 import { createMCPClient } from "@ai-sdk/mcp";
+import { tool, jsonSchema } from "ai";
 import type { Db } from "../db/client";
 import type { Env } from "../env";
 import { BotConnectorsRepo, type BotConnector } from "../db/botConnectors";
@@ -38,6 +39,104 @@ const MCP_COOLDOWN_MS = 5 * 60_000;
 /** Llaves donde se recuerda el último fallo (en la config del conector, para que sobreviva al reinicio y se pueda mostrar en el panel). */
 const ERR_KEY = "mcpLastError";
 const ERR_AT_KEY = "mcpLastErrorAt";
+
+/**
+ * Caché del CATÁLOGO de tools (nombre + descripción + esquema) de cada
+ * conector, en su propia config.
+ *
+ * Por qué existe: listar las tools costaba 1.3–2.6 s EN CADA TURNO, medido en
+ * producción — un viaje al servidor MCP del dueño solo para preguntarle algo
+ * que casi nunca cambia. Y la mayoría de los turnos ni siquiera USA una tool
+ * MCP: se pagaba el viaje para nada.
+ *
+ * La clave está en separar las dos cosas que antes iban juntas:
+ *   - el CATÁLOGO (lo que el modelo lee para decidir): sale del caché, sin red;
+ *   - la EJECUCIÓN (cuando de verdad llama una): ahí sí se conecta, y solo ahí.
+ *
+ * Una hora porque las tools de un MCP cambian cuando se despliega ESE
+ * servidor — semanas, no minutos. Y hay dos salidas para no esperar:
+ * abrir "ver herramientas" en /admin/conexiones refresca el caché al
+ * instante, y una llamada a una tool que ya no existe lo invalida sola.
+ */
+const TOOLS_CACHE_KEY = "mcpToolsCache";
+const TOOLS_CACHE_AT_KEY = "mcpToolsCachedAt";
+const TOOLS_CACHE_TTL_MS = 60 * 60_000;
+
+interface EsquemaTool {
+  name: string;
+  description?: string;
+  inputSchema?: unknown;
+}
+
+function leerCache(c: BotConnector): EsquemaTool[] | null {
+  const at = Number(c.config[TOOLS_CACHE_AT_KEY] ?? "");
+  if (!Number.isFinite(at) || at <= 0 || Date.now() - at > TOOLS_CACHE_TTL_MS) return null;
+  const raw = c.config[TOOLS_CACHE_KEY];
+  if (typeof raw !== "string" || !raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? (parsed as EsquemaTool[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Best-effort: si no se puede guardar, el próximo turno simplemente vuelve a listar. */
+function guardarCache(repo: BotConnectorsRepo, botId: string, c: BotConnector, tools: Record<string, any>): void {
+  const esquemas: EsquemaTool[] = Object.entries(tools).map(([name, t]) => ({
+    name,
+    description: t?.description,
+    inputSchema: t?.inputSchema?.jsonSchema ?? t?.inputSchema ?? t?.parameters,
+  }));
+  void repo
+    .mergeConfig(botId, c.provider, {
+      [TOOLS_CACHE_KEY]: JSON.stringify(esquemas),
+      [TOOLS_CACHE_AT_KEY]: String(Date.now()),
+    })
+    .catch((e) => console.warn(`[mcpTools] no se pudo guardar el catálogo de ${c.name ?? c.provider}:`, e));
+}
+
+/** Borra el catálogo guardado — tras una llamada a una tool que el servidor ya no reconoce. */
+function invalidarCache(repo: BotConnectorsRepo, botId: string, provider: string): void {
+  void repo
+    .mergeConfig(botId, provider, { [TOOLS_CACHE_KEY]: "", [TOOLS_CACHE_AT_KEY]: "" })
+    .catch(() => {});
+}
+
+/**
+ * Reconstruye las tools desde el catálogo guardado. El modelo las ve idénticas
+ * (mismo nombre, misma descripción, mismo esquema); lo que cambia es que
+ * `execute` se conecta EN ESE MOMENTO, y solo si de verdad la llama.
+ */
+function toolsDesdeCache(
+  env: Env,
+  db: Db,
+  repo: BotConnectorsRepo,
+  botId: string,
+  c: BotConnector,
+  esquemas: EsquemaTool[],
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const e of esquemas) {
+    out[e.name] = tool({
+      description: e.description ?? "",
+      inputSchema: jsonSchema((e.inputSchema ?? { type: "object", properties: {} }) as any),
+      execute: async (args: unknown) => {
+        const vivas = (await conectarYListarTools(env, db, c)) as Record<string, any>;
+        const real = vivas[e.name];
+        if (!real?.execute) {
+          // El catálogo quedó viejo: la tool ya no existe allá. Se tira el
+          // caché para que el próximo turno liste de nuevo, y se le devuelve
+          // al modelo un motivo que puede leer en vez de una excepción.
+          invalidarCache(repo, botId, c.provider);
+          return { error: `La herramienta "${e.name}" ya no está disponible en este servidor.` };
+        }
+        return real.execute(args, { toolCallId: e.name, messages: [] });
+      },
+    });
+  }
+  return out;
+}
 
 function enCooldown(c: BotConnector): boolean {
   const at = Number(c.config[ERR_AT_KEY] ?? "");
@@ -84,6 +183,18 @@ export async function loadMcpTools(env: Env, db: Db, botId: string): Promise<Rec
       // Un conector roto costaba ~8s de espera del cliente en CADA mensaje.
       if (enCooldown(c)) return {};
 
+      // El camino rápido: con el catálogo en caché NO se toca la red. Es el
+      // que corre en la enorme mayoría de los turnos, y el que ahorra los
+      // 1.3–2.6 s medidos en producción.
+      const cacheado = leerCache(c);
+      if (cacheado) {
+        const prefijadas: Record<string, unknown> = {};
+        for (const [name, t] of Object.entries(toolsDesdeCache(env, db, repo, botId, c, cacheado))) {
+          prefijadas[mcpToolName(prefix, name)] = t;
+        }
+        return prefijadas;
+      }
+
       try {
         const tools = await conTimeout(
           conectarYListarTools(env, db, c),
@@ -96,6 +207,8 @@ export async function loadMcpTools(env: Env, db: Db, botId: string): Promise<Rec
             .mergeConfig(botId, c.provider, { [ERR_KEY]: "", [ERR_AT_KEY]: "" })
             .catch((e) => console.error(`[mcpTools] no se pudo limpiar el estado de ${etiqueta}:`, e));
         }
+        // Se guarda el catálogo para que los próximos turnos no paguen el viaje.
+        guardarCache(repo, botId, c, tools as Record<string, any>);
         const prefixed: Record<string, unknown> = {};
         for (const [name, t] of Object.entries(tools)) {
           prefixed[mcpToolName(prefix, name)] = t;
@@ -208,6 +321,10 @@ export async function listMcpConnectorTools(
       });
     }
     const { tools } = await client.listTools();
+    // Salida de emergencia del caché de una hora: si el dueño acaba de agregar
+    // una tool en su MCP y viene a verla aquí, se invalida el catálogo para
+    // que el próximo turno la liste de nuevo — sin esperar el TTL.
+    invalidarCache(new BotConnectorsRepo(db), botId, provider);
     return {
       tools: tools
         .map((t) => ({ name: t.name, title: t.title, description: t.description }))
