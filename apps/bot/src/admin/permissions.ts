@@ -71,6 +71,12 @@ export const NAV_PERMISSIONS: Record<string, string> = {
   habilidades: "nodia-agents.habilidades.administrar",
   seguimientos: "nodia-agents.seguimientos.administrar",
   mejoras: "nodia-agents.mejoras.ver",
+  // Entrenamiento REUSA el permiso de Mejoras a propósito, en vez de estrenar
+  // uno propio: lo que produce (lecciones) es exactamente lo que se ve y se
+  // quita desde Mejoras, y un permiso nuevo no existiría todavía en KontrolIA
+  // Auth — nadie lo tendría, así que la pantalla nueva quedaría inaccesible
+  // para todos hasta que alguien lo diera de alta allá.
+  entrenamiento: "nodia-agents.mejoras.ver",
   conexiones: "nodia-agents.conexiones.administrar",
   telefono: "nodia-agents.telefono.administrar",
   config: "nodia-agents.configuracion.editar",
@@ -102,6 +108,7 @@ export const PERMISSION_GATE: Array<[string, string, string]> = [
   ["/habilidades", NAV_PERMISSIONS.habilidades, "Habilidades"],
   ["/seguimientos", NAV_PERMISSIONS.seguimientos, "Seguimientos"],
   ["/mejoras", NAV_PERMISSIONS.mejoras, "Mejoras"],
+  ["/entrenamiento", NAV_PERMISSIONS.entrenamiento, "Entrenamiento"],
   ["/conexiones", NAV_PERMISSIONS.conexiones, "Conexiones"],
   ["/telefono", NAV_PERMISSIONS.telefono, "Tu número"],
   ["/config", NAV_PERMISSIONS.config, "Configuración"],

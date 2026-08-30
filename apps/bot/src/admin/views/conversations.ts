@@ -19,6 +19,7 @@ import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
 import { resolveTimezone } from "../../datetime";
+import { TRAINING_CHANNEL } from "./sandbox";
 import { layout } from "./layout";
 
 /** Tiempo relativo corto en español (ej. "hace 5 min", "hace 2 h", "hace 3 d"). */
@@ -131,8 +132,11 @@ export async function renderInboxList(env: Env, botId: string, p: InboxParams): 
   const db = new Db(env.DB);
   const now = Date.now();
 
-  const conds: string[] = ["c.bot_id = ?"];
-  const params: (string | number)[] = [botId];
+  // El ensayo de /admin/entrenamiento vive en su propio canal y NO es un
+  // cliente: mezclarlo en la bandeja haría que el dueño lo confundiera con
+  // una conversación real (y lo contara como tal).
+  const conds: string[] = ["c.bot_id = ?", "c.channel <> ?"];
+  const params: (string | number)[] = [botId, TRAINING_CHANNEL];
   if (p.search) {
     conds.push("(c.display_name LIKE ? OR c.channel_user_id LIKE ?)");
     params.push(`%${p.search}%`, `%${p.search}%`);
@@ -477,7 +481,12 @@ export async function renderInbox(env: Env, botId: string, p: InboxParams, visib
   const now = Date.now();
 
   const totalConvs =
-    (await db.first<{ n: number }>("SELECT COUNT(*) as n FROM conversations WHERE bot_id = ?", [botId]))?.n ?? 0;
+    (
+      await db.first<{ n: number }>("SELECT COUNT(*) as n FROM conversations WHERE bot_id = ? AND channel <> ?", [
+        botId,
+        TRAINING_CHANNEL,
+      ])
+    )?.n ?? 0;
   const totalLeads =
     (await db.first<{ n: number }>("SELECT COUNT(*) as n FROM leads WHERE bot_id = ?", [botId]))?.n ?? 0;
   const nMolestos =

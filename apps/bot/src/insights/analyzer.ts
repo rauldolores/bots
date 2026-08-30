@@ -66,7 +66,14 @@ interface PendingConv {
   open_tickets: number;
 }
 
-/** Conversations that are idle, have a real exchange, and lack a fresh insight. */
+/**
+ * Conversaciones inactivas, con intercambio real y sin análisis fresco.
+ *
+ * Se excluye el canal "training" (el ensayo de /admin/entrenamiento): no es
+ * un cliente. Calificarlo ensuciaría las métricas del panel con
+ * conversaciones que el dueño tuvo consigo mismo, y encima gastaría una
+ * llamada al modelo por cada ensayo.
+ */
 async function pickPending(db: Db, botId: string, now: number, limit: number): Promise<PendingConv[]> {
   return db.all<PendingConv>(
     `SELECT c.id,
@@ -75,6 +82,7 @@ async function pickPending(db: Db, botId: string, now: number, limit: number): P
      FROM conversations c
      LEFT JOIN conversation_insights i ON i.conversation_id = c.id
      WHERE c.bot_id = ?
+       AND c.channel <> 'training'
        AND c.last_message_at < ?
        AND (i.conversation_id IS NULL OR i.analyzed_at < c.last_message_at)
        AND (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) >= 2
@@ -93,6 +101,7 @@ export async function countPending(env: Env, botIdOverride?: string, now = Date.
      FROM conversations c
      LEFT JOIN conversation_insights i ON i.conversation_id = c.id
      WHERE c.bot_id = ?
+       AND c.channel <> 'training'
        AND c.last_message_at < ?
        AND (i.conversation_id IS NULL OR i.analyzed_at < c.last_message_at)
        AND (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) >= 2`,

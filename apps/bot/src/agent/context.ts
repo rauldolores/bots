@@ -30,6 +30,8 @@ export interface AgentContextInput {
    */
   conversationId: string | null;
   conversationKey: string | null;
+  /** Sandbox de /admin/entrenamiento: las tools que escriben se simulan. Ver buildTools. */
+  training?: boolean;
 }
 
 export interface AgentContext {
@@ -103,7 +105,7 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
       : Promise.resolve([]),
   ]);
 
-  const tools = buildTools({ env, getConversationId: () => conversationId, botId });
+  const tools = buildTools({ env, getConversationId: () => conversationId, botId, training: input.training });
   const toolNames = Object.keys(tools);
 
   // Tanda 2: lo que sí dependía de la anterior.

@@ -175,7 +175,27 @@ export async function runFlywheel(env: Env, botIdOverride?: string): Promise<Fly
 
 // --- Lessons setting helpers (shared with apply.ts and the view) ---------------
 
-export const MAX_LESSONS = 15;
+/**
+ * Cuántas lecciones puede acumular un bot.
+ *
+ * Eran 15, y para un negocio real se llenaba enseguida: cada correccion del
+ * dueño gasta una, y al llegar al tope la mas vieja se cae — o sea, enseñar
+ * algo nuevo desaprendia algo de antes.
+ *
+ * El costo del tope es REAL y conviene tenerlo presente: las lecciones se
+ * inyectan en el prompt de CADA turno, en todos los canales (voz incluida).
+ * Con el tope lleno y lecciones del largo maximo (240 caracteres, ver
+ * MAX_REGLA en training/corrections.ts) son ~24 mil caracteres, del orden de
+ * 6 mil tokens de entrada por turno. En la practica las reglas son bastante
+ * mas cortas, pero el orden de magnitud es ese: un bot con MUCHAS lecciones
+ * paga mas por turno y le da al modelo una lista larga que seguir, que se
+ * sigue peor que una corta.
+ *
+ * 100 es un tope operativo, no un limite tecnico: si un bot llega ahi, lo que
+ * hace falta no es subirlo otra vez sino depurar reglas repetidas o contra-
+ * dictorias desde /admin/mejoras.
+ */
+export const MAX_LESSONS = 100;
 
 export async function getLessons(env: Env, botIdOverride?: string): Promise<string[]> {
   try {

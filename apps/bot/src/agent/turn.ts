@@ -36,6 +36,8 @@ export interface AgentTurnInput {
   conversationKey: string;
   /** Lo que dijo/escribió el cliente en este turno, ya resuelto a texto (buffer combinado para canales de texto; una sola frase/utterance para voz). */
   userText: string;
+  /** Sandbox de /admin/entrenamiento: las tools que escriben se simulan. Ver buildTools. */
+  training?: boolean;
   /**
    * Entrega ANTICIPADA de lo que el modelo alcanzó a decir antes de llamar una
    * herramienta lenta ("dame un segundo, estoy registrando eso…").
@@ -132,7 +134,7 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
   // Tools + system prompt + memoria: TODO sale de buildAgentContext(), la
   // misma función que usa el puente de OpenAI Realtime (F7 fase 3) — así
   // texto y voz arman la configuración del agente exactamente igual.
-  const ctx = await buildAgentContext({ env, botId, conversationId: convId, conversationKey });
+  const ctx = await buildAgentContext({ env, botId, conversationId: convId, conversationKey, training: input.training });
   const { bot, tools: enabledTools, cfg, state } = ctx;
 
   // Historial (últimos 20).

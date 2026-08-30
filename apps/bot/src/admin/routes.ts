@@ -21,6 +21,10 @@ import type { Env } from "../env";
 import { adminAuth } from "./auth";
 import { layout, renderAccessDenied } from "./views/layout";
 import { renderCorregirModal, renderReglaPropuesta, renderLeccionGuardada } from "./views/entrenamiento";
+import { renderSandbox, renderTrainingThread, trainingConversationId, TRAINING_CHANNEL, TRAINING_USER } from "./views/sandbox";
+import { runAgentTurnCore } from "../agent/turn";
+import { conversationKeyOf } from "../agent/key";
+import { AgentStateRepo } from "../agent/state";
 import { proponerLeccion, guardarLeccion } from "../training/corrections";
 import { renderOverview } from "./views/overview";
 import { renderStats } from "./views/stats";
@@ -1020,6 +1024,58 @@ adminApp.get("/conversations/list-fragment", async (c) =>
 adminApp.get("/conversations/thread/:id", async (c) =>
   c.html(await renderThreadLive(c.env, c.get("botId"), c.req.param("id"))),
 );
+
+// --- Entrenamiento: el sandbox -----------------------------------------------
+// Conversación de práctica contra el MISMO Agent Core que atiende a clientes
+// (runAgentTurnCore, la misma puerta que usa el canal de voz) — si usara otro
+// camino, el ensayo no probaria nada. Lo que cambia es `training: true`, que
+// simula las tools que escriben (ver src/tools/index.ts).
+//
+// Se llama en directo, sin pasar por el buffer ni por la cola: aqui no hay
+// nadie del otro lado escribiendo a ratos, es el dueño esperando la respuesta.
+adminApp.get("/entrenamiento", async (c) =>
+  c.html(await renderSandbox(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")))),
+);
+
+adminApp.post("/entrenamiento/mensaje", async (c) => {
+  const botId = c.get("botId");
+  const texto = String((await c.req.formData()).get("texto") ?? "").trim();
+  if (!texto) return c.html(await renderTrainingThread(c.env, botId));
+
+  const convId = await trainingConversationId(c.env, botId);
+  const key = conversationKeyOf(botId, TRAINING_CHANNEL, TRAINING_USER);
+  // upsertIdentity antes del turno: runAgentTurnCore lo da por hecho (lo mismo
+  // que hace ingestMessage en los canales reales).
+  await new AgentStateRepo(new Db(c.env.DB)).upsertIdentity(key, {
+    conversationId: convId,
+    channel: TRAINING_CHANNEL,
+    channelUserId: TRAINING_USER,
+  });
+
+  try {
+    await runAgentTurnCore({
+      env: c.env,
+      botId,
+      conversationId: convId,
+      conversationKey: key,
+      userText: texto,
+      training: true,
+    });
+  } catch (e) {
+    console.error("[entrenamiento] el turno de prueba falló:", e);
+  }
+  // Se re-renderiza el hilo completo: el turno ya persistio ambos mensajes.
+  return c.html(await renderTrainingThread(c.env, botId));
+});
+
+adminApp.post("/entrenamiento/reiniciar", async (c) => {
+  const botId = c.get("botId");
+  const convId = await trainingConversationId(c.env, botId);
+  // Solo se borra el ENSAYO. Las lecciones aprendidas viven en settings y se
+  // conservan — es justo lo que el dueño no querria perder al limpiar.
+  await new Db(c.env.DB).run("DELETE FROM messages WHERE conversation_id = ?", [convId]);
+  return c.html(await renderTrainingThread(c.env, botId));
+});
 
 // --- Entrenamiento: corregir una respuesta concreta del bot ------------------
 // Tres pasos (escribir la corrección → revisar la regla → guardar). El paso

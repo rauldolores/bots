@@ -56,6 +56,7 @@ const NAV: Section[] = [
       { id: "agente", label: "Flujo", href: "/admin/agente", icon: "workflow" },
       { id: "kb", label: "Conocimiento", href: "/admin/kb", icon: "book-open" },
       { id: "habilidades", label: "Habilidades", href: "/admin/habilidades", icon: "square-function" },
+      { id: "entrenamiento", label: "Entrenamiento", href: "/admin/entrenamiento", icon: "graduation-cap" },
       { id: "mejoras", label: "Mejoras", href: "/admin/mejoras", icon: "sparkles" },
       { id: "conexiones", label: "Conexiones", href: "/admin/conexiones", icon: "plug-zap" },
       { id: "telefono", label: "Tu número", href: "/admin/telefono", icon: "phone-forwarded" },
