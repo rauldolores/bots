@@ -39,6 +39,16 @@ export function renderCreateBotPage(opts?: { error?: string; orgName?: string | 
                 style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:11px 20px">Crear bot</button>
       </form>
 
+      <div style="margin-top:18px;border:1px solid var(--line);background:var(--panel2);padding:14px 16px">
+        <div class="font-display font-semibold text-[12.5px] text-cream" style="margin-bottom:8px">Después de crearlo, te guiamos en 3 pasos</div>
+        <ol style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:5px">
+          <li class="text-[11.5px]" style="color:var(--muted)">Le cuentas de qué se trata tu negocio</li>
+          <li class="text-[11.5px]" style="color:var(--muted)">Lo conectas a Telegram (es gratis y toma un minuto)</li>
+          <li class="text-[11.5px]" style="color:var(--muted)">Le escribes y ves cómo contesta</li>
+        </ol>
+        <p class="text-dim text-[11px]" style="margin:9px 0 0">Y de ahí puedes sumar WhatsApp, correo o llamadas cuando quieras. No hay que programar nada.</p>
+      </div>
+
       <p class="text-dim text-[11.5px]" style="text-align:center;margin-top:14px">¿Buscabas otra organización? Cámbiala arriba, en el selector.</p>
     </div>`;
 

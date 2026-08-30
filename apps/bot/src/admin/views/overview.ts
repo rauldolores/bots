@@ -1,5 +1,6 @@
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
+import { calcularPrimerosPasos, renderPrimerosPasos, renderYaOpera } from "./primerosPasos";
 import { layout } from "./layout";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { resolveAgentConfig, type AgentConfig } from "../../settings-loader";
@@ -256,8 +257,16 @@ export async function renderOverview(env: Env, botId: string, visibleNavIds: Set
       <a href="/admin/mejoras" class="flex items-center gap-1 text-[11.5px] mt-2.5">ver todas <i data-lucide="arrow-right" width="13" height="13"></i></a>
     </div>`;
 
+  // Primeros pasos: hasta que el bot está operando, la guía va ARRIBA de las
+  // métricas — a alguien recién instalado un tablero en ceros no le dice qué
+  // hacer. Las dos funciones devuelven "" cuando no aplican, así que no hay
+  // condicionales aquí y el panel se ve normal en cuanto sobra la guía.
+  const estadoPasos = await calcularPrimerosPasos(env, botId, bot?.config);
+  const guia = renderPrimerosPasos(estadoPasos, bot?.name ?? "tu bot") + renderYaOpera(estadoPasos, bot?.name ?? "tu bot");
+
   const body = `
     <div class="flex flex-col gap-[22px]">
+      ${guia}
       <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[14px]">
         <div class="card bg-panel border border-line p-4 relative overflow-hidden" style="animation-delay:.02s">
           <div class="absolute top-3 right-3 text-[9.5px] tracking-[.2em] text-dim uppercase">01</div>
