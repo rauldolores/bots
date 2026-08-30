@@ -1,16 +1,19 @@
-// "Conexiones" tab — el mapa de canales del bot ACTIVO. Telegram, WhatsApp
-// (Twilio) y ManyChat son por-bot desde F4 (bot_channels + Vault: el token
-// nunca vive en texto plano); conectar/desconectar pasa por aquí, con un
-// diálogo guiado, no por terminal. Meta y WhatsApp Cloud API siguen siendo
-// del DESPLIEGUE (decisión pendiente de F4 — resolver el bot por evento,
-// no por bot_id en la URL) y se muestran con esa aclaración, sin fingir
-// que ya son por-bot.
+// "Conexiones" tab — el mapa de canales del bot ACTIVO. TODOS son por-bot
+// (bot_channels + Vault: el token nunca vive en texto plano) y se conectan
+// desde aquí con un diálogo guiado, nunca por terminal ni variables de
+// entorno — quien instala esto probablemente no programa.
+//
+// Meta y WhatsApp Cloud fueron los últimos en llegar. Se quedaron fuera mucho
+// tiempo por creer que hacía falta resolver el bot POR EVENTO; no hacía falta:
+// cada dueño crea SU PROPIA app de Meta y pega él mismo la URL, así que la URL
+// lleva el botId igual que Telegram (/webhooks/meta/:botId). Lo difícil era
+// otro escenario —una sola app de Meta para todos los bots— que no es este.
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { BotChannelsRepo, type BotChannel } from "../../db/botChannels";
 import { BotConnectorsRepo, type BotConnector } from "../../db/botConnectors";
 import { VoiceNumbersRepo, DuplicateVoiceNumberError } from "../../db/voiceNumbers";
-import { createSecret, updateSecret, deleteSecret } from "../../db/vault";
+import { createSecret, updateSecret, deleteSecret, readSecret } from "../../db/vault";
 import { setTelegramWebhook } from "../../channels/telegram";
 import { registerKapsoWebhook } from "../../channels/kapso";
 import { listMcpConnectorTools } from "../../tools/mcpTools";
@@ -37,7 +40,7 @@ function esc(s: string): string {
   );
 }
 
-type ConnectableChannel = "telegram" | "twilio" | "kapso" | "voice" | "manychat" | "widget";
+type ConnectableChannel = "telegram" | "twilio" | "kapso" | "voice" | "manychat" | "widget" | "meta" | "whatsapp";
 
 interface FieldSpec {
   name: string;
@@ -58,6 +61,43 @@ interface ChannelMeta {
 }
 
 const CHANNEL_META: Record<ConnectableChannel, ChannelMeta> = {
+  meta: {
+    id: "meta",
+    name: "Instagram + Messenger (Meta)",
+    icon: "instagram",
+    desc: "Los DMs de tu Instagram y tu página de Facebook, con la conexión oficial de Meta.",
+    steps: [
+      'Entra a <span class="font-mono">developers.facebook.com</span> con la cuenta que administra tu página, y crea una app: <b>Crear app → Otro → Empresa</b>.',
+      'Dentro de tu app, agrega el producto <b>Messenger</b> (y <b>Instagram</b> si quieres los DMs de Instagram). En <b>Accesos a la página</b>, elige tu página y copia el <b>token de acceso</b> que te genera.',
+      'En <b>Configuración → Básica</b> de tu app, copia la <b>Clave secreta de la app</b> (tienes que darle "Mostrar").',
+      "Pega los dos datos aquí abajo. Al guardar te damos la dirección y el código que Meta te va a pedir en el último paso — no tienes que inventarte nada.",
+    ],
+    fields: [
+      { name: "page_token", label: "Token de acceso de la página", placeholder: "EAAG...", type: "password" },
+      { name: "app_secret", label: "Clave secreta de la app", placeholder: "········", type: "password" },
+    ],
+    webhookNote:
+      "Último paso, en tu app de Meta: entra a <b>Messenger → Configuración → Webhooks</b>, presiona \"Agregar URL de devolución de llamada\" y pega ahí la dirección y el código de verificación que aparecen en la tarjeta. Después marca la casilla <span class=\"font-mono\">messages</span>.",
+  },
+  whatsapp: {
+    id: "whatsapp",
+    name: "WhatsApp (Oficial · Cloud API)",
+    icon: "message-square",
+    desc: "WhatsApp Business directo con Meta, sin intermediarios ni costo por mensaje de terceros.",
+    steps: [
+      'Entra a <span class="font-mono">developers.facebook.com</span>, crea una app (<b>Crear app → Otro → Empresa</b>) y agrégale el producto <b>WhatsApp</b>.',
+      'En <b>WhatsApp → Configuración de la API</b> vas a ver tu número de prueba. Copia el <b>Identificador del número de teléfono</b> (son puros números) y el <b>token de acceso</b>.',
+      'En <b>Configuración → Básica</b> de la app, copia la <b>Clave secreta de la app</b> (dale "Mostrar").',
+      "Pega los tres datos aquí abajo. Al guardar te damos la dirección y el código que Meta te va a pedir — no tienes que inventarte nada.",
+    ],
+    fields: [
+      { name: "access_token", label: "Token de acceso", placeholder: "EAAG...", type: "password" },
+      { name: "phone_number_id", label: "Identificador del número de teléfono", placeholder: "123456789012345" },
+      { name: "app_secret", label: "Clave secreta de la app", placeholder: "········", type: "password" },
+    ],
+    webhookNote:
+      "Último paso, en tu app de Meta: entra a <b>WhatsApp → Configuración</b>, presiona \"Editar\" en Webhook y pega ahí la dirección y el código de verificación que aparecen en la tarjeta. Después marca la casilla <span class=\"font-mono\">messages</span>.",
+  },
   telegram: {
     id: "telegram",
     name: "Telegram",
@@ -439,6 +479,8 @@ function renderConnectedModal(
   env: Env,
   botId: string,
   webhookResult?: { ok: boolean; error?: string },
+  /** Solo Meta/WhatsApp: el código que Meta pide junto con la URL. */
+  verifyToken?: string,
 ): string {
   const meta = CHANNEL_META[channel];
   const url = webhookUrlFor(env, channel, botId);
@@ -457,7 +499,9 @@ function renderConnectedModal(
         `<div class="text-[12.5px]" style="color:var(--bad);margin-bottom:14px">Se guardaron tus datos, pero registrar el webhook automáticamente en ${donde} falló: ${esc(webhookResult!.error ?? "error desconocido")}.</div>
          <p class="text-[12.5px]" style="color:var(--muted);margin:0 0 12px">Puedes reintentar volviendo a pegar los mismos datos, o darlo de alta a mano con esta URL:</p>
          ${copyRow("URL del webhook", url)}`
-    : `<p class="text-[12.5px]" style="color:var(--muted);margin:0 0 12px">${meta.webhookNote}</p>${copyRow("URL del webhook", url)}`;
+    : `<p class="text-[12.5px]" style="color:var(--muted);margin:0 0 12px">${meta.webhookNote}</p>${copyRow("URL del webhook", url)}${
+        verifyToken ? copyRow("Código de verificación", verifyToken) : ""
+      }`;
 
   return modalShell(
     meta.icon,
@@ -604,12 +648,74 @@ export async function connectChannel(
     return renderConnectedModal("voice", env, botId);
   }
 
+  if (channel === "meta" || channel === "whatsapp") {
+    return conectarCanalDeMeta(env, db, botId, channel, str);
+  }
+
   // manychat
   const apiKey = str("api_key");
   if (!apiKey) return renderConnectModal("manychat", { error: "Falta la API Key." });
   const secretRef = await saveChannelSecret(db, botId, "manychat", apiKey);
   await repo.upsert({ botId, channel: "manychat", secretRef });
   return renderConnectedModal("manychat", env, botId);
+}
+
+/**
+ * Meta y WhatsApp Cloud: mismo trámite, distinto producto de la misma app.
+ *
+ * Los tres secretos van a Vault (nunca a texto plano, ni a variables de
+ * entorno que el dueño tendría que saber configurar). El TOKEN DE VERIFICACIÓN
+ * lo generamos nosotros y se lo mostramos ya hecho: Meta pide uno pero no le
+ * importa cuál sea, así que pedírselo al dueño era hacerle inventar un dato
+ * técnico sin ninguna razón. Mismo criterio que el secreto del webhook de
+ * Kapso, que tampoco ve nunca.
+ */
+async function conectarCanalDeMeta(
+  env: Env,
+  db: Db,
+  botId: string,
+  channel: "meta" | "whatsapp",
+  str: (name: string) => string,
+): Promise<string> {
+  const token = channel === "meta" ? str("page_token") : str("access_token");
+  const appSecret = str("app_secret");
+  const phoneNumberId = channel === "whatsapp" ? str("phone_number_id") : "";
+
+  if (!token || !appSecret || (channel === "whatsapp" && !phoneNumberId)) {
+    return renderConnectModal(channel, { error: "Faltan datos — todos los campos son obligatorios." });
+  }
+
+  const repo = new BotChannelsRepo(db);
+  const existing = await connectedRow(db, botId, channel);
+
+  // El código de verificación se conserva entre reconexiones: si el dueño
+  // vuelve a guardar para corregir un token, el que ya pegó en Meta sigue
+  // sirviendo y no tiene que volver a hacer ese paso.
+  const nuevoVerify = crypto.randomUUID().replace(/-/g, "");
+  const verifyRef =
+    existing?.verify_token_ref ?? (await createSecret(db, nuevoVerify, `${channel}-verify:${botId}`));
+  // Si ya existía, se lee el que YA está pegado en Meta — mostrarle uno nuevo
+  // lo mandaría a rehacer un paso que ya había hecho.
+  const verifyToken = existing?.verify_token_ref
+    ? (await readSecret(db, existing.verify_token_ref)) ?? nuevoVerify
+    : nuevoVerify;
+
+  const secretRef = await saveChannelSecret(db, botId, channel, token);
+  const appSecretRef = existing?.app_secret_ref
+    ? (await updateSecret(db, existing.app_secret_ref, appSecret), existing.app_secret_ref)
+    : await createSecret(db, appSecret, `${channel}-app-secret:${botId}`);
+
+  await repo.upsert({
+    botId,
+    channel,
+    ...(phoneNumberId ? { externalId: phoneNumberId } : {}),
+    secretRef,
+    verifyTokenRef: verifyRef,
+    appSecretRef,
+    ...(phoneNumberId ? { config: { phoneNumberId } } : {}),
+  });
+
+  return renderConnectedModal(channel, env, botId, undefined, verifyToken);
 }
 
 export async function disconnectChannel(env: Env, botId: string, channel: ConnectableChannel): Promise<void> {
@@ -620,6 +726,9 @@ export async function disconnectChannel(env: Env, botId: string, channel: Connec
   // Kapso guarda un SEGUNDO secreto (el del webhook, que generamos nosotros).
   // Sin esto quedaría huérfano en Vault al desconectar.
   if (row?.verify_token_ref) await deleteSecret(db, row.verify_token_ref).catch(() => {});
+  // Meta/WhatsApp guardan un TERCERO: el App Secret con el que se verifica la
+  // firma de Meta. Mismo motivo — si no, queda huérfano en Vault.
+  if (row?.app_secret_ref) await deleteSecret(db, row.app_secret_ref).catch(() => {});
   await repo.disable(botId, channel);
   // El webhook YA rechaza llamadas sin la fila de bot_channels (arriba), pero
   // también se apagan los números para que /admin no los siga mostrando
@@ -1296,6 +1405,17 @@ export async function renderConnectorsGrid(env: Env, botId: string, category: Co
 async function renderConnectableCard(env: Env, db: Db, botId: string, meta: ChannelMeta): Promise<string> {
   const row = await connectedRow(db, botId, meta.id);
   const ok = Boolean(row);
+
+  // Meta y WhatsApp Cloud se configuraban por variables de entorno del
+  // despliegue. Ahora se conectan desde aquí como todos los demás, pero quien
+  // ya las tenía puestas sigue funcionando — y decirle "sin conectar" a secas
+  // sería falso. Se le avisa, y conectarlo desde la pantalla lo reemplaza.
+  const vieneDelDespliegue =
+    !ok &&
+    ((meta.id === "meta" && Boolean(env.META_PAGE_ACCESS_TOKEN?.trim())) ||
+      (meta.id === "whatsapp" && Boolean(env.WHATSAPP_ACCESS_TOKEN?.trim())))
+      ? `<p class="text-[11px]" style="color:var(--accent-2);margin:8px 0 0">Este canal ya está configurado en el servidor. Si lo conectas aquí, estos datos mandan sobre aquéllos — y podrás cambiarlos sin tocar el servidor.</p>`
+      : "";
   const badge = ok
     ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>`
     : `<span style="font-size:10px;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);padding:3px 10px;font-weight:600">○ SIN CONECTAR</span>`;
@@ -1328,12 +1448,23 @@ async function renderConnectableCard(env: Env, db: Db, botId: string, meta: Chan
       ? `<a href="/admin/telefono" class="text-[11px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:5px 12px;text-decoration:none;font-weight:600">¿Quieres conservar tu número actual?</a>`
       : "";
 
+  // Meta pide DOS cosas al dar de alta el webhook: la dirección y un código de
+  // verificación. El código lo generamos nosotros (ver conectarCanalDeMeta), así
+  // que aquí se muestra para copiar — si no, el dueño tendría la mitad de lo que
+  // necesita y ninguna forma de conseguir la otra.
+  const codigoDeVerificacion =
+    ok && row?.verify_token_ref && (meta.id === "meta" || meta.id === "whatsapp")
+      ? copyRow("Código de verificación", (await readSecret(db, row.verify_token_ref)) ?? "")
+      : "";
+
   const action = ok
     ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
          ${meta.id === "widget" && row ? copyBlock("Código para tu sitio", widgetSnippet(env, botId, row.external_id ?? "")) : copyRow("Webhook", webhookUrlFor(env, meta.id, botId))}
        </div>
+       ${codigoDeVerificacion}
        ${widgetConfigForm}
        ${voiceOnboardingLink}
+       ${vieneDelDespliegue}
        <form method="POST" action="/admin/conexiones/${meta.id}/disconnect" style="margin-top:4px" onsubmit="return confirm('¿Desconectar ${esc(meta.name)}? El bot dejará de recibir mensajes por aquí.')">
          <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Desconectar</button>
        </form>`
@@ -1354,78 +1485,13 @@ async function renderConnectableCard(env: Env, db: Db, botId: string, meta: Chan
     </div>`;
 }
 
-function envChannelCard(opts: {
-  name: string;
-  icon: string;
-  desc: string;
-  ok: boolean;
-  missing: string[];
-  howTo: string;
-}): string {
-  const badge = opts.ok
-    ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>`
-    : `<span style="font-size:10px;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);padding:3px 10px;font-weight:600">○ SIN CONECTAR</span>`;
-  const missing = opts.ok
-    ? ""
-    : `<div class="text-[11.5px]" style="color:var(--bad)">Falta configurar: <span class="font-mono">${opts.missing.map(esc).join(", ")}</span></div>
-       <div class="text-dim text-[11.5px]">${esc(opts.howTo)}</div>`;
-  return `
-    <div class="bg-panel border ${opts.ok ? "" : "border-line"}" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;${opts.ok ? "border-color:rgba(127,183,126,.45)" : ""}">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-        <div class="font-display font-semibold text-[13.5px] text-cream" style="display:flex;align-items:center;gap:9px">
-          <i data-lucide="${opts.icon}" width="16" height="16" class="${opts.ok ? "text-accent" : "text-dim"}"></i>
-          ${esc(opts.name)}
-        </div>
-        ${badge}
-      </div>
-      <p class="text-dim text-[12px]" style="margin:0">${esc(opts.desc)}</p>
-      ${missing}
-      <div class="text-[10.5px]" style="color:var(--dim);border-top:1px solid var(--line);padding-top:8px;margin-top:2px">Compartido por todos los bots de este despliegue — todavía no es por bot.</div>
-    </div>`;
-}
-
-function envChannelCards(env: Env): string {
-  const has = (v?: string) => Boolean(v && v.trim() !== "");
-  const metaMissing = [
-    !has(env.META_PAGE_ACCESS_TOKEN) && "META_PAGE_ACCESS_TOKEN",
-    !has(env.META_VERIFY_TOKEN) && "META_VERIFY_TOKEN",
-    !has(env.META_APP_SECRET) && "META_APP_SECRET",
-  ].filter(Boolean) as string[];
-  const whatsappCloudMissing = [
-    !has(env.WHATSAPP_PHONE_NUMBER_ID) && "WHATSAPP_PHONE_NUMBER_ID",
-    !has(env.WHATSAPP_ACCESS_TOKEN) && "WHATSAPP_ACCESS_TOKEN",
-    !has(env.WHATSAPP_VERIFY_TOKEN || env.META_VERIFY_TOKEN) && "WHATSAPP_VERIFY_TOKEN",
-    !has(env.WHATSAPP_APP_SECRET || env.META_APP_SECRET) && "WHATSAPP_APP_SECRET",
-  ].filter(Boolean) as string[];
-
-  return (
-    envChannelCard({
-      name: "WhatsApp (Oficial · Cloud API)",
-      icon: "message-circle",
-      desc: "WhatsApp directo con Meta, sin intermediario — mejor margen.",
-      ok: whatsappCloudMissing.length === 0,
-      missing: whatsappCloudMissing,
-      howTo:
-        "App de Meta → WhatsApp → Configuration: apunta el webhook a /webhooks/whatsapp, suscribe el campo messages, y guarda tu Phone Number ID y token.",
-    }) +
-    envChannelCard({
-      name: "Instagram + Messenger (Meta)",
-      icon: "instagram",
-      desc: "DMs de Instagram y Messenger con la API oficial de Meta.",
-      ok: metaMissing.length === 0,
-      missing: metaMissing,
-      howTo: "App de Meta → Webhooks → suscribe messages con tu VERIFY_TOKEN; la firma se valida sola.",
-    })
-  );
-}
-
 async function connectableCards(env: Env, botId: string): Promise<string> {
   const db = new Db(env.DB);
   const cards = await Promise.all(
     (Object.values(CHANNEL_META) as ChannelMeta[]).map((meta) => renderConnectableCard(env, db, botId, meta)),
   );
   const emailCard = await renderEmailCard(env, db, botId);
-  return cards.join("") + emailCard + envChannelCards(env);
+  return cards.join("") + emailCard;
 }
 
 export async function renderConexionesGrid(env: Env, botId: string): Promise<string> {
@@ -1437,7 +1503,7 @@ export async function renderConexionesGrid(env: Env, botId: string): Promise<str
   ).filter(Boolean).length;
   const cards = await connectableCards(env, botId);
   return `
-    <div id="conexiones-summary" hx-swap-oob="innerHTML">Canales conectados: ${connected} de ${Object.keys(CHANNEL_META).length + 2}</div>
+    <div id="conexiones-summary" hx-swap-oob="innerHTML">Canales conectados: ${connected} de ${Object.keys(CHANNEL_META).length + 1}</div>
     <div id="conexiones-grid" hx-swap-oob="innerHTML" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px">
       ${cards}
     </div>`;
@@ -1475,7 +1541,7 @@ export async function renderConexiones(
         (Object.keys(CHANNEL_META) as ConnectableChannel[]).map((id) => connectedRow(db, botId, id)),
       )
     ).filter(Boolean).length;
-    const total = Object.keys(CHANNEL_META).length + 2; // + Meta + WhatsApp Cloud, todavía del despliegue
+    const total = Object.keys(CHANNEL_META).length + 1; // + correo, que tiene su propia tarjeta
     summary = `Canales conectados: ${connected} de ${total}`;
     cards = await connectableCards(env, botId);
   } else {
@@ -1508,5 +1574,5 @@ export async function connectionsSummary(env: Env, botId: string): Promise<{ con
       (Object.keys(CHANNEL_META) as ConnectableChannel[]).map((id) => connectedRow(db, botId, id)),
     )
   ).filter(Boolean).length;
-  return { connected, total: Object.keys(CHANNEL_META).length + 2 };
+  return { connected, total: Object.keys(CHANNEL_META).length + 1 };
 }

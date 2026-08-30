@@ -67,14 +67,29 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/** Construye la URL firmada del proxy para un media_id (o null si no hay secret/base). */
-async function signedMediaUrl(mediaId: string, env: Env, origin: string): Promise<string | null> {
+/**
+ * Construye la URL firmada del proxy para un media_id (o null si no hay
+ * secret/base).
+ *
+ * Con `botId`, la URL lo lleva dentro. Hace falta desde que las credenciales de
+ * WhatsApp se conectan por bot: quien sirva el archivo después necesita saber
+ * de QUIÉN es el token, y en una petición suelta de imagen no hay otra pista.
+ */
+async function signedMediaUrl(
+  mediaId: string,
+  env: Env,
+  origin: string,
+  botId?: string,
+): Promise<string | null> {
   const secret = appSecret(env);
   const base = (origin || env.DASHBOARD_BASE_URL || "").replace(/\/$/, "");
   if (!secret || !base) return null;
   const exp = Date.now() + MEDIA_TTL_MS;
   const sig = await hmacHex(secret, `${mediaId}.${exp}`);
-  return `${base}/webhooks/whatsapp/media/${encodeURIComponent(mediaId)}?exp=${exp}&sig=${sig}`;
+  const ruta = botId
+    ? `/webhooks/whatsapp/${encodeURIComponent(botId)}/media/${encodeURIComponent(mediaId)}`
+    : `/webhooks/whatsapp/media/${encodeURIComponent(mediaId)}`;
+  return `${base}${ruta}?exp=${exp}&sig=${sig}`;
 }
 
 /**
@@ -87,6 +102,8 @@ export async function parseWhatsAppEvents(
   body: WaWebhookBody,
   env: Env,
   origin: string,
+  /** Dueño de las credenciales — va en la URL firmada del media. Ver signedMediaUrl. */
+  botId?: string,
 ): Promise<IncomingMessage[]> {
   const out: IncomingMessage[] = [];
   for (const entry of body.entry ?? []) {
@@ -107,11 +124,11 @@ export async function parseWhatsAppEvents(
         if (m.type === "text") {
           text = m.text?.body || undefined;
         } else if (m.type === "image" && m.image?.id) {
-          imageUrl = (await signedMediaUrl(m.image.id, env, origin)) ?? undefined;
+          imageUrl = (await signedMediaUrl(m.image.id, env, origin, botId)) ?? undefined;
           text = m.image.caption || undefined;
         } else if (m.type === "audio" && m.audio?.id) {
           // Las notas de voz llegan como type "audio" con voice:true.
-          audioUrl = (await signedMediaUrl(m.audio.id, env, origin)) ?? undefined;
+          audioUrl = (await signedMediaUrl(m.audio.id, env, origin, botId)) ?? undefined;
         }
         console.log(
           "whatsapp in:",

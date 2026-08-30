@@ -290,30 +290,40 @@ app.post("/webhooks/kapso/:botId", async (c) => {
 // GET = handshake de verificación de Meta: devuelve hub.challenge si el
 // hub.verify_token coincide con nuestro secreto. Se llama una vez al configurar
 // el webhook en la app de Meta.
-app.get("/webhooks/meta", (c) => {
+// El saludo de verificación de Meta. Con :botId sale del canal conectado desde
+// /admin/conexiones; sin él, del env del despliegue (instalaciones viejas).
+async function metaVerify(c: any, botId?: string) {
+  const env = botId ? await resolveChannelEnv(c.env, botId, "meta") : c.env;
   const mode = c.req.query("hub.mode");
   const token = c.req.query("hub.verify_token");
   const challenge = c.req.query("hub.challenge");
-  if (mode === "subscribe" && token && token === c.env.META_VERIFY_TOKEN) {
+  if (mode === "subscribe" && token && env.META_VERIFY_TOKEN && token === env.META_VERIFY_TOKEN) {
     return c.text(challenge ?? "", 200);
   }
   return c.text("forbidden", 403);
-});
+}
+app.get("/webhooks/meta", (c) => metaVerify(c));
+app.get("/webhooks/meta/:botId", (c) => metaVerify(c, c.req.param("botId")));
 
 // POST = eventos de mensajes. Meta firma el cuerpo con el App Secret; validamos
 // la firma (fail-closed) antes de procesar. Un POST puede traer varios mensajes
 // (varias paginas/usuarios): encola cada uno por separado. Responde 200
 // rápido para que Meta no reintente.
-app.post("/webhooks/meta", async (c) => {
+async function metaEvents(c: any, botId?: string) {
+  // Con :botId, las credenciales salen del canal que el dueño conectó desde
+  // /admin/conexiones; sin él, del env del despliegue. Se resuelve ANTES de
+  // verificar la firma porque el App Secret con el que se verifica es
+  // justamente uno de esos datos.
+  const env = botId ? await resolveChannelEnv(c.env, botId, "meta") : c.env;
   const raw = await c.req.text();
   const sig = c.req.header("x-hub-signature-256");
   // Messenger (app de Facebook) e Instagram (IG Login) pueden firmar con App
   // Secrets DISTINTOS aunque sea la misma app de Meta. Aceptamos la firma si
   // cuadra con cualquiera de los dos secretos configurados (fail-closed si con
-  // ninguno). Así un solo webhook /webhooks/meta sirve para ambos canales.
+  // ninguno). Así un solo webhook sirve para ambos canales.
   const valid =
-    (!!c.env.META_APP_SECRET && (await verifyMetaSignature(raw, sig, c.env.META_APP_SECRET))) ||
-    (!!c.env.INSTAGRAM_APP_SECRET && (await verifyMetaSignature(raw, sig, c.env.INSTAGRAM_APP_SECRET)));
+    (!!env.META_APP_SECRET && (await verifyMetaSignature(raw, sig, env.META_APP_SECRET))) ||
+    (!!env.INSTAGRAM_APP_SECRET && (await verifyMetaSignature(raw, sig, env.INSTAGRAM_APP_SECRET)));
   if (!valid) return c.text("bad signature", 403);
   let body: unknown;
   try {
@@ -325,7 +335,7 @@ app.post("/webhooks/meta", async (c) => {
   // TODO lo de IG por esta vía (DMs) — el bot de IG vive únicamente en ManyChat
   // (decisión de diseño). Messenger (object === "page") no se ve
   // afectado. Para reactivar: quitar la var y redeploy.
-  if ((body as { object?: string }).object === "instagram" && c.env.IG_OFFICIAL === "off") {
+  if ((body as { object?: string }).object === "instagram" && env.IG_OFFICIAL === "off") {
     return c.text("EVENT_RECEIVED", 200);
   }
 
@@ -334,33 +344,39 @@ app.post("/webhooks/meta", async (c) => {
     // entran SOLO por el webhook de ManyChat — el canal oficial los ignora
     // (si no, cada DM se procesa DOBLE: 2x LLM, 2x respuestas al lead y
     // colisiones de rate limit en ráfagas de historias).
-    if (msg.channel === "instagram" && c.env.IG_DM_SOURCE === "manychat") continue;
-    const r = await ingestMessage(c.env, msg);
-    if (r.scheduledInMs !== null) wakeTickAfter(c.env, ctxOpcional(c), r.scheduledInMs, r.warm);
+    if (msg.channel === "instagram" && env.IG_DM_SOURCE === "manychat") continue;
+    const r = await ingestMessage(env, msg, botId);
+    if (r.scheduledInMs !== null) wakeTickAfter(env, ctxOpcional(c), r.scheduledInMs, r.warm);
   }
   return c.text("EVENT_RECEIVED", 200);
-});
+}
+app.post("/webhooks/meta", (c) => metaEvents(c));
+app.post("/webhooks/meta/:botId", (c) => metaEvents(c, c.req.param("botId")));
 
 // --- WhatsApp OFICIAL (Cloud API de Meta, sin Twilio/BSP) -------------------
 // GET = handshake de verificación (igual que Meta). Acepta el WHATSAPP_VERIFY_TOKEN
 // propio o, si no se configuró, cae al META_VERIFY_TOKEN (misma app de Meta).
-app.get("/webhooks/whatsapp", (c) => {
+async function waVerify(c: any, botId?: string) {
+  const env = botId ? await resolveChannelEnv(c.env, botId, "whatsapp") : c.env;
   const mode = c.req.query("hub.mode");
   const token = c.req.query("hub.verify_token");
   const challenge = c.req.query("hub.challenge");
-  const expected = c.env.WHATSAPP_VERIFY_TOKEN || c.env.META_VERIFY_TOKEN;
+  const expected = env.WHATSAPP_VERIFY_TOKEN || env.META_VERIFY_TOKEN;
   if (mode === "subscribe" && token && expected && token === expected) {
     return c.text(challenge ?? "", 200);
   }
   return c.text("forbidden", 403);
-});
+}
+app.get("/webhooks/whatsapp", (c) => waVerify(c));
+app.get("/webhooks/whatsapp/:botId", (c) => waVerify(c, c.req.param("botId")));
 
 // POST = mensajes entrantes. Firma X-Hub-Signature-256 con el App Secret de
 // WhatsApp (o el de Meta si comparten app). Un POST puede traer varios mensajes.
-app.post("/webhooks/whatsapp", async (c) => {
+async function waEvents(c: any, botId?: string) {
+  const env = botId ? await resolveChannelEnv(c.env, botId, "whatsapp") : c.env;
   const raw = await c.req.text();
   const sig = c.req.header("x-hub-signature-256");
-  const secret = c.env.WHATSAPP_APP_SECRET || c.env.META_APP_SECRET;
+  const secret = env.WHATSAPP_APP_SECRET || env.META_APP_SECRET;
   const valid = !!secret && (await verifyMetaSignature(raw, sig, secret));
   if (!valid) return c.text("bad signature", 403);
   let body: unknown;
@@ -369,18 +385,30 @@ app.post("/webhooks/whatsapp", async (c) => {
   } catch {
     return c.text("bad json", 400);
   }
-  const origin = c.env.DASHBOARD_BASE_URL || new URL(c.req.url).origin;
-  for (const msg of await parseWhatsAppEvents(body as any, c.env, origin)) {
-    const r = await ingestMessage(c.env, msg);
-    if (r.scheduledInMs !== null) wakeTickAfter(c.env, ctxOpcional(c), r.scheduledInMs, r.warm);
+  const origin = env.DASHBOARD_BASE_URL || new URL(c.req.url).origin;
+  for (const msg of await parseWhatsAppEvents(body as any, env, origin, botId)) {
+    const r = await ingestMessage(env, msg, botId);
+    if (r.scheduledInMs !== null) wakeTickAfter(env, ctxOpcional(c), r.scheduledInMs, r.warm);
   }
   return c.text("EVENT_RECEIVED", 200);
-});
+}
+app.post("/webhooks/whatsapp", (c) => waEvents(c));
+app.post("/webhooks/whatsapp/:botId", (c) => waEvents(c, c.req.param("botId")));
 
 // Proxy FIRMADO del media entrante de WhatsApp Cloud (audio/imagen). Hace el
 // media públicamente fetchable (para transcribe/vision) sin exponer el token.
 app.get("/webhooks/whatsapp/media/:id", (c) =>
   serveWhatsAppMedia(c.req.param("id"), c.req.query("exp") ?? null, c.req.query("sig") ?? null, c.env),
+);
+// Igual, pero con las credenciales del bot dueño del archivo — es la variante
+// que se genera desde que WhatsApp se conecta por bot.
+app.get("/webhooks/whatsapp/:botId/media/:id", async (c) =>
+  serveWhatsAppMedia(
+    c.req.param("id"),
+    c.req.query("exp") ?? null,
+    c.req.query("sig") ?? null,
+    await resolveChannelEnv(c.env, c.req.param("botId"), "whatsapp"),
+  ),
 );
 
 // Universal webhook LEARN endpoint. When learn mode is ON for `:channel`, this
