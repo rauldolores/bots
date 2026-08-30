@@ -1,4 +1,3 @@
-import { Hammer } from "lucide-react";
 import { Container } from "./ui";
 
 const links = [
@@ -13,11 +12,9 @@ export default function Footer() {
       <Container>
         <div className="flex flex-col items-center gap-6 text-center">
           <div className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500 text-stone-900">
-              <Hammer size={16} strokeWidth={2.5} />
-            </span>
+            <img src="/nodia-icon.png" alt="" width={32} height={32} className="h-8 w-8 rounded-lg" />
             <span className="font-display text-[15px] font-extrabold text-stone-900">
-              Nodia Agents
+              nodia<span className="text-amber-500">.</span>agents
             </span>
           </div>
 

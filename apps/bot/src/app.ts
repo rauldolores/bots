@@ -29,6 +29,7 @@ import { saveCapture, isLearnMode } from "./learn/mapping";
 import { tokensMatch } from "./http-auth";
 import { apiApp } from "./api";
 import { widgetApp, widgetScriptHandler } from "./widget/routes";
+import { serveFavicon, serveIcon } from "./brand";
 import { skillsApp } from "./skills/routes";
 import { ingestMessage } from "./agent/runner";
 import { wakeTickAfter } from "./queue/wake";
@@ -431,6 +432,13 @@ app.route("/api", apiApp);
 // sub-app porque un <script src> no está sujeto a CORS, a diferencia de los
 // fetch() que ese script hace después contra /widget/*.
 app.get("/widget.js", widgetScriptHandler);
+
+// Marca (favicon + logo del panel). Públicas a propósito: el navegador pide el
+// favicon ANTES de que exista sesión, así que ponerlas detrás del login las
+// rompería. En Vercel gana la copia estática de public/ y esto ni se invoca;
+// en Node/Docker/Cloudflare es la única forma de servirlas — ver src/brand.ts.
+app.get("/nodia-favicon.png", serveFavicon);
+app.get("/nodia-icon.png", serveIcon);
 app.route("/widget", widgetApp);
 
 // F8 — el agente como servicio: un sistema externo invoca una habilidad y

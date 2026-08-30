@@ -74,6 +74,8 @@ const NAV: Section[] = [
 
 // <head> assets: fonts, Tailwind CDN + token config, lucide, htmx.
 const HEAD_ASSETS = `
+  <link rel="icon" href="/nodia-favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/nodia-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -314,11 +316,9 @@ function sidebar(activeTab: string, niche: NichePack | null, visibleIds: Set<str
   return `<aside class="sb">
     <div class="sb-brand" style="padding:20px 18px 16px;border-bottom:1px solid var(--sb-line)">
       <div style="display:flex;align-items:center;gap:11px">
-        <div style="width:36px;height:36px;flex:none;border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--accent)">
-          <i data-lucide="bot" width="19" height="19" style="color:#231d05"></i>
-        </div>
+        <img src="/nodia-icon.png" alt="" width="36" height="36" style="width:36px;height:36px;flex:none;border-radius:12px;display:block">
         <div style="line-height:1.1">
-          <div style="font-family:'Archivo';font-weight:800;font-size:15px;letter-spacing:-.01em;color:#fff">NODIA AGENTS</div>
+          <div style="font-family:'Archivo';font-weight:800;font-size:15px;letter-spacing:-.01em;color:#fff">nodia<span style="color:var(--accent)">.</span>agents</div>
           <div style="font-size:9px;letter-spacing:.24em;color:var(--accent);text-transform:uppercase;font-weight:600">by Kontrolia</div>
         </div>
       </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Hammer, Menu, X, ArrowRight } from "lucide-react";
+import { Menu, X, ArrowRight } from "lucide-react";
 
 const links = [
   { href: "#caracteristicas", label: "Características" },
@@ -18,12 +18,19 @@ export default function Nav() {
   return (
     <header className="sticky top-0 z-50 border-b border-line bg-bg/80 backdrop-blur-xl">
       <nav className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-6">
-        <a href="#" className="flex items-center gap-2.5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500 text-stone-900">
-            <Hammer size={17} strokeWidth={2.5} />
-          </span>
+        {/* El logo de la marca. El punto va en ámbar y el resto en el gris
+            oscuro del ícono — es la firma visual de "nodia.agents", no un
+            adorno: sin él el texto se lee como dos palabras sueltas. */}
+        <a href="#" className="flex items-center gap-2.5" aria-label="Nodia Agents — inicio">
+          <img
+            src="/nodia-icon.png"
+            alt=""
+            width={32}
+            height={32}
+            className="h-8 w-8 rounded-lg"
+          />
           <span className="font-display text-[15px] font-extrabold tracking-tight text-stone-900">
-            Nodia&nbsp;Agents
+            nodia<span className="text-amber-500">.</span>agents
           </span>
         </a>
 

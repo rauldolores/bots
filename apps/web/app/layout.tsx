@@ -18,12 +18,21 @@ export const metadata: Metadata = {
     "atención al cliente IA",
     "agentes de venta IA",
   ],
+  // Los archivos viven en apps/web/public/, así que Next los sirve desde la
+  // raíz del sitio. `nodia-favicon.png` es la versión chica (pensada para
+  // 16-32px de la pestaña); `nodia-icon.png` es el ícono completo, que
+  // además sirve de icono al guardar el sitio en un teléfono.
+  icons: {
+    icon: "/nodia-favicon.png",
+    apple: "/nodia-icon.png",
+  },
   openGraph: {
     title: "Nodia Agents — Agentes de IA para tu negocio",
     description:
       "Contesta las llamadas de tu número y atiende 24/7 en WhatsApp, Instagram, Messenger y Telegram. Un proyecto de Kontrolia. Solicita una demo.",
     type: "website",
     locale: "es_MX",
+    images: [{ url: "/nodia-icon.png", width: 384, height: 384, alt: "Nodia Agents" }],
   },
 };
 
