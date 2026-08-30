@@ -26,6 +26,7 @@ import { createCallMetrics, beginTurn, timeToFirstAudioMs, turnLatencyMs, respon
 import { resolveVoiceOpenAiApiKey } from "./openaiKey";
 import { logVoiceEvent, maskId } from "./log";
 import { VOICE_BEHAVIOR_ADDENDUM, bloqueLlamadaEnCurso } from "./voiceInstructions";
+import { esAlucinacionDeTranscripcion } from "./hallucinations";
 import { resolveVoiceGreeting } from "./voiceGreeting";
 import { recordOnboardingMilestones } from "./onboarding/milestones";
 import { transferToHumanTool } from "./tools/transferToHuman";
@@ -228,6 +229,9 @@ export class RealtimeCallBridge {
         temperature: ctx.cfg.temperature,
         voice: ctx.cfg.voiceName,
         vadSilenceMs: Number(settings[SETTING_KEYS.voiceVadSilenceMs]) || undefined,
+        // Whisper necesita el idioma FIJO o alucina en los silencios — ver la
+        // config de `transcription` en realtimeClient.ts.
+        language: ctx.bot?.language ?? env.BOT_LANGUAGE,
       },
       {
         onAudioDelta: (base64, responseId, itemId) => this.handleAudioDelta(base64, responseId, itemId),
@@ -768,6 +772,13 @@ export class RealtimeCallBridge {
    */
   private async persistTurn(role: "user" | "assistant", text: string): Promise<void> {
     if (!text.trim() || !this.conversationId) return;
+    // Solo el turno del CLIENTE pasa por Whisper; lo del bot lo genera el
+    // modelo de voz y no tiene por qué filtrarse. Ver hallucinations.ts para
+    // por qué el filtro es tan conservador.
+    if (role === "user" && esAlucinacionDeTranscripcion(text)) {
+      console.warn(`[voice] descartada una transcripción que parece alucinación de Whisper: ${JSON.stringify(text.slice(0, 60))}`);
+      return;
+    }
     try {
       const db = new Db(this.deps.env.DB);
       const msgs = new MessagesRepo(db, this.deps.botId);

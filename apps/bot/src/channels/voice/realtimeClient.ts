@@ -24,6 +24,8 @@ export interface RealtimeSessionConfig {
   temperature?: number;
   /** Cuánto silencio (ms) espera el VAD antes de dar por terminado el turno del cliente. Ver DEFAULT_VAD_SILENCE_MS. */
   vadSilenceMs?: number;
+  /** Idioma del bot en ISO-639-1 ("es"). Se le pasa a Whisper — ver la config de `transcription`. */
+  language?: string;
   /** Override del endpoint — para pruebas (un servidor Realtime falso local). Vacío = wss://api.openai.com/v1/realtime. */
   baseUrl?: string;
 }
@@ -171,7 +173,17 @@ export class RealtimeClient {
             // Sin esto Realtime nunca transcribe lo que dice el LLAMANTE (solo
             // "oye" el audio para pensar) — lo necesitamos para persistir el
             // turno del cliente en messages, igual que cualquier otro canal.
-            transcription: { model: "whisper-1" },
+            //
+            // `language` NO es opcional en la práctica, aunque la API lo
+            // permita omitir: sin él Whisper detecta el idioma por SEGMENTO, y
+            // en los tramos de silencio o ruido de una llamada esa detección
+            // se va al inglés y escupe su muletilla más frecuente del
+            // entrenamiento ("Thank you.", "Bye.", "you"). Bug real: en una
+            // llamada en español aparecieron "Thank you." y "No, it's good"
+            // que el cliente nunca dijo. Fijar el idioma le quita a Whisper
+            // esa libertad. El filtro de persistTurn (realtimeBridge.ts) cubre
+            // lo que aun así se cuele.
+            transcription: { model: "whisper-1", ...(this.config.language ? { language: this.config.language } : {}) },
           },
           output: {
             format: g711UlawFormat,
