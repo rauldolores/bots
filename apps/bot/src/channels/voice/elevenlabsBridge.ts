@@ -23,6 +23,7 @@ import { ElevenLabsClient } from "./elevenlabsClient";
 import { VOICE_CHANNEL } from "./session";
 import { buildClearMessage, buildMediaMessage } from "./mediaStreamProtocol";
 import { bloqueLlamadaEnCurso, VOICE_BEHAVIOR_ADDENDUM } from "./voiceInstructions";
+import { resolveVoiceGreeting } from "./voiceGreeting";
 
 import { logVoiceEvent, maskId } from "./log";
 import { createCallMetrics, type CallMetrics } from "./metrics";
