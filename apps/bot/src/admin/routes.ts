@@ -84,6 +84,7 @@ import {
   renderMcpToolsModal,
   renderMcpEditModal,
   saveMcpPurpose,
+  reconnectMcp,
   updateConnectorConfig,
   saveWidgetConfig,
   renderPipelineStageModal,
@@ -1440,6 +1441,17 @@ adminApp.get("/conexiones/connectors/mcp/:provider/editar", async (c) => {
   return c.html(await renderMcpEditModal(c.env, c.get("botId"), provider));
 });
 
+// Reconectar un MCP de token estático (no OAuth) — reintento inmediato sin
+// esperar el enfriamiento de 5 min. Los conectores OAuth NO pasan por aquí:
+// su botón "Reconectar" manda directo a /oauth/start (mcpReconnectOauthUrl en
+// admin/views/conexiones.ts), porque ahí hace falta re-autorizar de verdad.
+adminApp.post("/conexiones/connectors/mcp/:provider/reconectar", async (c) => {
+  const provider = c.req.param("provider");
+  const modalHtml = await reconnectMcp(c.env, c.get("botId"), provider);
+  const gridHtml = await renderConnectorsGrid(c.env, c.get("botId"), "mcp");
+  return c.html(modalHtml + gridHtml);
+});
+
 adminApp.post("/conexiones/connectors/mcp/:provider/editar", async (c) => {
   const provider = c.req.param("provider");
   const modalHtml = await saveMcpPurpose(c.env, c.get("botId"), provider, await c.req.formData());
@@ -1515,7 +1527,10 @@ adminApp.get("/conexiones/connectors/mcp/oauth/start", async (c) => {
   const url = c.req.query("url") ?? "";
   const clientId = c.req.query("client_id") ?? "";
   const purpose = c.req.query("purpose") ?? "";
-  const result = await startMcpOAuth(c.env, c.get("botId"), name, url, clientId, purpose);
+  // Presente solo cuando esto es el botón "Reconectar" de un conector OAuth
+  // ya existente (ver mcpReconnectOauthUrl) — no una conexión nueva.
+  const reconnect = c.req.query("reconnect") ?? "";
+  const result = await startMcpOAuth(c.env, c.get("botId"), name, url, clientId, purpose, reconnect || undefined);
   if ("error" in result) return c.redirect(`/admin/conexiones?cat=mcp&err=${encodeURIComponent(result.error)}`, 302);
   setCookie(c, MCP_OAUTH_STATE_COOKIE, JSON.stringify(result.state), {
     httpOnly: true,

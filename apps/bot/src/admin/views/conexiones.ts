@@ -1122,8 +1122,31 @@ export async function savePipelineStage(env: Env, botId: string, provider: strin
 // aquí puede haber varios a la vez y cada uno lo da de alta el usuario con su
 // propio nombre + URL — por eso viven fuera del molde genérico de arriba.
 
+/**
+ * A dónde manda el botón "Reconectar" de un conector MCP por OAuth: al mismo
+ * arranque de siempre (/oauth/start), con `reconnect=` para que
+ * handleMcpOAuthCallback actualice ESTE conector en vez de crear uno nuevo
+ * (ver admin/mcpOAuthConnect.ts). Si el servidor exigió un client_id fijo la
+ * primera vez, se recupera de oauthClientInfo para no pedírselo de nuevo.
+ */
+function mcpReconnectOauthUrl(c: BotConnector): string {
+  const url = typeof c.config.url === "string" ? c.config.url : "";
+  const params = new URLSearchParams({ name: c.name ?? "", url, reconnect: c.provider });
+  const raw = c.config.oauthClientInfo;
+  if (typeof raw === "string" && raw) {
+    try {
+      const clientId = JSON.parse(raw)?.client_id;
+      if (typeof clientId === "string" && clientId) params.set("client_id", clientId);
+    } catch {
+      // sin client_id fijo — @ai-sdk/mcp intenta registro dinámico de nuevo, igual que la primera vez.
+    }
+  }
+  return `/admin/conexiones/connectors/mcp/oauth/start?${params.toString()}`;
+}
+
 function renderMcpConnectedCard(c: BotConnector, prefix: string): string {
   const url = typeof c.config.url === "string" ? c.config.url : "";
+  const isOauth = c.config.authMode === "oauth";
   const purpose = (c.config.purpose ?? "").trim();
   // El propósito es lo ÚNICO que el agente no puede deducir solo: el servidor
   // MCP describe qué hace cada tool, pero nunca cuándo este negocio la quiere.
@@ -1142,12 +1165,25 @@ function renderMcpConnectedCard(c: BotConnector, prefix: string): string {
   const estado = falloReciente
     ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:3px 10px;font-weight:700">● SIN CONEXIÓN</span>`
     : `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>`;
+  // El token de OAuth se refresca solo (ver connectors/mcpOAuth.ts +
+  // tools/mcpTools.ts: cada conexión intenta refrescar con el refresh_token
+  // antes de fallar) — si de todos modos llegó aquí, es porque ESE refresco
+  // también falló (el proveedor revocó el acceso, o el refresh_token venció).
+  // No hay nada que un reintento simple arregle: hace falta volver a autorizar
+  // de verdad, por eso el botón manda al proveedor en vez de solo reintentar.
   const falloBlock = falloReciente
-    ? `<div class="text-[11.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;line-height:1.5">
-         <b>El agente no pudo conectarse</b> (${esc(new Date(falloAt).toLocaleString("es-MX"))}). Mientras siga así, no tiene estas herramientas.
-         Si es un conector OAuth, lo más probable es que el acceso haya caducado: vuelve a conectarlo.
-         <div class="font-mono text-[10.5px]" style="color:var(--dim);margin-top:5px;word-break:break-word">${esc(fallo)}</div>
-       </div>`
+    ? isOauth
+      ? `<div class="text-[11.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;line-height:1.5">
+           <b>El agente no pudo conectarse</b> (${esc(new Date(falloAt).toLocaleString("es-MX"))}). Mientras siga así, no tiene estas herramientas.
+           Esto es OAuth: el acceso se refresca solo normalmente, así que si sigue fallando es que caducó o lo revocaron del lado del proveedor.
+           Dale a <b>Reconectar</b> para volver a autorizarlo.
+           <div class="font-mono text-[10.5px]" style="color:var(--dim);margin-top:5px;word-break:break-word">${esc(fallo)}</div>
+         </div>`
+      : `<div class="text-[11.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;line-height:1.5">
+           <b>El agente no pudo conectarse</b> (${esc(new Date(falloAt).toLocaleString("es-MX"))}). Mientras siga así, no tiene estas herramientas.
+           Revisa el token o la URL en tu servidor y dale a <b>Reconectar</b> para probar sin esperar.
+           <div class="font-mono text-[10.5px]" style="color:var(--dim);margin-top:5px;word-break:break-word">${esc(fallo)}</div>
+         </div>`
     : "";
 
   return `
@@ -1164,6 +1200,22 @@ function renderMcpConnectedCard(c: BotConnector, prefix: string): string {
       ${falloBlock}
       ${purposeBlock}
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${
+          falloReciente
+            ? isOauth
+              ? // OAuth: no es un reintento — hace falta volver a autorizar de
+                // verdad con el proveedor, así que es una navegación real, no htmx.
+                `<a href="${mcpReconnectOauthUrl(c)}"
+                    class="text-[11px] font-display font-bold"
+                    style="border:1px solid var(--accent);background:var(--accent);color:#1a1206;padding:5px 12px;cursor:pointer;text-decoration:none;display:inline-block">Reconectar</a>`
+              : `<button type="button" class="text-[11px] font-display font-bold"
+                         style="border:1px solid var(--accent);background:var(--accent);color:#1a1206;padding:5px 12px;cursor:pointer"
+                         hx-post="/admin/conexiones/connectors/mcp/${encodeURIComponent(c.provider)}/reconectar"
+                         hx-target="#modal-root" hx-swap="innerHTML"
+                         hx-disabled-elt="this"
+                         hx-indicator="this">Reconectar</button>`
+            : ""
+        }
         <button type="button" class="text-[11px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 10px;cursor:pointer;background:none"
                 hx-get="/admin/conexiones/connectors/mcp/${encodeURIComponent(c.provider)}/tools" hx-target="#modal-root" hx-swap="innerHTML">Ver herramientas</button>
         <button type="button" class="text-[11px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 10px;cursor:pointer;background:none"
@@ -1247,6 +1299,50 @@ export async function renderMcpToolsModal(env: Env, botId: string, provider: str
   }
 
   return modalShell("wrench", `Herramientas de ${name}`, body);
+}
+
+/**
+ * Botón "Reconectar" de un conector MCP de token estático (no OAuth) — no hay
+ * nada que refrescar solo, así que esto es un reintento real: limpia el
+ * enfriamiento y el catálogo cacheado, y prueba la conexión AHORA MISMO en
+ * vez de esperar los 5 minutos de MCP_COOLDOWN_MS. Los conectores OAuth no
+ * pasan por aquí — su botón manda directo a /oauth/start (ver
+ * mcpReconnectOauthUrl arriba): ahí sí hace falta re-autorizar de verdad.
+ */
+export async function reconnectMcp(env: Env, botId: string, provider: string): Promise<string> {
+  const db = new Db(env.DB);
+  const repo = new BotConnectorsRepo(db);
+  const connector = await repo.getByBotAndProvider(botId, provider);
+  if (!connector) {
+    return modalShell("plug", "Reconectar", `<div class="text-[12.5px]" style="color:var(--bad)">Este conector ya no existe.</div>`);
+  }
+
+  await repo.mergeConfig(botId, provider, {
+    mcpLastError: "",
+    mcpLastErrorAt: "",
+    mcpToolsCache: "",
+    mcpToolsCachedAt: "",
+  });
+
+  const result = await listMcpConnectorTools(env, db, botId, provider);
+  if ("error" in result) {
+    // Sigue sin conectar: se vuelve a registrar el fallo (y arranca de nuevo
+    // el enfriamiento) para que el próximo turno no lo intente en caliente.
+    await repo.mergeConfig(botId, provider, { mcpLastError: result.error.slice(0, 300), mcpLastErrorAt: String(Date.now()) });
+    return modalShell(
+      "plug",
+      "Sigue sin conectar",
+      `<div class="text-[12.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:10px 12px">${esc(result.error)}</div>`,
+    );
+  }
+  return modalShell(
+    "plug",
+    "Reconectado",
+    `<div class="text-[13px]" style="color:var(--ok);font-weight:600;margin-bottom:12px">✓ Ya se conectó</div>
+     <p class="text-[12.5px]" style="color:var(--muted);margin:0 0 14px">${result.tools.length} herramienta${result.tools.length === 1 ? "" : "s"} disponible${result.tools.length === 1 ? "" : "s"} para el agente.</p>
+     <button type="button" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:9px"
+             onclick="document.getElementById('modal-root').innerHTML=''">Listo</button>`,
+  );
 }
 
 function renderMcpAddCard(): string {

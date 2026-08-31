@@ -9,7 +9,7 @@ import { auth as mcpOAuthAuth } from "@ai-sdk/mcp";
 import type { Env } from "../env";
 import { Db } from "../db/client";
 import { BotConnectorsRepo } from "../db/botConnectors";
-import { createSecret } from "../db/vault";
+import { createSecret, updateSecret } from "../db/vault";
 import { McpOAuthState, snapshotToConnectorConfig, mcpOAuthRedirectUrl, type McpOAuthSnapshot } from "../connectors/mcpOAuth";
 
 export interface McpOAuthStateData {
@@ -25,6 +25,14 @@ export interface McpOAuthStateData {
   mcpName: string;
   /** Para qué sirve este MCP y cuándo usarlo, en palabras del dueño — va al prompt del agente (ver settings-loader.ts). */
   mcpPurpose?: string;
+  /**
+   * Si viene, esto NO es una conexión nueva — es el botón "Reconectar" de un
+   * conector OAuth que dejó de poder refrescar su propio token (ver
+   * admin/views/conexiones.ts, mcpReconnectOauthUrl). El callback actualiza
+   * ESE conector en su lugar (mismo provider, mismo prefijo de tools,
+   * conserva su propósito) en vez de dar de alta uno nuevo.
+   */
+  reconnectProvider?: string;
   snapshot: McpOAuthSnapshot;
 }
 
@@ -46,6 +54,7 @@ export async function startMcpOAuth(
   url: string,
   fixedClientId?: string,
   purpose?: string,
+  reconnectProvider?: string,
 ): Promise<StartMcpOAuthResult> {
   const trimmedName = name.trim();
   if (!trimmedName) return { error: "Falta el nombre." };
@@ -76,6 +85,7 @@ export async function startMcpOAuth(
       botId,
       mcpName: trimmedName,
       ...(trimmedPurpose ? { mcpPurpose: trimmedPurpose } : {}),
+      ...(reconnectProvider ? { reconnectProvider } : {}),
       snapshot: provider.snapshot,
     },
   };
@@ -123,8 +133,40 @@ export async function handleMcpOAuthCallback(
   }
 
   const db = new Db(env.DB);
-  const secretRef = await createSecret(db, JSON.stringify(provider.snapshot.tokens), `mcp-oauth:${stored.botId}:${stored.mcpName}`);
-  await new BotConnectorsRepo(db).upsert({
+  const repo = new BotConnectorsRepo(db);
+  const tokensJson = JSON.stringify(provider.snapshot.tokens);
+
+  if (stored.reconnectProvider) {
+    // Reconectar: mismo conector de siempre — mismo provider (mismo prefijo
+    // de tools para el agente), mismo propósito ya escrito. Solo cambian los
+    // tokens y lo que venga de snapshotToConnectorConfig (URL/expiración/
+    // client info), y se borra cualquier fallo viejo: si llegamos hasta acá,
+    // ya volvió a autorizar.
+    const existente = await repo.getByBotAndProvider(stored.botId, stored.reconnectProvider);
+    if (existente?.secret_ref) {
+      await updateSecret(db, existente.secret_ref, tokensJson);
+    }
+    const secretRef = existente?.secret_ref ?? (await createSecret(db, tokensJson, `mcp-oauth:${stored.botId}:${stored.mcpName}`));
+    await repo.upsert({
+      botId: stored.botId,
+      category: "mcp",
+      provider: stored.reconnectProvider,
+      name: existente?.name ?? stored.mcpName,
+      secretRef,
+      config: {
+        ...existente?.config,
+        ...snapshotToConnectorConfig(provider.snapshot),
+        mcpLastError: "",
+        mcpLastErrorAt: "",
+        mcpToolsCache: "",
+        mcpToolsCachedAt: "",
+      },
+    });
+    return { redirectTo: "/admin/conexiones?cat=mcp&ok=1" };
+  }
+
+  const secretRef = await createSecret(db, tokensJson, `mcp-oauth:${stored.botId}:${stored.mcpName}`);
+  await repo.upsert({
     botId: stored.botId,
     category: "mcp",
     provider: `mcp-${crypto.randomUUID()}`,
