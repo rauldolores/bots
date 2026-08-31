@@ -44,14 +44,16 @@ function fetchQueRespondePor(rutas: {
   voces?: () => Response;
   compartidas?: () => Response;
   agregar?: () => Response;
-  crearAgente?: () => Response;
+  crearAgente?: (cuerpo: any) => Response;
 }): typeof fetch {
-  return vi.fn(async (url: string | URL) => {
+  return vi.fn(async (url: string | URL, init?: RequestInit) => {
     const { pathname } = new URL(String(url));
     if (pathname === "/v1/voices" && rutas.voces) return rutas.voces();
     if (pathname === "/v1/shared-voices" && rutas.compartidas) return rutas.compartidas();
     if (pathname.startsWith("/v1/voices/add/") && rutas.agregar) return rutas.agregar();
-    if (pathname === "/v1/convai/agents/create" && rutas.crearAgente) return rutas.crearAgente();
+    if (pathname === "/v1/convai/agents/create" && rutas.crearAgente) {
+      return rutas.crearAgente(init?.body ? JSON.parse(String(init.body)) : undefined);
+    }
     throw new Error(`fetch no esperado: ${pathname}`);
   }) as any;
 }
@@ -145,6 +147,26 @@ describe("una voz que YA está en la cuenta", () => {
     const r = await prepararAgenteElevenLabs({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO);
     expect(sePidioAgregar).toBe(false);
     expect(r.ok).toBe(true);
+  });
+});
+
+describe("el idioma del agente", () => {
+  // Bug real: sin declarar el idioma, ElevenLabs asume inglés — y su
+  // validación NO deja usar Flash v2.5 con un agente en inglés ("English
+  // Agents must use turbo or flash v2"). Todo lo que arma este archivo es en
+  // español, así que tiene que decirlo, no dejar que ElevenLabs adivine.
+  it("se declara español explícitamente al crear el agente", async () => {
+    let cuerpoEnviado: any = null;
+    global.fetch = fetchQueRespondePor({
+      voces: () => Response.json({ voices: [{ voice_id: VOZ_DEL_CATALOGO }] }),
+      crearAgente: (cuerpo) => {
+        cuerpoEnviado = cuerpo;
+        return Response.json({ agent_id: "agent-nuevo" });
+      },
+    });
+
+    await prepararAgenteElevenLabs({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO);
+    expect(cuerpoEnviado.conversation_config.agent.language).toBe("es");
   });
 });
 

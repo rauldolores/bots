@@ -189,7 +189,12 @@ export async function prepararAgenteElevenLabs(
   const cuerpo = {
     name: `Nodia — ${botId.slice(0, 8)}`,
     conversation_config: {
-      agent: { prompt: { prompt: "Asistente telefónico." } },
+      // Sin esto, ElevenLabs asume inglés — y su validación NO deja usar
+      // Flash v2.5 en un agente en inglés (solo v2/turbo). Pasó en producción:
+      // "English Agents must use turbo or flash v2", con un agente que solo
+      // va a hablar español. Todo lo que arma este archivo es en español, así
+      // que se declara, en vez de dejarlo a lo que ElevenLabs adivine.
+      agent: { language: "es", prompt: { prompt: "Asistente telefónico." } },
       tts: { voice_id: voiceId, model_id: MODELO_TTS, agent_output_audio_format: FORMATO_TELEFONIA },
     },
   };
