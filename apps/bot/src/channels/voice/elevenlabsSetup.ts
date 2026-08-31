@@ -91,6 +91,57 @@ interface ResultadoSetup {
   agentId?: string;
 }
 
+/** Cuántas páginas de 100 se recorren buscando una voz — cubre 1000 antes de rendirse. */
+const MAX_PAGINAS_BUSQUEDA = 10;
+
+/**
+ * Encuentra al dueño público de una voz compartida, buscando por su voice_id
+ * en la biblioteca de ElevenLabs (filtrada a español).
+ *
+ * La API de "agregar a mi cuenta" pide voice_id Y public_owner_id juntos, pero
+ * de una voz solo se conoce el primero — el catálogo de este archivo no guarda
+ * el segundo porque cambiaría si ElevenLabs reorganiza su biblioteca, y
+ * buscarlo en vivo es más robusto que confiar en un valor fijo de hace meses.
+ */
+async function buscarDuenoPublico(apiKey: string, voiceId: string): Promise<string | null> {
+  for (let page = 0; page < MAX_PAGINAS_BUSQUEDA; page++) {
+    const res = await fetch(`${API}/shared-voices?language=es&page_size=100&page=${page}`, {
+      headers: { "xi-api-key": apiKey },
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      voices?: { voice_id?: string; public_owner_id?: string }[];
+      has_more?: boolean;
+    };
+    const hallada = (body.voices ?? []).find((v) => v.voice_id === voiceId);
+    if (hallada?.public_owner_id) return hallada.public_owner_id;
+    if (!body.has_more) break;
+  }
+  return null;
+}
+
+/**
+ * Agrega una voz compartida a la biblioteca de la cuenta — el paso que en el
+ * sitio de ElevenLabs es un botón "Add to my voices", hecho aquí sin que el
+ * dueño lo toque.
+ */
+async function agregarVozCompartida(
+  apiKey: string,
+  publicOwnerId: string,
+  voiceId: string,
+  nombre: string,
+): Promise<boolean> {
+  const res = await fetch(
+    `${API}/voices/add/${encodeURIComponent(publicOwnerId)}/${encodeURIComponent(voiceId)}`,
+    {
+      method: "POST",
+      headers: { "xi-api-key": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ new_name: nombre }),
+    },
+  );
+  return res.ok;
+}
+
 /**
  * Crea (o actualiza) el agente de ElevenLabs de este bot y guarda su id.
  *
@@ -113,12 +164,23 @@ export async function prepararAgenteElevenLabs(
   } catch (e) {
     return { ok: false, error: String((e as Error)?.message ?? e) };
   }
-  if (disponibles.size > 0 && !disponibles.has(voiceId)) {
-    return {
-      ok: false,
-      error:
-        "Esa voz no está disponible en tu cuenta de ElevenLabs. Agrégala a tu biblioteca desde su sitio y vuelve a guardar.",
-    };
+  // Las voces del catálogo son compartidas: viven en la biblioteca pública de
+  // ElevenLabs, no en la cuenta del dueño hasta que alguien las agrega — el
+  // mismo botón "Add to my voices" de su sitio. Antes esto se le pedía a mano
+  // al dueño; ahora se hace solo, que es justo lo que "sin pasos técnicos"
+  // significa.
+  if (!disponibles.has(voiceId)) {
+    const dueno = await buscarDuenoPublico(apiKey, voiceId);
+    const agregada = dueno
+      ? await agregarVozCompartida(apiKey, dueno, voiceId, `Nodia — ${voiceId.slice(0, 8)}`)
+      : false;
+    if (!agregada) {
+      return {
+        ok: false,
+        error:
+          "No se pudo agregar esa voz a tu cuenta de ElevenLabs automáticamente. Intenta con otra opción del catálogo.",
+      };
+    }
   }
 
   // El prompt real se manda por conversación (ver elevenlabsBridge.ts), así que
