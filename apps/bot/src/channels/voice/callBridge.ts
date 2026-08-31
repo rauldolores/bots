@@ -9,6 +9,8 @@
  * despliegue.
  */
 import type { Env } from "../../env";
+import type { Db } from "../../db/client";
+import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
 import type { VoiceSession } from "./session";
 
 export interface CallBridgeDeps {
@@ -48,8 +50,8 @@ function soloDigitos(s: string): string {
  * internacional: "+52 1 55 1234 5678", "5215512345678" y "5512345678" son la
  * misma persona marcando desde el mismo teléfono.
  */
-export function elegirProveedorDeVoz(env: Env, callerId: string): VoiceProvider {
-  const lista = (env.VOICE_ELEVENLABS_BETA_CALLERS ?? "")
+export function elegirProveedorDeVoz(listaCruda: string | undefined, callerId: string): VoiceProvider {
+  const lista = (listaCruda ?? "")
     .split(",")
     .map((n) => soloDigitos(n))
     .filter(Boolean);
@@ -60,4 +62,26 @@ export function elegirProveedorDeVoz(env: Env, callerId: string): VoiceProvider 
 
   const cola = (n: string) => n.slice(-10);
   return lista.some((n) => cola(n) === cola(quienLlama)) ? "elevenlabs" : "openai";
+}
+
+/**
+ * Lo que ElevenLabs necesita para atender ESTA llamada, salido de la pantalla
+ * de configuración — no del entorno del servidor.
+ *
+ * Devuelve null si falta cualquier pieza: sin llave, sin agente o sin la
+ * persona en la lista de prueba, la llamada es de OpenAI y punto.
+ */
+export async function credencialesElevenLabs(
+  db: Db,
+  botId: string,
+  callerId: string,
+): Promise<{ apiKey: string; agentId: string } | null> {
+  const settings = await new SettingsRepo(db, botId).all();
+  if (elegirProveedorDeVoz(settings[SETTING_KEYS.voiceElevenLabsBetaCallers], callerId) !== "elevenlabs") {
+    return null;
+  }
+  const apiKey = settings[SETTING_KEYS.voiceElevenLabsApiKey]?.trim();
+  const agentId = settings[SETTING_KEYS.voiceElevenLabsAgentId]?.trim();
+  if (!apiKey || !agentId) return null;
+  return { apiKey, agentId };
 }

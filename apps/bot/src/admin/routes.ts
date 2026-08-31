@@ -1642,6 +1642,7 @@ adminApp.get("/config", async (c) => {
       { niche: bot?.niche ?? null, language: bot?.language ?? c.env.BOT_LANGUAGE },
       mcpConnectors.map((conn) => ({ name: conn.name, provider: conn.provider })),
       visibleNavIds(c.get("kontroliaClaims")),
+      c.req.query("eleven_error") ?? undefined,
     ),
   );
 });
@@ -1897,6 +1898,21 @@ adminApp.post("/config", async (c) => {
     }
   }
 
+  // ElevenLabs: la llave, la voz y quién la escucha. Al guardar se crea (o
+  // actualiza) el agente contra su API, así el dueño se entera AQUÍ si la
+  // llave está mal o la voz no está en su cuenta — y no con un cliente al
+  // teléfono. Ver channels/voice/elevenlabsSetup.ts.
+  const elevenKeyRaw = form.get(SETTING_KEYS.voiceElevenLabsApiKey);
+  if (elevenKeyRaw !== null && String(elevenKeyRaw).trim() !== "") {
+    await repo.set(SETTING_KEYS.voiceElevenLabsApiKey, String(elevenKeyRaw).trim());
+  }
+  const vozEleven = String(form.get(SETTING_KEYS.voiceElevenLabsVoiceId) ?? "").trim();
+  if (vozEleven) await repo.set(SETTING_KEYS.voiceElevenLabsVoiceId, vozEleven);
+  const betaCallers = form.get(SETTING_KEYS.voiceElevenLabsBetaCallers);
+  if (betaCallers !== null) {
+    await repo.set(SETTING_KEYS.voiceElevenLabsBetaCallers, String(betaCallers).trim());
+  }
+
   // API key de OpenAI para Voz (Realtime) — mismo patrón que la de arriba.
   if (form.get("voice_openai_api_key_clear") === "1") {
     await repo.set(SETTING_KEYS.voiceOpenAiApiKey, "");
@@ -1929,6 +1945,24 @@ adminApp.post("/config", async (c) => {
     const emailKeyRaw = form.get(SETTING_KEYS.emailOutboundApiKey);
     if (emailKeyRaw !== null && String(emailKeyRaw).trim() !== "") {
       await repo.set(SETTING_KEYS.emailOutboundApiKey, String(emailKeyRaw).trim());
+    }
+  }
+
+  // Con llave Y alguien en la lista de prueba, se deja listo el agente en
+  // ElevenLabs. Va al FINAL y después de guardar: aunque esto falle, lo que el
+  // dueño escribió no se pierde — solo se le avisa que la prueba no quedó
+  // encendida, con el motivo.
+  const elevenApiKey = (await repo.get(SETTING_KEYS.voiceElevenLabsApiKey))?.trim();
+  const elevenCallers = (await repo.get(SETTING_KEYS.voiceElevenLabsBetaCallers))?.trim();
+  if (elevenApiKey && elevenCallers) {
+    const { prepararAgenteElevenLabs, VOZ_POR_DEFECTO } = await import("../channels/voice/elevenlabsSetup");
+    const voz = (await repo.get(SETTING_KEYS.voiceElevenLabsVoiceId))?.trim() || VOZ_POR_DEFECTO;
+    const r = await prepararAgenteElevenLabs(new Db(c.env.DB), c.get("botId"), elevenApiKey, voz).catch((e) => ({
+      ok: false as const,
+      error: String((e as Error)?.message ?? e),
+    }));
+    if (!r.ok) {
+      return c.redirect(`/admin/config?eleven_error=${encodeURIComponent(r.error ?? "no se pudo conectar")}`);
     }
   }
 

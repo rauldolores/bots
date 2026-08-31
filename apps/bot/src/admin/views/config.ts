@@ -18,6 +18,7 @@ import {
   type ControlDef,
 } from "../control-levels";
 import { layout } from "./layout";
+import { VOCES_ELEVENLABS, VOZ_POR_DEFECTO } from "../../channels/voice/elevenlabsSetup";
 
 /** Escape untrusted text before interpolating it into an HTML attribute/body. */
 function esc(s: string): string {
@@ -380,7 +381,11 @@ function renderCorreoSalienteSection(settings: Record<string, string>): string {
 }
 
 /** Sección "Voz": API key de OpenAI para Realtime — detecta si ya hay una utilizable antes de pedirla (channels/voice/openaiKey.ts). */
-function renderVoiceSection(settings: Record<string, string>, hasEnvOpenAiKey: boolean): string {
+function renderVoiceSection(
+  settings: Record<string, string>,
+  hasEnvOpenAiKey: boolean,
+  elevenError?: string,
+): string {
   const source = resolveKeySource(settings, hasEnvOpenAiKey);
   const hasVoiceKey = source === "voice_setting";
   const voiceKeyTail = hasVoiceKey ? (settings[SETTING_KEYS.voiceOpenAiApiKey] ?? "").trim().slice(-4) : "";
@@ -430,6 +435,47 @@ function renderVoiceSection(settings: Record<string, string>, hasEnvOpenAiKey: b
             return `<option value="${v.value}" ${selected ? "selected" : ""}>${esc(v.label)}</option>`;
           }).join("")}
         </select>
+      </div>
+      <div style="border-top:1px solid var(--line);padding-top:18px;display:flex;flex-direction:column;gap:14px">
+        ${
+          elevenError
+            ? `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px">
+                 No se pudo activar la prueba de ElevenLabs: ${esc(elevenError)}
+                 <span class="text-dim"> — lo demás sí se guardó.</span>
+               </div>`
+            : ""
+        }
+        <div>
+          <label class="font-display font-semibold text-[12.5px] text-cream">Probar voces de ElevenLabs</label>
+          <p class="text-dim text-[11px]" style="margin-top:2px">
+            Otro proveedor de voz, con voces que suenan más naturales en español. Se prueba
+            <b>en este mismo número</b>: solo los teléfonos que pongas abajo escuchan la voz nueva,
+            todos los demás siguen igual. Si algo falla, la llamada se atiende como siempre.
+          </p>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <label class="text-dim text-[11.5px]">Llave de ElevenLabs</label>
+          <p class="text-dim text-[11px]">La consigues en <span class="font-mono">elevenlabs.io</span> → tu perfil → API Keys.</p>
+          <input type="password" name="${SETTING_KEYS.voiceElevenLabsApiKey}" value="" autocomplete="off"
+                 placeholder="${settings[SETTING_KEYS.voiceElevenLabsApiKey]?.trim() ? "••••••••••••" : "sk_…"}" style="${INPUT_STYLE}">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <label class="text-dim text-[11.5px]">Voz</label>
+          <p class="text-dim text-[11px]">Todas son de hablantes nativos de español. Puedes escucharlas en el sitio de ElevenLabs antes de elegir.</p>
+          <select name="${SETTING_KEYS.voiceElevenLabsVoiceId}" style="${SELECT_STYLE}">
+            ${VOCES_ELEVENLABS.map((v) => {
+              const actual = settings[SETTING_KEYS.voiceElevenLabsVoiceId] || VOZ_POR_DEFECTO;
+              return `<option value="${v.value}" ${actual === v.value ? "selected" : ""}>${esc(v.label)}</option>`;
+            }).join("")}
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <label class="text-dim text-[11.5px]">Teléfonos que escuchan la voz nueva</label>
+          <p class="text-dim text-[11px]">Separados por comas. Pon el tuyo para probar. <b>Déjalo vacío para apagar la prueba</b> — todo vuelve a la voz de siempre.</p>
+          <input type="text" name="${SETTING_KEYS.voiceElevenLabsBetaCallers}"
+                 value="${esc(settings[SETTING_KEYS.voiceElevenLabsBetaCallers] ?? "")}"
+                 placeholder="+52 55 1234 5678" style="${INPUT_STYLE}">
+        </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
         <label class="font-display font-semibold text-[12.5px] text-cream">Saludo al contestar</label>
@@ -521,6 +567,8 @@ export function renderConfig(
   bot: { niche: string | null; language: string } = { niche: null, language: "es" },
   mcpConnectors: { name: string | null; provider: string }[] = [],
   visibleNavIds: Set<string> | null = null,
+  /** Por qué no se pudo dejar lista la prueba de ElevenLabs — ver POST /admin/config. */
+  elevenError?: string,
 ): string {
   const personalidadCards = CONTROL_LIST.filter((c) => c.key !== SETTING_KEYS.modelOverride)
     .map((c) => renderCardGroup(c, settings))
@@ -597,7 +645,7 @@ export function renderConfig(
               ${modelTierCards}
             </div>
             ${renderLlmSection(settings, llmTest)}
-            ${renderVoiceSection(settings, hasEnvOpenAiKey)}
+            ${renderVoiceSection(settings, hasEnvOpenAiKey, elevenError)}
           </div>
 
           <div class="cfg-pane" data-pane="negocio" style="display:none;flex-direction:column;gap:24px">

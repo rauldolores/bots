@@ -41,9 +41,12 @@ export class ElevenLabsCallBridge implements CallBridge {
 
   private constructor(private readonly deps: CallBridgeDeps) {}
 
-  static async start(deps: CallBridgeDeps): Promise<ElevenLabsCallBridge> {
+  static async start(
+    deps: CallBridgeDeps,
+    creds: { apiKey: string; agentId: string },
+  ): Promise<ElevenLabsCallBridge> {
     const bridge = new ElevenLabsCallBridge(deps);
-    await bridge.conectar();
+    await bridge.conectar(creds);
     bridge.metrics.callStartedAt = Date.now();
     logVoiceEvent("call_started", {
       botId: deps.botId,
@@ -57,17 +60,11 @@ export class ElevenLabsCallBridge implements CallBridge {
     return new Db(this.deps.env.DB);
   }
 
-  private async conectar(): Promise<void> {
-    const { env, botId, callerId } = this.deps;
-    const apiKey = env.ELEVENLABS_API_KEY;
-    const agentId = env.ELEVENLABS_AGENT_ID;
-    if (!apiKey || !agentId) {
-      throw new Error("Falta ELEVENLABS_API_KEY o ELEVENLABS_AGENT_ID");
-    }
-
+  private async conectar(creds: { apiKey: string; agentId: string }): Promise<void> {
+    const { botId, callerId } = this.deps;
     const ctx = await this.prepararConversacion();
 
-    this.client = new ElevenLabsClient(apiKey, agentId, {
+    this.client = new ElevenLabsClient(creds.apiKey, creds.agentId, {
       onAudio: (b64) => this.audioHaciaTwilio(b64),
       onInterruption: () => this.interrumpido(),
       onUserTranscript: (t) => void this.persistirTurno("user", t),

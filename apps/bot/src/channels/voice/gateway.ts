@@ -25,7 +25,8 @@ import { parseTwilioStreamEvent } from "./mediaStreamProtocol";
 import { VoiceChannel } from "./channel";
 import { RealtimeCallBridge } from "./realtimeBridge";
 import { ElevenLabsCallBridge } from "./elevenlabsBridge";
-import { elegirProveedorDeVoz, type CallBridge } from "./callBridge";
+import { credencialesElevenLabs, type CallBridge } from "./callBridge";
+import { Db } from "../../db/client";
 import { logVoiceEvent, maskId } from "./log";
 import { recordOnboardingMilestones } from "./onboarding/milestones";
 
@@ -209,7 +210,9 @@ async function handleMessage(ws: WebSocket, state: GatewayCallState, env: Env, r
         // teniendo un solo número. Sin lista de prueba configurada, esto es
         // siempre "openai" y el código de abajo es el de siempre.
         const callerId = state.from || msg.start.callSid;
-        const proveedor = elegirProveedorDeVoz(env, callerId);
+        // Sale de /admin/config, no del entorno: quien instala esto no
+        // configura servidores. null = esta llamada es de OpenAI.
+        const credsEleven = await credencialesElevenLabs(new Db(env.DB), state.botId, callerId).catch(() => null);
         const deps = {
           env,
           botId: state.botId,
@@ -219,14 +222,14 @@ async function handleMessage(ws: WebSocket, state: GatewayCallState, env: Env, r
           voiceSession,
           sendToTwilio: (json: string) => ws.send(json),
         };
-        if (proveedor === "elevenlabs") {
+        if (credsEleven) {
           logVoiceEvent("proveedor_beta", {
             botId: state.botId,
             callSid: maskId(state.callSid),
-            proveedor,
+            proveedor: "elevenlabs",
           });
           try {
-            state.bridge = await ElevenLabsCallBridge.start(deps);
+            state.bridge = await ElevenLabsCallBridge.start(deps, credsEleven);
           } catch (e) {
             // La prueba NUNCA puede tumbar una llamada real: si ElevenLabs no
             // conecta, se atiende con OpenAI como cualquier otra. Quien llama

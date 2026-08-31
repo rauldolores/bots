@@ -87,6 +87,16 @@ export const SETTING_KEYS = {
   // marin/cedar (las únicas dos que suenan bien en español); sin configurar,
   // cae al default hardcodeado "marin" en realtimeClient.ts.
   voiceName: "voice_name",
+  // --- Prueba de ElevenLabs como proveedor de voz (mismo número que producción) ---
+  // La llave del dueño. Va en la pantalla y no en variables de entorno: quien
+  // instala esto no sabe configurar un servidor, y ése era justo el problema.
+  voiceElevenLabsApiKey: "voice_elevenlabs_api_key",
+  /** Voz elegida del catálogo en español — ver VOCES_ELEVENLABS en admin/views/config.ts. */
+  voiceElevenLabsVoiceId: "voice_elevenlabs_voice_id",
+  /** Lo crea el sistema contra la API de ElevenLabs al guardar; el dueño nunca lo ve ni lo teclea. */
+  voiceElevenLabsAgentId: "voice_elevenlabs_agent_id",
+  /** Teléfonos (separados por comas) cuyas llamadas atiende ElevenLabs. Vacío = nadie. */
+  voiceElevenLabsBetaCallers: "voice_elevenlabs_beta_callers",
   // Saludo con el que el bot contesta la llamada — antes quedaba a criterio
   // del modelo (podía improvisar, o narrar instrucciones internas). Ahora es
   // texto fijo que el dueño controla; placeholders {{negocio}} y {{nombre}}

@@ -11,12 +11,15 @@
 import { describe, it, expect } from "vitest";
 import { elegirProveedorDeVoz } from "../../src/channels/voice/callBridge";
 
-const env = (lista?: string) => ({ VOICE_ELEVENLABS_BETA_CALLERS: lista }) as any;
+// La lista viene de /admin/config, no del entorno: quien instala esto no
+// configura servidores, y ése era justo el problema que se estaba resolviendo.
+const env = (lista?: string) => lista;
 
 describe("a quién atiende ElevenLabs", () => {
   it("sin lista configurada, TODO sigue por OpenAI", () => {
-    // El default tiene que ser el de producción: un despliegue que no sabe del
+    // El default tiene que ser el de producción: un bot que no sabe del
     // experimento no puede caer en él por accidente.
+    expect(elegirProveedorDeVoz(undefined, "+5215512345678")).toBe("openai");
     expect(elegirProveedorDeVoz(env(), "+5215512345678")).toBe("openai");
     expect(elegirProveedorDeVoz(env(""), "+5215512345678")).toBe("openai");
     expect(elegirProveedorDeVoz(env("   "), "+5215512345678")).toBe("openai");

@@ -97,16 +97,6 @@ export interface Env {
   // F7 fase 6: manejo de silencios largos. Cuánto silencio del cliente (sin
   // respuesta activa) antes de sondear si sigue en la línea, y cuánto en
   // total antes de colgar si no contesta. Vacío = 15s / 45s.
-  /**
-   * Prueba de ElevenLabs en el MISMO número: teléfonos (separados por comas)
-   * cuyas llamadas se atienden con ElevenLabs en vez de OpenAI Realtime. Vacío
-   * = nadie, todo sigue por OpenAI. Ver channels/voice/callBridge.ts.
-   */
-  VOICE_ELEVENLABS_BETA_CALLERS?: string;
-  /** Llave de API de ElevenLabs — solo para las llamadas de la lista de arriba. */
-  ELEVENLABS_API_KEY?: string;
-  /** Id del agente de ElevenLabs (se crea en su panel) que atiende esas llamadas. */
-  ELEVENLABS_AGENT_ID?: string;
   VOICE_SILENCE_NUDGE_MS?: string;
   VOICE_SILENCE_HANGUP_MS?: string;
   /** Cada cuánto se revisa (setInterval) — para pruebas. Vacío = 5s. */
