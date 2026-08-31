@@ -24,6 +24,8 @@ import { verifyStreamToken } from "./streamToken";
 import { parseTwilioStreamEvent } from "./mediaStreamProtocol";
 import { VoiceChannel } from "./channel";
 import { RealtimeCallBridge } from "./realtimeBridge";
+import { ElevenLabsCallBridge } from "./elevenlabsBridge";
+import { elegirProveedorDeVoz, type CallBridge } from "./callBridge";
 import { logVoiceEvent, maskId } from "./log";
 import { recordOnboardingMilestones } from "./onboarding/milestones";
 
@@ -35,7 +37,7 @@ interface GatewayCallState {
   from: string;
   to: string;
   streamSid: string | null;
-  bridge: RealtimeCallBridge | null;
+  bridge: CallBridge | null;
   /** Recién en `true` tras verificar el token del evento "start" — ver authorizeStreamStart(). */
   authorized: boolean;
 }
@@ -199,17 +201,46 @@ async function handleMessage(ws: WebSocket, state: GatewayCallState, env: Env, r
           console.error("[voice-gateway] no se pudo guardar el streamSid:", e);
         });
         // Aquí es donde se conecta el Agent Core existente (vía
-        // buildAgentContext dentro de RealtimeCallBridge) con OpenAI
-        // Realtime — nada de esto reimplementa tools/RAG/system prompt.
-        state.bridge = await RealtimeCallBridge.start({
+        // buildAgentContext dentro del puente) con el proveedor de voz —
+        // nada de esto reimplementa tools/RAG/system prompt.
+        //
+        // Quién atiende se decide POR LLAMADA, según el teléfono de quien
+        // marca: es la única forma de probar ElevenLabs con llamadas reales
+        // teniendo un solo número. Sin lista de prueba configurada, esto es
+        // siempre "openai" y el código de abajo es el de siempre.
+        const callerId = state.from || msg.start.callSid;
+        const proveedor = elegirProveedorDeVoz(env, callerId);
+        const deps = {
           env,
           botId: state.botId,
-          callerId: state.from || msg.start.callSid,
+          callerId,
           callSid: msg.start.callSid,
           streamSid,
           voiceSession,
-          sendToTwilio: (json) => ws.send(json),
-        });
+          sendToTwilio: (json: string) => ws.send(json),
+        };
+        if (proveedor === "elevenlabs") {
+          logVoiceEvent("proveedor_beta", {
+            botId: state.botId,
+            callSid: maskId(state.callSid),
+            proveedor,
+          });
+          try {
+            state.bridge = await ElevenLabsCallBridge.start(deps);
+          } catch (e) {
+            // La prueba NUNCA puede tumbar una llamada real: si ElevenLabs no
+            // conecta, se atiende con OpenAI como cualquier otra. Quien llama
+            // no se entera de que había un experimento de por medio.
+            console.error("[voice-gateway] ElevenLabs falló, se cae a OpenAI:", e);
+            logVoiceEvent("proveedor_beta_fallback", {
+              botId: state.botId,
+              callSid: maskId(state.callSid),
+            });
+            state.bridge = await RealtimeCallBridge.start(deps);
+          }
+        } else {
+          state.bridge = await RealtimeCallBridge.start(deps);
+        }
       } catch (e) {
         console.error("[voice-gateway] no se pudo iniciar la llamada:", e);
       }
