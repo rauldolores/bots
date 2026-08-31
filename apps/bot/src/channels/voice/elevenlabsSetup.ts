@@ -55,10 +55,32 @@ export const VOCES_ELEVENLABS: OpcionDeVoz[] = [
 
 export const VOZ_POR_DEFECTO = VOCES_ELEVENLABS[0].value;
 
-/** Las voces que la cuenta de ESTA llave puede usar de verdad. */
+/**
+ * Las voces que la cuenta de ESTA llave puede usar de verdad.
+ *
+ * Antes de llamar a la red: ElevenLabs muestra en su panel una lista de
+ * llaves con un identificador junto a cada una, y el secreto real —el que
+ * empieza con "sk_"— solo se ve completo al crearla o rotarla. Es fácil
+ * copiar el identificador por error, y ElevenLabs lo rechaza con un mensaje
+ * de error genérico (400) indistinguible de una llave revocada o mal tecleada
+ * si no se lee el cuerpo de la respuesta. Pasó en producción: el dueño guardó
+ * el identificador, la prueba nunca se activó, y el mensaje no explicaba qué
+ * corregir.
+ */
 export async function vocesDisponibles(apiKey: string): Promise<Set<string>> {
+  if (!apiKey.startsWith("sk_")) {
+    throw new Error(
+      'Esa no es la llave — es el identificador. En ElevenLabs, la llave de verdad empieza con "sk_" y solo se ve completa al crearla o rotarla (Perfil → API Keys). Crea una nueva o rota la que ya tienes y pega el valor que empiece con sk_.',
+    );
+  }
   const res = await fetch(`${API}/voices`, { headers: { "xi-api-key": apiKey } });
-  if (!res.ok) throw new Error(`ElevenLabs rechazó la llave (${res.status})`);
+  if (!res.ok) {
+    const detalle = await res
+      .json()
+      .then((b: any) => b?.detail?.message as string | undefined)
+      .catch(() => undefined);
+    throw new Error(detalle ?? `ElevenLabs rechazó la llave (${res.status}).`);
+  }
   const body = (await res.json()) as { voices?: { voice_id?: string }[] };
   return new Set((body.voices ?? []).map((v) => v.voice_id).filter(Boolean) as string[]);
 }
