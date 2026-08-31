@@ -170,6 +170,28 @@ describe("el idioma del agente", () => {
   });
 });
 
+describe("los overrides", () => {
+  // Bug real: overrides vienen APAGADOS por defecto en cada agente nuevo —
+  // seguridad de ElevenLabs, para que un cliente cualquiera no le haga decir
+  // al agente lo que no autorizó. Sin encenderlos, ElevenLabs corta la
+  // conexión en cuanto elevenlabsBridge.ts manda el prompt real de la
+  // conversación: la llamada conectaba pero se quedaba muda, sin un segundo
+  // de audio, porque el cierre llegaba antes de que hubiera algo que decir.
+  it("se habilita el override del prompt al crear el agente", async () => {
+    let cuerpoEnviado: any = null;
+    global.fetch = fetchQueRespondePor({
+      voces: () => Response.json({ voices: [{ voice_id: VOZ_DEL_CATALOGO }] }),
+      crearAgente: (cuerpo) => {
+        cuerpoEnviado = cuerpo;
+        return Response.json({ agent_id: "agent-nuevo" });
+      },
+    });
+
+    await prepararAgenteElevenLabs({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO);
+    expect(cuerpoEnviado.platform_settings.overrides.conversation_config_override.agent.prompt.prompt).toBe(true);
+  });
+});
+
 describe("la llave, antes de tocar la red", () => {
   it("rechaza el identificador de la llave — el error real que ya pasó en producción", async () => {
     const r = await prepararAgenteElevenLabs({} as any, "bot1", "no-empieza-con-sk", VOZ_DEL_CATALOGO);

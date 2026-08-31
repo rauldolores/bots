@@ -188,6 +188,24 @@ export async function prepararAgenteElevenLabs(
   // formato de audio.
   const cuerpo = {
     name: `Nodia — ${botId.slice(0, 8)}`,
+    // Los overrides vienen APAGADOS por defecto en cada agente nuevo — medida
+    // de seguridad de ElevenLabs para que un cliente cualquiera no pueda
+    // hacer que el agente diga cosas que su dueño no autorizó. Sin esto,
+    // ElevenLabs corta la conexión en cuanto elevenlabsBridge.ts manda el
+    // prompt real de la conversación (conversation_config_override): pasó en
+    // producción — la llamada conectaba pero se quedaba muda, sin un solo
+    // segundo de audio, porque el cierre llegaba antes de que hubiera algo
+    // que decir. El prompt real SÍ tiene que mandarse por conversación (es el
+    // mismo Agent Core que usa OpenAI, con la memoria de ESE cliente) — el
+    // valor de aquí abajo es solo el default si algún día se conecta sin
+    // pasar por el puente.
+    platform_settings: {
+      overrides: {
+        conversation_config_override: {
+          agent: { first_message: true, prompt: { prompt: true } },
+        },
+      },
+    },
     conversation_config: {
       // Sin esto, ElevenLabs asume inglés — y su validación NO deja usar
       // Flash v2.5 en un agente en inglés (solo v2/turbo). Pasó en producción:
