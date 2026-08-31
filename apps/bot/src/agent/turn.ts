@@ -61,6 +61,29 @@ export interface AgentTurnInput {
 const MAX_AVISOS_POR_TURNO = 1;
 
 /**
+ * Cuántos ADELANTOS por párrafo se permiten en un turno.
+ *
+ * Uno. El objetivo es que el cliente vea algo pronto, no convertir una
+ * respuesta en una ráfaga de mensajes sueltos — en WhatsApp eso se lee como
+ * spam. Con uno basta: se manda el primer párrafo y el resto viaja junto.
+ */
+const MAX_ADELANTOS_POR_TURNO = 1;
+
+/**
+ * Mínimo de caracteres para adelantar un párrafo.
+ *
+ * Sin este piso, un "¡Hola!" suelto saldría como mensaje aparte y el cliente
+ * vería dos globos donde debía haber uno. Solo vale la pena adelantar algo
+ * que ya diga lo suficiente para leerse mientras se genera el resto.
+ */
+const MIN_CHARS_ADELANTO = 80;
+
+/** Para comparar dos textos "iguales" aunque cambien espacios o mayúsculas. */
+function normalizarEntrega(t: string): string {
+  return t.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/**
  * Lo que se guarda en messages.tool_calls por cada herramienta que el modelo
  * llamó en el turno. `ok`/`output` se agregaron después: sin el RESULTADO, un
  * MCP que devuelve error se ve exactamente igual que uno que funcionó — el
@@ -221,6 +244,22 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
   let avisosEnviados = 0;
   /** El último aviso que el cliente ya recibió — para no repetírselo si un reintento regenera el mismo preámbulo. */
   let ultimoAvisoEnviado = "";
+  // Igual que `avisosEnviados`: FUERA de attempt(), para que un reintento no
+  // le mande al cliente por segunda vez un párrafo que ya recibió.
+  let adelantosEnviados = 0;
+  /** Lo ya entregado por adelantado en este turno, normalizado — ver `yaSeEntrego`. */
+  const entregadoEsteTurno: string[] = [];
+  /**
+   * ¿Esto ya se le mandó al cliente en este turno?
+   *
+   * Importa en los REINTENTOS: si el primer intento adelantó un párrafo y
+   * luego falló, el intento siguiente regenera un texto parecido y volvería a
+   * mandarlo. El cliente vería el mismo párrafo dos veces sin entender por qué.
+   */
+  const yaSeEntrego = (t: string): boolean => {
+    const n = normalizarEntrega(t);
+    return entregadoEsteTurno.some((e) => e === n || e.startsWith(n) || n.startsWith(e));
+  };
 
   // Instrumentación del "turno vacío" (ver src/agent/llmDiagnostics.ts para
   // el porqué de cada campo, verificado contra el código fuente del SDK).
@@ -303,6 +342,44 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
         const delta: string = part.text ?? part.delta ?? "";
         completo += delta;
         porEnviar += delta;
+
+        // ADELANTO POR PÁRRAFO — de dónde sale el "responde más rápido".
+        //
+        // Antes el cliente no veía NADA hasta que el modelo terminaba de
+        // escribir: 6 segundos de silencio y de golpe todo. Ahora, en cuanto
+        // hay un párrafo cerrado se manda ese pedazo y el resto sigue
+        // generándose. El tiempo TOTAL no baja; lo que baja es la espera hasta
+        // el primer texto, que es lo que la persona percibe como lentitud.
+        //
+        // Se corta en salto de párrafo (no en cualquier punto) porque es el
+        // único límite donde el modelo ya cerró una idea. Partir a media frase
+        // mandaría algo que la siguiente línea podría contradecir — y lo
+        // enviado ya no se puede retirar.
+        if (onInterimMessage) {
+          const corte = porEnviar.lastIndexOf("\n\n");
+          const listo = corte > 0 ? porEnviar.slice(0, corte).trim() : "";
+          if (listo.length >= MIN_CHARS_ADELANTO) {
+            if (yaSeEntrego(listo)) {
+              // REINTENTO: el intento anterior ya le mandó este párrafo al
+              // cliente y luego falló; ahora el modelo lo regeneró. No basta
+              // con no re-enviarlo — hay que SACARLO de lo que queda por
+              // enviar, o viajaría dentro de la respuesta final y la persona
+              // lo vería DOS VECES. (Bug real: lo cazó la prueba del reintento.)
+              porEnviar = porEnviar.slice(corte).replace(/^\s+/, "");
+            } else if (adelantosEnviados < MAX_ADELANTOS_POR_TURNO) {
+              porEnviar = porEnviar.slice(corte).replace(/^\s+/, "");
+              adelantosEnviados++;
+              entregadoEsteTurno.push(normalizarEntrega(listo));
+              // Best-effort, igual que el aviso de herramienta: si no se puede
+              // entregar, el turno sigue y el texto viaja en la respuesta final.
+              await onInterimMessage(listo).catch((e) =>
+                console.error("[runAgentTurnCore] no se pudo adelantar el párrafo:", e),
+              );
+            }
+            // Agotado el cupo y sin haberlo entregado: NO se toca. El texto se
+            // queda acumulado y viaja completo en la respuesta final.
+          }
+        }
       } else if (part?.type === "error") {
         // La causa real del "turno vacío" visto en producción: ante un error
         // del proveedor A MITAD del stream (sobrecarga, red, etc.), el SDK
