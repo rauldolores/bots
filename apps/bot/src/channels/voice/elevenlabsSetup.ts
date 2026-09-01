@@ -168,6 +168,8 @@ export async function prepararAgenteElevenLabs(
   botId: string,
   apiKey: string,
   voiceId: string,
+  /** Las tools del Agent Core — sin ellas el agente habla pero no puede HACER nada. */
+  tools?: Record<string, any>,
 ): Promise<ResultadoSetup> {
   const repo = new SettingsRepo(db, botId);
 
@@ -194,6 +196,21 @@ export async function prepararAgenteElevenLabs(
           "No se pudo agregar esa voz a tu cuenta de ElevenLabs automáticamente. Intenta con otra opción del catálogo.",
       };
     }
+  }
+
+  // Las herramientas se registran como entidades aparte en ElevenLabs y el
+  // agente las referencia por id. Sin esto el agente conversa igual de bien
+  // pero no puede agendar, capturar un lead ni consultar la base de
+  // conocimiento — que fue justo lo que se descubrió en una llamada real:
+  // "le pedí que me agendara y no pudo".
+  let toolIds: string[] = [];
+  if (tools && Object.keys(tools).length > 0) {
+    const { registrarHerramientas } = await import("./elevenlabsTools");
+    const previos = leerMapa(await repo.get(SETTING_KEYS.voiceElevenLabsToolIds));
+    const r = await registrarHerramientas(apiKey, tools, previos);
+    if (r.error) return { ok: false, error: r.error };
+    await repo.set(SETTING_KEYS.voiceElevenLabsToolIds, JSON.stringify(r.ids));
+    toolIds = Object.values(r.ids);
   }
 
   // El prompt real se manda por conversación (ver elevenlabsBridge.ts), así que
@@ -232,7 +249,10 @@ export async function prepararAgenteElevenLabs(
       // familia que ya usa este proyecto como su nivel rápido/barato (ver
       // pricing.ts) — se declara a propósito, en vez de heredar lo que
       // ElevenLabs decida hoy.
-      agent: { language: "es", prompt: { prompt: "Asistente telefónico.", llm: MODELO_LLM } },
+      agent: {
+        language: "es",
+        prompt: { prompt: "Asistente telefónico.", llm: MODELO_LLM, tool_ids: toolIds },
+      },
       tts: { voice_id: voiceId, model_id: MODELO_TTS, agent_output_audio_format: FORMATO_TELEFONIA },
       // El formato de SALIDA (arriba) y el de ENTRADA son campos separados —
       // se probó configurando solo el primero, y el resultado fue que la
@@ -269,7 +289,7 @@ export async function prepararAgenteElevenLabs(
   if (!agentId) return { ok: false, error: "ElevenLabs no devolvió el identificador del agente." };
 
   await repo.set(SETTING_KEYS.voiceElevenLabsAgentId, agentId);
-  await repo.set(SETTING_KEYS.voiceElevenLabsConfigHash, huellaDeConfiguracion(voiceId));
+  await repo.set(SETTING_KEYS.voiceElevenLabsConfigHash, huellaDeConfiguracion(voiceId, toolIds));
   return { ok: true, agentId };
 }
 
@@ -283,8 +303,29 @@ export async function prepararAgenteElevenLabs(
  * nadie se le dijo que tenía que volver a guardarla. La llamada seguía muda
  * por un arreglo que ya estaba hecho.
  */
-export function huellaDeConfiguracion(voiceId: string): string {
-  return [voiceId, MODELO_TTS, MODELO_LLM, FORMATO_TELEFONIA, `max:${MAX_DURACION_SEG}`, "overrides:v1"].join("|");
+export function huellaDeConfiguracion(voiceId: string, toolIds: string[] = []): string {
+  return [
+    voiceId,
+    MODELO_TTS,
+    MODELO_LLM,
+    FORMATO_TELEFONIA,
+    `max:${MAX_DURACION_SEG}`,
+    // Las herramientas entran en la huella: si el dueño enciende o apaga una
+    // desde /admin/agente, el agente se actualiza solo en la próxima llamada.
+    `tools:${[...toolIds].sort().join(",")}`,
+    "overrides:v1",
+  ].join("|");
+}
+
+/** Lee un mapa nombre→id guardado como JSON, tolerante a basura. */
+function leerMapa(crudo: string | null | undefined): Record<string, string> {
+  if (!crudo?.trim()) return {};
+  try {
+    const v = JSON.parse(crudo);
+    return v && typeof v === "object" ? (v as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -300,12 +341,14 @@ export async function asegurarAgenteAlDia(
   botId: string,
   apiKey: string,
   voiceId: string,
+  tools?: Record<string, any>,
 ): Promise<{ actualizado: boolean; error?: string }> {
   const repo = new SettingsRepo(db, botId);
   const guardada = (await repo.get(SETTING_KEYS.voiceElevenLabsConfigHash))?.trim();
-  if (guardada === huellaDeConfiguracion(voiceId)) return { actualizado: false };
+  const idsActuales = Object.values(leerMapa(await repo.get(SETTING_KEYS.voiceElevenLabsToolIds)));
+  if (guardada === huellaDeConfiguracion(voiceId, idsActuales)) return { actualizado: false };
 
-  const r = await prepararAgenteElevenLabs(db, botId, apiKey, voiceId).catch((e) => ({
+  const r = await prepararAgenteElevenLabs(db, botId, apiKey, voiceId, tools).catch((e) => ({
     ok: false as const,
     error: String((e as Error)?.message ?? e),
   }));

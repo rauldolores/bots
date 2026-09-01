@@ -75,6 +75,7 @@ export async function credencialesElevenLabs(
   db: Db,
   botId: string,
   callerId: string,
+  env: Env,
 ): Promise<{ apiKey: string; agentId: string } | null> {
   const settings = await new SettingsRepo(db, botId).all();
   if (elegirProveedorDeVoz(settings[SETTING_KEYS.voiceElevenLabsBetaCallers], callerId) !== "elevenlabs") {
@@ -94,8 +95,14 @@ export async function credencialesElevenLabs(
   // contra un arreglo que ya existía pero no había llegado a su agente.
   const voiceId = settings[SETTING_KEYS.voiceElevenLabsVoiceId]?.trim();
   if (voiceId) {
-    const { asegurarAgenteAlDia } = await import("./elevenlabsSetup");
-    const r = await asegurarAgenteAlDia(db, botId, apiKey, voiceId).catch(() => ({
+    const [{ asegurarAgenteAlDia }, { buildTools }] = await Promise.all([
+      import("./elevenlabsSetup"),
+      import("../../tools"),
+    ]);
+    // Las MISMAS tools del camino de texto. Solo se usan sus esquemas aquí —
+    // la ejecución vive en el puente, con el execute() de siempre.
+    const tools = buildTools({ env, botId, getConversationId: () => null });
+    const r = await asegurarAgenteAlDia(db, botId, apiKey, voiceId, tools).catch(() => ({
       actualizado: false,
       error: "no se pudo verificar",
     }));

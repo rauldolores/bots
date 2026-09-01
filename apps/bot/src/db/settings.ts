@@ -102,6 +102,8 @@ export const SETTING_KEYS = {
    * el dueño tenga que acordarse de volver a guardar la pantalla.
    */
   voiceElevenLabsConfigHash: "voice_elevenlabs_config_hash",
+  /** Mapa nombre→id de las herramientas registradas en ElevenLabs (JSON). Se actualizan, no se recrean. */
+  voiceElevenLabsToolIds: "voice_elevenlabs_tool_ids",
   /** Teléfonos (separados por comas) cuyas llamadas atiende ElevenLabs. Vacío = nadie. */
   voiceElevenLabsBetaCallers: "voice_elevenlabs_beta_callers",
   // Saludo con el que el bot contesta la llamada — antes quedaba a criterio

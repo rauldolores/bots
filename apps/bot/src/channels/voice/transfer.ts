@@ -140,3 +140,38 @@ export async function handleTransferStatusCallback(request: Request, rawEnv: Env
   // intento de transferencia fallido, solo sigue hablando con el agente.
   return buildStreamConnectResponse(rawEnv, authToken, { botId, callSid, from, to });
 }
+
+/**
+ * Mueve una llamada VIVA de la IA al número humano configurado.
+ *
+ * Vive aquí y no dentro de un puente porque los dos proveedores de voz la
+ * necesitan igual — y porque a mitad de una transferencia lo peor que puede
+ * pasar es que cada puente la resuelva un poco distinto.
+ *
+ * Nunca lanza. Si algo falla, la llamada NO se toca y el cliente sigue con la
+ * IA, que es el único desenlace aceptable: peor que no transferir es dejar a
+ * alguien colgado en el limbo.
+ *
+ * Quien llama debe esperar a que el agente TERMINE de decir "te comunico" —
+ * si no, la frase se corta a media palabra.
+ */
+export async function transferirLlamadaViva(
+  rawEnv: Env,
+  deps: { botId: string; callSid: string },
+): Promise<{ ok: boolean; motivo?: string }> {
+  try {
+    const env = await resolveChannelEnv(rawEnv, deps.botId, "voice");
+    const canal = await new BotChannelsRepo(new Db(env.DB)).getByBotAndChannel(deps.botId, "voice");
+    const destino = canal?.config.transferNumber;
+    const accountSid = env.TWILIO_ACCOUNT_SID;
+    const authToken = env.TWILIO_AUTH_TOKEN;
+    if (!destino || !accountSid || !authToken) return { ok: false, motivo: "not_configured" };
+
+    const base = (env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
+    const twiml = buildTransferTwiml(destino, `${base}/webhooks/voice/${deps.botId}/transfer-status`);
+    const r = await redirectLiveCall({ accountSid, authToken }, deps.callSid, twiml);
+    return r.ok ? { ok: true } : { ok: false, motivo: "twilio_api_error" };
+  } catch {
+    return { ok: false, motivo: "exception" };
+  }
+}

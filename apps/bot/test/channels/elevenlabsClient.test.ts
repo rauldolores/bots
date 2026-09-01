@@ -64,6 +64,7 @@ function manejadores() {
     onError: vi.fn(),
     onClose: vi.fn(),
     onEvento: vi.fn(),
+    onToolCall: vi.fn(),
   };
 }
 
@@ -119,6 +120,43 @@ describe("lo que llega del servidor", () => {
     ultimoSocket.recibir({ type: "ping", ping_event: { event_id: 77 } });
     const pong = ultimoSocket.enviados.map((e) => JSON.parse(e)).find((e) => e.type === "pong");
     expect(pong.event_id).toBe(77);
+  });
+
+  it("una llamada a herramienta llega con su id y sus parámetros", async () => {
+    const h = manejadores();
+    const c = new ElevenLabsClient("sk_x", "agente1", h);
+    await c.connect();
+
+    ultimoSocket.recibir({
+      type: "client_tool_call",
+      client_tool_call: {
+        tool_name: "scheduleAppointment",
+        tool_call_id: "call_1",
+        parameters: { fecha: "mañana 5pm" },
+      },
+    });
+    expect(h.onToolCall).toHaveBeenCalledWith({
+      toolCallId: "call_1",
+      nombre: "scheduleAppointment",
+      parametros: { fecha: "mañana 5pm" },
+    });
+  });
+
+  it("el resultado de una herramienta vuelve con su id, y un fallo va marcado como error", async () => {
+    // Sin is_error, el agente le confirmaría al cliente una cita que no se
+    // agendó — peor que decirle que falló.
+    const c = new ElevenLabsClient("sk_x", "agente1", manejadores());
+    await c.connect();
+
+    c.sendToolResult("call_1", { ok: true });
+    c.sendToolResult("call_2", { error: "timeout" }, true);
+
+    const enviados = ultimoSocket.enviados.map((e) => JSON.parse(e));
+    const bien = enviados.find((e) => e.tool_call_id === "call_1");
+    const mal = enviados.find((e) => e.tool_call_id === "call_2");
+    expect(bien.type).toBe("client_tool_result");
+    expect(bien.is_error).toBe(false);
+    expect(mal.is_error).toBe(true);
   });
 
   it("la transcripción del cliente y la respuesta del agente llegan a sus manejadores", async () => {

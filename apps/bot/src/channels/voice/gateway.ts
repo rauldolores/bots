@@ -212,7 +212,7 @@ async function handleMessage(ws: WebSocket, state: GatewayCallState, env: Env, r
         const callerId = state.from || msg.start.callSid;
         // Sale de /admin/config, no del entorno: quien instala esto no
         // configura servidores. null = esta llamada es de OpenAI.
-        const credsEleven = await credencialesElevenLabs(new Db(env.DB), state.botId, callerId).catch(() => null);
+        const credsEleven = await credencialesElevenLabs(new Db(env.DB), state.botId, callerId, env).catch(() => null);
         const deps = {
           env,
           botId: state.botId,

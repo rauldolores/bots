@@ -21,6 +21,9 @@ import { ConversationsRepo } from "../../db/conversations";
 import { MessagesRepo } from "../../db/messages";
 import { ElevenLabsClient } from "./elevenlabsClient";
 import { VOICE_CHANNEL } from "./session";
+import { BotChannelsRepo } from "../../db/botChannels";
+import { transferToHumanTool } from "./tools/transferToHuman";
+import { transferirLlamadaViva } from "./transfer";
 import { buildClearMessage, buildMediaMessage } from "./mediaStreamProtocol";
 import { bloqueLlamadaEnCurso, VOICE_BEHAVIOR_ADDENDUM } from "./voiceInstructions";
 import { resolveVoiceGreeting } from "./voiceGreeting";
@@ -28,8 +31,19 @@ import { resolveVoiceGreeting } from "./voiceGreeting";
 import { logVoiceEvent, maskId } from "./log";
 import { createCallMetrics, type CallMetrics } from "./metrics";
 import { recordCallEvent } from "./events";
-import { VoiceSessionsRepo } from "../../db/voiceSessions";
+import { estimateElevenLabsCost, estimateTelephonyCost, resolveTelephonyCostPerMinute } from "./callCost";
+import { VoiceSessionsRepo, type VoiceTranscriptTurn } from "../../db/voiceSessions";
+import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
 import type { CallBridge, CallBridgeDeps } from "./callBridge";
+
+/**
+ * Tope para una herramienta, igual que en el puente de OpenAI.
+ *
+ * Ojo con subirlo: allá 8 s resultaron cortos para captureLead y el modelo
+ * creyó que había fallado cuando sí había guardado (ver leads/postCaptura.ts,
+ * que sacó el CRM y el aviso fuera del camino crítico justo por eso).
+ */
+const TOOL_TIMEOUT_MS = 8_000;
 
 export class ElevenLabsCallBridge implements CallBridge {
   private client: ElevenLabsClient | null = null;
@@ -43,6 +57,13 @@ export class ElevenLabsCallBridge implements CallBridge {
   private audioDelClienteEnviado = false;
   /** Lo mismo, en la otra dirección: ¿ElevenLabs llegó a mandar audio? */
   private audioDelAgenteRecibido = false;
+  /** Las tools del Agent Core — las MISMAS del chat, con su execute() real. */
+  private tools: Record<string, any> = {};
+  /** Transferencia pedida y aún no hecha — espera a que el agente termine de avisarle al cliente. */
+  private transferenciaPendiente = false;
+  /** Transcripción de la llamada — solo si el dueño la habilitó; se escribe UNA vez, al cerrar. */
+  private transcripcion: VoiceTranscriptTurn[] = [];
+  private guardarTranscripcion = false;
   /** Última señal de vida de la llamada — la base del vigilante de silencio. */
   private ultimaActividad = Date.now();
   private vigilanteDeSilencio: ReturnType<typeof setInterval> | null = null;
@@ -80,6 +101,7 @@ export class ElevenLabsCallBridge implements CallBridge {
       onAgentResponse: (t) => void this.persistirTurno("assistant", t),
       onError: (e) => console.error("[voice-elevenlabs] error:", e),
       onEvento: (tipo, evento) => this.eventoDeElevenLabs(tipo, evento),
+      onToolCall: (llamada) => void this.ejecutarHerramienta(llamada),
       onClose: () => logVoiceEvent("elevenlabs_closed", { botId, callSid: maskId(this.deps.callSid) }),
     });
 
@@ -109,7 +131,29 @@ export class ElevenLabsCallBridge implements CallBridge {
     this.conversationId = conv.id;
     const conversationKey = conversationKeyOf(botId, VOICE_CHANNEL, callerId);
 
+    // Guardar la transcripción es decisión del dueño (datos de sus clientes),
+    // igual que en el puente de OpenAI. Sin habilitar, la llamada funciona
+    // idéntico y no se persiste el texto.
+    const ajustes = await new SettingsRepo(db, botId).all();
+    this.guardarTranscripcion = ajustes[SETTING_KEYS.voiceStoreTranscript] === "1";
+
     const ctx = await buildAgentContext({ env, botId, conversationId: conv.id, conversationKey });
+    // Se guardan para ejecutarlas cuando el agente las pida. Aquí SÍ vienen
+    // las de MCP (buildAgentContext las agrega), aunque al registrar el agente
+    // solo se declaren las estáticas.
+    this.tools = ctx.tools;
+
+    // transfer_to_human es SOLO de Voice — nunca pasa por buildTools (un chat
+    // de WhatsApp no tiene una llamada que transferir), y solo se ofrece si el
+    // dueño configuró un número destino: sin él, sería una herramienta que
+    // falla garantizado y el agente la ofrecería igual.
+    const canal = await new BotChannelsRepo(db).getByBotAndChannel(botId, VOICE_CHANNEL);
+    if (canal?.config.transferNumber) {
+      this.tools = {
+        ...this.tools,
+        transfer_to_human: transferToHumanTool(env, botId, () => this.conversationId),
+      };
+    }
     const prompt = [
       ctx.basePrompt,
       ...ctx.memoryBlocks,
@@ -139,6 +183,12 @@ export class ElevenLabsCallBridge implements CallBridge {
    * las dos direcciones es ruido y nada más va a funcionar.
    */
   private eventoDeElevenLabs(tipo: string, evento: unknown): void {
+    // El agente terminó de hablar: si había una transferencia esperando, este
+    // es el momento — ya dijo lo que tenía que decir.
+    if (tipo === "agent_response_complete" && this.transferenciaPendiente) {
+      this.transferenciaPendiente = false;
+      void this.hacerTransferencia();
+    }
     const esError = tipo.includes("error") || tipo === "guardrail_triggered";
     const base = { botId: this.deps.botId, callSid: maskId(this.deps.callSid), tipo };
     if (esError || tipo === "conversation_initiation_metadata") {
@@ -174,6 +224,71 @@ export class ElevenLabsCallBridge implements CallBridge {
       });
       void this.close("silencio_prolongado");
     }, cada);
+  }
+
+  /**
+   * Ejecuta una herramienta que pidió el agente y le devuelve el resultado.
+   *
+   * Es el MISMO `execute()` del AI SDK que usan el chat y el puente de OpenAI
+   * — no hay una segunda implementación de agendar o capturar leads. Una cita
+   * agendada por aquí escribe en las mismas tablas que una de WhatsApp.
+   *
+   * Nunca lanza: un fallo se le devuelve al agente como error para que se lo
+   * diga al cliente. Callarse el error haría que confirme una cita que no se
+   * agendó, y eso es peor que admitir que falló.
+   */
+  private async ejecutarHerramienta(llamada: {
+    toolCallId: string;
+    nombre: string;
+    parametros: unknown;
+  }): Promise<void> {
+    const { nombre, toolCallId, parametros } = llamada;
+    logVoiceEvent("elevenlabs_tool_call", {
+      botId: this.deps.botId,
+      callSid: maskId(this.deps.callSid),
+      tool: nombre,
+    });
+
+    const def = this.tools[nombre];
+    if (!def?.execute) {
+      logVoiceEvent("elevenlabs_tool_missing", { botId: this.deps.botId, tool: nombre });
+      this.client?.sendToolResult(toolCallId, { error: "tool_not_available" }, true);
+      return;
+    }
+
+    // El mismo tope que el puente de OpenAI: una herramienta lenta no puede
+    // dejar al cliente esperando en silencio indefinidamente.
+    try {
+      const resultado = await Promise.race([
+        def.execute(parametros, {} as any),
+        new Promise((_r, reject) => setTimeout(() => reject(new Error("tool_timeout")), TOOL_TIMEOUT_MS)),
+      ]);
+      void recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.tool_called", {
+        tool: nombre,
+        kind: nombre === "searchKb" ? "rag" : nombre.startsWith("mcp_") ? "mcp" : "other",
+        ok: true,
+      });
+
+      // La transferencia NO se ejecuta aquí: primero el agente tiene que
+      // terminar de decirle al cliente "te comunico con alguien". Cortarle la
+      // llamada a media frase es peor que no transferir — el cliente se queda
+      // sin entender qué pasó. Se ejecuta al cerrar la respuesta.
+      if (nombre === "transfer_to_human" && !(resultado as { error?: string } | null)?.error) {
+        this.transferenciaPendiente = true;
+      }
+
+      this.client?.sendToolResult(toolCallId, resultado);
+    } catch (e) {
+      const porTiempo = e instanceof Error && e.message === "tool_timeout";
+      logVoiceEvent(porTiempo ? "elevenlabs_tool_timeout" : "elevenlabs_tool_failed", {
+        botId: this.deps.botId,
+        tool: nombre,
+      });
+      if (!porTiempo) console.error(`[voice-elevenlabs] tool "${nombre}" falló:`, e);
+      // Motivo corto, nunca el stack: el agente lo lee para decirle algo
+      // razonable al cliente, no para recitárselo.
+      this.client?.sendToolResult(toolCallId, { error: porTiempo ? "timeout" : "tool_execution_failed" }, true);
+    }
   }
 
   private audioHaciaTwilio(audioBase64: string): void {
@@ -227,6 +342,7 @@ export class ElevenLabsCallBridge implements CallBridge {
   private async persistirTurno(role: "user" | "assistant", text: string): Promise<void> {
     if (role === "user") this.finDeTurnoDelCliente = Date.now();
     if (!this.conversationId || !text.trim()) return;
+    if (this.guardarTranscripcion) this.transcripcion.push({ role, text, at: Date.now() });
     await new MessagesRepo(this.db(), this.deps.botId)
       .append(this.conversationId, role, text)
       .catch((e) => console.error("[voice-elevenlabs] no se pudo persistir el turno:", e));
@@ -262,8 +378,67 @@ export class ElevenLabsCallBridge implements CallBridge {
       reason,
       proveedor: "elevenlabs",
     });
+    // El costo, con la misma precisión que el otro puente — es lo único que
+    // permite comparar los dos proveedores en /admin. ElevenLabs cobra POR
+    // MINUTO y no por tokens, así que se estima con duración × tarifa: aquí el
+    // prompt largo, que en Realtime era el costo dominante, no cuesta nada.
+    await this.registrarCostos().catch((e) =>
+      console.error("[voice-elevenlabs] no se pudo estimar el costo:", e),
+    );
+
     await this.deps.voiceSession.end("completed", reason).catch((e: unknown) =>
       console.error("[voice-elevenlabs] no se pudo cerrar la sesión:", e),
     );
+  }
+
+  /**
+   * Mueve la llamada al número humano. Si falla, la llamada NO se toca y el
+   * cliente sigue con la IA — nunca se le deja colgado en el limbo.
+   */
+  private async hacerTransferencia(): Promise<void> {
+    const base = { botId: this.deps.botId, callSid: maskId(this.deps.callSid) };
+    const r = await transferirLlamadaViva(this.deps.env, {
+      botId: this.deps.botId,
+      callSid: this.deps.callSid,
+    });
+    const repo = new VoiceSessionsRepo(this.db(), this.deps.botId);
+    if (!r.ok) {
+      logVoiceEvent("transfer_failed", { ...base, reason: r.motivo });
+      await repo.setTransferStatus(this.callRowId, "failed").catch(() => {});
+      await recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.transferred", {
+        phase: "failed",
+        reason: r.motivo,
+      }).catch(() => {});
+      return;
+    }
+    logVoiceEvent("transfer_started", base);
+    await repo.setTransferStatus(this.callRowId, "started").catch(() => {});
+    await recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.transferred", {
+      phase: "started",
+    }).catch(() => {});
+    // Twilio ya movió la llamada: este lado se cierra para no seguir
+    // procesando (y cobrando) una llamada que ya no está con nosotros.
+    void this.close("transferred");
+  }
+
+  private async registrarCostos(): Promise<void> {
+    if (!this.callRowId) return;
+    const db = this.db();
+    const repo = new VoiceSessionsRepo(db, this.deps.botId);
+    const [row, tarifaTelefonia] = await Promise.all([
+      repo.getById(this.callRowId),
+      resolveTelephonyCostPerMinute(db, this.deps.botId),
+    ]);
+    const durationMs = row ? Date.now() - row.started_at : 0;
+    await repo.finalize(this.callRowId, {
+      durationMs,
+      estimatedAiCostUsd: estimateElevenLabsCost(durationMs),
+      estimatedTelephonyCostUsd: estimateTelephonyCost(durationMs, tarifaTelefonia),
+    });
+    if (this.guardarTranscripcion && this.transcripcion.length > 0) {
+      await repo.setTranscript(this.callRowId, this.transcripcion).catch((e) =>
+        console.error("[voice-elevenlabs] no se pudo guardar la transcripción:", e),
+      );
+    }
   }
 }

@@ -16,6 +16,8 @@ const SIGNED_URL_ENDPOINT = "https://api.elevenlabs.io/v1/convai/conversation/ge
 export interface ElevenLabsHandlers {
   /** Todo lo que llega y no se maneja arriba — para no diagnosticar a ciegas. */
   onEvento: (tipo: string, evento: unknown) => void;
+  /** El agente quiere usar una herramienta. La ejecuta el puente, no este cliente. */
+  onToolCall: (llamada: { toolCallId: string; nombre: string; parametros: unknown }) => void;
   /** Audio del agente, base64 μ-law 8k — se reenvía a Twilio tal cual. */
   onAudio: (audioBase64: string) => void;
   /** El agente fue interrumpido: hay que vaciar lo que Twilio tenga en cola. */
@@ -122,6 +124,15 @@ export class ElevenLabsClient {
           this.handlers.onAgentResponse(evt.agent_response_event.agent_response);
         }
         return;
+      case "client_tool_call": {
+        const c = evt.client_tool_call ?? {};
+        this.handlers.onToolCall({
+          toolCallId: String(c.tool_call_id ?? ""),
+          nombre: String(c.tool_name ?? ""),
+          parametros: c.parameters ?? {},
+        });
+        return;
+      }
       case "ping":
         // Sin el pong, ElevenLabs cierra la conexión por inactividad a media
         // llamada. El event_id tiene que ir de vuelta tal cual.
@@ -137,6 +148,22 @@ export class ElevenLabsClient {
         this.handlers.onEvento(String(evt.type ?? "sin_tipo"), evt);
         return;
     }
+  }
+
+  /**
+   * El resultado de una herramienta, de vuelta al agente.
+   *
+   * `is_error` importa: con él, el agente le dice al cliente que algo no se
+   * pudo. Sin él, se inventaría que sí — y confirmarle a alguien una cita que
+   * no se agendó es peor que decirle que falló.
+   */
+  sendToolResult(toolCallId: string, resultado: unknown, esError = false): void {
+    this.send({
+      type: "client_tool_result",
+      tool_call_id: toolCallId,
+      result: typeof resultado === "string" ? resultado : JSON.stringify(resultado ?? {}),
+      is_error: esError,
+    });
   }
 
   /** Audio del cliente hacia el agente — base64 μ-law 8k, tal como llega de Twilio. */

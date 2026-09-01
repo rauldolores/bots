@@ -34,6 +34,23 @@ export function estimateTelephonyCost(durationMs: number, ratePerMinuteUsd: numb
   return Math.round(minutes * ratePerMinuteUsd * 10_000) / 10_000;
 }
 
+/**
+ * USD/minuto de ElevenLabs Agents (su tarifa de plataforma; el LLM va aparte).
+ *
+ * A diferencia de OpenAI Realtime, aquí NO hay tokens que contar: cobran por
+ * minuto de sesión, sin importar cuánto se hable. Por eso el costo de una
+ * llamada de ElevenLabs se estima con duración × tarifa, igual que la
+ * telefonía — y por eso el prompt, que en Realtime era el costo dominante,
+ * aquí deja de importar.
+ */
+export const ELEVENLABS_COST_PER_MINUTE_USD = 0.08;
+
+/** Costo estimado de una llamada atendida por ElevenLabs — duración × tarifa. */
+export function estimateElevenLabsCost(durationMs: number): number {
+  const minutos = Math.max(0, durationMs) / 60_000;
+  return Math.round(minutos * ELEVENLABS_COST_PER_MINUTE_USD * 10_000) / 10_000;
+}
+
 /** Costo de IA estimado a partir del uso REAL de tokens de Realtime acumulado durante la llamada — mismo costOfUsage() que texto. */
 export function estimateAiCost(model: string, usage: Usage): number {
   return Math.round(costOfUsage(model, usage) * 10_000) / 10_000;
