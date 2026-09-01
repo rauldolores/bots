@@ -43,7 +43,30 @@ beforeEach(() => {
   peticiones = [];
 });
 
+/** Una tool con un campo SIN describir — como captureLead.notes en el repo real. */
+function toolConCampoSinDescribir() {
+  return {
+    description: "Captura un lead",
+    inputSchema: z.object({ nombre: z.string().describe("Su nombre"), notes: z.string() }),
+    execute: async () => ({ ok: true }),
+  };
+}
+
 describe("registrar herramientas en ElevenLabs", () => {
+  it("le pone descripción a los parámetros que no la traen", async () => {
+    // Falla real: ElevenLabs EXIGE descripción en cada parámetro. Sin ella
+    // responde 422 y rechaza la herramienta entera — por un solo campo se
+    // caían las ocho y el agente se quedaba sin nada, confirmando citas que
+    // no podía agendar.
+    global.fetch = fetchQueRegistra(() => Response.json({ id: "tool_abc" }));
+    await registrarHerramientas(LLAVE, { captureLead: toolConCampoSinDescribir() }, {});
+
+    const props = peticiones[0].cuerpo.tool_config.parameters.properties;
+    expect(props.notes.description).toBeTruthy();
+    // La que SÍ tenía descripción propia la conserva — no se pisa.
+    expect(props.nombre.description).toBe("Su nombre");
+  });
+
   it("crea las que no existían y devuelve sus ids", async () => {
     global.fetch = fetchQueRegistra(() => Response.json({ id: "tool_abc" }));
 

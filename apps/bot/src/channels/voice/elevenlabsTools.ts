@@ -54,7 +54,17 @@ function limpiarEsquema(nodo: unknown): unknown {
     if (clave === "properties" && entrada.properties && typeof entrada.properties === "object") {
       const props: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(entrada.properties as Record<string, unknown>)) {
-        props[k] = limpiarEsquema(v);
+        const limpia = limpiarEsquema(v) as Record<string, unknown>;
+        // ElevenLabs EXIGE descripción en cada parámetro: sin ella responde
+        // "Must set one of: description, dynamic_variable, is_system_provided,
+        // constant_value, or is_omitted" y rechaza la herramienta ENTERA.
+        // Varias tools tienen campos sin describir (notes, query…) porque para
+        // los otros proveedores el nombre bastaba — y por uno solo se caían
+        // las ocho, dejando al agente sin nada con qué trabajar.
+        if (limpia && typeof limpia === "object" && !limpia.description) {
+          limpia.description = k;
+        }
+        props[k] = limpia;
       }
       salida.properties = props;
     } else if (clave === "items") {

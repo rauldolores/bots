@@ -112,6 +112,13 @@ export class ElevenLabsCallBridge implements CallBridge {
       callSid: maskId(this.deps.callSid),
       saludo: (ctx.saludo ?? "").slice(0, 80),
       promptChars: ctx.prompt.length,
+      // El tamaño solo dice que ALGO se mandó. Estas dos banderas dicen QUÉ:
+      // el dueño notó que el bot nunca pide la empresa aunque su playbook lo
+      // exige, y "el prompt mide 26 mil caracteres" no distingue entre un
+      // playbook que no se inyectó y un modelo que lo ignoró.
+      llevaPlaybook: ctx.prompt.includes("PLAYBOOK"),
+      pideEmpresa: ctx.prompt.includes("empresa nos contacta"),
+      herramientas: Object.keys(this.tools).length,
     });
     await this.client.connect({ prompt: ctx.prompt, firstMessage: ctx.saludo });
     this.callRowId = this.deps.voiceSession.getContext().callId;
