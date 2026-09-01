@@ -23,12 +23,50 @@ interface ToolConfig {
   type: "client";
   name: string;
   description: string;
-  /** Si es false, el agente sigue hablando sin esperar el resultado. */
-  expects_response: boolean;
   parameters: unknown;
 }
 
 const ESQUEMA_VACIO = { type: "object", properties: {} };
+
+/** Lo único que ElevenLabs acepta dentro de una propiedad del esquema. */
+const CAMPOS_DE_PROPIEDAD = ["type", "description", "enum", "items", "properties", "required"];
+
+/**
+ * Deja el JSON Schema con SOLO lo que ElevenLabs entiende.
+ *
+ * El que produce el AI SDK trae además `$schema` y `additionalProperties` —
+ * legales en JSON Schema, pero su validador los rechaza y devuelve 422 sin
+ * decir cuál campo le molestó. Se probó en producción: TODAS las herramientas
+ * fallaron con 422 y el agente se quedó sin ninguna, así que confirmó una cita
+ * que no podía agendar.
+ *
+ * Va recursivo porque un parámetro puede ser un objeto o un arreglo de
+ * objetos, y ahí adentro vuelve a aparecer la misma basura.
+ */
+function limpiarEsquema(nodo: unknown): unknown {
+  if (Array.isArray(nodo)) return nodo.map(limpiarEsquema);
+  if (!nodo || typeof nodo !== "object") return nodo;
+
+  const entrada = nodo as Record<string, unknown>;
+  const salida: Record<string, unknown> = {};
+  for (const clave of CAMPOS_DE_PROPIEDAD) {
+    if (!(clave in entrada)) continue;
+    if (clave === "properties" && entrada.properties && typeof entrada.properties === "object") {
+      const props: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(entrada.properties as Record<string, unknown>)) {
+        props[k] = limpiarEsquema(v);
+      }
+      salida.properties = props;
+    } else if (clave === "items") {
+      salida.items = limpiarEsquema(entrada.items);
+    } else {
+      salida[clave] = entrada[clave];
+    }
+  }
+  // Sin `type`, ElevenLabs no sabe qué es — el default razonable es objeto.
+  if (!salida.type && salida.properties) salida.type = "object";
+  return salida;
+}
 
 /** Convierte una tool del Agent Core al formato que espera ElevenLabs. */
 async function aToolConfig(nombre: string, def: any): Promise<ToolConfig | null> {
@@ -47,11 +85,7 @@ async function aToolConfig(nombre: string, def: any): Promise<ToolConfig | null>
     type: "client",
     name: nombre,
     description: String(def?.description ?? ""),
-    // true SIEMPRE: el agente tiene que esperar el resultado para poder
-    // contárselo al cliente. Sin esto diría "ya te agendé" antes de saber si
-    // se agendó — exactamente la clase de mentira que este proyecto evita.
-    expects_response: true,
-    parameters,
+    parameters: limpiarEsquema(parameters),
   };
 }
 
@@ -97,9 +131,15 @@ export async function registrarHerramientas(
           continue;
         }
       }
+      // El CUERPO del error, no solo el código: un 422 sin detalle no dice
+      // qué campo le molestó, y eso costó una llamada real en la que el
+      // agente se quedó sin ninguna herramienta.
+      const detalle = await res.text().catch(() => "");
+      console.error(
+        `[voice-elevenlabs] no se registró la tool "${nombre}": ${res.status} ${detalle.slice(0, 300)}`,
+      );
       // Una herramienta que no se pudo registrar NO tumba a las demás: es
       // mejor un agente con cinco herramientas que uno con ninguna.
-      console.error(`[voice-elevenlabs] no se registró la tool "${nombre}": ${res.status}`);
       continue;
     }
 

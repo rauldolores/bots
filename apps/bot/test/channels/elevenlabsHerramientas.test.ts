@@ -53,9 +53,24 @@ describe("registrar herramientas en ElevenLabs", () => {
     const creada = peticiones.find((p) => p.metodo === "POST");
     expect(creada!.cuerpo.tool_config.name).toBe("scheduleAppointment");
     expect(creada!.cuerpo.tool_config.type).toBe("client");
-    // Sin esperar el resultado, el agente diría "ya te agendé" antes de saber
-    // si se agendó.
-    expect(creada!.cuerpo.tool_config.expects_response).toBe(true);
+  });
+
+  it("manda SOLO los campos que ElevenLabs entiende — nada de $schema", async () => {
+    // Falla real: el esquema del AI SDK trae "$schema" y
+    // "additionalProperties", legales en JSON Schema pero que su validador
+    // rechaza con 422 sin decir cuál. TODAS las herramientas fallaron y el
+    // agente se quedó sin ninguna — por eso confirmó una cita que no podía
+    // agendar.
+    global.fetch = fetchQueRegistra(() => Response.json({ id: "tool_abc" }));
+    await registrarHerramientas(LLAVE, { scheduleAppointment: toolFalsa("Agenda") }, {});
+
+    const config = peticiones[0].cuerpo.tool_config;
+    expect(config.parameters).not.toHaveProperty("$schema");
+    expect(config.parameters).not.toHaveProperty("additionalProperties");
+    // Y lo que SÍ importa sigue ahí — limpiar de más sería igual de inútil.
+    expect(config.parameters.type).toBe("object");
+    expect(config.parameters.properties.fecha.description).toBe("Cuándo");
+    expect(config.parameters.required).toEqual(["fecha"]);
   });
 
   it("manda el esquema de parámetros, no solo el nombre", async () => {
