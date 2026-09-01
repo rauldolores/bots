@@ -11,7 +11,6 @@ import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { FakeRealtimeServer } from "../helpers/fakeRealtimeServer";
 import { Db } from "../../src/db/client";
 import { SettingsRepo } from "../../src/db/settings";
-import { BotConnectorsRepo } from "../../src/db/botConnectors";
 import { VoiceSession } from "../../src/channels/voice/session";
 import { RealtimeCallBridge } from "../../src/channels/voice/realtimeBridge";
 
@@ -260,22 +259,15 @@ describe("Voice — interrupciones y conversación humana (F7 fase 6)", () => {
   });
 
   it("9) el cliente interrumpe MIENTRAS una tool sigue en vuelo: cuando la tool responde, no pide una respuesta para un turno que el cliente ya dejó atrás", async () => {
-    await new BotConnectorsRepo(db).upsert({
-      botId: TEST_BOT_ID,
-      category: "mcp",
-      provider: "lenta",
-      name: "Lenta",
-      config: { url: "https://mcp.lenta.example.com/mcp" },
-    });
-    createMCPClientMock.mockResolvedValue({
-      tools: async () => ({
-        buscar: {
-          description: "Tarda un poco en contestar",
-          execute: vi.fn(() => new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 300))),
-        },
-      }),
-    });
     const { bridge, ws } = await startBridge("+5215500000106");
+    // Una tool que tarda y NO es MCP: las tools MCP se delegan y ya no se quedan
+    // "en vuelo" desde la perspectiva del puente (ver F-compañero,
+    // realtimeBridge.ts) — para probar de verdad la carrera con una tool que
+    // SIGUE bloqueando el turno, se inyecta una directo en el registro.
+    (bridge as any).tools = {
+      ...(bridge as any).tools,
+      lenta_buscar: { execute: vi.fn(() => new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 300))) },
+    };
     // El bot saluda primero al conectar (ver realtimeBridge.ts) — ese
     // response.create llega async (frame de WS aparte), así que se espera
     // explícitamente antes de tomar la foto base.
@@ -286,7 +278,7 @@ describe("Voice — interrupciones y conversación humana (F7 fase 6)", () => {
 
     const pending = (bridge as any).handleFunctionCall({
       callId: "call_epoch",
-      name: "mcp_lenta_buscar",
+      name: "lenta_buscar",
       argumentsJson: "{}",
     });
     // El cliente interrumpe MIENTRAS la tool sigue ejecutándose (300ms) —
@@ -316,22 +308,13 @@ describe("Voice — interrupciones y conversación humana (F7 fase 6)", () => {
     // quedaba en silencio indefinido. Ahora el guard usa
     // metrics.interruptionCount (solo sube en una interrupción REAL, ver
     // handleSpeechStarted) en vez de un contador que sube con cualquier ruido.
-    await new BotConnectorsRepo(db).upsert({
-      botId: TEST_BOT_ID,
-      category: "mcp",
-      provider: "lenta2",
-      name: "Lenta2",
-      config: { url: "https://mcp.lenta2.example.com/mcp" },
-    });
-    createMCPClientMock.mockResolvedValue({
-      tools: async () => ({
-        guardar: {
-          description: "Tarda un poco en contestar",
-          execute: vi.fn(() => new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 200))),
-        },
-      }),
-    });
     const { bridge, ws } = await startBridge("+5215500000107");
+    // Igual que en el test anterior: una tool MCP ya no se queda "en vuelo" (se
+    // delega, F-compañero) — se inyecta una tool lenta que sí sigue bloqueando.
+    (bridge as any).tools = {
+      ...(bridge as any).tools,
+      lenta2_guardar: { execute: vi.fn(() => new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 200))) },
+    };
     await fakeRealtime.waitForMessageType(ws, "response.create");
     const baselineResponseCreates = fakeRealtime.messagesFrom(ws).filter((m) => m.type === "response.create").length;
 
@@ -350,7 +333,7 @@ describe("Voice — interrupciones y conversación humana (F7 fase 6)", () => {
 
     const pending = (bridge as any).handleFunctionCall({
       callId: "call_noise",
-      name: "mcp_lenta2_guardar",
+      name: "lenta2_guardar",
       argumentsJson: "{}",
     });
 

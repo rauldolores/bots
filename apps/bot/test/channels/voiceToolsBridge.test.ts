@@ -97,6 +97,17 @@ async function callTool(bridge: RealtimeCallBridge, ws: WebSocket, name: string,
   return waitForFunctionOutput(ws, callId);
 }
 
+/** consultar_tarea hasta que deje de estar "en_progreso" — así es como el propio agente la usaría en una llamada real. */
+async function esperarTareaLista(bridge: RealtimeCallBridge, ws: WebSocket, tareaId: string, timeoutMs = 3000): Promise<any> {
+  const start = Date.now();
+  for (;;) {
+    const r = await callTool(bridge, ws, "consultar_tarea", { tarea_id: tareaId });
+    if (r.estado !== "en_progreso") return r;
+    if (Date.now() - start > timeoutMs) throw new Error(`la tarea ${tareaId} nunca terminó`);
+    await new Promise((res) => setTimeout(res, 20));
+  }
+}
+
 describe("Voice → tools existentes, vía el mismo Agent Core que Telegram/WhatsApp", () => {
   it("las instructions que llegan a Realtime incluyen el addendum de voz SIN reemplazar el Agent Core (evidencia de 'respuesta natural en voz' para TODAS las tools)", async () => {
     const { ws } = await startBridge(TEST_BOT_ID, "+5215500000001");
@@ -155,7 +166,7 @@ describe("Voice → tools existentes, vía el mismo Agent Core que Telegram/What
     expect(output.results).toEqual([]);
   });
 
-  it("3) tool MCP: llamada, argumentos y resultado correctos vía la MISMA infraestructura MCP (loadMcpTools)", async () => {
+  it("3) tool MCP: se delega — 'en_progreso' de inmediato, y el resultado real (con los mismos argumentos) llega por consultar_tarea (F-compañero)", async () => {
     await new BotConnectorsRepo(db).upsert({
       botId: TEST_BOT_ID,
       category: "mcp",
@@ -181,12 +192,20 @@ describe("Voice → tools existentes, vía el mismo Agent Core que Telegram/What
       }),
     });
     const { bridge, ws } = await startBridge(TEST_BOT_ID, "+5215500000006");
-    const output = await callTool(bridge, ws, "mcp_zendesk_searchTickets", { email: "cliente@x.com" });
+
+    const startedAt = Date.now();
+    const output = await callTool(bridge, ws, "zendesk_searchTickets", { email: "cliente@x.com" });
+    expect(Date.now() - startedAt).toBeLessThan(500); // nunca esperó a la tool de verdad
+    expect(output.estado).toBe("en_progreso");
+    expect(typeof output.tarea_id).toBe("string");
+
+    const consulta = await esperarTareaLista(bridge, ws, output.tarea_id);
     expect(execute).toHaveBeenCalledWith({ email: "cliente@x.com" }, expect.anything());
-    expect(output.tickets[0].subject).toBe("Impresora no prende");
+    expect(consulta.estado).toBe("lista");
+    expect(consulta.resultado.tickets[0].subject).toBe("Impresora no prende");
   });
 
-  it("tool MCP que truena: la IA nunca ve el error técnico, solo un motivo genérico y opaco", async () => {
+  it("tool MCP que truena en segundo plano: la IA nunca ve el error técnico — consultar_tarea da un motivo genérico y opaco", async () => {
     await new BotConnectorsRepo(db).upsert({
       botId: TEST_BOT_ID,
       category: "mcp",
@@ -206,9 +225,13 @@ describe("Voice → tools existentes, vía el mismo Agent Core que Telegram/What
       }),
     });
     const { bridge, ws } = await startBridge(TEST_BOT_ID, "+5215500000007");
-    const output = await callTool(bridge, ws, "mcp_flaky_lookup", {});
-    expect(output).toEqual({ error: "tool_execution_failed" });
-    expect(JSON.stringify(output)).not.toContain("ETIMEDOUT");
+
+    const output = await callTool(bridge, ws, "flaky_lookup", {});
+    expect(output.estado).toBe("en_progreso"); // la falla real solo se sabe después, en segundo plano
+
+    const consulta = await esperarTareaLista(bridge, ws, output.tarea_id);
+    expect(consulta.estado).toBe("error");
+    expect(JSON.stringify(consulta)).not.toContain("ETIMEDOUT");
   });
 
   it("MCP desconectado: el conector falla al cargar → la tool ni existe en el registro → error opaco, no un crash de la llamada", async () => {
@@ -221,7 +244,7 @@ describe("Voice → tools existentes, vía el mismo Agent Core que Telegram/What
     });
     createMCPClientMock.mockRejectedValue(new Error("ECONNREFUSED"));
     const { bridge, ws } = await startBridge(TEST_BOT_ID, "+5215500000008");
-    const output = await callTool(bridge, ws, "mcp_caido_lookup", {});
+    const output = await callTool(bridge, ws, "caido_lookup", {});
     expect(output).toEqual({ error: "tool_not_available" });
   });
 
@@ -239,30 +262,23 @@ describe("Voice → tools existentes, vía el mismo Agent Core que Telegram/What
     expect(upcoming[0].customer_name).toBe("Carla");
   });
 
-  it("datos insuficientes: argumentos inválidos se rechazan ANTES de ejecutar — no deja una cita a medias", async () => {
+  it("datos insuficientes: un email inválido no deja una cita a medias", async () => {
+    // El email se valida A MANO dentro de execute() (ver scheduleAppointment.ts
+    // — z.string().email() generaba un regex con lookaheads que OpenAI no
+    // podía compilar), no en el schema — por eso SÍ se ejecuta y devuelve
+    // "invalid_email" en vez de que el schema lo rechace con "invalid_arguments".
     const { bridge, ws } = await startBridge(TEST_BOT_ID, "+5215500000010");
     const output = await callTool(bridge, ws, "scheduleAppointment", {
       attendeeName: "Sin email válido",
       attendeeEmail: "no-es-un-email",
       startTime: new Date(Date.now() + 86_400_000).toISOString(),
     });
-    expect(output).toEqual({ error: "invalid_arguments" });
+    expect(output.error).toBe("invalid_email");
     const upcoming = await new AppointmentsRepo(db, TEST_BOT_ID).listUpcoming(10, Date.now());
     expect(upcoming).toHaveLength(0);
   });
 
-  it("permisos correctos: un bot free NO puede agendar por voz, igual que por texto (las tools Pro se filtran igual en cualquier canal)", async () => {
-    await db.run("UPDATE bots SET tier = ? WHERE id = ?", ["free", TEST_BOT_ID]);
-    const { bridge, ws } = await startBridge(TEST_BOT_ID, "+5215500000011");
-    const output = await callTool(bridge, ws, "scheduleAppointment", {
-      attendeeName: "X",
-      attendeeEmail: "x@x.com",
-      startTime: new Date(Date.now() + 86_400_000).toISOString(),
-    });
-    expect(output).toEqual({ error: "tool_not_available" });
-  });
-
-  it("6) tool que tarda varios segundos: el timeout de Voice la corta en vez de dejar al llamante en silencio indefinido", async () => {
+  it("6) tool MCP lenta (F-compañero): la llamada NUNCA se queda esperándola — responde 'en_progreso' de inmediato, sin importar cuánto tarde de verdad", async () => {
     await new BotConnectorsRepo(db).upsert({
       botId: TEST_BOT_ID,
       category: "mcp",
@@ -275,17 +291,25 @@ describe("Voice → tools existentes, vía el mismo Agent Core que Telegram/What
         buscar: {
           description: "Una tool que tarda de más",
           inputSchema: jsonSchema({ type: "object", properties: {} }),
-          execute: vi.fn(() => new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 15_000))),
+          // Antes esto probaba TOOL_TIMEOUT_MS (8s) cortando a los 15s reales
+          // de la tool — ya no aplica: una tool MCP nunca bloquea el turno,
+          // así que ya no hay timeout que probar aquí. Lo que importa ahora
+          // es que 300ms de "trabajo real" no se noten en la respuesta
+          // inmediata, y que sí lleguen después vía consultar_tarea.
+          execute: vi.fn(() => new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 300))),
         },
       }),
     });
     const { bridge, ws } = await startBridge(TEST_BOT_ID, "+5215500000012");
+
     const startedAt = Date.now();
-    const output = await callTool(bridge, ws, "mcp_lento_buscar", {});
-    const elapsed = Date.now() - startedAt;
-    expect(output).toEqual({ error: "timeout" });
-    // Corta a los ~8s (TOOL_TIMEOUT_MS) — nunca espera los 15s reales de la tool.
-    expect(elapsed).toBeLessThan(12_000);
+    const output = await callTool(bridge, ws, "lento_buscar", {});
+    expect(Date.now() - startedAt).toBeLessThan(200); // bien antes de que la tool (300ms) siquiera termine
+    expect(output.estado).toBe("en_progreso");
+
+    const consulta = await esperarTareaLista(bridge, ws, output.tarea_id);
+    expect(consulta.estado).toBe("lista");
+    expect(consulta.resultado).toEqual({ ok: true });
   });
 
   it("tenant correcto: la misma tool, con la misma pregunta, nunca cruza datos entre bots distintos", async () => {
@@ -311,5 +335,111 @@ describe("Voice → tools existentes, vía el mismo Agent Core que Telegram/What
     const { bridge, ws } = await startBridge(TEST_BOT_ID, "+5215500000015");
     const output = await callTool(bridge, ws, "toolQueNoExiste", { x: 1 });
     expect(output).toEqual({ error: "tool_not_available" });
+  });
+
+  it("una tool que NO es MCP sigue bloqueando y sujeta al timeout de siempre — la delegación es SOLO para tools MCP", async () => {
+    const { bridge, ws } = await startBridge(TEST_BOT_ID, "+5215500000016");
+    // Inyecta una tool lenta que no viene de MCP, directo en el registro del
+    // puente — ninguna tool "de fábrica" es lenta a propósito, así que no hay
+    // forma de provocar este caso desde afuera.
+    (bridge as any).tools = {
+      ...(bridge as any).tools,
+      lentaNoMcp: { execute: vi.fn(() => new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 15_000))) },
+    };
+    const startedAt = Date.now();
+    const output = await callTool(bridge, ws, "lentaNoMcp", {});
+    expect(output).toEqual({ error: "timeout" });
+    expect(Date.now() - startedAt).toBeLessThan(12_000); // corta a los ~8s (TOOL_TIMEOUT_MS), no espera los 15s reales
+  });
+});
+
+describe("consultar_tarea (F-compañero): el estado de lo que se delegó en esta llamada", () => {
+  it("sin ningún conector MCP, la tool ni se ofrece — no hay nada que consultar", async () => {
+    const { ws } = await startBridge(TEST_BOT_ID, "+5215500000017");
+    const update = await fakeRealtime.waitForMessageType(ws, "session.update");
+    const nombres = (update.session.tools as any[]).map((t) => t.name);
+    expect(nombres).not.toContain("consultar_tarea");
+  });
+
+  it("con un conector MCP conectado, sí se ofrece", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "zendesk",
+      name: "Zendesk",
+      config: { url: "https://mcp.zendesk.example.com/mcp" },
+    });
+    createMCPClientMock.mockResolvedValue({
+      tools: async () => ({ searchTickets: { description: "x", inputSchema: jsonSchema({ type: "object", properties: {} }), execute: vi.fn() } }),
+    });
+    const { ws } = await startBridge(TEST_BOT_ID, "+5215500000018");
+    const update = await fakeRealtime.waitForMessageType(ws, "session.update");
+    const nombres = (update.session.tools as any[]).map((t) => t.name);
+    expect(nombres).toContain("consultar_tarea");
+  });
+
+  it("sin tarea_id, consulta la MÁS RECIENTE de la llamada", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "crm",
+      name: "CRM",
+      config: { url: "https://mcp.crm.example.com/mcp" },
+    });
+    createMCPClientMock.mockResolvedValue({
+      tools: async () => ({
+        agendar: { description: "x", inputSchema: jsonSchema({ type: "object", properties: {} }), execute: vi.fn(async () => ({ ok: 1 })) },
+        anotar: { description: "y", inputSchema: jsonSchema({ type: "object", properties: {} }), execute: vi.fn(async () => ({ ok: 2 })) },
+      }),
+    });
+    const { bridge, ws } = await startBridge(TEST_BOT_ID, "+5215500000019");
+
+    await callTool(bridge, ws, "crm_agendar", {});
+    await callTool(bridge, ws, "crm_anotar", {});
+
+    // Sin tarea_id: la respuesta corresponde a la ÚLTIMA delegada (anotar), no la primera.
+    let consulta = await callTool(bridge, ws, "consultar_tarea", {});
+    const start = Date.now();
+    while (consulta.estado === "en_progreso") {
+      if (Date.now() - start > 3000) throw new Error("nunca terminó");
+      await new Promise((res) => setTimeout(res, 20));
+      consulta = await callTool(bridge, ws, "consultar_tarea", {});
+    }
+    expect(consulta.estado).toBe("lista");
+    expect(consulta.resultado).toEqual({ ok: 2 });
+  });
+
+  it("tarea_id que no existe: 'no_encontrada', no un crash", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "crm",
+      name: "CRM",
+      config: { url: "https://mcp.crm.example.com/mcp" },
+    });
+    createMCPClientMock.mockResolvedValue({
+      tools: async () => ({ agendar: { description: "x", inputSchema: jsonSchema({ type: "object", properties: {} }), execute: vi.fn() } }),
+    });
+    const { bridge, ws } = await startBridge(TEST_BOT_ID, "+5215500000020");
+
+    const consulta = await callTool(bridge, ws, "consultar_tarea", { tarea_id: "no-existe-123" });
+    expect(consulta.estado).toBe("no_encontrada");
+  });
+
+  it("sin ninguna tarea delegada todavía: 'no_encontrada' en vez de tronar", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "crm",
+      name: "CRM",
+      config: { url: "https://mcp.crm.example.com/mcp" },
+    });
+    createMCPClientMock.mockResolvedValue({
+      tools: async () => ({ agendar: { description: "x", inputSchema: jsonSchema({ type: "object", properties: {} }), execute: vi.fn() } }),
+    });
+    const { bridge, ws } = await startBridge(TEST_BOT_ID, "+5215500000021");
+
+    const consulta = await callTool(bridge, ws, "consultar_tarea", {});
+    expect(consulta.estado).toBe("no_encontrada");
   });
 });

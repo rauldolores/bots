@@ -73,8 +73,14 @@ export async function runSkill(
   // {error:"no_conversation"} y el modelo quemaría un paso descubriéndolo;
   // handoffHuman/captureLead crearían tickets y leads huérfanos sin
   // conversación. En modo tarea, "escalar" es un CAMPO del resultado.
+  // El prefijo de una tool MCP lo elige el dueño por conector (ver
+  // connectors/mcpNaming.ts: "Vinqulia" → vinqulia_query) — nunca un patrón
+  // fijo "mcp_*". Con ese patrón, esta lista SIEMPRE quedaba vacía de tools
+  // MCP: ninguna skill podía consultar un sistema conectado por MCP, aunque
+  // el bot sí lo tuviera. ctx.mcpToolNames es la lista real.
+  const mcpToolNames = new Set(ctx.mcpToolNames);
   const tools = Object.fromEntries(
-    Object.entries(ctx.tools).filter(([name]) => KNOWLEDGE_TOOLS.has(name) || name.startsWith("mcp_")),
+    Object.entries(ctx.tools).filter(([name]) => KNOWLEDGE_TOOLS.has(name) || mcpToolNames.has(name)),
   );
 
   // Corte DURO por presupuesto. En el chat el guard solo baja de modelo (el

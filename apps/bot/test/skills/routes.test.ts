@@ -12,7 +12,13 @@ import { BotApiKeysRepo } from "../../src/db/apiKeys";
 import { BotChannelsRepo } from "../../src/db/botChannels";
 import { BotSkillsRepo } from "../../src/db/skills";
 import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
+import { BotConnectorsRepo } from "../../src/db/botConnectors";
 import type { Env } from "../../src/env";
+
+const createMCPClientMock = vi.fn();
+vi.mock("@ai-sdk/mcp", () => ({
+  createMCPClient: (...args: unknown[]) => createMCPClientMock(...args),
+}));
 
 // Una habilidad son DOS llamadas al modelo (ver src/skills/run.ts): investigar
 // con herramientas, y luego dar forma al resultado. Se simulan las dos.
@@ -67,6 +73,7 @@ beforeEach(async () => {
 
   generateTextMock.mockReset();
   generateObjectMock.mockReset();
+  createMCPClientMock.mockReset();
   // Paso 1: investigar (texto libre, con herramientas).
   generateTextMock.mockResolvedValue({
     text: "Ana tiene alto interés y menciona 5000 de presupuesto.",
@@ -159,6 +166,28 @@ describe("POST /v1/skills/:slug — modo síncrono", () => {
     expect(nombres).not.toContain("snoozeUser");
     expect(nombres).not.toContain("handoffHuman");
     expect(nombres).not.toContain("captureLead");
+  });
+
+  // Bug real: el filtro asumía que una tool MCP siempre se llama "mcp_algo",
+  // pero el prefijo lo elige el dueño por conector (ver mcpNaming.ts:
+  // "Vinqulia" → vinqulia_query) — nunca ese patrón fijo. Con eso, ninguna
+  // skill había podido consultar un sistema conectado por MCP jamás, aunque
+  // el bot sí lo tuviera conectado.
+  it("también le pasa las tools MCP conectadas, sin importar cómo se llamen", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "vinqulia",
+      name: "Vinqulia",
+      config: { url: "https://mcp.vinqulia.example.com/mcp" },
+    });
+    createMCPClientMock.mockResolvedValue({
+      tools: async () => ({ query: { description: "Consulta el CRM", inputSchema: { type: "object", properties: {} }, execute: vi.fn() } }),
+    });
+
+    await runSkill({ input: "¿cuánto cuesta el curso?" });
+    const args = generateTextMock.mock.calls[0][0] as { tools: Record<string, unknown> };
+    expect(Object.keys(args.tools)).toContain("vinqulia_query");
   });
 
   it("le pone tope de pasos para que no entre en bucle encadenando consultas", async () => {

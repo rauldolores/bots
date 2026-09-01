@@ -42,6 +42,15 @@ export interface AgentContext {
   memoryBlocks: string[];
   /** Registro de tools YA filtrado por los toggles del panel + MCP conectados — lo mismo que ve streamText() en el camino de texto. */
   tools: Record<string, any>;
+  /**
+   * Los nombres de `tools` que vienen de un servidor MCP — el prefijo lo
+   * decide el propio dueño (ver connectors/mcpNaming.ts: "Vinqulia" →
+   * `vinqulia_query`, "Zendesk" → `zendesk_searchTickets`), así que NO hay
+   * ningún patrón fijo (nunca `mcp_*`) con el que un canal pueda reconocerlas
+   * por su cuenta. Voice lo necesita para decidir qué tools delegar en vez de
+   * esperarlas en vivo — ver channels/voice/realtimeBridge.ts.
+   */
+  mcpToolNames: string[];
   cfg: AgentConfig;
   state: AgentState | null;
   /** Nombre del <cliente_conocido> (mismo lookup de abajo), en crudo — para canales que necesitan el valor solo, no el bloque de texto ya armado (ej. el saludo de voz, ver voiceGreeting.ts). undefined si no se conoce. */
@@ -153,6 +162,7 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
     basePrompt: cfg.systemPrompt,
     memoryBlocks,
     tools: enabledTools,
+    mcpToolNames: Object.keys(mcpTools),
     cfg,
     state,
     knownCustomerName,

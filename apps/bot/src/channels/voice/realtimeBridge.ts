@@ -30,6 +30,7 @@ import { esAlucinacionDeTranscripcion } from "./hallucinations";
 import { resolveVoiceGreeting } from "./voiceGreeting";
 import { recordOnboardingMilestones } from "./onboarding/milestones";
 import { transferToHumanTool } from "./tools/transferToHuman";
+import { consultarTareaTool, type TareaDelegada } from "./tools/consultarTarea";
 import { buildTransferTwiml, redirectLiveCall } from "./transfer";
 import { recordCallEvent } from "./events";
 import {
@@ -124,6 +125,24 @@ export class RealtimeCallBridge {
   private conversationId = "";
   /** Tools que se llamaron DURANTE la respuesta en curso — se adjuntan al turno del asistente cuando se persiste, igual que toolCalls en messages.tool_calls para los demás canales. */
   private toolCallsThisResponse: { toolName: string; input: unknown }[] = [];
+  /**
+   * Acciones MCP delegadas en esta llamada (ver handleFunctionCall: una tool
+   * MCP no bloquea el turno — se dispara y sigue corriendo mientras el
+   * agente sigue hablando) y su resultado, para que consultar_tarea pueda
+   * responder cuando el agente pregunte "¿ya quedó?". Vive en memoria del
+   * proceso porque el puente completo (WebSocket incluido) también — no hay
+   * nada que persistir aquí más allá de lo que ya persiste la tool en sí.
+   */
+  private tareasDelegadas: Map<string, TareaDelegada> = new Map();
+  /** La última tarea delegada — consultar_tarea la usa cuando el modelo omite tarea_id (el caso común: casi nunca hay más de una a la vez). */
+  private ultimaTareaDelegadaId: string | null = null;
+  /**
+   * Qué nombres de `this.tools` vienen de un servidor MCP — ver
+   * agent/context.ts::AgentContext.mcpToolNames. El prefijo lo elige el
+   * dueño por conector (nunca un patrón fijo tipo `mcp_*`), así que sin este
+   * set no hay forma de saber, mirando solo el nombre, cuáles delegar.
+   */
+  private mcpToolNames: Set<string> = new Set();
 
   // ---- F7 fase 10: observabilidad y analytics ------------------------------
   /** voice_sessions.id de ESTA llamada — se resuelve una vez al conectar (getContext().callId), se usa para todos los agregados/eventos de abajo. */
@@ -185,6 +204,7 @@ export class RealtimeCallBridge {
     // negocio, memoria de cliente y tools salen de aquí, no se reinventan.
     const ctx = await buildAgentContext({ env, botId, conversationId, conversationKey });
     this.tools = ctx.tools;
+    this.mcpToolNames = new Set(ctx.mcpToolNames);
 
     // F7 fase 9: transfer_to_human es SOLO de Voice — nunca pasa por
     // buildTools()/buildAgentContext() (Telegram/WhatsApp no tienen una
@@ -194,6 +214,20 @@ export class RealtimeCallBridge {
     const channelRow = await new BotChannelsRepo(new Db(env.DB)).getByBotAndChannel(botId, "voice");
     if (channelRow?.config.transferNumber) {
       this.tools = { ...this.tools, transfer_to_human: transferToHumanTool(env, botId, () => this.conversationId) };
+    }
+
+    // consultar_tarea: solo tiene sentido si este bot tiene al menos un
+    // conector MCP — sin eso, handleFunctionCall() nunca delega nada y la
+    // tool no tendría nada que consultar. Ofrecerla de todos modos solo le
+    // sumaría una tool más al esquema de Realtime sin ningún beneficio.
+    if (this.mcpToolNames.size > 0) {
+      this.tools = {
+        ...this.tools,
+        consultar_tarea: consultarTareaTool(() => ({
+          tareas: this.tareasDelegadas,
+          ultimaId: this.ultimaTareaDelegadaId,
+        })),
+      };
     }
 
     // El addendum de voz se agrega DESPUÉS del Agent Core (nunca lo
@@ -630,6 +664,64 @@ export class RealtimeCallBridge {
       args = parsed.data;
     }
 
+    // Delegar en vez de encolar (F-compañero): una tool MCP puede tardar
+    // varios segundos — un viaje real a un servidor ajeno, no una consulta a
+    // nuestra propia base — y esperarla aquí deja al cliente en silencio
+    // hasta TOOL_TIMEOUT_MS (8s). En vez de eso, se dispara y la llamada
+    // sigue: el agente le dice al cliente que lo está gestionando (ver
+    // <modo_voz> en voiceInstructions.ts) y usa consultar_tarea más adelante
+    // — cuando el cliente pregunte, o antes de despedirse — para confirmar
+    // el resultado real. Ningún otro tipo de tool se delega: captureLead,
+    // scheduleAppointment, etc. son escrituras rápidas a nuestra propia base
+    // y esperar por ellas no vale la pena la vuelta de "consultar" después.
+    if (this.mcpToolNames.has(call.name)) {
+      const tareaId = crypto.randomUUID();
+      const tarea: TareaDelegada = { toolName: call.name, estado: "en_progreso", iniciadaEn: Date.now() };
+      this.tareasDelegadas.set(tareaId, tarea);
+      this.ultimaTareaDelegadaId = tareaId;
+      this.toolCallsThisResponse.push({ toolName: call.name, input: args });
+
+      void toolDef.execute(args, {} as any).then(
+        (resultado: unknown) => {
+          const fallo = Boolean((resultado as { error?: unknown } | null)?.error);
+          tarea.estado = fallo ? "error" : "lista";
+          tarea.resultado = resultado;
+          void this.sessionsRepo().incrementToolCall(this.callRowId, "mcp");
+          void recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.tool_called", {
+            tool: call.name,
+            kind: "mcp",
+            ok: !fallo,
+          });
+        },
+        (e: unknown) => {
+          tarea.estado = "error";
+          // Opaco a propósito — igual que el camino síncrono de abajo
+          // (tool_execution_failed): el motivo REAL solo va al log, nunca a
+          // lo que consultar_tarea le puede repetir al modelo (y de ahí, al
+          // cliente en voz alta).
+          tarea.error = "tool_execution_failed";
+          console.error(`[voice-realtime] tool delegada "${call.name}" falló:`, e);
+          void recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.tool_called", {
+            tool: call.name,
+            kind: "mcp",
+            ok: false,
+          });
+        },
+      );
+
+      this.finishToolCall(
+        call.callId,
+        {
+          estado: "en_progreso",
+          tarea_id: tareaId,
+          instruccion:
+            "Se está procesando en segundo plano. NO digas que ya quedó hecho — avísale al cliente con naturalidad que lo estás gestionando, y usa consultar_tarea (con este tarea_id, o sin él para la más reciente) cuando el cliente pregunte o antes de despedirte, para confirmar el resultado real.",
+        },
+        interruptionCountAtCallStart,
+      );
+      return;
+    }
+
     try {
       const result = await Promise.race([
         toolDef.execute(args, {} as any),
@@ -638,8 +730,11 @@ export class RealtimeCallBridge {
       this.toolCallsThisResponse.push({ toolName: call.name, input: args });
 
       // F7 fase 10 — call.tool_called: cuenta TODAS las tools; RAG/MCP
-      // además suman su contador específico (searchKb = RAG; mcp_* = MCP).
-      const kind: "rag" | "mcp" | "other" = call.name === "searchKb" ? "rag" : call.name.startsWith("mcp_") ? "mcp" : "other";
+      // además suman su contador específico (searchKb = RAG; el resto de MCP
+      // ya se fue por la rama de arriba — delegada — así que en la práctica
+      // aquí nunca llega una MCP, pero el chequeo se deja correcto de todos
+      // modos en vez de asumir un prefijo que no existe).
+      const kind: "rag" | "mcp" | "other" = call.name === "searchKb" ? "rag" : this.mcpToolNames.has(call.name) ? "mcp" : "other";
       void this.sessionsRepo().incrementToolCall(this.callRowId, kind);
       void recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.tool_called", {
         tool: call.name,
