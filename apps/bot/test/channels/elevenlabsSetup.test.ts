@@ -192,6 +192,20 @@ describe("el LLM y el formato de audio de entrada", () => {
     expect(cuerpoEnviado.conversation_config.agent.prompt.llm).toBeTruthy();
   });
 
+  it("le pone tope de duración al agente — ElevenLabs cobra por minuto", async () => {
+    // Sin tope, una llamada que alguien deja colgada sigue gastando créditos.
+    let cuerpoEnviado: any = null;
+    global.fetch = fetchQueRespondePor({
+      voces: () => Response.json({ voices: [{ voice_id: VOZ_DEL_CATALOGO }] }),
+      crearAgente: (cuerpo) => {
+        cuerpoEnviado = cuerpo;
+        return Response.json({ agent_id: "agent-nuevo" });
+      },
+    });
+    await prepararAgenteElevenLabs({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO);
+    expect(cuerpoEnviado.conversation_config.conversation.max_duration_seconds).toBeGreaterThan(0);
+  });
+
   it("declara el formato de audio de ENTRADA, no solo el de salida", async () => {
     let cuerpoEnviado: any = null;
     global.fetch = fetchQueRespondePor({

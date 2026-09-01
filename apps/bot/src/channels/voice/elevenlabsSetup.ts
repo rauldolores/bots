@@ -24,6 +24,17 @@ const MODELO_TTS = "eleven_flash_v2_5";
 /** El cerebro que genera las respuestas — separado del modelo de VOZ (MODELO_TTS). */
 const MODELO_LLM = "gpt-4o-mini";
 
+/**
+ * Tope duro de duración, en segundos — el mismo que ya aplica el puente de
+ * OpenAI (30 min).
+ *
+ * ElevenLabs cobra POR MINUTO, así que una llamada que se quede colgada es
+ * dinero corriendo. Su default son 10 minutos; aquí se alinea con el tope que
+ * este proyecto ya usa, para que las dos rutas de voz se comporten igual y
+ * ninguna pueda gastar más que la otra por un descuido de configuración.
+ */
+const MAX_DURACION_SEG = 30 * 60;
+
 export interface VozDisponible {
   voiceId: string;
   nombre: string;
@@ -230,6 +241,8 @@ export async function prepararAgenteElevenLabs(
       // μ-law de Twilio sin avisar — audio irreconocible para su ASR. Sin este
       // campo, hablarle al bot no producía ni un solo user_transcript.
       asr: { user_input_audio_format: FORMATO_TELEFONIA },
+      // Cobran por minuto: sin tope, una llamada olvidada sigue gastando.
+      conversation: { max_duration_seconds: MAX_DURACION_SEG },
     },
   };
 
@@ -271,7 +284,7 @@ export async function prepararAgenteElevenLabs(
  * por un arreglo que ya estaba hecho.
  */
 export function huellaDeConfiguracion(voiceId: string): string {
-  return [voiceId, MODELO_TTS, MODELO_LLM, FORMATO_TELEFONIA, "overrides:v1"].join("|");
+  return [voiceId, MODELO_TTS, MODELO_LLM, FORMATO_TELEFONIA, `max:${MAX_DURACION_SEG}`, "overrides:v1"].join("|");
 }
 
 /**

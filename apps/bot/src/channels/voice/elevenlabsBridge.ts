@@ -43,6 +43,9 @@ export class ElevenLabsCallBridge implements CallBridge {
   private audioDelClienteEnviado = false;
   /** Lo mismo, en la otra dirección: ¿ElevenLabs llegó a mandar audio? */
   private audioDelAgenteRecibido = false;
+  /** Última señal de vida de la llamada — la base del vigilante de silencio. */
+  private ultimaActividad = Date.now();
+  private vigilanteDeSilencio: ReturnType<typeof setInterval> | null = null;
 
   private constructor(private readonly deps: CallBridgeDeps) {}
 
@@ -53,6 +56,7 @@ export class ElevenLabsCallBridge implements CallBridge {
     const bridge = new ElevenLabsCallBridge(deps);
     await bridge.conectar(creds);
     bridge.metrics.callStartedAt = Date.now();
+    bridge.arrancarVigilanteDeSilencio();
     logVoiceEvent("call_started", {
       botId: deps.botId,
       callSid: maskId(deps.callSid),
@@ -112,7 +116,17 @@ export class ElevenLabsCallBridge implements CallBridge {
       bloqueLlamadaEnCurso(callerId),
       VOICE_BEHAVIOR_ADDENDUM,
     ].join("\n\n");
-    return { prompt };
+    // El bot SALUDA PRIMERO — mismo criterio que el puente de OpenAI
+    // (realtimeBridge.ts). Sin esto el agente espera callado a que el cliente
+    // hable, y desde el teléfono eso se oye EXACTAMENTE igual que estar roto:
+    // el dueño estuvo probando llamadas creyendo que el puente no servía,
+    // cuando lo único que faltaba era que alguien abriera la boca primero.
+    const saludo = resolveVoiceGreeting(
+      ctx.cfg.voiceGreeting,
+      ctx.bot?.business_name ?? env.BUSINESS_NAME ?? "",
+      ctx.knownCustomerName,
+    );
+    return { prompt, saludo };
   }
 
   /**
@@ -135,8 +149,36 @@ export class ElevenLabsCallBridge implements CallBridge {
     logVoiceEvent("elevenlabs_evento", base);
   }
 
+  /**
+   * Cuelga una llamada que se quedó sola.
+   *
+   * ElevenLabs cobra POR MINUTO, así que un cliente que deja el teléfono
+   * descolgado es dinero corriendo hasta el tope de 30 minutos. El puente de
+   * OpenAI ya tenía este freno; el de ElevenLabs nació sin él — y ahí el
+   * descuido cuesta más, porque allá se paga por minuto de sesión y no por
+   * tokens de lo que se dice.
+   *
+   * Mismos umbrales y mismas variables de entorno que el otro puente, para no
+   * inventar un segundo juego de reglas que se desincronice.
+   */
+  private arrancarVigilanteDeSilencio(): void {
+    const limite = Number(this.deps.env.VOICE_SILENCE_HANGUP_MS) || 45_000;
+    const cada = Number(this.deps.env.VOICE_SILENCE_CHECK_INTERVAL_MS) || 5_000;
+    this.vigilanteDeSilencio = setInterval(() => {
+      if (this.cerrado) return;
+      if (Date.now() - this.ultimaActividad < limite) return;
+      logVoiceEvent("silence_hangup", {
+        botId: this.deps.botId,
+        callSid: maskId(this.deps.callSid),
+        idleMs: Date.now() - this.ultimaActividad,
+      });
+      void this.close("silencio_prolongado");
+    }, cada);
+  }
+
   private audioHaciaTwilio(audioBase64: string): void {
     if (this.cerrado) return;
+    this.ultimaActividad = Date.now();
     // La otra mitad del diagnóstico: sin esto solo se sabía que el audio del
     // cliente SALÍA, no si alguna vez volvía algo. "La llamada no se oye"
     // puede ser que ElevenLabs no hable, o que hable y no llegue a Twilio —
@@ -201,6 +243,7 @@ export class ElevenLabsCallBridge implements CallBridge {
         callSid: maskId(this.deps.callSid),
       });
     }
+    this.ultimaActividad = Date.now();
     this.client?.sendUserAudio(payloadBase64);
   }
 
@@ -211,6 +254,7 @@ export class ElevenLabsCallBridge implements CallBridge {
   async close(reason: string): Promise<void> {
     if (this.cerrado) return;
     this.cerrado = true;
+    if (this.vigilanteDeSilencio) clearInterval(this.vigilanteDeSilencio);
     this.client?.close();
     logVoiceEvent("call_ended", {
       botId: this.deps.botId,
