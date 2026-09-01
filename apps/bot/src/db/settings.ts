@@ -95,6 +95,13 @@ export const SETTING_KEYS = {
   voiceElevenLabsVoiceId: "voice_elevenlabs_voice_id",
   /** Lo crea el sistema contra la API de ElevenLabs al guardar; el dueño nunca lo ve ni lo teclea. */
   voiceElevenLabsAgentId: "voice_elevenlabs_agent_id",
+  /**
+   * Huella de la configuración con la que se creó el agente en ElevenLabs.
+   * Si el código cambia algo (voz, modelo, formato de audio), deja de
+   * coincidir y el agente se actualiza solo en la siguiente llamada — sin que
+   * el dueño tenga que acordarse de volver a guardar la pantalla.
+   */
+  voiceElevenLabsConfigHash: "voice_elevenlabs_config_hash",
   /** Teléfonos (separados por comas) cuyas llamadas atiende ElevenLabs. Vacío = nadie. */
   voiceElevenLabsBetaCallers: "voice_elevenlabs_beta_callers",
   // Saludo con el que el bot contesta la llamada — antes quedaba a criterio

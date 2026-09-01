@@ -256,5 +256,45 @@ export async function prepararAgenteElevenLabs(
   if (!agentId) return { ok: false, error: "ElevenLabs no devolvió el identificador del agente." };
 
   await repo.set(SETTING_KEYS.voiceElevenLabsAgentId, agentId);
+  await repo.set(SETTING_KEYS.voiceElevenLabsConfigHash, huellaDeConfiguracion(voiceId));
   return { ok: true, agentId };
+}
+
+/**
+ * Con qué configuración quedó armado el agente en ElevenLabs.
+ *
+ * Sirve para saber si el agente que vive allá sigue coincidiendo con lo que
+ * este código produce hoy. Pasó en producción: se corrigieron el formato de
+ * audio y el LLM del agente, se desplegó, y el agente del dueño siguió con la
+ * configuración vieja — porque solo se actualiza al guardar la pantalla, y a
+ * nadie se le dijo que tenía que volver a guardarla. La llamada seguía muda
+ * por un arreglo que ya estaba hecho.
+ */
+export function huellaDeConfiguracion(voiceId: string): string {
+  return [voiceId, MODELO_TTS, MODELO_LLM, FORMATO_TELEFONIA, "overrides:v1"].join("|");
+}
+
+/**
+ * Se asegura de que el agente en ElevenLabs esté al día ANTES de la llamada.
+ *
+ * No hace nada en el caso normal (una comparación de textos en memoria); solo
+ * cuando el código cambió algo del agente desde la última vez, lo actualiza.
+ * Nunca lanza: si esto falla, la llamada sigue con lo que haya — es mejor un
+ * agente desactualizado que ninguna llamada.
+ */
+export async function asegurarAgenteAlDia(
+  db: Db,
+  botId: string,
+  apiKey: string,
+  voiceId: string,
+): Promise<{ actualizado: boolean; error?: string }> {
+  const repo = new SettingsRepo(db, botId);
+  const guardada = (await repo.get(SETTING_KEYS.voiceElevenLabsConfigHash))?.trim();
+  if (guardada === huellaDeConfiguracion(voiceId)) return { actualizado: false };
+
+  const r = await prepararAgenteElevenLabs(db, botId, apiKey, voiceId).catch((e) => ({
+    ok: false as const,
+    error: String((e as Error)?.message ?? e),
+  }));
+  return { actualizado: r.ok, error: r.ok ? undefined : r.error };
 }

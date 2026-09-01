@@ -81,7 +81,30 @@ export async function credencialesElevenLabs(
     return null;
   }
   const apiKey = settings[SETTING_KEYS.voiceElevenLabsApiKey]?.trim();
-  const agentId = settings[SETTING_KEYS.voiceElevenLabsAgentId]?.trim();
-  if (!apiKey || !agentId) return null;
+  if (!apiKey) return null;
+
+  // El agente en ElevenLabs se actualiza SOLO si el código cambió algo suyo
+  // desde la última vez (voz, modelo, formato de audio). En el caso normal
+  // esto es una comparación de textos en memoria y no toca la red.
+  //
+  // Existe porque pasó lo contrario: se corrigieron el formato de audio y el
+  // LLM del agente, se desplegó, y el agente del dueño se quedó con la
+  // configuración vieja — porque solo se actualizaba al guardar la pantalla, y
+  // nadie le dijo que tenía que volver a guardarla. Estuvo probando llamadas
+  // contra un arreglo que ya existía pero no había llegado a su agente.
+  const voiceId = settings[SETTING_KEYS.voiceElevenLabsVoiceId]?.trim();
+  if (voiceId) {
+    const { asegurarAgenteAlDia } = await import("./elevenlabsSetup");
+    const r = await asegurarAgenteAlDia(db, botId, apiKey, voiceId).catch(() => ({
+      actualizado: false,
+      error: "no se pudo verificar",
+    }));
+    if (r.error) console.warn(`[voice-elevenlabs] agente posiblemente desactualizado: ${r.error}`);
+  }
+
+  // Se relee DESPUÉS de la actualización: si el agente se acababa de crear,
+  // el id existe apenas ahora.
+  const agentId = (await new SettingsRepo(db, botId).get(SETTING_KEYS.voiceElevenLabsAgentId))?.trim();
+  if (!agentId) return null;
   return { apiKey, agentId };
 }

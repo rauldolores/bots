@@ -27,10 +27,13 @@ vi.mock("../../src/db/settings", () => ({
   },
   SETTING_KEYS: {
     voiceElevenLabsAgentId: "voice_elevenlabs_agent_id",
+    voiceElevenLabsConfigHash: "voice_elevenlabs_config_hash",
   },
 }));
 
-const { prepararAgenteElevenLabs } = await import("../../src/channels/voice/elevenlabsSetup");
+const { prepararAgenteElevenLabs, asegurarAgenteAlDia, huellaDeConfiguracion } = await import(
+  "../../src/channels/voice/elevenlabsSetup"
+);
 
 const LLAVE = "sk_test_llave_valida";
 const VOZ_DEL_CATALOGO = "nbcvT3C2tyOd2OsRAtUf";
@@ -223,6 +226,52 @@ describe("los overrides", () => {
 
     await prepararAgenteElevenLabs({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO);
     expect(cuerpoEnviado.platform_settings.overrides.conversation_config_override.agent.prompt.prompt).toBe(true);
+  });
+});
+
+describe("mantener al agente al día", () => {
+  // Pasó en producción: se corrigieron el formato de audio y el LLM del
+  // agente, se desplegó, y el agente del dueño se quedó con la configuración
+  // vieja — porque solo se actualizaba al guardar la pantalla, y nadie le dijo
+  // que tenía que volver a guardarla. Estuvo probando llamadas contra un
+  // arreglo que ya existía pero no había llegado a su agente.
+  it("si la configuración ya coincide, no toca la red", async () => {
+    settingsGuardados["voice_elevenlabs_config_hash"] = huellaDeConfiguracion(VOZ_DEL_CATALOGO);
+    global.fetch = vi.fn(async () => {
+      throw new Error("no debió llamar a la red");
+    }) as any;
+
+    const r = await asegurarAgenteAlDia({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO);
+    expect(r.actualizado).toBe(false);
+    expect(r.error).toBeUndefined();
+  });
+
+  it("si el código cambió algo del agente, lo actualiza solo", async () => {
+    settingsGuardados["voice_elevenlabs_config_hash"] = "una-huella-vieja";
+    let seActualizo = false;
+    global.fetch = fetchQueRespondePor({
+      voces: () => Response.json({ voices: [{ voice_id: VOZ_DEL_CATALOGO }] }),
+      crearAgente: () => {
+        seActualizo = true;
+        return Response.json({ agent_id: "agent-nuevo" });
+      },
+    });
+
+    const r = await asegurarAgenteAlDia({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO);
+    expect(seActualizo).toBe(true);
+    expect(r.actualizado).toBe(true);
+    expect(settingsGuardados["voice_elevenlabs_config_hash"]).toBe(huellaDeConfiguracion(VOZ_DEL_CATALOGO));
+  });
+
+  it("si la actualización falla, se reporta pero no lanza — la llamada sigue", async () => {
+    settingsGuardados["voice_elevenlabs_config_hash"] = "vieja";
+    global.fetch = fetchQueRespondePor({
+      voces: () => new Response("no", { status: 500 }),
+    });
+
+    const r = await asegurarAgenteAlDia({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO);
+    expect(r.actualizado).toBe(false);
+    expect(r.error).toBeTruthy();
   });
 });
 
