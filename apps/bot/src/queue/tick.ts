@@ -66,6 +66,15 @@ const TURN_TIMEOUT_MS = 40_000;
 const TURN_CONCURRENCY = 3;
 
 /**
+ * Cuánto se espera para reintentar cuando el cliente escribió de nuevo
+ * MIENTRAS el turno anterior corría (F-interrumpir, ver runner.ts y
+ * jobs.rescheduleSoon). Mucho más corto que un buffer normal — el punto es
+ * justo no hacerlo esperar otra vez el debounce completo por algo que ya
+ * estaba escribiendo.
+ */
+const INTERRUPT_RETRY_MS = 1_500;
+
+/**
  * Corre `p`, pero se rinde a los `ms`.
  *
  * El trabajo de fondo no se cancela de verdad (no hay forma en JS), pero en
@@ -106,9 +115,19 @@ async function atenderConversacion(
 ): Promise<void> {
   try {
     const respondio = await conTimeout(runTurn(env, key), TURN_TIMEOUT_MS, `[tick] turno de ${key}`);
-    // Sin nada que responder el trabajo igual se cierra: dejarlo vivo lo
-    // haría reintentar para siempre sobre un buffer vacío.
-    await jobs.complete(key);
+
+    // ¿El cliente escribió de nuevo mientras este turno corría? Si se cierra
+    // el trabajo aquí (como antes), ese mensaje nuevo se queda con el
+    // run_after que ingestMessage() ya le puso — el buffer normal completo,
+    // el mismo tiempo de espera que esto busca evitar. Se reprograma para YA
+    // en su lugar, mucho más corto.
+    if (await jobs.hasNewPending(key)) {
+      await jobs.rescheduleSoon(key, INTERRUPT_RETRY_MS);
+    } else {
+      // Sin nada que responder el trabajo igual se cierra: dejarlo vivo lo
+      // haría reintentar para siempre sobre un buffer vacío.
+      await jobs.complete(key);
+    }
     if (respondio) result.answered++;
   } catch (e) {
     result.failed++;

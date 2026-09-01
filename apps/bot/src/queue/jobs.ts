@@ -148,6 +148,39 @@ export class AgentJobsRepo {
   }
 
   /**
+   * ¿Llegó algo del cliente que este turno nunca alcanzó a leer? (F-interrumpir:
+   * "interrumpir en vez de encolar" — la versión segura, ver runner.ts).
+   *
+   * Un mensaje sin `claimed_at` es uno que ingestMessage() guardó DESPUÉS de que
+   * drainPending() tomó una foto del buffer — típicamente porque el cliente
+   * siguió escribiendo mientras el modelo todavía estaba pensando. Sirve para
+   * decidir si el trabajo se cierra normal o se reprograma para ya mismo.
+   */
+  async hasNewPending(conversationKey: string): Promise<boolean> {
+    const row = await this.db.first<{ id: number }>(
+      "SELECT id FROM pending_messages WHERE conversation_key = ? AND claimed_at IS NULL LIMIT 1",
+      [conversationKey],
+    );
+    return row !== null;
+  }
+
+  /**
+   * El trabajo NO se cierra: se reprograma para dentro de `delayMs`, mucho más
+   * corto que el buffer normal — es la respuesta a "llegó algo nuevo mientras
+   * este turno corría, que se atienda YA, no que espere otro buffer completo".
+   *
+   * Además de correr run_after, suelta el lease (locked_at = NULL): si no,
+   * claimDue() no vuelve a tomar esta fila hasta que venza AGENT_JOB_LEASE_MS
+   * (90s) — la misma espera larga que esto busca evitar.
+   */
+  async rescheduleSoon(conversationKey: string, delayMs: number): Promise<void> {
+    await this.db.run(
+      `UPDATE agent_jobs SET run_after = ${NOW_MS} + ?, locked_at = NULL WHERE conversation_key = ?`,
+      [delayMs, conversationKey],
+    );
+  }
+
+  /**
    * El turno falló. Se suelta el lease y se reprograma con un respiro, para que
    * el siguiente tick lo reintente en vez de quedarse trabado.
    */

@@ -253,3 +253,51 @@ describe("complete y fail", () => {
     expect(await jobs.claimDue(10)).toEqual([]);
   });
 });
+
+// F-interrumpir (versión segura): un mensaje que llega mientras el turno
+// corría no debe quedar huérfano por culpa de complete() borrando la fila.
+describe("hasNewPending y rescheduleSoon", () => {
+  it("hasNewPending: falso sin nada en el buffer", async () => {
+    expect(await jobs.hasNewPending("telegram:u1")).toBe(false);
+  });
+
+  it("hasNewPending: falso si lo único que hay ya se tomó (claimed_at)", async () => {
+    await jobs.addPending("telegram:u1", "hola");
+    await jobs.drainPending("telegram:u1");
+    expect(await jobs.hasNewPending("telegram:u1")).toBe(false);
+  });
+
+  it("hasNewPending: verdadero si llegó algo DESPUÉS del drain", async () => {
+    await jobs.addPending("telegram:u1", "primero");
+    await jobs.drainPending("telegram:u1");
+    await jobs.addPending("telegram:u1", "segundo"); // llegó mientras el turno "pensaba"
+    expect(await jobs.hasNewPending("telegram:u1")).toBe(true);
+  });
+
+  it("rescheduleSoon: adelanta run_after y suelta el lease", async () => {
+    await jobs.schedule("telegram:u1", 0);
+    await vencer("telegram:u1");
+    await jobs.claimDue(10); // deja locked_at puesto, como durante un turno real
+
+    await jobs.rescheduleSoon("telegram:u1", 1_500);
+
+    const fila = await db.first<{ run_after: number; locked_at: number | null }>(
+      "SELECT run_after, locked_at FROM agent_jobs WHERE conversation_key = ?",
+      ["telegram:u1"],
+    );
+    expect(fila!.locked_at).toBeNull(); // si no, claimDue() no lo vuelve a tomar hasta que venza el lease (90s)
+    expect(fila!.run_after).toBeGreaterThan(Date.now());
+    expect(fila!.run_after - Date.now()).toBeLessThan(3_000);
+  });
+
+  it("rescheduleSoon sobre un lease vivo: sin esto el trabajo quedaba invisible para claimDue() hasta los 90s del lease", async () => {
+    await jobs.schedule("telegram:u1", 0);
+    await vencer("telegram:u1");
+    await jobs.claimDue(10);
+
+    await jobs.rescheduleSoon("telegram:u1", 0);
+    await vencer("telegram:u1", 0);
+
+    expect(await jobs.claimDue(10)).toEqual(["telegram:u1"]);
+  });
+});
