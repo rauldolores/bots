@@ -21,6 +21,8 @@ const API = "https://api.elevenlabs.io/v1";
 const FORMATO_TELEFONIA = "ulaw_8000";
 /** Flash v2.5: ~75 ms de inferencia. En una llamada, la latencia se oye. */
 const MODELO_TTS = "eleven_flash_v2_5";
+/** El cerebro que genera las respuestas — separado del modelo de VOZ (MODELO_TTS). */
+const MODELO_LLM = "gpt-4o-mini";
 
 export interface VozDisponible {
   voiceId: string;
@@ -212,8 +214,22 @@ export async function prepararAgenteElevenLabs(
       // "English Agents must use turbo or flash v2", con un agente que solo
       // va a hablar español. Todo lo que arma este archivo es en español, así
       // que se declara, en vez de dejarlo a lo que ElevenLabs adivine.
-      agent: { language: "es", prompt: { prompt: "Asistente telefónico." } },
+      // Sin decir qué LLM usar, ElevenLabs le asigna el que tenía por default
+      // al crear el agente — y ese default puede quedar obsoleto con el
+      // tiempo sin que nadie lo note (pasó: su panel marcó el agente con
+      // "Update deprecated LLM" en cuanto se creó). "gpt-4o-mini" es la misma
+      // familia que ya usa este proyecto como su nivel rápido/barato (ver
+      // pricing.ts) — se declara a propósito, en vez de heredar lo que
+      // ElevenLabs decida hoy.
+      agent: { language: "es", prompt: { prompt: "Asistente telefónico.", llm: MODELO_LLM } },
       tts: { voice_id: voiceId, model_id: MODELO_TTS, agent_output_audio_format: FORMATO_TELEFONIA },
+      // El formato de SALIDA (arriba) y el de ENTRADA son campos separados —
+      // se probó configurando solo el primero, y el resultado fue que la
+      // conexión conectaba bien pero nadie se transcribía: ElevenLabs seguía
+      // esperando el default (PCM) para lo que el cliente manda, y le llegaba
+      // μ-law de Twilio sin avisar — audio irreconocible para su ASR. Sin este
+      // campo, hablarle al bot no producía ni un solo user_transcript.
+      asr: { user_input_audio_format: FORMATO_TELEFONIA },
     },
   };
 

@@ -170,6 +170,40 @@ describe("el idioma del agente", () => {
   });
 });
 
+describe("el LLM y el formato de audio de entrada", () => {
+  // Bug real: sin declarar el LLM, ElevenLabs asigna el que tenía por default
+  // al crear el agente — y ElevenLabs marcó ese default como "deprecated" en
+  // su propio panel, apenas se creó. Sin declarar el formato de ENTRADA
+  // (separado del de salida), el ASR recibía μ-law de Twilio esperando PCM:
+  // el cliente hablaba y no se transcribía ni una palabra.
+  it("declara un LLM vigente, no lo que ElevenLabs asigne por su cuenta", async () => {
+    let cuerpoEnviado: any = null;
+    global.fetch = fetchQueRespondePor({
+      voces: () => Response.json({ voices: [{ voice_id: VOZ_DEL_CATALOGO }] }),
+      crearAgente: (cuerpo) => {
+        cuerpoEnviado = cuerpo;
+        return Response.json({ agent_id: "agent-nuevo" });
+      },
+    });
+    await prepararAgenteElevenLabs({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO);
+    expect(cuerpoEnviado.conversation_config.agent.prompt.llm).toBeTruthy();
+  });
+
+  it("declara el formato de audio de ENTRADA, no solo el de salida", async () => {
+    let cuerpoEnviado: any = null;
+    global.fetch = fetchQueRespondePor({
+      voces: () => Response.json({ voices: [{ voice_id: VOZ_DEL_CATALOGO }] }),
+      crearAgente: (cuerpo) => {
+        cuerpoEnviado = cuerpo;
+        return Response.json({ agent_id: "agent-nuevo" });
+      },
+    });
+    await prepararAgenteElevenLabs({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO);
+    expect(cuerpoEnviado.conversation_config.asr.user_input_audio_format).toBe("ulaw_8000");
+    expect(cuerpoEnviado.conversation_config.tts.agent_output_audio_format).toBe("ulaw_8000");
+  });
+});
+
 describe("los overrides", () => {
   // Bug real: overrides vienen APAGADOS por defecto en cada agente nuevo —
   // seguridad de ElevenLabs, para que un cliente cualquiera no le haga decir
