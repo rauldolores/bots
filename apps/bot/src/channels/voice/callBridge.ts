@@ -95,13 +95,22 @@ export async function credencialesElevenLabs(
   // contra un arreglo que ya existía pero no había llegado a su agente.
   const voiceId = settings[SETTING_KEYS.voiceElevenLabsVoiceId]?.trim();
   if (voiceId) {
-    const [{ asegurarAgenteAlDia }, { buildTools }] = await Promise.all([
+    const [{ asegurarAgenteAlDia }, { buildTools }, { loadMcpTools }] = await Promise.all([
       import("./elevenlabsSetup"),
       import("../../tools"),
+      import("../../tools/mcpTools"),
     ]);
     // Las MISMAS tools del camino de texto. Solo se usan sus esquemas aquí —
     // la ejecución vive en el puente, con el execute() de siempre.
-    const tools = buildTools({ env, botId, getConversationId: () => null });
+    //
+    // Las de MCP van INCLUIDAS: ElevenLabs solo puede llamar a lo que está
+    // registrado en el agente, así que dejarlas fuera las volvía invisibles —
+    // se cargaban en cada llamada y el agente nunca sabía que existían. Es una
+    // consulta más al guardar o cuando cambia la configuración, no en cada
+    // llamada, y loadMcpTools ya trae su propio cortacircuitos por si un
+    // servidor MCP no responde.
+    const mcp = await loadMcpTools(env, db, botId).catch(() => ({}));
+    const tools = { ...buildTools({ env, botId, getConversationId: () => null }), ...mcp };
     const r = await asegurarAgenteAlDia(db, botId, apiKey, voiceId, tools).catch(() => ({
       actualizado: false,
       error: "no se pudo verificar",

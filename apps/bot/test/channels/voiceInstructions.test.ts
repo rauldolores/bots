@@ -45,6 +45,22 @@ describe("VOICE_BEHAVIOR_ADDENDUM", () => {
 // El cliente dijo "regístrame con el número desde el que estoy llamando" y el
 // bot no supo cuál era: `callerId` solo se usaba para la llave de conversación
 // (gateway.ts) y nunca llegaba a las instructions del modelo.
+describe("no confirmar lo que no se hizo", () => {
+  // Falla real en una llamada de producción: el cliente pidió una cita para el
+  // jueves, el agente dijo que la había agendado, y no existía — nunca llamó a
+  // la herramienta (de hecho no tenía ninguna registrada). Colgó creyendo que
+  // tenía cita. Por teléfono nadie lo saca del error hasta que es tarde.
+  it("prohíbe explícitamente decir que algo quedó hecho sin haberlo hecho", () => {
+    expect(VOICE_BEHAVIOR_ADDENDUM).toMatch(/NUNCA digas que algo quedó hecho/);
+  });
+
+  it("le da una salida honesta cuando no tiene la herramienta", () => {
+    // Prohibir sin ofrecer alternativa deja al agente sin nada que decir, y
+    // ahí es donde improvisa.
+    expect(VOICE_BEHAVIOR_ADDENDUM).toMatch(/te comunico con alguien|van a llamar/);
+  });
+});
+
 describe("bloqueLlamadaEnCurso — el teléfono del que llama", () => {
   it("le da el número al modelo, para que pueda ofrecerlo como contacto", () => {
     const b = bloqueLlamadaEnCurso("+525545562046");
