@@ -39,6 +39,8 @@ export class ElevenLabsCallBridge implements CallBridge {
   private cerrado = false;
   /** Cuándo dejó de hablar el cliente — la mitad del cálculo de latencia. */
   private finDeTurnoDelCliente: number | null = null;
+  /** Solo para registrar UNA vez que el audio del cliente empezó a fluir. */
+  private audioDelClienteEnviado = false;
 
   private constructor(private readonly deps: CallBridgeDeps) {}
 
@@ -71,6 +73,7 @@ export class ElevenLabsCallBridge implements CallBridge {
       onUserTranscript: (t) => void this.persistirTurno("user", t),
       onAgentResponse: (t) => void this.persistirTurno("assistant", t),
       onError: (e) => console.error("[voice-elevenlabs] error:", e),
+      onEvento: (tipo, evento) => this.eventoDeElevenLabs(tipo, evento),
       onClose: () => logVoiceEvent("elevenlabs_closed", { botId, callSid: maskId(this.deps.callSid) }),
     });
 
@@ -100,6 +103,26 @@ export class ElevenLabsCallBridge implements CallBridge {
       VOICE_BEHAVIOR_ADDENDUM,
     ].join("\n\n");
     return { prompt };
+  }
+
+  /**
+   * Todo lo que ElevenLabs manda y el cliente no maneja explícitamente.
+   *
+   * Se registra SIEMPRE, no solo los errores: en una llamada muda, saber qué
+   * eventos SÍ llegaron vale tanto como saber cuál falló. Lo importante aquí
+   * es `conversation_initiation_metadata`, que trae el formato de audio que
+   * ElevenLabs negoció de verdad — si no coincide con μ-law 8k, el audio de
+   * las dos direcciones es ruido y nada más va a funcionar.
+   */
+  private eventoDeElevenLabs(tipo: string, evento: unknown): void {
+    const esError = tipo.includes("error") || tipo === "guardrail_triggered";
+    const base = { botId: this.deps.botId, callSid: maskId(this.deps.callSid), tipo };
+    if (esError || tipo === "conversation_initiation_metadata") {
+      // Con detalle: son los dos que de verdad explican una llamada rota.
+      logVoiceEvent("elevenlabs_evento", { ...base, detalle: JSON.stringify(evento).slice(0, 400) });
+      return;
+    }
+    logVoiceEvent("elevenlabs_evento", base);
   }
 
   private audioHaciaTwilio(audioBase64: string): void {
@@ -147,6 +170,16 @@ export class ElevenLabsCallBridge implements CallBridge {
   }
 
   handleTwilioMedia(payloadBase64: string): void {
+    // Se registra el PRIMER trozo nada más — uno cada 20 ms llenaría el log
+    // en segundos. Lo que se quiere saber es si el audio del cliente llega a
+    // salir hacia ElevenLabs, no cuántas veces.
+    if (!this.audioDelClienteEnviado) {
+      this.audioDelClienteEnviado = true;
+      logVoiceEvent("elevenlabs_audio_cliente", {
+        botId: this.deps.botId,
+        callSid: maskId(this.deps.callSid),
+      });
+    }
     this.client?.sendUserAudio(payloadBase64);
   }
 

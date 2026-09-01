@@ -14,6 +14,8 @@ import { WebSocket } from "ws";
 const SIGNED_URL_ENDPOINT = "https://api.elevenlabs.io/v1/convai/conversation/get-signed-url";
 
 export interface ElevenLabsHandlers {
+  /** Todo lo que llega y no se maneja arriba — para no diagnosticar a ciegas. */
+  onEvento: (tipo: string, evento: unknown) => void;
   /** Audio del agente, base64 μ-law 8k — se reenvía a Twilio tal cual. */
   onAudio: (audioBase64: string) => void;
   /** El agente fue interrumpido: hay que vaciar lo que Twilio tenga en cola. */
@@ -66,6 +68,18 @@ export class ElevenLabsClient {
       });
     });
 
+    // Los escuchas van ANTES de mandar nada. Al revés se pierde lo que
+    // ElevenLabs conteste de inmediato — y lo que contesta de inmediato es
+    // justo lo que importa: el metadata con el formato de audio negociado, o
+    // el error si la configuración no le cuadra. En `ws` de Node, un mensaje
+    // que llega sin escucha puesta simplemente se descarta.
+    ws.on("message", (raw) => this.handleMessage(raw.toString()));
+    ws.on("error", (e) => this.handlers.onError(e));
+    ws.on("close", () => {
+      this.cerrado = true;
+      this.handlers.onClose();
+    });
+
     // El prompt y el saludo del bot son del DUEÑO, no del panel de ElevenLabs:
     // así la prueba compara la misma personalidad que ya tiene en producción y
     // no la de un agente configurado aparte, que no probaría nada.
@@ -81,13 +95,6 @@ export class ElevenLabsClient {
             },
           }
         : {}),
-    });
-
-    ws.on("message", (raw) => this.handleMessage(raw.toString()));
-    ws.on("error", (e) => this.handlers.onError(e));
-    ws.on("close", () => {
-      this.cerrado = true;
-      this.handlers.onClose();
     });
   }
 
@@ -121,6 +128,13 @@ export class ElevenLabsClient {
         this.send({ type: "pong", event_id: evt.ping_event?.event_id });
         return;
       default:
+        // NADA se descarta en silencio. Esto empezó como `default: return` y
+        // costó cuatro rondas de diagnóstico a ciegas: ElevenLabs manda
+        // `client_error` cuando algo de la configuración no le cuadra, y
+        // `conversation_initiation_metadata` con el formato de audio que
+        // REALMENTE negoció — los dos se estaban tirando a la basura. Con una
+        // llamada muda y cero pistas, adivinar era lo único que quedaba.
+        this.handlers.onEvento(String(evt.type ?? "sin_tipo"), evt);
         return;
     }
   }
