@@ -41,6 +41,8 @@ export class ElevenLabsCallBridge implements CallBridge {
   private finDeTurnoDelCliente: number | null = null;
   /** Solo para registrar UNA vez que el audio del cliente empezó a fluir. */
   private audioDelClienteEnviado = false;
+  /** Lo mismo, en la otra dirección: ¿ElevenLabs llegó a mandar audio? */
+  private audioDelAgenteRecibido = false;
 
   private constructor(private readonly deps: CallBridgeDeps) {}
 
@@ -77,6 +79,14 @@ export class ElevenLabsCallBridge implements CallBridge {
       onClose: () => logVoiceEvent("elevenlabs_closed", { botId, callSid: maskId(this.deps.callSid) }),
     });
 
+    // Se registra QUÉ se le manda: un saludo vacío haría que el agente espere
+    // en silencio a que el cliente hable, que se oye igual que estar roto.
+    logVoiceEvent("elevenlabs_iniciando", {
+      botId,
+      callSid: maskId(this.deps.callSid),
+      saludo: (ctx.saludo ?? "").slice(0, 80),
+      promptChars: ctx.prompt.length,
+    });
     await this.client.connect({ prompt: ctx.prompt, firstMessage: ctx.saludo });
     this.callRowId = this.deps.voiceSession.getContext().callId;
     await recordCallEvent(this.db(), botId, this.callRowId, "call.answered", { proveedor: "elevenlabs" });
@@ -127,6 +137,17 @@ export class ElevenLabsCallBridge implements CallBridge {
 
   private audioHaciaTwilio(audioBase64: string): void {
     if (this.cerrado) return;
+    // La otra mitad del diagnóstico: sin esto solo se sabía que el audio del
+    // cliente SALÍA, no si alguna vez volvía algo. "La llamada no se oye"
+    // puede ser que ElevenLabs no hable, o que hable y no llegue a Twilio —
+    // dos causas muy distintas que se veían idénticas desde afuera.
+    if (!this.audioDelAgenteRecibido) {
+      this.audioDelAgenteRecibido = true;
+      logVoiceEvent("elevenlabs_audio_agente", {
+        botId: this.deps.botId,
+        callSid: maskId(this.deps.callSid),
+      });
+    }
     // La primera muestra de audio de un turno es lo que mide la latencia que
     // de verdad se oye: desde que el cliente calló hasta que el bot habla.
     if (this.finDeTurnoDelCliente != null) {
