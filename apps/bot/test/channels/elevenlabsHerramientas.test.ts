@@ -155,6 +155,33 @@ describe("registrar herramientas en ElevenLabs", () => {
     expect(r.error).toBeUndefined();
   });
 
+  it("reporta cuáles NO quedaron, aunque otras sí", async () => {
+    // El bug que congeló todo: se registraron 5 de 11, se trató como éxito, se
+    // guardó la huella, y desde entonces el registro se saltaba. El agente se
+    // quedó sin scheduleAppointment ni captureLead y ningún arreglo posterior
+    // llegaba a aplicarse — el bot confirmaba citas que no podía agendar.
+    let n = 0;
+    global.fetch = fetchQueRegistra(() => {
+      n++;
+      return n === 1 ? new Response("no", { status: 422 }) : Response.json({ id: "tool_ok" });
+    });
+
+    const r = await registrarHerramientas(
+      LLAVE,
+      { scheduleAppointment: toolFalsa("Agenda"), searchKb: toolFalsa("Busca") },
+      {},
+    );
+
+    expect(r.faltantes).toEqual(["scheduleAppointment"]);
+    expect(r.ids.searchKb).toBe("tool_ok");
+  });
+
+  it("cuando TODAS entran, no reporta faltantes", async () => {
+    global.fetch = fetchQueRegistra(() => Response.json({ id: "tool_ok" }));
+    const r = await registrarHerramientas(LLAVE, { searchKb: toolFalsa("Busca") }, {});
+    expect(r.faltantes).toEqual([]);
+  });
+
   it("si NINGUNA se pudo registrar, eso sí se reporta", async () => {
     global.fetch = fetchQueRegistra(() => new Response("no", { status: 500 }));
     const r = await registrarHerramientas(LLAVE, { a: toolFalsa("x") }, {});

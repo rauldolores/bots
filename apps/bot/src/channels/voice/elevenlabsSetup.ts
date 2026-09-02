@@ -204,6 +204,7 @@ export async function prepararAgenteElevenLabs(
   // conocimiento — que fue justo lo que se descubrió en una llamada real:
   // "le pedí que me agendara y no pudo".
   let toolIds: string[] = [];
+  let faltaronHerramientas = false;
   if (tools && Object.keys(tools).length > 0) {
     const { registrarHerramientas } = await import("./elevenlabsTools");
     const previos = leerMapa(await repo.get(SETTING_KEYS.voiceElevenLabsToolIds));
@@ -211,6 +212,10 @@ export async function prepararAgenteElevenLabs(
     if (r.error) return { ok: false, error: r.error };
     await repo.set(SETTING_KEYS.voiceElevenLabsToolIds, JSON.stringify(r.ids));
     toolIds = Object.values(r.ids);
+    faltaronHerramientas = r.faltantes.length > 0;
+    if (faltaronHerramientas) {
+      console.error(`[voice-elevenlabs] herramientas sin registrar: ${r.faltantes.join(", ")}`);
+    }
   }
 
   // El prompt real se manda por conversación (ver elevenlabsBridge.ts), así que
@@ -289,7 +294,14 @@ export async function prepararAgenteElevenLabs(
   if (!agentId) return { ok: false, error: "ElevenLabs no devolvió el identificador del agente." };
 
   await repo.set(SETTING_KEYS.voiceElevenLabsAgentId, agentId);
-  await repo.set(SETTING_KEYS.voiceElevenLabsConfigHash, huellaDeConfiguracion(voiceId, toolIds));
+  // La huella SOLO se guarda si TODAS quedaron. Con una faltante se deja sin
+  // guardar a propósito: así la próxima llamada vuelve a intentarlo y el
+  // agente se completa solo en cuanto el problema se arregle. Antes se
+  // guardaba pasara lo que pasara, y eso dejó al bot sin poder agendar
+  // durante días — cada arreglo se desplegaba y nunca llegaba a aplicarse.
+  if (!faltaronHerramientas) {
+    await repo.set(SETTING_KEYS.voiceElevenLabsConfigHash, huellaDeConfiguracion(voiceId, toolIds));
+  }
   return { ok: true, agentId };
 }
 

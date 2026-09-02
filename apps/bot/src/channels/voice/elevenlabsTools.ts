@@ -111,7 +111,7 @@ export async function registrarHerramientas(
   apiKey: string,
   tools: Record<string, any>,
   idsPrevios: Record<string, string>,
-): Promise<{ ids: Record<string, string>; error?: string }> {
+): Promise<{ ids: Record<string, string>; faltantes: string[]; error?: string }> {
   const ids: Record<string, string> = {};
   const cabeceras = { "xi-api-key": apiKey, "Content-Type": "application/json" };
 
@@ -168,8 +168,15 @@ export async function registrarHerramientas(
     }).catch(() => {});
   }
 
+  // Qué NO quedó. Se reporta aunque otras sí hayan entrado: tratar el éxito
+  // parcial como éxito congeló el sistema en producción — entraron 5 de 11, se
+  // guardó la huella como si todo hubiera salido bien, y desde entonces el
+  // registro se saltaba. El agente se quedó sin scheduleAppointment ni
+  // captureLead, y ningún arreglo posterior llegaba a aplicarse.
+  const faltantes = Object.keys(tools).filter((n) => !ids[n]);
+
   if (Object.keys(ids).length === 0 && Object.keys(tools).length > 0) {
-    return { ids, error: "No se pudo registrar ninguna herramienta en ElevenLabs." };
+    return { ids, faltantes, error: "No se pudo registrar ninguna herramienta en ElevenLabs." };
   }
-  return { ids };
+  return { ids, faltantes };
 }
