@@ -69,6 +69,22 @@ export class AppointmentsRepo {
     );
   }
 
+  /**
+   * La cita futura que YA tiene esta conversación, si la hay.
+   *
+   * Sirve para distinguir "agéndame" de "cámbiala": la tool solo sabía crear,
+   * así que un "muévela al jueves" dejaba DOS citas activas y el cliente sin
+   * saber a cuál ir. Pasó en producción.
+   */
+  async findUpcomingByConversation(conversationId: string, now: number = Date.now()): Promise<Appointment | null> {
+    return this.db.first<Appointment>(
+      `SELECT * FROM appointments
+        WHERE bot_id = ? AND conversation_id = ? AND status = 'scheduled' AND starts_at > ?
+        ORDER BY starts_at ASC LIMIT 1`,
+      [this.botId, conversationId, now],
+    );
+  }
+
   async cancel(id: string): Promise<void> {
     await this.db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ? AND bot_id = ?", [id, this.botId]);
   }

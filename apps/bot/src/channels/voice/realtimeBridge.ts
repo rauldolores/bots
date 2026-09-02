@@ -33,6 +33,7 @@ import { transferToHumanTool } from "./tools/transferToHuman";
 import { consultarTareaTool, type TareaDelegada } from "./tools/consultarTarea";
 import { buildTransferTwiml, redirectLiveCall } from "./transfer";
 import { recordCallEvent } from "./events";
+import { encolarAnalisisDeLlamada } from "./analisisPostLlamada";
 import {
   createUsageAccumulator,
   addRealtimeUsage,
@@ -972,6 +973,11 @@ export class RealtimeCallBridge {
       writes.push(repo.setTranscript(this.callRowId, this.transcriptTurns));
     }
     await Promise.all(writes);
+
+    // El CRM se pone al día con lo que se habló, igual que en texto. Faltaba
+    // en los DOS puentes de voz: una conversación por WhatsApp actualizaba el
+    // CRM y la misma por teléfono no dejaba rastro.
+    await encolarAnalisisDeLlamada(this.deps.env, this.deps.botId, this.conversationId);
   }
 }
 

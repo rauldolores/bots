@@ -24,6 +24,7 @@ import { VOICE_CHANNEL } from "./session";
 import { BotChannelsRepo } from "../../db/botChannels";
 import { transferToHumanTool } from "./tools/transferToHuman";
 import { transferirLlamadaViva } from "./transfer";
+import { encolarAnalisisDeLlamada } from "./analisisPostLlamada";
 import { buildClearMessage, buildMediaMessage } from "./mediaStreamProtocol";
 import { bloqueLlamadaEnCurso, VOICE_BEHAVIOR_ADDENDUM } from "./voiceInstructions";
 import { resolveVoiceGreeting } from "./voiceGreeting";
@@ -392,6 +393,10 @@ export class ElevenLabsCallBridge implements CallBridge {
     await this.registrarCostos().catch((e) =>
       console.error("[voice-elevenlabs] no se pudo estimar el costo:", e),
     );
+
+    // El CRM se pone al día con lo que se habló, igual que en texto — una
+    // llamada no puede dejar menos rastro que un WhatsApp.
+    await encolarAnalisisDeLlamada(this.deps.env, this.deps.botId, this.conversationId);
 
     await this.deps.voiceSession.end("completed", reason).catch((e: unknown) =>
       console.error("[voice-elevenlabs] no se pudo cerrar la sesión:", e),

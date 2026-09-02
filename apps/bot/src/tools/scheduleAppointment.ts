@@ -8,6 +8,7 @@ import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 import { resolveConnectorCreds } from "../connectors/creds";
 import { CALENDAR_ADAPTERS } from "../connectors/registry";
 import { localTimeToUtcMs, resolveTimezone } from "../datetime";
+import { registrarCitaEnCrm } from "../appointments/crmSync";
 
 /**
  * Agenda una cita. Si el bot tiene un calendario conectado (Cal.com…), la
@@ -27,7 +28,7 @@ import { localTimeToUtcMs, resolveTimezone } from "../datetime";
 export function scheduleAppointmentTool(env: Env, getConversationId: () => string | null, botId: string) {
   return tool({
     description:
-      "Agenda una cita con el cliente. Necesitas su nombre, email y la fecha/hora deseada EN HORA LOCAL DEL NEGOCIO. Si el horario ya está ocupado en el calendario conectado, devuelve un error — propónle otro horario al cliente.",
+      "Agenda una cita con el cliente, o CAMBIA la que ya acordaron en esta misma conversación (para mover una cita, llama otra vez con la fecha nueva — no hace falta cancelar antes). Necesitas su nombre, email y la fecha/hora deseada EN HORA LOCAL DEL NEGOCIO. Si el horario ya está ocupado en el calendario conectado, devuelve un error — propónle otro horario al cliente.",
     inputSchema: z.object({
       attendeeName: z.string(),
       // NO uses `.email()` aquí (ni ningún validador de Zod cuyo JSON Schema
@@ -65,6 +66,14 @@ export function scheduleAppointmentTool(env: Env, getConversationId: () => strin
       const db = new Db(env.DB);
       const connector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "calendar");
       const appts = new AppointmentsRepo(db, botId);
+
+      // ¿Ya había una cita en esta conversación? Entonces esto es un CAMBIO,
+      // no una segunda cita. Sin esto, un "muévela al jueves" dejaba las DOS
+      // activas y el cliente sin saber a cuál presentarse — pasó en una
+      // llamada real, y el bot dijo "ya la cambié" con toda razón desde su
+      // punto de vista: su herramienta había respondido que sí.
+      const convId = getConversationId();
+      const anterior = convId ? await appts.findUpcomingByConversation(convId) : null;
       const timezone = resolveTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
       const startsAt = localTimeToUtcMs(startTime, timezone);
 
@@ -80,6 +89,21 @@ export function scheduleAppointmentTool(env: Env, getConversationId: () => strin
         };
       }
 
+
+      // La cita ya quedó guardada; reflejarla en el CRM es aparte y
+      // best-effort. Si el CRM esta caido, la cita NO se cae con el: la base
+      // de Nodia es justamente el respaldo del que sale el panel.
+      const reflejarEnCrm = async (): Promise<void> => {
+        const r = await registrarCitaEnCrm(
+          env,
+          db,
+          botId,
+          { conversationId: getConversationId(), nombre: attendeeName, correo: attendeeEmail, startsAt, notas: notes },
+          timezone,
+        );
+        if (!r.ok) console.error("[scheduleAppointment] no se pudo reflejar la cita en el CRM:", r.detalle);
+      };
+
       if (!connector) {
         const appointmentId = await appts.create({
           conversationId: getConversationId(),
@@ -88,6 +112,11 @@ export function scheduleAppointmentTool(env: Env, getConversationId: () => strin
           startsAt,
           notes,
         });
+        await reflejarEnCrm();
+        if (anterior) {
+          await appts.cancel(anterior.id);
+          return { appointmentId, reagendada: true, message: "Cita cambiada — la anterior quedó cancelada." };
+        }
         return { appointmentId, message: "Cita agendada." };
       }
 
@@ -113,6 +142,20 @@ export function scheduleAppointmentTool(env: Env, getConversationId: () => strin
         notes,
         externalRef: result.externalId ?? null,
       });
+      await reflejarEnCrm();
+      if (anterior) {
+        await appts.cancel(anterior.id);
+        // El calendario externo no se puede limpiar: los adaptadores solo
+        // saben CREAR eventos (ver CalendarConnector). Se le dice al agente
+        // para que se lo diga al cliente, en vez de dejar un evento fantasma
+        // del que nadie se entera hasta que alguien se presenta ese día.
+        return {
+          appointmentId,
+          reagendada: true,
+          message:
+            "Cita cambiada. AVÍSALE al cliente que la cita anterior sigue en el calendario y alguien del equipo la va a quitar.",
+        };
+      }
       return { appointmentId, message: "Cita agendada." };
     },
   });
