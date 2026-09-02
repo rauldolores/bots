@@ -87,3 +87,37 @@ export function formatTodayLong(now: Date, timeZone: string): string {
   const iso = now.toLocaleDateString("en-CA", { timeZone }); // en-CA = YYYY-MM-DD
   return `${long} (${iso}, hora de ${timeZone})`;
 }
+
+/** Cuántos días adelante se le dan ya calculados al modelo. Dos semanas cubren "el lunes", "el finde" y "la próxima semana". */
+const DIAS_DE_REFERENCIA = 14;
+
+/**
+ * Los próximos días con su nombre y su fecha ISO, ya resueltos.
+ *
+ * Existe porque decirle "hoy es lunes 31 de agosto" a un modelo NO basta: la
+ * aritmética de calendario la hace mal, y los modelos chicos (el de la llamada
+ * es gpt-4o-mini) peor. Caso real: el cliente pidió mover su cita "al lunes" un
+ * lunes por la noche y el agente agendó el SÁBADO. La herramienta hizo bien su
+ * trabajo — la fecha ya venía equivocada de arriba.
+ *
+ * Mismo principio que localTimeToUtcMs: si es una cuenta, la hace el código.
+ * Aquí el modelo ya no calcula, busca en una tabla.
+ *
+ * Solo fechas, nunca la hora: este bloque va en el prompt del sistema, que se
+ * cachea. Meterle el minuto actual rompería la caché en cada turno.
+ */
+export function proximosDias(now: Date, timeZone: string, dias = DIAS_DE_REFERENCIA): string {
+  // El "hoy" del NEGOCIO, no el del servidor: a las 23:00 de México ya es el
+  // día siguiente en UTC, y la tabla arrancaría un día tarde.
+  const [y, m, d] = now.toLocaleDateString("en-CA", { timeZone }).split("-").map(Number);
+  const lineas: string[] = [];
+  for (let i = 0; i < dias; i++) {
+    // Mediodía UTC: a esa hora ningún huso ni cambio de horario mueve el día,
+    // así que el nombre del día siempre corresponde a la fecha ISO de al lado.
+    const dia = new Date(Date.UTC(y, m - 1, d + i, 12));
+    const iso = dia.toISOString().slice(0, 10);
+    const nombre = dia.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
+    lineas.push(`${nombre} → ${iso}${i === 0 ? " (HOY)" : ""}`);
+  }
+  return lineas.join("\n");
+}

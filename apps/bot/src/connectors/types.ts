@@ -172,6 +172,12 @@ export interface AppointmentInput {
   /** ISO datetime. */
   startTime: string;
   notes?: string;
+  /**
+   * Teléfono del cliente, si se conoce. Solo lo usan los calendarios que viven
+   * DENTRO del CRM (ver calendar/vinqulia.ts): ahí la cita se cuelga de una
+   * persona, y a alguien que llegó por teléfono no se le encuentra por correo.
+   */
+  phone?: string | null;
 }
 
 export interface AppointmentRecord {
@@ -185,4 +191,15 @@ export interface AppointmentRecord {
 export interface CalendarConnector {
   pushAppointment(creds: ConnectorCreds, appt: AppointmentInput): Promise<ConnectorPushResult>;
   listUpcoming(creds: ConnectorCreds, limit: number): Promise<ConnectorListResult<AppointmentRecord>>;
+  /**
+   * Cancela/borra una cita ya creada, por el id que devolvió `pushAppointment`.
+   *
+   * Sin esto, mover una cita dejaba la vieja viva en el calendario del dueño:
+   * el agente decía "ya la cambié" y el 2 de septiembre seguía ahí junto al 5.
+   * Pasó en producción — el conector solo sabía CREAR.
+   *
+   * Opcional porque no todo proveedor lo permite; quien llama debe degradar
+   * avisándole al cliente en vez de callarse el evento fantasma.
+   */
+  cancelAppointment?(creds: ConnectorCreds, externalId: string): Promise<{ ok: boolean; error?: string }>;
 }

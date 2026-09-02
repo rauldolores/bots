@@ -116,3 +116,48 @@ describe("googleCalendarConnector.listUpcoming", () => {
     expect(result.items[0]).toMatchObject({ id: "1", name: "Cita con Ana", contact: "ana@x.com", url: "https://cal/1" });
   });
 });
+
+describe("googleCalendarConnector.cancelAppointment — para que mover una cita no deje dos", () => {
+  it("borra el evento del calendario configurado", async () => {
+    let visto: any = null;
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      visto = { url: String(url), method: init?.method, auth: init?.headers?.Authorization };
+      return new Response(null, { status: 204 });
+    }) as any;
+
+    const r = await googleCalendarConnector.cancelAppointment!(
+      { apiKey: "at-fake", config: { calendarId: "equipo@empresa.com" } },
+      "evt_123",
+    );
+    expect(r).toEqual({ ok: true });
+    expect(visto.url).toBe(
+      "https://www.googleapis.com/calendar/v3/calendars/equipo%40empresa.com/events/evt_123",
+    );
+    expect(visto.method).toBe("DELETE");
+    expect(visto.auth).toBe("Bearer at-fake");
+  });
+
+  it("sin calendario configurado usa el primario, igual que al crear", async () => {
+    let visto = "";
+    global.fetch = vi.fn(async (url: any) => {
+      visto = String(url);
+      return new Response(null, { status: 204 });
+    }) as any;
+    await googleCalendarConnector.cancelAppointment!(creds, "evt_123");
+    expect(visto).toContain("/calendars/primary/events/evt_123");
+  });
+
+  it("410 y 404 cuentan como éxito: el evento ya no está, que es lo que se buscaba", async () => {
+    for (const status of [404, 410]) {
+      global.fetch = vi.fn(async () => new Response("gone", { status })) as any;
+      expect(await googleCalendarConnector.cancelAppointment!(creds, "evt_123")).toEqual({ ok: true });
+    }
+  });
+
+  it("un error real (permisos, token vencido) se reporta", async () => {
+    global.fetch = vi.fn(async () => new Response("forbidden", { status: 403 })) as any;
+    const r = await googleCalendarConnector.cancelAppointment!(creds, "evt_123");
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("403");
+  });
+});

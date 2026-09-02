@@ -47,6 +47,28 @@ export const calcomConnector: CalendarConnector = {
     }
   },
 
+  /**
+   * Cancela la reserva. Cal.com no la borra: la deja en CANCELLED, que es
+   * justo lo que `listUpcoming` ya filtra, así que deja de contar como cita.
+   *
+   * Un 404 se toma como éxito a propósito — si la reserva ya no está, el
+   * estado final del calendario es el que queríamos. Fallar aquí solo lograría
+   * que el agente le dijera al cliente que quedó un evento fantasma que en
+   * realidad no existe.
+   */
+  async cancelAppointment(creds: ConnectorCreds, externalId: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const res = await fetch(
+        `${API}/bookings/${encodeURIComponent(externalId)}?apiKey=${encodeURIComponent(creds.apiKey)}`,
+        { method: "DELETE" },
+      );
+      if (res.ok || res.status === 404) return { ok: true };
+      return { ok: false, error: `Cal.com respondió ${res.status}: ${(await res.text()).slice(0, 200)}` };
+    } catch (e) {
+      return { ok: false, error: String((e as Error)?.message ?? e) };
+    }
+  },
+
   async listUpcoming(creds: ConnectorCreds, limit: number): Promise<ConnectorListResult<AppointmentRecord>> {
     try {
       const res = await fetch(`${API}/bookings?apiKey=${encodeURIComponent(creds.apiKey)}`);

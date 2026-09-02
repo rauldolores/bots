@@ -858,3 +858,76 @@ describe("etiquetas", () => {
     expect(r.detalle).toContain("No se encontró");
   });
 });
+
+/**
+ * El tipo de la nota. En el CRM, la nota de una llamada y la de un chat se ven
+ * IGUALES si todas nacen con `type: "note"` — y el equipo pierde la única
+ * pista de por dónde habló el cliente. El canal ya lo sabemos con certeza, así
+ * que no hay nada que adivinar.
+ */
+describe("tipo de nota según el canal", () => {
+  const notaDe = (payload: Record<string, unknown>) => ({
+    kind: "nota" as const,
+    operation: "crear",
+    contacto: { idEnCrm: "7", dato: null },
+    payload,
+    valorPropuesto: null,
+  });
+
+  it("una llamada queda registrada COMO llamada, no como nota genérica", async () => {
+    fetchMock.mockImplementation(creaTodoCon(1));
+    const r = await vinquliaConnector.aplicarCambio!(creds(), notaDe({ texto: "Pidió una demo", tipo: "call" }) as any);
+    expect(r.ok).toBe(true);
+    expect(cuerpo("/contact_notes").type).toBe("call");
+  });
+
+  it("sin tipo en el payload (propuestas viejas) sigue siendo una nota normal", async () => {
+    fetchMock.mockImplementation(creaTodoCon(1));
+    await vinquliaConnector.aplicarCambio!(creds(), notaDe({ texto: "Pidió una demo" }) as any);
+    expect(cuerpo("/contact_notes").type).toBe("note");
+  });
+
+  it("un tipo desconocido no se le manda al CRM tal cual", async () => {
+    fetchMock.mockImplementation(creaTodoCon(1));
+    await vinquliaConnector.aplicarCambio!(creds(), notaDe({ texto: "x", tipo: "señal-de-humo" }) as any);
+    expect(cuerpo("/contact_notes").type).toBe("note");
+  });
+
+  // Lo importante: la etiqueta es un adorno, el texto no. Perder la nota
+  // entera porque esta instalación no reconoce "whatsapp" sería cambiar un
+  // problema chico por uno grande.
+  it("si el CRM rechaza el tipo, reintenta como nota en vez de perder el texto", async () => {
+    let intentos = 0;
+    fetchMock.mockImplementation((async (url: string, init?: { method?: string }) => {
+      if (String(url).includes("/contact_notes") && (init?.method ?? "GET").toUpperCase() === "POST") {
+        intentos++;
+        return intentos === 1 ? jsonResponse("violates check constraint", 400) : jsonResponse([{ id: 1 }], 201);
+      }
+      return jsonResponse([]);
+    }) as unknown as typeof fetch);
+
+    const r = await vinquliaConnector.aplicarCambio!(
+      creds(),
+      notaDe({ texto: "Escribió por WhatsApp", tipo: "whatsapp" }) as any,
+    );
+    expect(r.ok).toBe(true);
+    expect(intentos).toBe(2);
+    const posts = fetchMock.mock.calls.filter(
+      ([u, i]: any) => String(u).includes("/contact_notes") && i?.method === "POST",
+    );
+    expect(JSON.parse(posts[0][1].body).type).toBe("whatsapp");
+    expect(JSON.parse(posts[1][1].body).type).toBe("note");
+    // El texto NO cambia entre un intento y otro: lo que se degrada es la etiqueta.
+    expect(JSON.parse(posts[1][1].body).text).toBe("Escribió por WhatsApp");
+  });
+
+  it("no reintenta cuando el tipo ya era el neutro — sería pedir dos veces lo mismo", async () => {
+    fetchMock.mockImplementation((async () => jsonResponse("boom", 500)) as unknown as typeof fetch);
+    const r = await vinquliaConnector.aplicarCambio!(creds(), notaDe({ texto: "x", tipo: "note" }) as any);
+    expect(r.ok).toBe(false);
+    const posts = fetchMock.mock.calls.filter(
+      ([u, i]: any) => String(u).includes("/contact_notes") && i?.method === "POST",
+    );
+    expect(posts).toHaveLength(1);
+  });
+});

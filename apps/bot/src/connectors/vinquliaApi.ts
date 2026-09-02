@@ -253,17 +253,21 @@ export async function buscarOCrearEmpresa(
  *
  * Es lo que hace que alguien de verdad marque: una oportunidad sin tarea se
  * queda en el tablero esperando a que alguien la vea. Best-effort como todo lo
- * secundario — devuelve false y lo loguea, nunca tumba el alta del lead.
+ * secundario — devuelve undefined y lo loguea, nunca tumba el alta del lead.
+ *
+ * Devuelve el id de la tarea creada, no un booleano: el calendario de Vinqulia
+ * (ver calendar/vinqulia.ts) necesita poder BORRARLA después, y sin su id una
+ * cita movida dejaría la vieja colgada para siempre.
  */
 export async function crearTarea(
   creds: ConnectorCreds,
   base: string,
   tarea: { contactId: number | string; texto: string; tipo?: string; vence?: Date; salesId?: number },
-): Promise<boolean> {
+): Promise<number | string | undefined> {
   try {
     const res = await fetch(`${base}/tasks`, {
       method: "POST",
-      headers: vinquliaHeaders(creds, { "Content-Type": "application/json" }),
+      headers: vinquliaHeaders(creds, { "Content-Type": "application/json", Prefer: "return=representation" }),
       body: JSON.stringify({
         contact_id: tarea.contactId,
         type: tarea.tipo ?? "follow-up",
@@ -274,12 +278,59 @@ export async function crearTarea(
     });
     if (!res.ok) {
       console.error(`[vinqulia] no se pudo crear la tarea: ${res.status} ${(await res.text()).slice(0, 200)}`);
-      return false;
+      return undefined;
     }
-    return true;
+    return firstRowId(await res.json().catch(() => null));
   } catch (e) {
     console.error("[vinqulia] no se pudo crear la tarea:", e);
-    return false;
+    return undefined;
+  }
+}
+
+/**
+ * El contacto al que colgarle algo: el que ya existe, o uno nuevo con lo poco
+ * que se sepa de él.
+ *
+ * Lo necesita el calendario de Vinqulia: allá una cita no es un evento suelto
+ * sino una tarea de UNA persona, así que sin contacto no hay dónde ponerla. Se
+ * crea aquí en vez de exigir que el CRM ya lo tenga porque el orden real es al
+ * revés — mucha gente agenda antes de que nadie la haya dado de alta.
+ */
+export async function buscarOCrearContacto(
+  creds: ConnectorCreds,
+  base: string,
+  persona: { nombre: string | null; correo?: string | null; telefono?: string | null },
+  sales: number | undefined,
+): Promise<number | string | undefined> {
+  const correo = (persona.correo ?? "").trim();
+  const telefono = (persona.telefono ?? "").trim();
+
+  // El correo identifica a una persona; el teléfono no (ver buscarContacto).
+  // Por eso se busca primero por correo y solo después por teléfono.
+  for (const dato of [correo, telefono].filter(Boolean)) {
+    const hallado = await buscarContacto(creds, base, dato, persona.nombre);
+    if (hallado) return hallado.id;
+  }
+
+  const body: Record<string, unknown> = splitName(persona.nombre);
+  if (correo && isEmail(correo)) body.email_jsonb = [{ email: correo, type: "Work" }];
+  if (telefono && isPhone(telefono)) body.phone_jsonb = [{ number: telefono, type: "Work" }];
+  if (sales !== undefined) body.sales_id = sales;
+
+  try {
+    const res = await fetch(`${base}/contacts`, {
+      method: "POST",
+      headers: vinquliaHeaders(creds, { "Content-Type": "application/json", Prefer: "return=representation" }),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      console.error(`[vinqulia] no se pudo crear el contacto: ${res.status} ${(await res.text()).slice(0, 200)}`);
+      return undefined;
+    }
+    return firstRowId(await res.json().catch(() => null));
+  } catch (e) {
+    console.error("[vinqulia] no se pudo crear el contacto:", e);
+    return undefined;
   }
 }
 

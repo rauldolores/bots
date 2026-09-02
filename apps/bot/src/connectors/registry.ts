@@ -12,6 +12,7 @@ import { zendeskConnector } from "./tickets/zendesk";
 import { jiraConnector } from "./tickets/jira";
 import { calcomConnector } from "./calendar/calcom";
 import { googleCalendarConnector } from "./calendar/googleCalendar";
+import { vinquliaCalendarConnector } from "./calendar/vinqulia";
 
 export type ConnectorCategory = "crm" | "tickets" | "calendar" | "mcp";
 
@@ -183,6 +184,35 @@ export const TICKET_PROVIDERS: Record<string, ConnectorMeta> = {
 };
 
 export const CALENDAR_PROVIDERS: Record<string, ConnectorMeta> = {
+  // Id distinto al del CRM y al de tickets, por lo mismo que "vinqulia-tickets":
+  // bot_connectors es único por (bot_id, provider), así que compartir el id
+  // haría que conectar el calendario desconectara el CRM.
+  "vinqulia-calendar": {
+    id: "vinqulia-calendar",
+    category: "calendar",
+    name: "Vinqulia",
+    icon: "calendar-clock",
+    desc: "Las citas del agente quedan como tareas con fecha en tu Vinqulia.",
+    steps: [
+      'En Vinqulia: <span class="font-mono">Ajustes → API</span>, crea una clave de API y cópiala.',
+      "Pega la dirección de tu Vinqulia — solo el dominio, sin rutas (ej. <span class=\"font-mono\">https://crm.miempresa.com</span>).",
+      "Si ya conectaste Vinqulia como CRM, aquí van los mismos datos: son conexiones separadas (una para leads, otra para la agenda).",
+      "Cada cita se cuelga de la persona en el CRM. Si todavía no existe ahí, el agente la da de alta con lo que sepa de ella.",
+    ],
+    apiKeyLabel: "Clave de API",
+    apiKeyPlaceholder: "········",
+    fields: [
+      { name: "url", label: "Dirección de tu Vinqulia", placeholder: "https://crm.miempresa.com", isConfig: true },
+      { name: "salesId", label: "ID del vendedor (opcional)", placeholder: "1", isConfig: true, optional: true },
+      {
+        name: "taskType",
+        label: "Tipo de tarea (opcional)",
+        placeholder: "follow-up",
+        isConfig: true,
+        optional: true,
+      },
+    ],
+  },
   calcom: {
     id: "calcom",
     category: "calendar",
@@ -222,7 +252,11 @@ export const TICKET_ADAPTERS: Record<string, TicketConnector> = {
   zendesk: zendeskConnector,
   jira: jiraConnector,
 };
-export const CALENDAR_ADAPTERS: Record<string, CalendarConnector> = { calcom: calcomConnector, "google-calendar": googleCalendarConnector };
+export const CALENDAR_ADAPTERS: Record<string, CalendarConnector> = {
+  calcom: calcomConnector,
+  "google-calendar": googleCalendarConnector,
+  "vinqulia-calendar": vinquliaCalendarConnector,
+};
 
 export const CATEGORY_LABELS: Record<ConnectorCategory, string> = {
   crm: "CRM",

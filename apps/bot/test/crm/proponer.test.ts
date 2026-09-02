@@ -53,8 +53,8 @@ function analisis(over: Record<string, unknown> = {}): AnalisisCrm {
   } as AnalisisCrm;
 }
 
-const correr = (a: AnalisisCrm, c = cliente()) =>
-  proponerDesdeAnalisis(db, "bot1", { analisis: a, conversationId: "conv1", cliente: c });
+const correr = (a: AnalisisCrm, c = cliente(), canal?: string) =>
+  proponerDesdeAnalisis(db, "bot1", { analisis: a, conversationId: "conv1", cliente: c, canal });
 
 const porTipo = (kind: string) => encoladas.filter((e) => e.kind === kind);
 
@@ -181,5 +181,36 @@ describe("una conversación de la que no se aprende nada", () => {
     await correr(analisis());
     expect(encoladas).toHaveLength(1);
     expect(encoladas[0].kind).toBe("nota");
+  });
+});
+
+/**
+ * El tipo de la nota lo decide el CANAL, no el modelo.
+ *
+ * Sin esto, la nota de una llamada y la de un chat llegan idénticas al CRM y
+ * el equipo pierde la pista de por dónde habló el cliente. Es un dato que ya
+ * tenemos con certeza: no hay nada que adivinar ni que preguntarle a un LLM.
+ */
+describe("de qué fue la interacción", () => {
+  it("una llamada se registra como llamada", async () => {
+    await correr(analisis(), cliente(), "voice");
+    expect(porTipo("nota")[0].payload).toMatchObject({ tipo: "call" });
+  });
+
+  it("un WhatsApp se registra como WhatsApp", async () => {
+    await correr(analisis(), cliente(), "whatsapp");
+    expect(porTipo("nota")[0].payload).toMatchObject({ tipo: "whatsapp" });
+  });
+
+  // Telegram, Instagram/Messenger y el widget no tienen tipo propio en el
+  // catálogo. Forzarlos a uno cercano sería inventarle un dato al equipo.
+  it("un canal sin tipo propio cae a nota, no a uno parecido", async () => {
+    await correr(analisis(), cliente(), "telegram");
+    expect(porTipo("nota")[0].payload).toMatchObject({ tipo: "note" });
+  });
+
+  it("sin canal conocido tampoco truena", async () => {
+    await correr(analisis());
+    expect(porTipo("nota")[0].payload).toMatchObject({ tipo: "note" });
   });
 });

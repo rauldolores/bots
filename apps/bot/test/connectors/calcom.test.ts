@@ -70,3 +70,38 @@ describe("calcomConnector.listUpcoming", () => {
     expect(result.items[0].url).toBe("https://app.cal.com/booking/def");
   });
 });
+
+describe("calcomConnector.cancelAppointment — para que mover una cita no deje dos", () => {
+  it("cancela la reserva por su id", async () => {
+    let visto: any = null;
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      visto = { url: String(url), method: init?.method };
+      return new Response(null, { status: 200 });
+    }) as any;
+
+    const r = await calcomConnector.cancelAppointment!(creds, "555");
+    expect(r).toEqual({ ok: true });
+    expect(visto.url).toBe("https://api.cal.com/v1/bookings/555?apiKey=cal-fake");
+    expect(visto.method).toBe("DELETE");
+  });
+
+  it("un 404 cuenta como éxito: si la reserva ya no está, no hay nada que advertir", async () => {
+    global.fetch = vi.fn(async () => new Response("not found", { status: 404 })) as any;
+    expect(await calcomConnector.cancelAppointment!(creds, "555")).toEqual({ ok: true });
+  });
+
+  it("un error real se reporta, para que el agente avise que la cita vieja sigue ahí", async () => {
+    global.fetch = vi.fn(async () => new Response("nope", { status: 500 })) as any;
+    const r = await calcomConnector.cancelAppointment!(creds, "555");
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("500");
+  });
+
+  it("si la red falla, no lanza", async () => {
+    global.fetch = vi.fn(async () => {
+      throw new Error("ECONNRESET");
+    }) as any;
+    const r = await calcomConnector.cancelAppointment!(creds, "555");
+    expect(r.ok).toBe(false);
+  });
+});

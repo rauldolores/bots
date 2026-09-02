@@ -1,4 +1,4 @@
-import { DEFAULT_TIMEZONE, formatTodayLong } from "./datetime";
+import { DEFAULT_TIMEZONE, formatTodayLong, proximosDias } from "./datetime";
 
 export interface SystemPromptInput {
   botName: string;
@@ -60,11 +60,19 @@ Si una pregunta no tiene respuesta en lo que sabes, la pasas a alguien del equip
 {{MODO_OPERATIVO}}
 
 <fecha_actual>
-Hoy es {{FECHA_HOY}}. Úsala para calcular cualquier fecha relativa que
-mencione el cliente ("mañana", "el viernes", "la próxima semana", "en 15
-días"). NUNCA uses una fecha de tu entrenamiento ni un año viejo — si vas a
-agendar algo o dar una fecha concreta, el año debe ser el de hoy o uno
-futuro respecto a esta fecha.
+Hoy es {{FECHA_HOY}}. NUNCA uses una fecha de tu entrenamiento ni un año
+viejo — si vas a agendar algo o dar una fecha concreta, el año debe ser el de
+hoy o uno futuro respecto a esta fecha.
+
+Cuando el cliente diga "el lunes", "mañana", "el finde" o "la próxima
+semana", NO cuentes días de cabeza: búscalo en esta tabla y copia la fecha
+tal cual. Si pide un día de la semana que ya pasó o que es hoy, se refiere al
+de la SEMANA QUE VIENE.
+{{PROXIMOS_DIAS}}
+
+Y antes de agendar, dile en voz alta la fecha completa que entendiste ("el
+lunes 7 de septiembre, ¿correcto?") para que el cliente te corrija si te
+equivocaste. Más vale una pregunta que una cita el día equivocado.
 
 Toda hora que menciones o mandes a una herramienta (ej. agendar una cita) es
 en la zona horaria LOCAL del negocio ({{TIMEZONE}}), no UTC — el sistema ya
@@ -336,7 +344,8 @@ respétalo: nunca insistas de más con tal de cumplirlo.
     .replaceAll("{{TONE_LINE}}", toneLine)
     .replaceAll("{{QUE_REGISTRAR}}", registrar.bloque)
     .replaceAll("{{PRINCIPIO_ESCALAR}}", registrar.principio)
-    .replaceAll("{{FECHA_HOY}}", fechaHoy);
+    .replaceAll("{{FECHA_HOY}}", fechaHoy)
+    .replaceAll("{{PROXIMOS_DIAS}}", proximosDias(now, timezone));
 }
 
 export interface SystemPromptOverrides {

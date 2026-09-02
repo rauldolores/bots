@@ -7,6 +7,7 @@ import { BotConnectorsRepo } from "../db/botConnectors";
 import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 import { resolveConnectorCreds } from "../connectors/creds";
 import { CALENDAR_ADAPTERS } from "../connectors/registry";
+import type { CalendarConnector, ConnectorCreds } from "../connectors/types";
 import { localTimeToUtcMs, resolveTimezone } from "../datetime";
 import { registrarCitaEnCrm } from "../appointments/crmSync";
 
@@ -25,6 +26,29 @@ import { registrarCitaEnCrm } from "../appointments/crmSync";
  * determinista (src/datetime.ts) con la zona horaria configurada en
  * /admin/config, no el modelo.
  */
+/**
+ * Quita del calendario conectado la reserva que acaba de quedar obsoleta.
+ *
+ * `ok: false` significa "quedó un evento fantasma allá" — y ESO es lo único
+ * que el cliente necesita oír. Un proveedor que todavía no sabe cancelar, o
+ * una cita local que nunca llegó a tener reserva externa, también caen aquí:
+ * mejor un aviso de más que un evento que nadie sabe que sobra.
+ */
+async function quitarDelCalendario(
+  adapter: CalendarConnector,
+  creds: ConnectorCreds,
+  externalRef: string | null,
+): Promise<{ ok: boolean }> {
+  if (!externalRef) return { ok: true }; // nunca hubo reserva externa que limpiar
+  if (!adapter.cancelAppointment) return { ok: false };
+  const r = await adapter.cancelAppointment(creds, externalRef).catch((e) => ({
+    ok: false as const,
+    error: String((e as Error)?.message ?? e),
+  }));
+  if (!r.ok) console.error("[scheduleAppointment] no se pudo cancelar la cita anterior en el calendario:", r.error);
+  return { ok: r.ok };
+}
+
 export function scheduleAppointmentTool(env: Env, getConversationId: () => string | null, botId: string) {
   return tool({
     description:
@@ -93,12 +117,22 @@ export function scheduleAppointmentTool(env: Env, getConversationId: () => strin
       // La cita ya quedó guardada; reflejarla en el CRM es aparte y
       // best-effort. Si el CRM esta caido, la cita NO se cae con el: la base
       // de Nodia es justamente el respaldo del que sale el panel.
-      const reflejarEnCrm = async (): Promise<void> => {
+      const reflejarEnCrm = async (omitirTarea = false): Promise<void> => {
         const r = await registrarCitaEnCrm(
           env,
           db,
           botId,
-          { conversationId: getConversationId(), nombre: attendeeName, correo: attendeeEmail, startsAt, notas: notes },
+          {
+            conversationId: convId,
+            nombre: attendeeName,
+            correo: attendeeEmail,
+            startsAt,
+            notas: notes,
+            // Si esto mueve una cita ya acordada, la tarea del CRM tiene que
+            // decir que es un cambio — si no, el equipo ve dos citas.
+            reemplazaA: anterior?.starts_at ?? null,
+            omitirTarea,
+          },
           timezone,
         );
         if (!r.ok) console.error("[scheduleAppointment] no se pudo reflejar la cita en el CRM:", r.detalle);
@@ -142,18 +176,23 @@ export function scheduleAppointmentTool(env: Env, getConversationId: () => strin
         notes,
         externalRef: result.externalId ?? null,
       });
-      await reflejarEnCrm();
+      // La agenda de Vinqulia ES una tarea del CRM: si el calendario conectado
+      // ya la escribió, crmSync no debe escribir otra igual.
+      await reflejarEnCrm(connector.provider === "vinqulia-calendar");
       if (anterior) {
         await appts.cancel(anterior.id);
-        // El calendario externo no se puede limpiar: los adaptadores solo
-        // saben CREAR eventos (ver CalendarConnector). Se le dice al agente
-        // para que se lo diga al cliente, en vez de dejar un evento fantasma
-        // del que nadie se entera hasta que alguien se presenta ese día.
+        // Y ahora sí, quitarla también del calendario del dueño. Antes esto no
+        // se podía —los adaptadores solo sabían CREAR— y la cita vieja se
+        // quedaba viva junto a la nueva; el agente decía "ya la cambié" y el
+        // equipo veía dos. Solo si la limpieza falla se le pide al agente que
+        // lo advierta, en vez de advertirlo siempre "por si acaso".
+        const limpieza = await quitarDelCalendario(adapter, creds, anterior.external_ref);
         return {
           appointmentId,
           reagendada: true,
-          message:
-            "Cita cambiada. AVÍSALE al cliente que la cita anterior sigue en el calendario y alguien del equipo la va a quitar.",
+          message: limpieza.ok
+            ? "Cita cambiada — la anterior quedó cancelada, también en el calendario."
+            : "Cita cambiada. AVÍSALE al cliente que la cita anterior sigue en el calendario y alguien del equipo la va a quitar.",
         };
       }
       return { appointmentId, message: "Cita agendada." };

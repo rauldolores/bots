@@ -7,6 +7,7 @@ import {
   formatDateTime,
   formatDate,
   formatTodayLong,
+  proximosDias,
 } from "../src/datetime";
 
 describe("resolveTimezone", () => {
@@ -84,5 +85,56 @@ describe("formatTodayLong", () => {
     // 03:00 UTC = 21:00 (9pm) del día anterior en CDMX (UTC-6).
     const s = formatTodayLong(new Date("2026-08-21T03:00:00Z"), "America/Mexico_City");
     expect(s).toContain("2026-08-20");
+  });
+});
+
+describe("proximosDias — bug real: pidió mover la cita al lunes y la agendó el sábado", () => {
+  // La llamada real fue el lunes 31 de agosto de 2026 por la noche.
+  const lunesPorLaNoche = new Date("2026-09-01T01:45:00Z"); // 19:45 del 31/08 en CDMX
+
+  it("arranca en el HOY del negocio, no en el del servidor UTC", () => {
+    const tabla = proximosDias(lunesPorLaNoche, "America/Mexico_City", 3).split("\n");
+    // En UTC ya es el 1 de septiembre; para el negocio sigue siendo el 31.
+    expect(tabla[0]).toContain("2026-08-31");
+    expect(tabla[0]).toContain("(HOY)");
+    expect(tabla[0]).toContain("lunes");
+  });
+
+  it("le da resuelto el lunes que el modelo calculó mal", () => {
+    const tabla = proximosDias(lunesPorLaNoche, "America/Mexico_City", 14);
+    // El lunes SIGUIENTE es el 7, no el sábado 5 que agendó el agente.
+    expect(tabla).toContain("lunes, 7 de septiembre → 2026-09-07");
+    expect(tabla).toContain("sábado, 5 de septiembre → 2026-09-05");
+  });
+
+  it("cada renglón empareja el nombre del día con su fecha ISO, sin correrse", () => {
+    for (const linea of proximosDias(lunesPorLaNoche, "America/Mexico_City", 14).split("\n")) {
+      const [nombre, iso] = linea.split(" → ");
+      const esperado = new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString("es-MX", {
+        weekday: "long",
+        timeZone: "UTC",
+      });
+      expect(nombre).toContain(esperado);
+    }
+  });
+
+  it("solo un renglón está marcado como HOY", () => {
+    const marcados = proximosDias(lunesPorLaNoche, "America/Mexico_City").split("\n").filter((l) => l.includes("(HOY)"));
+    expect(marcados).toHaveLength(1);
+  });
+
+  it("cruza el cambio de mes sin repetir ni saltarse días", () => {
+    const isos = proximosDias(new Date("2026-12-28T18:00:00Z"), "America/Mexico_City", 10)
+      .split("\n")
+      .map((l) => l.split(" → ")[1].slice(0, 10));
+    expect(isos).toEqual([...new Set(isos)]);
+    expect(isos[0]).toBe("2026-12-28");
+    expect(isos[9]).toBe("2027-01-06");
+  });
+
+  it("no lleva hora: el prompt del sistema se cachea y el minuto actual la rompería", () => {
+    const manana = proximosDias(new Date("2026-09-01T14:00:00Z"), "America/Mexico_City");
+    const tarde = proximosDias(new Date("2026-09-01T22:00:00Z"), "America/Mexico_City");
+    expect(manana).toBe(tarde);
   });
 });

@@ -18,6 +18,7 @@ import { Db } from "../db/client";
 import { createModel } from "../llm/provider";
 import { loadLlmOverrides } from "../settings-loader";
 import { MessagesRepo } from "../db/messages";
+import { ConversationsRepo } from "../db/conversations";
 import { CrmProposalsRepo } from "../db/crmProposals";
 import { buildCustomerContext } from "../customer/context";
 import { proponerDesdeAnalisis } from "./proponer";
@@ -168,6 +169,9 @@ Reporta ÚNICAMENTE lo que el cliente dijo de forma explícita. No deduzcas, no 
       analisis: object,
       conversationId,
       cliente,
+      // El canal es lo que hace que una llamada quede registrada COMO llamada
+      // en el CRM, y no como una nota más — ver crm/tiposDeNota.ts.
+      canal: (await new ConversationsRepo(db, botId).getById(conversationId))?.channel ?? null,
     });
     // Se registra SIEMPRE, incluido el cero: "no propuso nada" y "falló en
     // silencio" se veían idénticos desde fuera, y eso costó una tarde de

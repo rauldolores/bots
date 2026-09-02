@@ -30,6 +30,7 @@ import {
   crearTarea,
 } from "../vinquliaApi";
 import { textoDeSeguimiento, vencimientoSeguimiento } from "../followupTask";
+import { TIPO_NOTA_DEFAULT, tipoDeNotaValido } from "../../crm/tiposDeNota";
 
 /**
  * Vinqulia — CRM self-hosted, API REST estilo PostgREST.
@@ -404,20 +405,31 @@ export const vinquliaConnector: CrmConnector = {
     const sales = vinquliaSalesId(creds);
 
     if (cambio.kind === "nota") {
-      return conResultado(
-        await fetch(`${base}/contact_notes`, {
+      const cuerpo = {
+        contact_id: contactId,
+        text: String(payload.texto ?? cambio.valorPropuesto ?? ""),
+        date: new Date().toISOString(),
+        ...(sales !== undefined ? { sales_id: sales } : {}),
+      };
+      const escribir = (tipo: string) =>
+        fetch(`${base}/contact_notes`, {
           method: "POST",
           headers: vinquliaHeaders(creds, { "Content-Type": "application/json" }),
-          body: JSON.stringify({
-            contact_id: contactId,
-            type: "note",
-            text: String(payload.texto ?? cambio.valorPropuesto ?? ""),
-            date: new Date().toISOString(),
-            ...(sales !== undefined ? { sales_id: sales } : {}),
-          }),
-        }),
-        "Nota guardada en el CRM.",
-      );
+          body: JSON.stringify({ ...cuerpo, type: tipo }),
+        });
+
+      // El tipo viene del canal por el que habló el cliente: una llamada se
+      // registra como llamada, no como una nota más (ver crm/tiposDeNota.ts).
+      const tipo = tipoDeNotaValido(payload.tipo);
+      let res = await escribir(tipo);
+      // Si esta instalación de Vinqulia no reconoce ese tipo (catálogo propio,
+      // un CHECK más estrecho), se reintenta con el neutro. Perder la nota
+      // entera por su etiqueta sería cambiar un problema chico por uno grande.
+      if (!res.ok && tipo !== TIPO_NOTA_DEFAULT) {
+        console.warn(`[vinqulia] tipo de nota "${tipo}" rechazado (${res.status}); se guarda como "${TIPO_NOTA_DEFAULT}".`);
+        res = await escribir(TIPO_NOTA_DEFAULT);
+      }
+      return conResultado(res, "Nota guardada en el CRM.");
     }
 
     if (cambio.kind === "contacto") {
@@ -486,6 +498,14 @@ export const vinquliaConnector: CrmConnector = {
             // viernes es ambiguo, y una tarea con fecha equivocada es peor que
             // una sin fecha.
             text: [payload.texto, payload.cuando ? `(${payload.cuando})` : null].filter(Boolean).join(" "),
+            // ...salvo cuando quien pide la tarea YA tiene el instante exacto,
+            // no una frase. Es el caso de una cita agendada: ahí la fecha no se
+            // interpreta, se conoce (ver appointments/crmSync.ts). Sin esto la
+            // tarea nace sin vencimiento y no aparece en la agenda del CRM,
+            // que es justo donde el equipo la iba a buscar.
+            ...(typeof payload.venceIso === "string" && payload.venceIso
+              ? { due_date: payload.venceIso }
+              : {}),
             ...(sales !== undefined ? { sales_id: sales } : {}),
           }),
         }),

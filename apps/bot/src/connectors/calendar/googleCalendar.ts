@@ -102,6 +102,27 @@ export const googleCalendarConnector: CalendarConnector = {
     }
   },
 
+  /**
+   * Borra el evento del calendario.
+   *
+   * 410 (ya estaba borrado) y 404 (nunca existió, o vive en otro calendario)
+   * cuentan como éxito: el estado final es el que se buscaba. Solo un error de
+   * verdad —permisos, token vencido— debe hacer que el agente le avise al
+   * cliente que la cita vieja sigue ahí.
+   */
+  async cancelAppointment(creds: ConnectorCreds, externalId: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const res = await fetch(
+        `${API}/calendars/${encodeURIComponent(calendarId(creds))}/events/${encodeURIComponent(externalId)}`,
+        { method: "DELETE", headers: { Authorization: `Bearer ${creds.apiKey}` } },
+      );
+      if (res.ok || res.status === 404 || res.status === 410) return { ok: true };
+      return { ok: false, error: `Google Calendar respondió ${res.status}: ${(await res.text()).slice(0, 200)}` };
+    } catch (e) {
+      return { ok: false, error: String((e as Error)?.message ?? e) };
+    }
+  },
+
   async listUpcoming(creds: ConnectorCreds, limit: number): Promise<ConnectorListResult<AppointmentRecord>> {
     try {
       const params = new URLSearchParams({

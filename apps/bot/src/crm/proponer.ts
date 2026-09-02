@@ -12,6 +12,7 @@ import type { Db } from "../db/client";
 import { CrmProposalsRepo, type ProposalRisk } from "../db/crmProposals";
 import type { CustomerContext } from "../customer/context";
 import type { AnalisisCrm } from "./analizar";
+import { tipoDeNotaPorCanal } from "./tiposDeNota";
 
 /**
  * Riesgo por tipo de cambio, NO por confianza del modelo.
@@ -40,6 +41,12 @@ export interface EntradaPropuestas {
   analisis: AnalisisCrm;
   conversationId: string;
   cliente: CustomerContext;
+  /**
+   * Por dónde habló el cliente ("voice", "whatsapp", "telegram"…). Decide con
+   * qué tipo nace la nota en el CRM: una llamada no debería quedar registrada
+   * igual que un chat. Ausente = nota neutra.
+   */
+  canal?: string | null;
 }
 
 /**
@@ -49,7 +56,7 @@ export interface EntradaPropuestas {
 export async function proponerDesdeAnalisis(
   db: Db,
   botId: string,
-  { analisis, conversationId, cliente }: EntradaPropuestas,
+  { analisis, conversationId, cliente, canal }: EntradaPropuestas,
 ): Promise<number> {
   const repo = new CrmProposalsRepo(db, botId);
   const leadId = cliente.lead?.id ?? null;
@@ -74,7 +81,11 @@ export async function proponerDesdeAnalisis(
       kind: "nota",
       operation: "crear",
       summary: `Nota de la conversación: ${recortar(analisis.interaccion.resumen, 90)}`,
-      payload: { texto: analisis.interaccion.resumen, intencion: analisis.interaccion.intencion },
+      payload: {
+        texto: analisis.interaccion.resumen,
+        intencion: analisis.interaccion.intencion,
+        tipo: tipoDeNotaPorCanal(canal),
+      },
       proposedValue: analisis.interaccion.resumen,
       reason: `Conversación de tipo "${analisis.interaccion.intencion}".`,
       confidence: 0.9,
