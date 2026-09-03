@@ -184,8 +184,18 @@ async function aplicar(env: Env, db: Db, botId: string, p: CrmProposal): Promise
 
   // Lo que sale de NUESTRA base lo resuelve este archivo; traducir al
   // vocabulario del proveedor es del adaptador.
-  const snapshot = p.lead_id ? await readCrmSnapshot(db, botId, p.lead_id) : null;
-  const lead = p.lead_id ? await new LeadsRepo(db, botId).getById(p.lead_id) : null;
+  // Sin lead_id, ANTES se quedaba sin las dos vías de resolver al contacto a la
+  // vez: el snapshot Y el correo salían del mismo lead, así que el adaptador
+  // reportaba "no se encontró a esta persona, regístrala primero" sobre gente
+  // que llevaba días en el CRM. Medido en producción: las 26 propuestas con
+  // lead_id se aplicaron y las 5 sin él fallaron, todas por esto.
+  //
+  // La conversación es el respaldo natural: la propuesta nació de ella, así que
+  // su lead es el mismo aunque quien la creó no lo haya enlazado.
+  const leads = new LeadsRepo(db, botId);
+  const leadId = p.lead_id ?? (p.conversation_id ? (await leads.findByConversation(p.conversation_id))?.id ?? null : null);
+  const snapshot = leadId ? await readCrmSnapshot(db, botId, leadId) : null;
+  const lead = leadId ? await leads.getById(leadId) : null;
 
   const cambio: CrmChange = {
     kind: p.kind,
