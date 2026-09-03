@@ -1392,12 +1392,12 @@ adminApp.post("/conexiones/widget/config", async (c) => {
 // un webhook.
 const CONNECTOR_CATEGORIES = ["crm", "tickets", "calendar", "mcp"];
 
-adminApp.get("/conexiones/connectors/:category/:provider/connect", (c) => {
+adminApp.get("/conexiones/connectors/:category/:provider/connect", async (c) => {
   const category = c.req.param("category");
   const provider = c.req.param("provider");
   if (!CONNECTOR_CATEGORIES.includes(category)) return c.text("Categoría desconocida", 404);
   if (categoryOfProvider(provider) !== category) return c.text("Conector desconocido", 404);
-  return c.html(renderConnectorConnectModal(category as ConnectorCategory, provider));
+  return c.html(await renderConnectorConnectModal(c.env, c.get("botId"), category as ConnectorCategory, provider));
 });
 
 adminApp.post("/conexiones/connectors/:category/:provider/connect", async (c) => {

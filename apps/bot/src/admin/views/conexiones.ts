@@ -27,6 +27,7 @@ import {
   CRM_ADAPTERS,
   TICKET_ADAPTERS,
   CATEGORY_LABELS,
+  familyPeers,
   type ConnectorCategory,
   type ConnectorMeta,
   type ConnectorFieldSpec,
@@ -782,14 +783,55 @@ function renderTabs(active: string): string {
 }
 
 /** Diálogo de conexión genérico: instrucciones + API key + campos extra de config. */
-export function renderConnectorModal(meta: ConnectorMeta, opts?: { error?: string }): string {
+/** El hermano de familia ya conectado del que se pueden copiar los datos. */
+export interface FuenteReutilizable {
+  provider: string;
+  /** Cómo llamarlo en pantalla: "Vinqulia (CRM)". */
+  etiqueta: string;
+}
+
+/**
+ * ¿Hay otro conector de la MISMA instalación ya conectado?
+ *
+ * Los tres de Vinqulia son conexiones separadas (bot_connectors es único por
+ * (bot_id, provider)), pero eso es un detalle interno: al dueño no hay por qué
+ * mandarlo a generar tres claves de API y pegar la misma dirección tres veces.
+ */
+export async function fuenteReutilizable(
+  env: Env,
+  botId: string,
+  meta: ConnectorMeta,
+): Promise<FuenteReutilizable | null> {
+  const hermanos = familyPeers(meta);
+  if (hermanos.length === 0) return null;
+  const conectados = await new BotConnectorsRepo(new Db(env.DB)).listByBot(botId);
+  for (const h of hermanos) {
+    // Solo sirve uno activo y con clave: reutilizar la de un conector apagado
+    // o sin secreto daría un formulario que se ve bien y falla al guardar.
+    const fila = conectados.find((c) => c.provider === h.id && c.enabled && c.secret_ref);
+    if (fila) return { provider: h.id, etiqueta: `${h.name} (${CATEGORY_LABELS[h.category]})` };
+  }
+  return null;
+}
+
+export function renderConnectorModal(
+  meta: ConnectorMeta,
+  opts?: { error?: string; reusar?: FuenteReutilizable | null },
+): string {
+  // Con un hermano ya conectado, los campos nacen ocultos — y por lo tanto SIN
+  // `required`. Dejarlos requeridos mientras están escondidos hace que el
+  // navegador bloquee el envío sin mostrar nada: el botón "Conectar" no hace
+  // absolutamente nada y no hay forma de saber por qué. Verificado en un
+  // navegador de verdad, no deducido.
+  const reusar = opts?.reusar ?? null;
+  const obligatorio = reusar ? "" : "required";
   const steps = (meta.steps ?? [])
     .map((s, i) => `<li style="margin-bottom:6px"><span class="font-mono" style="color:var(--accent-2)">${i + 1}.</span> ${s}</li>`)
     .join("");
   const apiKeyField = `
     <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
       <label for="api_key" class="font-display font-semibold text-[12.5px] text-cream">${esc(meta.apiKeyLabel ?? "API key")}</label>
-      <input type="password" id="api_key" name="api_key" required
+      <input type="password" id="api_key" name="api_key" ${obligatorio} data-req
              placeholder="${esc(meta.apiKeyPlaceholder ?? "········")}"
              style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
     </div>`;
@@ -798,7 +840,7 @@ export function renderConnectorModal(meta: ConnectorMeta, opts?: { error?: strin
       (f) => `
       <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
         <label for="${f.name}" class="font-display font-semibold text-[12.5px] text-cream">${esc(f.label)}</label>
-        <input type="${f.type ?? "text"}" id="${f.name}" name="${f.name}" ${f.optional ? "" : "required"}
+        <input type="${f.type ?? "text"}" id="${f.name}" name="${f.name}" ${f.optional ? "" : `${obligatorio} data-req`}
                placeholder="${esc(f.placeholder)}"
                style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
       </div>`,
@@ -808,15 +850,38 @@ export function renderConnectorModal(meta: ConnectorMeta, opts?: { error?: strin
     ? `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;margin-bottom:14px">${esc(opts.error)}</div>`
     : "";
 
+  // Con un hermano ya conectado, lo normal es reutilizarlo: viene marcado, y
+  // los campos (y los pasos para sacar una clave nueva) se esconden hasta que
+  // el dueño diga que no.
+  const reuseBox = reusar
+    ? `
+    <label for="reuse_from" style="display:flex;gap:9px;align-items:flex-start;border:1px solid var(--line);background:var(--panel2);padding:11px 12px;margin-bottom:14px;cursor:pointer">
+      <input type="checkbox" id="reuse_from" name="reuse_from" value="${esc(reusar.provider)}" checked
+             style="margin-top:2px;flex:none"
+             onchange="(function(cb){var b=document.getElementById('manual-fields');b.style.display=cb.checked?'none':'block';b.querySelectorAll('[data-req]').forEach(function(i){i.required=!cb.checked});})(this)">
+      <span>
+        <span class="font-display font-semibold text-[12.5px] text-cream">Usar los mismos datos de ${esc(reusar.etiqueta)}</span>
+        <span class="text-[12px]" style="display:block;color:var(--muted);margin-top:3px">Copia la clave y la dirección que ya guardaste. No necesitas crear otra clave de API.</span>
+      </span>
+    </label>`
+    : "";
+
+  // Los pasos son "cómo saco una clave de API": sobran si va a reutilizar.
+  const stepsBlock = `<ol class="text-[12.5px]" style="color:var(--muted);line-height:1.6;padding-left:0;list-style:none;margin:0 0 16px">${steps}</ol>`;
+
   return modalShell(
     meta.icon,
     `Conectar ${meta.name}`,
     `
-    <ol class="text-[12.5px]" style="color:var(--muted);line-height:1.6;padding-left:0;list-style:none;margin:0 0 16px">${steps}</ol>
+    ${reusar ? "" : stepsBlock}
     ${error}
     <form hx-post="/admin/conexiones/connectors/${meta.category}/${meta.id}/connect" hx-target="#modal-root" hx-swap="innerHTML">
-      ${apiKeyField}
-      ${extraFields}
+      ${reuseBox}
+      <div id="manual-fields"${reusar ? ' style="display:none"' : ""}>
+        ${reusar ? stepsBlock : ""}
+        ${apiKeyField}
+        ${extraFields}
+      </div>
       <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:10px">Conectar</button>
     </form>`,
   );
@@ -849,20 +914,38 @@ export async function connectConnector(
   const db = new Db(env.DB);
   const str = (name: string) => String(form.get(name) ?? "").trim();
 
-  const apiKey = str("api_key");
+  // ¿Pidió copiar los datos de otro conector de la misma instalación? El
+  // formulario dice de cuál, pero quién puede prestárselos se decide AQUÍ:
+  // un `reuse_from` inventado no debe poder sacar el secreto de un conector
+  // que no es de la familia.
+  const prestados = await datosPrestados(env, botId, meta, str("reuse_from"));
+  if (prestados === "invalida") {
+    return renderConnectorModal(meta, {
+      error: "No se pudo leer la conexión que querías reutilizar. Captura los datos a mano.",
+      reusar: await fuenteReutilizable(env, botId, meta),
+    });
+  }
+
+  const conError = async (error: string) =>
+    renderConnectorModal(meta, { error, reusar: await fuenteReutilizable(env, botId, meta) });
+
+  const apiKey = prestados?.apiKey ?? str("api_key");
   if (!apiKey) {
-    return renderConnectorModal(meta, { error: `Falta ${(meta.apiKeyLabel ?? "el API key").toLowerCase()}.` });
+    return conError(`Falta ${(meta.apiKeyLabel ?? "el API key").toLowerCase()}.`);
   }
   const config: Record<string, string> = {};
   for (const f of meta.fields ?? []) {
-    const v = str(f.name);
+    const v = prestados?.config[f.name] ?? str(f.name);
     if (!v) {
       if (f.optional) continue;
-      return renderConnectorModal(meta, { error: `Falta "${f.label}".` });
+      return conError(`Falta "${f.label}".`);
     }
     config[f.name] = v;
   }
 
+  // Secreto PROPIO aunque el valor venga prestado: compartir el `secret_ref`
+  // haría que desconectar un conector borrara la clave de los otros dos
+  // (disconnectConnector hace deleteSecret), y se caerían en silencio.
   const secretRef = await createSecret(db, apiKey, `${category}:${provider}:${botId}`);
   await new BotConnectorsRepo(db).upsert({ botId, category, provider, name: meta.name, secretRef, config });
   return renderConnectorConnectedModal(meta);
@@ -889,13 +972,53 @@ export async function updateConnectorConfig(env: Env, botId: string, provider: s
   await new BotConnectorsRepo(new Db(env.DB)).mergeConfig(botId, provider, patch);
 }
 
+/**
+ * La clave y la config que se copian del hermano ya conectado.
+ *
+ * `null` = no pidió reutilizar nada (camino normal, captura a mano).
+ * `"invalida"` = pidió reutilizar algo que no se puede: un conector que no es
+ * de su familia, que no está conectado, o cuyo secreto ya no se puede leer.
+ * Eso NO se ignora en silencio: si se cayera al formulario vacío, el dueño
+ * vería "falta la clave" sin entender por qué.
+ */
+async function datosPrestados(
+  env: Env,
+  botId: string,
+  meta: ConnectorMeta,
+  desde: string,
+): Promise<{ apiKey: string; config: Record<string, string> } | null | "invalida"> {
+  if (!desde) return null;
+  if (!familyPeers(meta).some((p) => p.id === desde)) return "invalida";
+
+  const db = new Db(env.DB);
+  const fila = await new BotConnectorsRepo(db).getByBotAndProvider(botId, desde);
+  if (!fila?.enabled || !fila.secret_ref) return "invalida";
+  const apiKey = await readSecret(db, fila.secret_ref).catch(() => null);
+  if (!apiKey) return "invalida";
+
+  // Solo lo que identifica a la INSTALACIÓN. El vendedor, el pipeline o las
+  // horas de seguimiento significan cosas distintas en cada conector, así que
+  // copiarlos sería adivinar por el dueño.
+  const config: Record<string, string> = {};
+  for (const campo of meta.sharedConfigFields ?? []) {
+    const v = (fila.config[campo] ?? "").trim();
+    if (v) config[campo] = v;
+  }
+  return { apiKey, config };
+}
+
 /** Busca el conector por categoría+id y arma su diálogo — 404 amable si no existe o aún no está disponible. */
-export function renderConnectorConnectModal(category: ConnectorCategory, provider: string): string {
+export async function renderConnectorConnectModal(
+  env: Env,
+  botId: string,
+  category: ConnectorCategory,
+  provider: string,
+): Promise<string> {
   const meta = providersFor(category)[provider];
   if (!meta || meta.comingSoon) {
     return `<div class="text-[12.5px]" style="color:var(--bad)">Ese conector todavía no está disponible.</div>`;
   }
-  return renderConnectorModal(meta);
+  return renderConnectorModal(meta, { reusar: await fuenteReutilizable(env, botId, meta) });
 }
 
 /** Para saber a qué categoría redirigir tras desconectar (la URL de disconnect solo trae el provider). */

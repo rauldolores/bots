@@ -42,6 +42,32 @@ export interface ConnectorMeta {
   fields?: ConnectorFieldSpec[];
   /** Solo oauth: config que se completa DESPUÉS de conectar (ej. a qué proyecto de Jira caen los tickets). */
   postAuthFields?: ConnectorFieldSpec[];
+  /**
+   * Conectores que viven en la MISMA instalación y por lo tanto sirven con la
+   * misma clave: los tres de Vinqulia (CRM, tickets, calendario).
+   *
+   * Son conexiones separadas a propósito —bot_connectors es único por
+   * (bot_id, provider)— pero eso no significa que el dueño tenga que ir a
+   * generar tres claves de API distintas y pegar la misma dirección tres
+   * veces. Si ya conectó una, el diálogo le ofrece reutilizar sus datos.
+   */
+  credentialFamily?: string;
+  /**
+   * Qué campos de `config` se copian al reutilizar (además de la clave).
+   *
+   * Solo lo que identifica a la INSTALACIÓN, nunca lo que es una decisión de
+   * ese conector: la dirección se comparte; el vendedor, el pipeline o las
+   * horas de seguimiento no, porque significan cosas distintas en cada uno.
+   */
+  sharedConfigFields?: string[];
+}
+
+/** Los conectores que comparten credenciales con éste (misma instalación), sin contarlo a él. */
+export function familyPeers(meta: ConnectorMeta): ConnectorMeta[] {
+  if (!meta.credentialFamily) return [];
+  return [CRM_PROVIDERS, TICKET_PROVIDERS, CALENDAR_PROVIDERS, MCP_PROVIDERS]
+    .flatMap((grupo) => Object.values(grupo))
+    .filter((m) => m.credentialFamily === meta.credentialFamily && m.id !== meta.id);
 }
 
 /**
@@ -72,6 +98,8 @@ export const CRM_PROVIDERS: Record<string, ConnectorMeta> = {
     ],
     apiKeyLabel: "Clave de API",
     apiKeyPlaceholder: "········",
+    credentialFamily: "vinqulia",
+    sharedConfigFields: ["url"],
     // El pipeline y la etapa NO se piden aquí como texto: Vinqulia guarda por
     // value interno ("ventas", "opportunity") y muestra por label ("Ventas",
     // "Oportunidad"). Al teclearlos, el dueño escribe lo que ve y la
@@ -142,6 +170,8 @@ export const TICKET_PROVIDERS: Record<string, ConnectorMeta> = {
     ],
     apiKeyLabel: "Clave de API",
     apiKeyPlaceholder: "········",
+    credentialFamily: "vinqulia",
+    sharedConfigFields: ["url"],
     fields: [
       { name: "url", label: "Dirección de tu Vinqulia", placeholder: "https://crm.miempresa.com", isConfig: true },
       { name: "salesId", label: "ID del vendedor (opcional)", placeholder: "1", isConfig: true, optional: true },
@@ -201,6 +231,8 @@ export const CALENDAR_PROVIDERS: Record<string, ConnectorMeta> = {
     ],
     apiKeyLabel: "Clave de API",
     apiKeyPlaceholder: "········",
+    credentialFamily: "vinqulia",
+    sharedConfigFields: ["url"],
     // Solo la URL y la clave. NO se pide vendedor ni tipo de tarea: este
     // conector únicamente crea y borra citas, Vinqulia le pone dueño al
     // registro por su cuenta, y el tipo es fijo (ver calendar/vinqulia.ts).

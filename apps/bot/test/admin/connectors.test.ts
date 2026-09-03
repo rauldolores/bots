@@ -10,9 +10,11 @@ import type { Env } from "../../src/env";
 
 const createSecretMock = vi.fn();
 const deleteSecretMock = vi.fn();
+const readSecretMock = vi.fn();
 vi.mock("../../src/db/vault", () => ({
   createSecret: (...args: unknown[]) => createSecretMock(...args),
   deleteSecret: (...args: unknown[]) => deleteSecretMock(...args),
+  readSecret: (...args: unknown[]) => readSecretMock(...args),
 }));
 
 const {
@@ -36,6 +38,7 @@ beforeEach(async () => {
   db = await createTestDb();
   env = { DB: db.driver, DASHBOARD_BASE_URL: "https://bot.test" } as unknown as Env;
   createSecretMock.mockReset().mockResolvedValue("11111111-1111-1111-1111-111111111111");
+  readSecretMock.mockReset().mockResolvedValue(null);
   deleteSecretMock.mockReset().mockResolvedValue(undefined);
 });
 
@@ -49,8 +52,8 @@ describe("categoryOfProvider", () => {
 });
 
 describe("renderConnectorConnectModal", () => {
-  it("un proveedor 'próximamente' no tiene diálogo real", () => {
-    const html = renderConnectorConnectModal("crm", "twenty");
+  it("un proveedor 'próximamente' no tiene diálogo real", async () => {
+    const html = await renderConnectorConnectModal(env, TEST_BOT_ID, "crm", "twenty");
     expect(html).toContain("todavía no está disponible");
   });
 });
@@ -126,5 +129,117 @@ describe("aislamiento por bot", () => {
     const otherGrid = await renderConnectorsGrid(env, otherBotId, "crm");
     expect(ownGrid).toContain("CRM conectados: 1");
     expect(otherGrid).toContain("CRM conectados: 0");
+  });
+});
+
+/**
+ * Los tres conectores de Vinqulia (CRM, tickets, calendario) viven en la MISMA
+ * instalación, así que sirven con la misma clave. Son conexiones separadas
+ * porque bot_connectors es único por (bot_id, provider), pero eso es un
+ * detalle interno: mandar al dueño a generar tres claves de API y pegar la
+ * misma dirección tres veces sería hacerle pagar nuestra estructura de datos.
+ */
+describe("reutilizar los datos de otro conector de la misma instalación", () => {
+  const repo = () => new BotConnectorsRepo(db);
+
+  async function yaConectadoElCrm() {
+    await repo().upsert({
+      botId: TEST_BOT_ID,
+      category: "crm",
+      provider: "vinqulia",
+      name: "Vinqulia",
+      secretRef: "22222222-2222-2222-2222-222222222222",
+      config: { url: "https://crm.miempresa.com", salesId: "9", pipelineStage: "ventas|opportunity" },
+    });
+    readSecretMock.mockResolvedValue("clave-del-crm");
+  }
+
+  it("sin ningún hermano conectado, el diálogo no ofrece nada raro", async () => {
+    const html = await renderConnectorConnectModal(env, TEST_BOT_ID, "calendar", "vinqulia-calendar");
+    expect(html).not.toContain("Usar los mismos datos");
+    expect(html).toContain('name="api_key"');
+  });
+
+  it("con el CRM conectado, el calendario ofrece copiarle los datos", async () => {
+    await yaConectadoElCrm();
+    const html = await renderConnectorConnectModal(env, TEST_BOT_ID, "calendar", "vinqulia-calendar");
+    expect(html).toContain("Usar los mismos datos de Vinqulia (CRM)");
+    expect(html).toContain('name="reuse_from" value="vinqulia" checked');
+  });
+
+  it("copia la clave y la dirección sin que el dueño teclee nada", async () => {
+    await yaConectadoElCrm();
+    await connectConnector(env, TEST_BOT_ID, "calendar", "vinqulia-calendar", form({ reuse_from: "vinqulia" }));
+
+    const fila = await repo().getByBotAndProvider(TEST_BOT_ID, "vinqulia-calendar");
+    expect(fila?.config.url).toBe("https://crm.miempresa.com");
+    expect(createSecretMock).toHaveBeenCalledWith(expect.anything(), "clave-del-crm", expect.any(String));
+  });
+
+  // Compartir el secret_ref haría que desconectar UNO borrara la clave de los
+  // otros dos (disconnectConnector hace deleteSecret) y se caerían en silencio.
+  it("guarda un secreto PROPIO, no el mismo del hermano", async () => {
+    await yaConectadoElCrm();
+    await connectConnector(env, TEST_BOT_ID, "calendar", "vinqulia-calendar", form({ reuse_from: "vinqulia" }));
+
+    const fila = await repo().getByBotAndProvider(TEST_BOT_ID, "vinqulia-calendar");
+    expect(fila?.secret_ref).not.toBe("22222222-2222-2222-2222-222222222222");
+    expect(createSecretMock).toHaveBeenCalled();
+  });
+
+  // El vendedor y el pipeline significan cosas distintas en cada conector;
+  // copiarlos sería decidir por el dueño.
+  it("copia SOLO lo que identifica a la instalación, no las decisiones del otro", async () => {
+    await yaConectadoElCrm();
+    await connectConnector(env, TEST_BOT_ID, "tickets", "vinqulia-tickets", form({ reuse_from: "vinqulia" }));
+
+    const fila = await repo().getByBotAndProvider(TEST_BOT_ID, "vinqulia-tickets");
+    expect(fila?.config.url).toBe("https://crm.miempresa.com");
+    expect(fila?.config.salesId).toBeUndefined();
+    expect(fila?.config.pipelineStage).toBeUndefined();
+  });
+
+  // Quién puede prestar credenciales se decide en el servidor: si no,
+  // un reuse_from inventado sacaría el secreto de un conector ajeno.
+  it("no presta la clave de un conector de OTRA familia", async () => {
+    await repo().upsert({
+      botId: TEST_BOT_ID,
+      category: "crm",
+      provider: "hubspot",
+      name: "HubSpot",
+      secretRef: "33333333-3333-3333-3333-333333333333",
+      config: {},
+    });
+    readSecretMock.mockResolvedValue("pat-de-hubspot");
+
+    const html = await connectConnector(env, TEST_BOT_ID, "calendar", "vinqulia-calendar", form({ reuse_from: "hubspot" }));
+
+    expect(html).toContain("No se pudo leer la conexión");
+    expect(await repo().getByBotAndProvider(TEST_BOT_ID, "vinqulia-calendar")).toBeNull();
+    expect(readSecretMock).not.toHaveBeenCalled();
+  });
+
+  it("un hermano desconectado tampoco presta nada — y se dice, no se falla en silencio", async () => {
+    await yaConectadoElCrm();
+    await disconnectConnector(env, TEST_BOT_ID, "vinqulia");
+
+    const html = await connectConnector(env, TEST_BOT_ID, "calendar", "vinqulia-calendar", form({ reuse_from: "vinqulia" }));
+    expect(html).toContain("No se pudo leer la conexión");
+    expect(await repo().getByBotAndProvider(TEST_BOT_ID, "vinqulia-calendar")).toBeNull();
+  });
+
+  it("sin reuse_from sigue funcionando la captura a mano de siempre", async () => {
+    await yaConectadoElCrm();
+    await connectConnector(
+      env,
+      TEST_BOT_ID,
+      "calendar",
+      "vinqulia-calendar",
+      form({ api_key: "otra-clave", url: "https://otro.miempresa.com" }),
+    );
+
+    const fila = await repo().getByBotAndProvider(TEST_BOT_ID, "vinqulia-calendar");
+    expect(fila?.config.url).toBe("https://otro.miempresa.com");
+    expect(createSecretMock).toHaveBeenCalledWith(expect.anything(), "otra-clave", expect.any(String));
   });
 });
