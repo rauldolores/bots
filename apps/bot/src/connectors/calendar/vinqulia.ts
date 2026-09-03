@@ -27,7 +27,6 @@ import {
   vinquliaSiteUrl,
   vinquliaRecordUrl,
   vinquliaHeaders,
-  vinquliaSalesId,
   vinquliaBuscar,
   buscarOCrearContacto,
   crearTarea,
@@ -38,16 +37,18 @@ import {
 /**
  * El `type` con el que nacen las tareas de cita.
  *
- * "follow-up" es el único valor que ya está probado contra el Vinqulia real
- * (lo usan el alta de leads y el aplicado de propuestas). El dueño puede poner
- * otro desde la tarjeta si su instalación tiene un catálogo propio — pero el
- * default no inventa un valor que quizá su CRM rechace.
+ * Fijo, no configurable. Pedirle al dueño que escriba un tipo de tarea es el
+ * mismo error que ya costó un bug en producción con el pipeline: Vinqulia
+ * guarda por VALUE interno y muestra por LABEL, así que quien teclea lo que ve
+ * en pantalla guarda algo que su propio tablero no dibuja. Y este conector solo
+ * crea y borra citas — no hay nada que el dueño pueda decidir aquí.
+ *
+ * "follow-up" es el único valor comprobado contra un Vinqulia real (lo usan el
+ * alta de leads y el aplicado de propuestas). Si una instalación tiene su
+ * propio catálogo, lo correcto es un selector poblado desde su
+ * `crm.configuration` —como listPipelineStages— no un campo de texto libre.
  */
-const TIPO_TAREA_DEFAULT = "follow-up";
-
-function tipoDeTarea(creds: ConnectorCreds): string {
-  return (creds.config.taskType ?? "").trim() || TIPO_TAREA_DEFAULT;
-}
+const TIPO_TAREA = "follow-up";
 
 /** El id de tarea sale de `crearTarea`, que es numérico; se guarda como texto en `appointments.external_ref`. */
 interface TareaVinqulia {
@@ -69,14 +70,18 @@ export const vinquliaCalendarConnector: CalendarConnector = {
   async pushAppointment(creds: ConnectorCreds, appt: AppointmentInput): Promise<ConnectorPushResult> {
     const base = vinquliaBaseUrl(creds);
     if (!base) return { ok: false, error: VINQULIA_MISSING_URL };
-    const sales = vinquliaSalesId(creds);
 
+    // Sin `sales_id`: Vinqulia le pone dueño al registro por su cuenta a partir
+    // de quien autentica la clave. Comprobado en el CRM del cliente, cuyo
+    // conector no tiene vendedor configurado y crea tareas y contactos sin
+    // problema. Pedirlo aquí sería un campo de más que además duplica el de la
+    // tarjeta del CRM.
     // `contact` es el medio principal que trae quien agenda: casi siempre un
     // correo, pero por teléfono también se llega.
     const correo = appt.contact && isEmail(appt.contact) ? appt.contact : null;
     const telefono = appt.phone ?? (appt.contact && !isEmail(appt.contact) ? appt.contact : null);
 
-    const contactId = await buscarOCrearContacto(creds, base, { nombre: appt.name, correo, telefono }, sales);
+    const contactId = await buscarOCrearContacto(creds, base, { nombre: appt.name, correo, telefono }, undefined);
     if (contactId === undefined) {
       return { ok: false, error: "No se pudo encontrar ni crear a esta persona en Vinqulia." };
     }
@@ -86,10 +91,9 @@ export const vinquliaCalendarConnector: CalendarConnector = {
 
     const tareaId = await crearTarea(creds, base, {
       contactId,
-      tipo: tipoDeTarea(creds),
+      tipo: TIPO_TAREA,
       texto: [`Cita con ${appt.name}`, appt.notes?.trim()].filter(Boolean).join(" — "),
       vence,
-      salesId: sales,
     });
     if (tareaId === undefined) return { ok: false, error: "Vinqulia no aceptó la tarea de la cita." };
     return { ok: true, externalId: String(tareaId) };

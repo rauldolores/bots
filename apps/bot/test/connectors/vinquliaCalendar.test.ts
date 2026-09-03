@@ -3,7 +3,7 @@ import { vinquliaCalendarConnector } from "../../src/connectors/calendar/vinquli
 import { CALENDAR_ADAPTERS, CALENDAR_PROVIDERS } from "../../src/connectors/registry";
 import { categoryOfProvider } from "../../src/admin/views/conexiones";
 
-const creds = { apiKey: "vk-fake", config: { url: "https://crm.miempresa.com", salesId: "7" } };
+const creds = { apiKey: "vk-fake", config: { url: "https://crm.miempresa.com" } };
 const BASE = "https://crm.miempresa.com/api/datos/rest/v1";
 
 /** Las llamadas que hizo el conector, para poder afirmar sobre cada una por separado. */
@@ -43,11 +43,13 @@ describe("está dado de alta en el catálogo", () => {
     expect(categoryOfProvider("vinqulia-tickets")).toBe("tickets");
   });
 
-  it("la URL es obligatoria y el resto opcional — un campo de más bloquea la conexión de quien no lo sepa", () => {
+  // Está dirigido a gente que no es técnica: cada campo de más es una
+  // oportunidad de atorarse o de escribir un valor que el CRM no reconoce.
+  // Aquí no hay nada que decidir — este conector solo crea y borra citas.
+  it("pide SOLO la URL: ni vendedor ni tipo de tarea", () => {
     const fields = CALENDAR_PROVIDERS["vinqulia-calendar"]?.fields ?? [];
-    expect(fields.find((f) => f.name === "url")?.optional).toBeFalsy();
-    expect(fields.find((f) => f.name === "salesId")?.optional).toBe(true);
-    expect(fields.find((f) => f.name === "taskType")?.optional).toBe(true);
+    expect(fields.map((f) => f.name)).toEqual(["url"]);
+    expect(fields[0].optional).toBeFalsy(); // sin URL no hay a dónde agendar
   });
 });
 
@@ -72,7 +74,6 @@ describe("vinquliaCalendarConnector.pushAppointment", () => {
     expect(tarea.due_date).toBe("2026-09-07T16:00:00.000Z");
     expect(tarea.text).toContain("Pedro Alcántara");
     expect(tarea.text).toContain("Demo del plan anual");
-    expect(tarea.sales_id).toBe(7);
     expect(tarea.type).toBe("follow-up");
   });
 
@@ -115,18 +116,22 @@ describe("vinquliaCalendarConnector.pushAppointment", () => {
     expect(llamada("/contacts?")!.url).toContain("phone_jsonb");
   });
 
-  it("respeta el tipo de tarea que el dueño configuró", async () => {
+  // Vinqulia le pone dueño al registro por su cuenta, a partir de quien
+  // autentica la clave. Comprobado en el CRM del cliente, cuyo conector no
+  // tiene vendedor configurado y crea tareas y contactos sin problema.
+  it("no manda sales_id: no es un dato que el dueño tenga que saber", async () => {
     responder({
       "/contacts?": () => new Response(JSON.stringify([{ id: 42 }]), { status: 200 }),
       "/tasks": () => new Response(JSON.stringify([{ id: 903 }]), { status: 201 }),
     });
 
-    await vinquliaCalendarConnector.pushAppointment(
-      { ...creds, config: { ...creds.config, taskType: "meeting" } },
-      { name: "Pedro", contact: "pedro@x.com", startTime: "2026-09-07T16:00:00.000Z" },
-    );
+    await vinquliaCalendarConnector.pushAppointment(creds, {
+      name: "Pedro",
+      contact: "pedro@x.com",
+      startTime: "2026-09-07T16:00:00.000Z",
+    });
 
-    expect(JSON.parse(llamada("/tasks")!.init.body).type).toBe("meeting");
+    expect(JSON.parse(llamada("/tasks")!.init.body)).not.toHaveProperty("sales_id");
   });
 
   it("sin URL configurada: error claro y ni una llamada a la red", async () => {

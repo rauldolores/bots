@@ -201,16 +201,13 @@ export const CALENDAR_PROVIDERS: Record<string, ConnectorMeta> = {
     ],
     apiKeyLabel: "Clave de API",
     apiKeyPlaceholder: "········",
+    // Solo la URL y la clave. NO se pide vendedor ni tipo de tarea: este
+    // conector únicamente crea y borra citas, Vinqulia le pone dueño al
+    // registro por su cuenta, y el tipo es fijo (ver calendar/vinqulia.ts).
+    // Cada campo de más es una oportunidad de que alguien no técnico se
+    // atore o escriba un valor que su CRM no reconoce.
     fields: [
       { name: "url", label: "Dirección de tu Vinqulia", placeholder: "https://crm.miempresa.com", isConfig: true },
-      { name: "salesId", label: "ID del vendedor (opcional)", placeholder: "1", isConfig: true, optional: true },
-      {
-        name: "taskType",
-        label: "Tipo de tarea (opcional)",
-        placeholder: "follow-up",
-        isConfig: true,
-        optional: true,
-      },
     ],
   },
   calcom: {

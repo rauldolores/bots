@@ -5,6 +5,7 @@ import { AppointmentsRepo } from "../../src/db/appointments";
 import { BotConnectorsRepo } from "../../src/db/botConnectors";
 import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
 import { scheduleAppointmentTool } from "../../src/tools/scheduleAppointment";
+import { ConversationsRepo } from "../../src/db/conversations";
 import { localTimeToUtcMs, DEFAULT_TIMEZONE } from "../../src/datetime";
 
 const readSecretMock = vi.fn();
@@ -137,7 +138,16 @@ describe("scheduleAppointmentTool — con Cal.com conectado", () => {
  */
 describe("scheduleAppointmentTool — mover una cita ya acordada", () => {
   const OTRA_FECHA = new Date(Date.now() + 14 * 86_400_000).toISOString();
-  const conv = () => "conv-mover";
+
+  // La conversación tiene que EXISTIR: appointments.conversation_id es una
+  // llave foránea, así que un id inventado revienta el insert antes de probar
+  // nada. Cada prueba se crea la suya.
+  let convId: string;
+  const conv = () => convId;
+
+  beforeEach(async () => {
+    convId = (await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "u-mover")).id;
+  });
 
   it("sin calendario conectado: la segunda cita reemplaza a la primera, no se suma", async () => {
     const tool = scheduleAppointmentTool(env, conv, TEST_BOT_ID);
@@ -155,8 +165,11 @@ describe("scheduleAppointmentTool — mover una cita ya acordada", () => {
   });
 
   it("una cita en OTRA conversación no se toca: cada cliente tiene la suya", async () => {
-    await scheduleAppointmentTool(env, () => "conv-a", TEST_BOT_ID).execute!(INPUT, {} as any);
-    await scheduleAppointmentTool(env, () => "conv-b", TEST_BOT_ID).execute!(INPUT, {} as any);
+    const convs = new ConversationsRepo(db, TEST_BOT_ID);
+    const a = (await convs.getOrCreate("telegram", "u-a")).id;
+    const b = (await convs.getOrCreate("telegram", "u-b")).id;
+    await scheduleAppointmentTool(env, () => a, TEST_BOT_ID).execute!(INPUT, {} as any);
+    await scheduleAppointmentTool(env, () => b, TEST_BOT_ID).execute!(INPUT, {} as any);
     const activas = await new AppointmentsRepo(db, TEST_BOT_ID).listUpcoming(10, Date.parse("2026-01-01"));
     expect(activas).toHaveLength(2);
   });
