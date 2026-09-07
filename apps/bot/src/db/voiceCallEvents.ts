@@ -9,6 +9,11 @@ export type VoiceCallEventType =
   | "call.tool_called"
   | "call.interrupted"
   | "call.transferred"
+  // El bot le afirmó al cliente que algo YA estaba hecho y la base dice que
+  // no — ver channels/voice/verificarPromesas.ts. Es el único evento que no
+  // describe lo que pasó durante la llamada sino lo que se comprobó DESPUÉS,
+  // y por eso importa: es la diferencia entre creerle al agente y verificarlo.
+  | "call.promesa_incumplida"
   | "call.ended";
 
 export interface VoiceCallEventRow {

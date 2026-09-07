@@ -25,6 +25,7 @@ import { BotChannelsRepo } from "../../db/botChannels";
 import { transferToHumanTool } from "./tools/transferToHuman";
 import { transferirLlamadaViva } from "./transfer";
 import { encolarAnalisisDeLlamada } from "./analisisPostLlamada";
+import { verificarLlamada } from "./verificarPromesas";
 import { buildClearMessage, buildMediaMessage } from "./mediaStreamProtocol";
 import { bloqueLlamadaEnCurso, VOICE_BEHAVIOR_ADDENDUM } from "./voiceInstructions";
 import { resolveVoiceGreeting } from "./voiceGreeting";
@@ -454,6 +455,10 @@ export class ElevenLabsCallBridge implements CallBridge {
     // El CRM se pone al día con lo que se habló, igual que en texto — una
     // llamada no puede dejar menos rastro que un WhatsApp.
     await encolarAnalisisDeLlamada(this.deps.env, this.deps.botId, this.conversationId);
+    // Comprobar contra la base lo que el bot afirmó haber hecho. Va aquí y no
+    // en el analisis diferido porque no necesita esperar: los hechos ya estan
+    // escritos, y si algo no cuadra el dueno se entera hoy, no manana.
+    await verificarLlamada(this.deps.env, this.db(), this.deps.botId, this.callRowId, this.conversationId);
 
     await this.deps.voiceSession.end("completed", reason).catch((e: unknown) =>
       console.error("[voice-elevenlabs] no se pudo cerrar la sesión:", e),

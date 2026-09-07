@@ -34,6 +34,7 @@ import { consultarTareaTool, type TareaDelegada } from "./tools/consultarTarea";
 import { buildTransferTwiml, redirectLiveCall } from "./transfer";
 import { recordCallEvent } from "./events";
 import { encolarAnalisisDeLlamada } from "./analisisPostLlamada";
+import { verificarLlamada } from "./verificarPromesas";
 import {
   createUsageAccumulator,
   addRealtimeUsage,
@@ -978,6 +979,10 @@ export class RealtimeCallBridge {
     // en los DOS puentes de voz: una conversación por WhatsApp actualizaba el
     // CRM y la misma por teléfono no dejaba rastro.
     await encolarAnalisisDeLlamada(this.deps.env, this.deps.botId, this.conversationId);
+    // Comprobar contra la base lo que el bot afirmó haber hecho. Va aquí y no
+    // en el analisis diferido porque no necesita esperar: los hechos ya estan
+    // escritos, y si algo no cuadra el dueno se entera hoy, no manana.
+    await verificarLlamada(this.deps.env, this.db(), this.deps.botId, this.callRowId, this.conversationId);
   }
 }
 

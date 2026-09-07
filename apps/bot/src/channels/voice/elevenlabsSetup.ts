@@ -22,7 +22,7 @@ const FORMATO_TELEFONIA = "ulaw_8000";
 /** Flash v2.5: ~75 ms de inferencia. En una llamada, la latencia se oye. */
 const MODELO_TTS = "eleven_flash_v2_5";
 /** El cerebro que genera las respuestas — separado del modelo de VOZ (MODELO_TTS). */
-const MODELO_LLM = "gpt-4o-mini";
+const MODELO_LLM = "gpt-4.1-mini";
 
 /**
  * Tope duro de duración, en segundos — el mismo que ya aplica el puente de
