@@ -28,6 +28,7 @@ vi.mock("../../src/db/settings", () => ({
   SETTING_KEYS: {
     voiceElevenLabsAgentId: "voice_elevenlabs_agent_id",
     voiceElevenLabsConfigHash: "voice_elevenlabs_config_hash",
+    voiceElevenLabsToolIds: "voice_elevenlabs_tool_ids",
   },
 }));
 
@@ -48,6 +49,7 @@ function fetchQueRespondePor(rutas: {
   compartidas?: () => Response;
   agregar?: () => Response;
   crearAgente?: (cuerpo: any) => Response;
+  herramientas?: () => Response;
 }): typeof fetch {
   return vi.fn(async (url: string | URL, init?: RequestInit) => {
     const { pathname } = new URL(String(url));
@@ -56,6 +58,15 @@ function fetchQueRespondePor(rutas: {
     if (pathname.startsWith("/v1/voices/add/") && rutas.agregar) return rutas.agregar();
     if (pathname === "/v1/convai/agents/create" && rutas.crearAgente) {
       return rutas.crearAgente(init?.body ? JSON.parse(String(init.body)) : undefined);
+    }
+    // Registrar herramientas: solo aparece cuando la prueba pasa tools.
+    if (pathname.startsWith("/v1/convai/tools")) {
+      return (rutas.herramientas ?? (() => Response.json({ id: "tool_nuevo" })))();
+    }
+    if (pathname.startsWith("/v1/convai/agents/")) {
+      return (rutas.crearAgente ?? (() => Response.json({ agent_id: "agent-1" })))(
+        init?.body ? JSON.parse(String(init.body)) : undefined,
+      );
     }
     throw new Error(`fetch no esperado: ${pathname}`);
   }) as any;
@@ -330,5 +341,53 @@ describe("la llave, antes de tocar la red", () => {
     const r = await prepararAgenteElevenLabs({} as any, "bot1", "no-empieza-con-sk", VOZ_DEL_CATALOGO);
     expect(r.ok).toBe(false);
     expect(r.error).toContain('"sk_"');
+  });
+});
+
+// Ocurrió de verdad al aplicar el cambio de modelo: el servidor MCP no
+// respondió a tiempo, el conjunto se armó sin sus 5 herramientas, y el agente
+// se reescribió con 7 en vez de 12. Como esas 7 sí se registraron, la huella se
+// guardó y el sistema se quedó convencido de estar al día: la degradación se
+// volvía permanente y nadie se enteraba.
+describe("un tropiezo de red no puede encoger al agente", () => {
+  it("aborta si se van a registrar MENOS herramientas de las que ya tiene", async () => {
+    settingsGuardados["voice_elevenlabs_config_hash"] = "vieja";
+    settingsGuardados["voice_elevenlabs_tool_ids"] = JSON.stringify({
+      searchKb: "tool_1",
+      captureLead: "tool_2",
+      mcp_vinqulia_a: "tool_3",
+      mcp_vinqulia_b: "tool_4",
+    });
+    global.fetch = vi.fn(async () => {
+      throw new Error("no debió tocar la red");
+    }) as any;
+
+    // El MCP no respondió: solo llegan las estáticas.
+    const r = await asegurarAgenteAlDia({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO, async () => ({
+      searchKb: {},
+      captureLead: {},
+    }));
+
+    expect(r.actualizado).toBe(false);
+    expect(r.error).toContain("no se toca");
+    // Y sobre todo: la huella NO se guarda, así que el siguiente intento lo
+    // vuelve a hacer en cuanto el MCP conteste.
+    expect(settingsGuardados["voice_elevenlabs_config_hash"]).toBe("vieja");
+  });
+
+  it("con el mismo número o más, sí actualiza", async () => {
+    settingsGuardados["voice_elevenlabs_config_hash"] = "vieja";
+    settingsGuardados["voice_elevenlabs_tool_ids"] = JSON.stringify({ searchKb: "tool_1" });
+    global.fetch = fetchQueRespondePor({
+      voces: () => Response.json({ voices: [{ voice_id: VOZ_DEL_CATALOGO }] }),
+      crearAgente: () => Response.json({ agent_id: "agent-nuevo" }),
+    });
+
+    const r = await asegurarAgenteAlDia({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO, async () => ({
+      searchKb: {},
+      captureLead: {},
+    }));
+
+    expect(r.error).toBeUndefined();
   });
 });
