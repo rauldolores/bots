@@ -353,14 +353,25 @@ export async function asegurarAgenteAlDia(
   botId: string,
   apiKey: string,
   voiceId: string,
-  tools?: Record<string, any>,
+  /**
+   * Las herramientas, o una función que las consigue.
+   *
+   * Se acepta la función a propósito: armarlas obliga a consultar los
+   * servidores MCP, y eso son cientos de milisegundos EN MEDIO de una llamada
+   * entrante, con el cliente escuchando silencio. Como el caso normal es que
+   * la huella coincida y no haya nada que actualizar, ese trabajo se hacía
+   * para tirarlo. Pasando una función, solo se paga cuando de verdad hay que
+   * reconfigurar al agente.
+   */
+  tools?: Record<string, any> | (() => Promise<Record<string, any>>),
 ): Promise<{ actualizado: boolean; error?: string }> {
   const repo = new SettingsRepo(db, botId);
   const guardada = (await repo.get(SETTING_KEYS.voiceElevenLabsConfigHash))?.trim();
   const idsActuales = Object.values(leerMapa(await repo.get(SETTING_KEYS.voiceElevenLabsToolIds)));
   if (guardada === huellaDeConfiguracion(voiceId, idsActuales)) return { actualizado: false };
 
-  const r = await prepararAgenteElevenLabs(db, botId, apiKey, voiceId, tools).catch((e) => ({
+  const resueltas = typeof tools === "function" ? await tools() : tools;
+  const r = await prepararAgenteElevenLabs(db, botId, apiKey, voiceId, resueltas).catch((e) => ({
     ok: false as const,
     error: String((e as Error)?.message ?? e),
   }));

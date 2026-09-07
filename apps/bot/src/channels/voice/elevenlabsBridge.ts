@@ -87,13 +87,18 @@ export class ElevenLabsCallBridge implements CallBridge {
     return bridge;
   }
 
+  /** Desglose de lo que tardó armar el contexto — se registra al iniciar, ver abajo. */
+  private timings: { totalMs: number; mcpMs: number } | null = null;
+
   private db(): Db {
     return new Db(this.deps.env.DB);
   }
 
   private async conectar(creds: { apiKey: string; agentId: string }): Promise<void> {
     const { botId, callerId } = this.deps;
+    const t0 = Date.now();
     const ctx = await this.prepararConversacion();
+    const msPreparacion = Date.now() - t0;
 
     this.client = new ElevenLabsClient(creds.apiKey, creds.agentId, {
       onAudio: (b64) => this.audioHaciaTwilio(b64),
@@ -120,11 +125,26 @@ export class ElevenLabsCallBridge implements CallBridge {
       llevaPlaybook: ctx.prompt.includes("PLAYBOOK"),
       pideEmpresa: ctx.prompt.includes("empresa nos contacta"),
       herramientas: Object.keys(this.tools).length,
+      // El desglose de la espera ANTES de saludar. Sin esto solo se veía el
+      // hueco entre gateway_start y este log, y de ahí no se puede saber si
+      // los segundos son de la base, de los servidores MCP o de otra cosa —
+      // que es exactamente el callejón en el que estuvimos.
+      msPreparacion,
+      msContexto: this.timings?.totalMs ?? null,
+      msMcp: this.timings?.mcpMs ?? null,
     });
+    const tConn = Date.now();
     await this.client.connect({ prompt: ctx.prompt, firstMessage: ctx.saludo });
+    const msConexion = Date.now() - tConn;
     this.callRowId = this.deps.voiceSession.getContext().callId;
     await recordCallEvent(this.db(), botId, this.callRowId, "call.answered", { proveedor: "elevenlabs" });
-    logVoiceEvent("elevenlabs_connected", { botId, callSid: maskId(this.deps.callSid), callerId: maskId(callerId) });
+    logVoiceEvent("elevenlabs_connected", {
+      botId,
+      callSid: maskId(this.deps.callSid),
+      callerId: maskId(callerId),
+      msConexion,
+      msTotalHastaSaludar: Date.now() - t0,
+    });
   }
 
   /**
@@ -135,17 +155,25 @@ export class ElevenLabsCallBridge implements CallBridge {
   private async prepararConversacion(): Promise<{ prompt: string; saludo?: string }> {
     const { env, botId, callerId } = this.deps;
     const db = this.db();
-    const conv = await new ConversationsRepo(db, botId).getOrCreate(VOICE_CHANNEL, callerId);
+    // Estas tres no dependen entre sí y antes iban en fila, una espera de red
+    // detrás de la otra, con el cliente escuchando silencio. Sale la más lenta
+    // en vez de la suma. (buildAgentContext sí depende de conv.id, así que esa
+    // se queda después — ver abajo.)
+    const [conv, ajustes, canal] = await Promise.all([
+      new ConversationsRepo(db, botId).getOrCreate(VOICE_CHANNEL, callerId),
+      new SettingsRepo(db, botId).all(),
+      new BotChannelsRepo(db).getByBotAndChannel(botId, VOICE_CHANNEL),
+    ]);
     this.conversationId = conv.id;
     const conversationKey = conversationKeyOf(botId, VOICE_CHANNEL, callerId);
 
     // Guardar la transcripción es decisión del dueño (datos de sus clientes),
     // igual que en el puente de OpenAI. Sin habilitar, la llamada funciona
     // idéntico y no se persiste el texto.
-    const ajustes = await new SettingsRepo(db, botId).all();
     this.guardarTranscripcion = ajustes[SETTING_KEYS.voiceStoreTranscript] === "1";
 
     const ctx = await buildAgentContext({ env, botId, conversationId: conv.id, conversationKey });
+    this.timings = ctx.timings;
     // Se guardan para ejecutarlas cuando el agente las pida. Aquí SÍ vienen
     // las de MCP (buildAgentContext las agrega), aunque al registrar el agente
     // solo se declaren las estáticas.
@@ -155,7 +183,6 @@ export class ElevenLabsCallBridge implements CallBridge {
     // de WhatsApp no tiene una llamada que transferir), y solo se ofrece si el
     // dueño configuró un número destino: sin él, sería una herramienta que
     // falla garantizado y el agente la ofrecería igual.
-    const canal = await new BotChannelsRepo(db).getByBotAndChannel(botId, VOICE_CHANNEL);
     if (canal?.config.transferNumber) {
       this.tools = {
         ...this.tools,

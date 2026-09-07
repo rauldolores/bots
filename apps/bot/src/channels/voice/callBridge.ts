@@ -95,11 +95,7 @@ export async function credencialesElevenLabs(
   // contra un arreglo que ya existía pero no había llegado a su agente.
   const voiceId = settings[SETTING_KEYS.voiceElevenLabsVoiceId]?.trim();
   if (voiceId) {
-    const [{ asegurarAgenteAlDia }, { buildTools }, { loadMcpTools }] = await Promise.all([
-      import("./elevenlabsSetup"),
-      import("../../tools"),
-      import("../../tools/mcpTools"),
-    ]);
+    const { asegurarAgenteAlDia } = await import("./elevenlabsSetup");
     // Las MISMAS tools del camino de texto. Solo se usan sus esquemas aquí —
     // la ejecución vive en el puente, con el execute() de siempre.
     //
@@ -109,9 +105,19 @@ export async function credencialesElevenLabs(
     // consulta más al guardar o cuando cambia la configuración, no en cada
     // llamada, y loadMcpTools ya trae su propio cortacircuitos por si un
     // servidor MCP no responde.
-    const mcp = await loadMcpTools(env, db, botId).catch(() => ({}));
-    const tools = { ...buildTools({ env, botId, getConversationId: () => null }), ...mcp };
-    const r = await asegurarAgenteAlDia(db, botId, apiKey, voiceId, tools).catch(() => ({
+    // Se pasa como FUNCIÓN, no como valor ya calculado: en el caso normal la
+    // huella del agente coincide y no hay nada que actualizar, así que esto no
+    // llega a ejecutarse. Antes se armaba siempre —consultando los servidores
+    // MCP— en pleno camino crítico de una llamada entrante, para casi siempre
+    // tirar el resultado; era el cliente quien pagaba esa espera en silencio.
+    const r = await asegurarAgenteAlDia(db, botId, apiKey, voiceId, async () => {
+      const [{ buildTools }, { loadMcpTools }] = await Promise.all([
+        import("../../tools"),
+        import("../../tools/mcpTools"),
+      ]);
+      const mcp = await loadMcpTools(env, db, botId).catch(() => ({}));
+      return { ...buildTools({ env, botId, getConversationId: () => null }), ...mcp };
+    }).catch(() => ({
       actualizado: false,
       error: "no se pudo verificar",
     }));

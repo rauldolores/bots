@@ -277,6 +277,42 @@ describe("mantener al agente al día", () => {
     expect(settingsGuardados["voice_elevenlabs_config_hash"]).toBe(huellaDeConfiguracion(VOZ_DEL_CATALOGO));
   });
 
+  // El costo de armar las herramientas NO es el de una comparación: obliga a
+  // consultar los servidores MCP, y eso ocurría EN MEDIO de una llamada
+  // entrante, con el cliente escuchando silencio, para casi siempre tirar el
+  // resultado. Ahora se pasa una función y solo se paga si hay que reconfigurar.
+  it("con la huella al día, ni siquiera arma las herramientas", async () => {
+    settingsGuardados["voice_elevenlabs_config_hash"] = huellaDeConfiguracion(VOZ_DEL_CATALOGO);
+    global.fetch = vi.fn(async () => {
+      throw new Error("no debió llamar a la red");
+    }) as any;
+    let armadas = 0;
+
+    const r = await asegurarAgenteAlDia({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO, async () => {
+      armadas++;
+      return {};
+    });
+
+    expect(armadas).toBe(0);
+    expect(r.actualizado).toBe(false);
+  });
+
+  it("pero si SÍ hay que actualizar, las pide y las usa", async () => {
+    settingsGuardados["voice_elevenlabs_config_hash"] = "una-huella-vieja";
+    global.fetch = fetchQueRespondePor({
+      voces: () => Response.json({ voices: [{ voice_id: VOZ_DEL_CATALOGO }] }),
+      crearAgente: () => Response.json({ agent_id: "agent-nuevo" }),
+    });
+    let armadas = 0;
+
+    await asegurarAgenteAlDia({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO, async () => {
+      armadas++;
+      return {};
+    });
+
+    expect(armadas).toBe(1);
+  });
+
   it("si la actualización falla, se reporta pero no lanza — la llamada sigue", async () => {
     settingsGuardados["voice_elevenlabs_config_hash"] = "vieja";
     global.fetch = fetchQueRespondePor({
