@@ -12,6 +12,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { z } from "zod";
+import { jsonSchema } from "ai";
 import { registrarHerramientas } from "../../src/channels/voice/elevenlabsTools";
 
 const LLAVE = "sk_prueba";
@@ -197,5 +198,77 @@ describe("registrar herramientas en ElevenLabs", () => {
 
     const r = await registrarHerramientas(LLAVE, { searchKb: toolFalsa("Busca") }, { searchKb: "borrada" });
     expect(r.ids.searchKb).toBe("tool_nuevo");
+  });
+});
+
+/**
+ * Un campo SIN `type`, anidado dentro de un arreglo de objetos — la forma
+ * exacta que llegaba de un servidor MCP (vinqulia_display_task_list).
+ *
+ * ElevenLabs usa `type` como discriminador: si falta responde 422 con
+ * "Input tag 'None' ... does not match any of the expected tags" y rechaza la
+ * herramienta entera. Y eso salía carísimo por un camino indirecto: la huella
+ * de configuración solo se guarda si TODAS las tools quedaron, así que con una
+ * sola fallando el agente se reconfiguraba ENTERO en cada llamada entrante —
+ * ~9 segundos de silencio para quien llamaba, medido en producción.
+ */
+function toolConHojaSinTipo() {
+  return {
+    description: "Muestra una lista de tareas",
+    inputSchema: jsonSchema({
+      type: "object",
+      properties: {
+        tasks: {
+          type: "array",
+          description: "Las tareas",
+          items: {
+            type: "object",
+            properties: { text: { description: "El texto de la tarea" } },
+          },
+        },
+        nota: { type: ["string", "null"], description: "Nota opcional" },
+      },
+    } as any),
+    execute: async () => ({ ok: true }),
+  };
+}
+
+describe("el type es obligatorio: sin él ElevenLabs rechaza la herramienta entera", () => {
+  it("le pone type a una hoja anidada dentro de un arreglo de objetos", async () => {
+    global.fetch = fetchQueRegistra(() => Response.json({ id: "tool_1" }));
+
+    const r = await registrarHerramientas(LLAVE, { display_task_list: toolConHojaSinTipo() }, {});
+
+    expect(r.faltantes).toEqual([]);
+    const creada = peticiones.find((p) => p.metodo === "POST")!;
+    const props = creada.cuerpo.tool_config.parameters.properties;
+    expect(props.tasks.items.properties.text.type).toBe("string");
+  });
+
+  it("un union ['string','null'] se reduce a un tipo único", async () => {
+    global.fetch = fetchQueRegistra(() => Response.json({ id: "tool_1" }));
+
+    await registrarHerramientas(LLAVE, { display_task_list: toolConHojaSinTipo() }, {});
+
+    const props = peticiones.find((p) => p.metodo === "POST")!.cuerpo.tool_config.parameters.properties;
+    expect(props.nota.type).toBe("string");
+  });
+
+  it("ninguna propiedad del payload se va sin type — es lo que provoca el 422", async () => {
+    global.fetch = fetchQueRegistra(() => Response.json({ id: "tool_1" }));
+
+    await registrarHerramientas(LLAVE, { display_task_list: toolConHojaSinTipo() }, {});
+
+    const sinTipo: string[] = [];
+    const revisar = (nodo: any, ruta: string) => {
+      if (!nodo || typeof nodo !== "object") return;
+      if (nodo.properties || nodo.items || nodo.description) {
+        if (!nodo.type) sinTipo.push(ruta);
+      }
+      for (const [k, v] of Object.entries(nodo.properties ?? {})) revisar(v, `${ruta}.${k}`);
+      if (nodo.items) revisar(nodo.items, `${ruta}[]`);
+    };
+    revisar(peticiones.find((p) => p.metodo === "POST")!.cuerpo.tool_config.parameters, "raiz");
+    expect(sinTipo).toEqual([]);
   });
 });

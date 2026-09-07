@@ -94,6 +94,10 @@ export async function credencialesElevenLabs(
   // nadie le dijo que tenía que volver a guardarla. Estuvo probando llamadas
   // contra un arreglo que ya existía pero no había llegado a su agente.
   const voiceId = settings[SETTING_KEYS.voiceElevenLabsVoiceId]?.trim();
+  // Ya lo trae el all() de arriba — leerlo otra vez era una consulta de más en
+  // el camino crítico.
+  const agenteExistente = settings[SETTING_KEYS.voiceElevenLabsAgentId]?.trim();
+
   if (voiceId) {
     const { asegurarAgenteAlDia } = await import("./elevenlabsSetup");
     // Las MISMAS tools del camino de texto. Solo se usan sus esquemas aquí —
@@ -110,23 +114,37 @@ export async function credencialesElevenLabs(
     // llega a ejecutarse. Antes se armaba siempre —consultando los servidores
     // MCP— en pleno camino crítico de una llamada entrante, para casi siempre
     // tirar el resultado; era el cliente quien pagaba esa espera en silencio.
-    const r = await asegurarAgenteAlDia(db, botId, apiKey, voiceId, async () => {
-      const [{ buildTools }, { loadMcpTools }] = await Promise.all([
-        import("../../tools"),
-        import("../../tools/mcpTools"),
-      ]);
-      const mcp = await loadMcpTools(env, db, botId).catch(() => ({}));
-      return { ...buildTools({ env, botId, getConversationId: () => null }), ...mcp };
-    }).catch(() => ({
-      actualizado: false,
-      error: "no se pudo verificar",
-    }));
-    if (r.error) console.warn(`[voice-elevenlabs] agente posiblemente desactualizado: ${r.error}`);
+    const revisar = () =>
+      asegurarAgenteAlDia(db, botId, apiKey, voiceId, async () => {
+        const [{ buildTools }, { loadMcpTools }] = await Promise.all([
+          import("../../tools"),
+          import("../../tools/mcpTools"),
+        ]);
+        const mcp = await loadMcpTools(env, db, botId).catch(() => ({}));
+        return { ...buildTools({ env, botId, getConversationId: () => null }), ...mcp };
+      }).catch(() => ({ actualizado: false, error: "no se pudo verificar" }));
+
+    if (agenteExistente) {
+      // El agente YA existe y atiende: revisarlo puede esperar. Antes esto se
+      // esperaba antes de contestar, y cuando la revisión no terminaba limpia
+      // se repetía en CADA llamada — medido en producción: ~9 segundos de
+      // silencio por llamada porque una sola tool no se registraba (su huella
+      // no se guarda si falta alguna, a propósito, para reintentarla).
+      //
+      // Reintentar está bien; cobrárselo a quien llama, no. Se lanza sin
+      // esperar: la corrección llega igual, al agente de la llamada siguiente.
+      void revisar().then((r) => {
+        if (r.error) console.warn(`[voice-elevenlabs] agente posiblemente desactualizado: ${r.error}`);
+      });
+    } else {
+      // Sin agente no hay a qué conectarse: aquí sí hay que esperar.
+      const r = await revisar();
+      if (r.error) console.warn(`[voice-elevenlabs] agente posiblemente desactualizado: ${r.error}`);
+      const recienCreado = (await new SettingsRepo(db, botId).get(SETTING_KEYS.voiceElevenLabsAgentId))?.trim();
+      return recienCreado ? { apiKey, agentId: recienCreado } : null;
+    }
   }
 
-  // Se relee DESPUÉS de la actualización: si el agente se acababa de crear,
-  // el id existe apenas ahora.
-  const agentId = (await new SettingsRepo(db, botId).get(SETTING_KEYS.voiceElevenLabsAgentId))?.trim();
-  if (!agentId) return null;
-  return { apiKey, agentId };
+  if (!agenteExistente) return null;
+  return { apiKey, agentId: agenteExistente };
 }

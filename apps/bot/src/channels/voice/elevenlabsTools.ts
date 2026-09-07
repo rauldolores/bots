@@ -73,8 +73,25 @@ function limpiarEsquema(nodo: unknown): unknown {
       salida[clave] = entrada[clave];
     }
   }
-  // Sin `type`, ElevenLabs no sabe qué es — el default razonable es objeto.
-  if (!salida.type && salida.properties) salida.type = "object";
+  // El `type` es obligatorio y ElevenLabs lo usa como discriminador: si llega
+  // ausente responde 422 con "Input tag 'None' ... does not match any of the
+  // expected tags" y rechaza la herramienta ENTERA.
+  //
+  // Pasó con vinqulia_display_task_list, y salió caro por un camino indirecto:
+  // como esa tool no se registraba, la huella de configuración no se guardaba
+  // nunca (se guarda solo si TODAS quedaron), así que el agente se reconfiguraba
+  // ENTERO en cada llamada entrante — unos 9 segundos de silencio para quien
+  // llamaba, por un campo sin tipo dentro de un arreglo de objetos.
+  //
+  // Un union tipo ["string", "null"] tampoco le sirve: espera un tag único.
+  if (Array.isArray(salida.type)) {
+    salida.type = (salida.type as unknown[]).find((t) => t !== "null") ?? "string";
+  }
+  if (!salida.type) {
+    // Se deduce por la forma; si no hay ninguna pista, "string" es la hoja más
+    // segura — describe el dato sin prometer una estructura que no existe.
+    salida.type = salida.properties ? "object" : salida.items ? "array" : "string";
+  }
   return salida;
 }
 
