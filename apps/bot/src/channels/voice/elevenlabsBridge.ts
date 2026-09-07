@@ -28,6 +28,7 @@ import { encolarAnalisisDeLlamada } from "./analisisPostLlamada";
 import { buildClearMessage, buildMediaMessage } from "./mediaStreamProtocol";
 import { bloqueLlamadaEnCurso, VOICE_BEHAVIOR_ADDENDUM } from "./voiceInstructions";
 import { resolveVoiceGreeting } from "./voiceGreeting";
+import { motivoDeFallo, camposConValor } from "./toolResult";
 
 import { logVoiceEvent, maskId } from "./log";
 import { createCallMetrics, type CallMetrics } from "./metrics";
@@ -298,21 +299,50 @@ export class ElevenLabsCallBridge implements CallBridge {
         def.execute(parametros, {} as any),
         new Promise((_r, reject) => setTimeout(() => reject(new Error("tool_timeout")), TOOL_TIMEOUT_MS)),
       ]);
+      // Una tool que NO lanza puede haber fallado igual: las del Agent Core
+      // devuelven { error: "..." } en vez de tirar una excepción (es la misma
+      // convención que ya usa transfer_to_human más abajo). Antes eso se
+      // reportaba como éxito por partida doble, y las dos mentiras dolieron:
+      //
+      //  - En el evento quedaba ok:true, así que la bitácora decía que la
+      //    herramienta había funcionado cuando no.
+      //  - Y a ElevenLabs se le mandaba is_error:false, o sea que el agente
+      //    recibía el fallo disfrazado de resultado bueno. Pasó en una llamada
+      //    real: scheduleAppointment rechazó los datos, el agente lo leyó como
+      //    éxito y le dijo al cliente "ya quedó agendada" — sin cita.
+      const motivo = motivoDeFallo(resultado);
+
       void recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.tool_called", {
         tool: nombre,
         kind: nombre === "searchKb" ? "rag" : nombre.startsWith("mcp_") ? "mcp" : "other",
-        ok: true,
+        ok: motivo === null,
+        ...(motivo ? { motivo } : {}),
       });
+      if (motivo) {
+        logVoiceEvent("elevenlabs_tool_rechazada", {
+          botId: this.deps.botId,
+          callSid: maskId(this.deps.callSid),
+          tool: nombre,
+          motivo,
+          // QUÉ campos llegaron, nunca su contenido: para saber si el agente
+          // omitió un dato obligatorio sin guardar datos del cliente en la
+          // bitácora.
+          camposRecibidos: camposConValor(parametros).join(","),
+        });
+      }
 
       // La transferencia NO se ejecuta aquí: primero el agente tiene que
       // terminar de decirle al cliente "te comunico con alguien". Cortarle la
       // llamada a media frase es peor que no transferir — el cliente se queda
       // sin entender qué pasó. Se ejecuta al cerrar la respuesta.
-      if (nombre === "transfer_to_human" && !(resultado as { error?: string } | null)?.error) {
+      if (nombre === "transfer_to_human" && motivo === null) {
         this.transferenciaPendiente = true;
       }
 
-      this.client?.sendToolResult(toolCallId, resultado);
+      // El tercer parámetro es is_error: sin él, ElevenLabs le entrega al
+      // agente un fallo como si fuera un resultado bueno, y el agente le
+      // promete al cliente algo que no ocurrió.
+      this.client?.sendToolResult(toolCallId, resultado, motivo !== null);
     } catch (e) {
       const porTiempo = e instanceof Error && e.message === "tool_timeout";
       logVoiceEvent(porTiempo ? "elevenlabs_tool_timeout" : "elevenlabs_tool_failed", {
