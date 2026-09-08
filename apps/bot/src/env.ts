@@ -64,6 +64,10 @@ export interface Env {
   EMAIL_OUTBOUND_DOMAIN?: string;
   EMAIL_FROM_ADDRESS?: string;
   EMAIL_FROM_NAME?: string;
+  /** El buzón de siempre del negocio, el que reenvía hacia acá. Va como Reply-To. */
+  EMAIL_SUPPORT_MAILBOX?: string;
+  /** La dirección NUESTRA a la que ese buzón reenvía — sirve para saber qué correo es de este bot. */
+  EMAIL_INBOUND_ADDRESS?: string;
   TELEGRAM_BOT_TOKEN?: string;
   // Canal "kapso": WhatsApp vía kapso.ai (proxy sobre la Cloud API de Meta).
   // Ambas se resuelven POR BOT desde bot_channels (ver channels/effectiveEnv.ts) —

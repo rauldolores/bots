@@ -11,6 +11,14 @@
 //   secret_ref       = API key de Resend (para el GET de arriba)
 //   verify_token_ref = el "Signing Secret" (whsec_...) del webhook en Resend
 import type { IncomingMessage } from "../shared";
+import {
+  type Cabeceras,
+  direcciones,
+  dirigidoAEsteBot,
+  esCorreoAutomatico,
+  limpiarCuerpoReenviado,
+  remitenteReal,
+} from "./reenvio";
 
 /** Mismo estilo que twilioSignature.ts/meta.ts — HMAC vía crypto.subtle, portable Node/Cloudflare/Vercel. */
 async function hmacSha256Base64(keyBytes: Uint8Array, message: string): Promise<string> {
@@ -74,6 +82,22 @@ interface ResendReceivedEmail {
   subject?: string;
   text?: string;
   html?: string;
+  reply_to?: string | string[];
+  /** Resend las entrega como objeto o como lista {name,value} según la versión. */
+  headers?: Record<string, string> | Array<{ name?: string; value?: string }>;
+  message_id?: string;
+}
+
+/** Deja las cabeceras en un mapa con las llaves en minúsculas, venga como venga. */
+function normalizarCabeceras(h: ResendReceivedEmail["headers"]): Cabeceras {
+  const out: Cabeceras = {};
+  if (!h) return out;
+  if (Array.isArray(h)) {
+    for (const { name, value } of h) if (name) out[name.toLowerCase()] = value ?? "";
+  } else {
+    for (const [k, v] of Object.entries(h)) out[k.toLowerCase()] = String(v ?? "");
+  }
+  return out;
 }
 
 /** GET /emails/receiving/{id} — el webhook de Resend solo trae metadata; el cuerpo se pide aparte. */
@@ -88,18 +112,29 @@ async function fetchReceivedEmail(apiKey: string, emailId: string): Promise<Rese
   return (await res.json()) as ResendReceivedEmail;
 }
 
-/** El primer address de un remitente tipo "Nombre <correo@dominio.com>" o ya limpio. */
-function extractAddress(raw: string): string {
-  const match = raw.match(/<([^>]+)>/);
-  return (match ? match[1] : raw).trim().toLowerCase();
+/** Cómo llega el correo: qué buzón reenvía hacia acá y en qué dirección nuestra cae. */
+export interface OpcionesEntrada {
+  /** El buzón de siempre del negocio (soporte@suempresa.com), el que reenvía. */
+  buzonDeAtencion?: string | null;
+  /** La dirección NUESTRA a la que reenvía — para descartar el correo de otro bot. */
+  direccionDeEntrada?: string | null;
 }
 
 /**
  * Convierte el webhook de Resend en un IncomingMessage — SOLO se llama
  * después de que el caller (app.ts) ya verificó la firma con el rawBody.
  * `apiKey` es necesaria para el GET de contenido completo (ver arriba).
+ *
+ * Devuelve `null` para todo lo que NO debe llegarle al agente: otro tipo de
+ * evento, un correo de otro bot, un automático, o uno del que no se puede
+ * saber quién lo escribió. Callar es la respuesta correcta en los cuatro
+ * casos — un correo que no se entiende es peor contestado que ignorado.
  */
-export async function parseResendInbound(rawBody: string, apiKey: string): Promise<IncomingMessage | null> {
+export async function parseResendInbound(
+  rawBody: string,
+  apiKey: string,
+  opts: OpcionesEntrada = {},
+): Promise<IncomingMessage | null> {
   let payload: { type?: string; data?: { email_id?: string; from?: string; to?: string[]; subject?: string } };
   try {
     payload = JSON.parse(rawBody);
@@ -112,16 +147,37 @@ export async function parseResendInbound(rawBody: string, apiKey: string): Promi
   const from = full?.from ?? payload.data.from;
   if (!from) return null;
 
-  const text = (full?.text ?? "").trim();
+  const destinatarios = direcciones(full?.to ?? payload.data.to ?? []);
+  if (!dirigidoAEsteBot(destinatarios, opts.direccionDeEntrada)) return null;
+
+  const headers = normalizarCabeceras(full?.headers);
+  if (esCorreoAutomatico(from, headers)) return null;
+
+  const texto = (full?.text ?? "").trim();
+  const remitente = remitenteReal({ from, replyTo: primerReplyTo(full), headers, text: texto }, opts.buzonDeAtencion);
+  // Sin remitente identificable no hay a nombre de quién abrir la
+  // conversación, y usar el buzón del negocio los mezclaría todos.
+  if (!remitente) {
+    console.warn("[email/resend] correo descartado: no se pudo identificar al remitente real");
+    return null;
+  }
+
   const subject = full?.subject ?? payload.data.subject ?? "";
+  const cuerpo = limpiarCuerpoReenviado(texto);
 
   return {
     channel: "email",
-    channelUserId: extractAddress(from),
+    channelUserId: remitente,
     // El asunto se antepone: es la única "pista de tema" que un correo trae
     // aparte del cuerpo, y el agente la pierde si solo se le manda el texto.
-    text: subject ? `Asunto: ${subject}\n\n${text}` : text,
+    text: subject ? `Asunto: ${subject}\n\n${cuerpo}` : cuerpo,
     receivedAt: Date.now(),
     rawPayload: payload,
+    emailThread: { subject, messageId: full?.message_id ?? headers["message-id"] ?? undefined },
   };
+}
+
+function primerReplyTo(full: ResendReceivedEmail | null): string | null {
+  const rt = full?.reply_to;
+  return (Array.isArray(rt) ? rt[0] : rt) ?? null;
 }

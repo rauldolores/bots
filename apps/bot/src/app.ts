@@ -182,6 +182,19 @@ app.post("/webhooks/voice/:botId/transfer-status", (c) => handleTransferStatusCa
 // El proveedor de SALIDA (cómo el bot responde) es una decisión APARTE,
 // configurada en /admin/config → Correo saliente — ver
 // channels/effectiveEnv.ts → resolveChannelEnv(..., "email").
+/**
+ * Cómo llega el correo a ESTE bot: qué buzón del negocio reenvía hacia acá y
+ * en qué dirección nuestra cae.
+ *
+ * Sale de /admin/config (settings), no de bot_channels: es la misma decisión
+ * de negocio que el remitente de salida, y vive en la misma pantalla. Los dos
+ * campos son opcionales — sin ellos el canal se comporta como siempre.
+ */
+async function opcionesDeEntrada(rawEnv: Env, botId: string) {
+  const env = await resolveChannelEnv(rawEnv, botId, "email");
+  return { buzonDeAtencion: env.EMAIL_SUPPORT_MAILBOX, direccionDeEntrada: env.EMAIL_INBOUND_ADDRESS };
+}
+
 async function routeEmailToAgent(
   c: { req: { raw: Request }; env: Env; executionCtx?: unknown },
   provider: "resend" | "mailgun",
@@ -218,7 +231,7 @@ async function routeEmailToAgent(
     const apiKey = row.secret_ref ? await readSecret(db, row.secret_ref) : null;
     if (!apiKey) return new Response("email channel misconfigured (missing api key)", { status: 500 });
 
-    const msg = await parseResendInbound(rawBody, apiKey);
+    const msg = await parseResendInbound(rawBody, apiKey, await opcionesDeEntrada(c.env, botId));
     // Resend manda MÁS eventos que email.received (delivered/bounced/etc.) al
     // mismo webhook si el dueño no filtró la suscripción — se ignoran en vez
     // de tratarlos como error, para no reintentar de más del lado de Resend.
@@ -243,7 +256,7 @@ async function routeEmailToAgent(
     : false;
   if (!validSignature) return new Response("invalid signature", { status: 401 });
 
-  const msg = parseMailgunInbound(form);
+  const msg = parseMailgunInbound(form, await opcionesDeEntrada(c.env, botId));
   if (!msg) return new Response("ok", { status: 200 });
   const r = await ingestMessage(c.env, msg, botId);
   if (r.scheduledInMs !== null) wakeTickAfter(c.env, ctxOpcional(c), r.scheduledInMs, r.warm);

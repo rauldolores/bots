@@ -88,3 +88,50 @@ describe("ConversationsRepo", () => {
     });
   });
 });
+
+/**
+ * La metadata guarda hoy el hilo de correo al que pertenece la conversación:
+ * el asunto y el Message-ID del último entrante. Sin eso, cada respuesta del
+ * bot abre un hilo NUEVO en la bandeja del cliente y una conversación de
+ * cinco mensajes se ve como cinco correos sueltos.
+ */
+describe("ConversationsRepo — metadata", () => {
+  it("guarda y relee lo que se le puso", async () => {
+    const conv = await repo.getOrCreate("email", "ana@x.com");
+    await repo.mergeMetadata(conv.id, { emailThread: { subject: "Cotización", messageId: "<a@x>" } });
+    expect(await repo.readMetadata(conv.id)).toEqual({
+      emailThread: { subject: "Cotización", messageId: "<a@x>" },
+    });
+  });
+
+  // La columna es de todos, no de un solo caso de uso: pisarla completa haría
+  // que quien la use después borre en silencio lo que guardó el anterior.
+  it("MEZCLA en vez de pisar lo que ya había", async () => {
+    const conv = await repo.getOrCreate("email", "ana2@x.com");
+    await repo.mergeMetadata(conv.id, { otraCosa: 1 });
+    await repo.mergeMetadata(conv.id, { emailThread: { subject: "Hola" } });
+    expect(await repo.readMetadata(conv.id)).toEqual({ otraCosa: 1, emailThread: { subject: "Hola" } });
+  });
+
+  it("una conversación sin metadata devuelve un objeto vacío, no null", async () => {
+    const conv = await repo.getOrCreate("email", "ana3@x.com");
+    expect(await repo.readMetadata(conv.id)).toEqual({});
+  });
+
+  // Una fila corrupta no debe tumbar el turno: se pierde lo ilegible y se
+  // sigue con lo nuevo, que es lo que sí sabemos que sirve.
+  it("metadata corrupta no truena: se descarta y se guarda lo nuevo", async () => {
+    const conv = await repo.getOrCreate("email", "ana4@x.com");
+    await db.run("UPDATE conversations SET metadata = ? WHERE id = ?", ["{no es json", conv.id]);
+    expect(await repo.readMetadata(conv.id)).toEqual({});
+    await repo.mergeMetadata(conv.id, { emailThread: { subject: "Hola" } });
+    expect(await repo.readMetadata(conv.id)).toEqual({ emailThread: { subject: "Hola" } });
+  });
+
+  it("no toca la conversación de otro bot", async () => {
+    const conv = await repo.getOrCreate("email", "ana5@x.com");
+    const otroBot = await createSecondTestBot(db);
+    await new ConversationsRepo(db, otroBot).mergeMetadata(conv.id, { emailThread: { subject: "ajeno" } });
+    expect(await repo.readMetadata(conv.id)).toEqual({});
+  });
+});

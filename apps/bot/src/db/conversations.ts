@@ -103,6 +103,40 @@ export class ConversationsRepo {
     );
   }
 
+  /**
+   * Guarda datos sueltos de la conversación (hoy: el hilo de correo al que
+   * pertenece). Se MEZCLA con lo que ya hubiera en vez de pisarlo — la
+   * columna es de todos, no de un solo caso de uso.
+   */
+  async mergeMetadata(id: string, patch: Record<string, unknown>): Promise<void> {
+    const actual = await this.getById(id);
+    if (!actual) return;
+    let previo: Record<string, unknown> = {};
+    try {
+      // Una fila con metadata corrupta no debe tumbar el turno: se pierde lo
+      // ilegible y se sigue con lo nuevo, que es lo que sí sabemos que sirve.
+      previo = actual.metadata ? (JSON.parse(actual.metadata) as Record<string, unknown>) : {};
+    } catch {
+      previo = {};
+    }
+    await this.db.run("UPDATE conversations SET metadata = ? WHERE id = ? AND bot_id = ?", [
+      JSON.stringify({ ...previo, ...patch }),
+      id,
+      this.botId,
+    ]);
+  }
+
+  /** La metadata ya parseada. `{}` si no hay o si no se puede leer. */
+  async readMetadata(id: string): Promise<Record<string, unknown>> {
+    const conv = await this.getById(id);
+    if (!conv?.metadata) return {};
+    try {
+      return JSON.parse(conv.metadata) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+
   async setPausedUntil(id: string, until: number | null): Promise<void> {
     await this.db.run(
       "UPDATE conversations SET paused_until = ? WHERE id = ? AND bot_id = ?",

@@ -8,7 +8,9 @@
 // cumplir el contrato ChannelAdapter; nunca debería invocarse de verdad.
 import type { ChannelAdapter, OutgoingReply } from "../shared";
 import type { Env } from "../../env";
-import { sendOutboundEmail } from "./outbound";
+import { Db } from "../../db/client";
+import { ConversationsRepo } from "../../db/conversations";
+import { asuntoDeRespuesta, sendOutboundEmail, type HiloDeCorreo } from "./outbound";
 
 export const emailAdapter: ChannelAdapter = {
   async parseIncoming(): Promise<never> {
@@ -24,11 +26,31 @@ export const emailAdapter: ChannelAdapter = {
     // resolveChannelEnv(env, botId, "email") en channels/effectiveEnv.ts.
     const to = reply.channelUserId;
     const text = reply.chunks.join("\n\n");
+
+    // El hilo se guardó al RECIBIR (ver ingestMessage): al responder ya no
+    // queda rastro del asunto ni del Message-ID. Recuperarlo es lo que hace
+    // que la respuesta caiga dentro del mismo hilo del cliente y no abra uno
+    // nuevo. Es best-effort: sin él se responde igual, solo que suelto.
+    const hilo = await leerHilo(env, reply);
+
     // El asunto es siempre "Re: ..." porque un correo saliente del bot SIEMPRE
     // es una respuesta a uno entrante — este canal no manda correos en frío.
-    const result = await sendOutboundEmail(env, to, "Re: tu mensaje", text);
+    const result = await sendOutboundEmail(env, to, asuntoDeRespuesta(hilo?.subject), text, hilo);
     if (!result.ok) {
       throw new Error(`email: no se pudo mandar la respuesta a ${to}: ${result.error}`);
     }
   },
 };
+
+/** El hilo guardado en la conversación, o undefined si no hay o no se puede leer. */
+async function leerHilo(env: Env, reply: OutgoingReply): Promise<HiloDeCorreo | undefined> {
+  if (!reply.botId || !reply.conversationId) return undefined;
+  try {
+    const meta = await new ConversationsRepo(new Db(env.DB), reply.botId).readMetadata(reply.conversationId);
+    const hilo = meta.emailThread as HiloDeCorreo | undefined;
+    return hilo?.subject || hilo?.messageId ? hilo : undefined;
+  } catch (e) {
+    console.warn("[email] no se pudo leer el hilo de la conversación:", e);
+    return undefined;
+  }
+}

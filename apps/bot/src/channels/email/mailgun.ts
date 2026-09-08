@@ -11,6 +11,15 @@
 // en bot_channels.verify_token_ref (secret_ref se deja vacío: Mailgun no
 // necesita un API key para verificar, todo el contenido ya viene en el POST).
 import type { IncomingMessage } from "../shared";
+import {
+  type Cabeceras,
+  direcciones,
+  dirigidoAEsteBot,
+  esCorreoAutomatico,
+  limpiarCuerpoReenviado,
+  remitenteReal,
+} from "./reenvio";
+import type { OpcionesEntrada } from "./resend";
 
 async function hmacSha256Hex(key: string, message: string): Promise<string> {
   const cryptoKey = await crypto.subtle.importKey(
@@ -53,20 +62,46 @@ export async function verifyMailgunSignature(
  * llama después de que el caller (app.ts) ya verificó la firma. El body es
  * multipart/form-data o x-www-form-urlencoded según haya adjuntos.
  */
-export function parseMailgunInbound(form: FormData): IncomingMessage | null {
+export function parseMailgunInbound(form: FormData, opts: OpcionesEntrada = {}): IncomingMessage | null {
   const sender = String(form.get("sender") ?? "").trim().toLowerCase();
   if (!sender) return null;
+
+  // Mismas reglas que Resend: si un proveedor filtra el reenvío y el otro no,
+  // el dueño cambia de proveedor y el bot se comporta distinto sin motivo.
+  const destinatarios = direcciones(String(form.get("recipient") ?? form.get("To") ?? ""));
+  if (!dirigidoAEsteBot(destinatarios, opts.direccionDeEntrada)) return null;
+
+  // Mailgun entrega las cabeceras como un JSON de pares [nombre, valor].
+  const headers: Cabeceras = {};
+  try {
+    const crudas = JSON.parse(String(form.get("message-headers") ?? "[]")) as Array<[string, string]>;
+    for (const [nombre, valor] of crudas) if (nombre) headers[nombre.toLowerCase()] = String(valor ?? "");
+  } catch {
+    // Sin cabeceras se pierde la detección de automáticos, no el correo.
+  }
+  if (esCorreoAutomatico(sender, headers)) return null;
 
   const subject = String(form.get("subject") ?? "");
   // stripped-text = el cuerpo sin firma/cita del hilo previo — mucho mejor
   // señal para el agente que body-plain, que arrastra todo el historial.
   const text = String(form.get("stripped-text") ?? form.get("body-plain") ?? "").trim();
 
+  const remitente = remitenteReal(
+    { from: sender, replyTo: String(form.get("Reply-To") ?? headers["reply-to"] ?? ""), headers, text },
+    opts.buzonDeAtencion,
+  );
+  if (!remitente) {
+    console.warn("[email/mailgun] correo descartado: no se pudo identificar al remitente real");
+    return null;
+  }
+
+  const cuerpo = limpiarCuerpoReenviado(text);
   return {
     channel: "email",
-    channelUserId: sender,
-    text: subject ? `Asunto: ${subject}\n\n${text}` : text,
+    channelUserId: remitente,
+    text: subject ? `Asunto: ${subject}\n\n${cuerpo}` : cuerpo,
     receivedAt: Date.now(),
     rawPayload: Object.fromEntries(form.entries()),
+    emailThread: { subject, messageId: headers["message-id"] ?? undefined },
   };
 }

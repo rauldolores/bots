@@ -18,7 +18,7 @@ import type { WarmTarget } from "../customer/warm";
 import { chunkReply } from "../replies/chunker";
 import { pickAdapter } from "../replies/sender";
 import { costOfUsage } from "../pricing";
-import type { ChannelId } from "../channels/shared";
+import type { ChannelId, EmailThread } from "../channels/shared";
 import { AgentJobsRepo } from "../queue/jobs";
 import { WorkJobsRepo } from "../db/workJobs";
 
@@ -46,6 +46,8 @@ export interface AgentIncomingPayload {
   audioUrl?: string;
   imageUrl?: string;
   isOwnerMessage?: boolean;
+  /** Solo correo: el hilo al que pertenece, para poder responder dentro de él. */
+  emailThread?: EmailThread;
 }
 
 export interface IngestResult {
@@ -93,6 +95,15 @@ export async function ingestMessage(
     channel: payload.channel,
     channelUserId: payload.channelUserId,
   });
+
+  // El hilo del correo se guarda AL RECIBIR porque es el único momento en que
+  // se conoce: al responder ya no queda rastro del asunto ni del Message-ID.
+  // Sin esto cada respuesta abre un hilo nuevo en la bandeja del cliente.
+  if (payload.emailThread?.subject || payload.emailThread?.messageId) {
+    await convs.mergeMetadata(conv.id, { emailThread: payload.emailThread }).catch((e) => {
+      console.warn("[email] no se pudo guardar el hilo de la conversación:", e);
+    });
+  }
 
   // El dueño intervino → se pausa el bot y el mensaje NO se procesa como
   // entrada del cliente.
@@ -251,7 +262,7 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
   if (aMedioEnviar) {
     const estado = await stateRepo.get(conversationKey);
     if (estado) {
-      await enviarRespuesta(env, estado, aMedioEnviar, await resolveAgentConfig(env, [], botId));
+      await enviarRespuesta(env, estado, aMedioEnviar, await resolveAgentConfig(env, [], botId), botId);
       console.log(`[runTurn] reenvío exitoso para ${conversationKey}`);
       reenviada = true;
     }
@@ -288,7 +299,7 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
     // turno. Se manda sin trocear (es una frase corta) y sin pausas entre
     // partes: el punto es justamente que llegue antes de la espera.
     onInterimMessage: async (aviso) => {
-      await enviarRespuesta(env, state, aviso, { maxChunks: 1, interChunkDelayMs: 0 });
+      await enviarRespuesta(env, state, aviso, { maxChunks: 1, interChunkDelayMs: 0 }, botId);
     },
   });
 
@@ -312,7 +323,7 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
     // La respuesta se aparta ANTES de mandarla. Si el canal falla, el reintento
     // la reenvía en vez de perderla — que era lo que pasaba antes.
     await jobs.savePendingReply(conversationKey, result.text);
-    await enviarRespuesta(env, state, result.text, cfg);
+    await enviarRespuesta(env, state, result.text, cfg, botId);
     await jobs.clearPendingReply(conversationKey);
   }
 
@@ -348,9 +359,10 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
 /** Trocea y manda por el canal de la conversación. */
 async function enviarRespuesta(
   env: Env,
-  state: { channel: string; channelUserId: string },
+  state: { channel: string; channelUserId: string; conversationId?: string | null },
   texto: string,
   cfg: { maxChunks: number; interChunkDelayMs?: number },
+  botId?: string,
 ): Promise<void> {
   const channel = state.channel as ChannelId;
   await pickAdapter(channel).sendReply(
@@ -359,6 +371,10 @@ async function enviarRespuesta(
       channelUserId: state.channelUserId,
       chunks: chunkReply(texto, cfg.maxChunks),
       interChunkDelayMs: cfg.interChunkDelayMs,
+      // Solo los usa el correo, para responder dentro del mismo hilo. Los
+      // demás canales los ignoran.
+      botId,
+      conversationId: state.conversationId ?? undefined,
     },
     env,
   );

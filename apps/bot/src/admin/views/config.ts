@@ -340,6 +340,24 @@ function renderCorreoSalienteSection(settings: Record<string, string>): string {
           placeholder: "soporte@tunegocio.com",
         })}
       </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        ${renderTextField({
+          name: SETTING_KEYS.emailSupportMailbox,
+          label: "Tu buzón de atención",
+          help:
+            "El correo que ya usas para atender clientes. Va como \"responder a\", para que te sigan escribiendo ahí y su respuesta regrese al bot por el mismo reenvío.",
+          value: settings[SETTING_KEYS.emailSupportMailbox] ?? "",
+          placeholder: "soporte@tunegocio.com",
+        })}
+        ${renderTextField({
+          name: SETTING_KEYS.emailInboundAddress,
+          label: "Dirección que recibe (a la que reenvías)",
+          help:
+            "La dirección de tu proveedor a la que tu buzón reenvía. Déjala vacía si este es el único bot que recibe correo.",
+          value: settings[SETTING_KEYS.emailInboundAddress] ?? "",
+          placeholder: "bot@mail.tuproveedor.com",
+        })}
+      </div>
       <div id="email-mailgun-domain-block" style="display:${provider === "mailgun" ? "flex" : "none"};flex-direction:column;gap:6px">
         ${renderTextField({
           name: SETTING_KEYS.emailOutboundDomain,
