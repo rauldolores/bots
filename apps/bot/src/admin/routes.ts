@@ -603,6 +603,25 @@ adminApp.get("/overview", async (c) => c.html(await renderOverview(c.env, c.get(
 
 adminApp.get("/stats", async (c) => c.html(await renderStats(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")))));
 
+// La muestra de audio de una voz de ElevenLabs, para escucharla SIN salir de
+// Nodia ni entrar a ElevenLabs. Redirige a la URL real en vez de descargar el
+// audio y reenviarlo: algunas vienen firmadas con caducidad, así que se
+// resuelven al momento (ver urlDeMuestra) y el navegador la reproduce directo.
+adminApp.get("/config/voz/:voiceId/muestra", async (c) => {
+  const voiceId = c.req.param("voiceId");
+  // Solo se aceptan voces del catálogo: sin esto, la ruta serviría para sondear
+  // cualquier id contra la cuenta de ElevenLabs del dueño.
+  const { VOCES_ELEVENLABS, urlDeMuestra } = await import("../channels/voice/elevenlabsSetup");
+  if (!VOCES_ELEVENLABS.some((v) => v.value === voiceId)) return c.text("Voz desconocida", 404);
+
+  const apiKey = (await (await settingsFor(c)).get(SETTING_KEYS.voiceElevenLabsApiKey))?.trim();
+  if (!apiKey) return c.text("Todavía no has guardado tu llave de ElevenLabs", 409);
+
+  const url = await urlDeMuestra(apiKey, voiceId);
+  if (!url) return c.text("Esa voz no tiene muestra disponible", 404);
+  return c.redirect(url, 302);
+});
+
 adminApp.get("/costs", async (c) =>
   c.html(await renderCosts(c.env, c.get("botId"), c.req.query("saved") === "1", visibleNavIds(c.get("kontroliaClaims")))),
 );

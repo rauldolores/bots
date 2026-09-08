@@ -47,23 +47,42 @@ export interface OpcionDeVoz {
 }
 
 /**
- * Catálogo en español, curado a propósito.
+ * Catálogo de voces MEXICANAS, curado a propósito.
  *
- * ElevenLabs tiene miles de voces y la mayoría son en inglés o suenan con
- * acento marcado al hablar español. Mostrarlas todas sería darle al dueño un
- * problema en vez de una opción. Las etiquetas describen cómo suenan, no cómo
- * se llaman: "voz femenina, mexicana" le dice mucho más que "Maya".
+ * ElevenLabs tiene 107 voces con acento mexicano solo en español, y miles en
+ * total. Mostrarlas todas sería darle al dueño un problema en vez de una
+ * opción: nadie escucha cien muestras para elegir una. Estas se eligieron de
+ * esa lista con un criterio concreto —que suenen bien al TELÉFONO en una
+ * conversación de ventas, no narrando un audiolibro— y quedaron balanceadas
+ * entre voces de mujer y de hombre.
  *
- * Que una voz exista en el catálogo NO garantiza que la cuenta del dueño la
- * tenga — por eso se valida contra su cuenta al guardar (ver vocesDisponibles).
+ * Las etiquetas describen cómo SUENAN, no cómo se llaman: "mujer, cálida y
+ * cercana" le dice al dueño mucho más que "Fernanda". El nombre real de
+ * ElevenLabs se conserva entre paréntesis solo para poder rastrearla.
+ *
+ * Que una voz exista aquí NO garantiza que la cuenta del dueño la tenga — son
+ * voces de la biblioteca compartida y se agregan solas al guardar (ver
+ * vocesDisponibles y agregarVozCompartida).
  */
 export const VOCES_ELEVENLABS: OpcionDeVoz[] = [
-  { value: "nbcvT3C2tyOd2OsRAtUf", label: "Femenina — mexicana, cercana" },
-  { value: "IOyj8WtBHdke2FjQgGAr", label: "Femenina — colombiana, clara" },
-  { value: "x5IDPSl4ZUbhosMmVFTk", label: "Femenina — neutra, natural" },
-  { value: "57D8YIbQSuE3REDPO6Vm", label: "Masculina — colombiana, formal" },
-  { value: "6NviSCQ9jcQTnryEFRc1", label: "Masculina — rioplatense, versátil" },
-  { value: "a4Rnq6xoXLwW9h60Ay5h", label: "Masculina — neutra, serena" },
+  // La que este despliegue venía usando. Va primera y NO se quita: si
+  // desapareciera del catálogo, el bot que ya la tiene guardada se quedaría
+  // con un id que el selector no reconoce.
+  { value: "nbcvT3C2tyOd2OsRAtUf", label: "Mujer — cercana y natural (la de siempre)" },
+
+  { value: "ewn5JTa3lNPY8QVuZJi6", label: "Mujer — conversacional, acento neutro (Ana Sofía)" },
+  { value: "9Godp7dNohUvXk6qp0gS", label: "Mujer — joven y amable, tipo centro de contacto (Regina)" },
+  { value: "NyQ87MpRGbszyh7rZLXM", label: "Mujer — cálida y clara (Fernanda)" },
+  { value: "xTNZKgOQwmwWXcrmZIca", label: "Mujer — profesional y confiable (Saya)" },
+  { value: "sORJQTBm9rUDnyKe7RpG", label: "Mujer — ejecutiva y amable (Erika)" },
+  { value: "iOeCMakiJ4CctfQaM9yd", label: "Mujer — cordial, de todos los días (Marisol)" },
+
+  { value: "iKVy5pslTv9psldEFn41", label: "Hombre — claro y profesional, acento neutro (Diego)" },
+  { value: "L8yclR0Szq6ZIMSK6iXo", label: "Hombre — ejecutivo, acento chilango (Juan)" },
+  { value: "HS7W0ly7cmPolP5WMyz9", label: "Hombre — cálido y conversacional (Carlos Garza)" },
+  { value: "7EmI9SPdwF8NyYuIn2Vh", label: "Hombre — tranquilo y bien modulado (Sergio López)" },
+  { value: "77K94gl6ZCRVTHG8Gi1w", label: "Hombre — cercano y fácil de seguir (Patricio)" },
+  { value: "9gm2jXcKEKzgaypKoOlk", label: "Hombre — grave y seguro (Alejandro García)" },
 ];
 
 export const VOZ_POR_DEFECTO = VOCES_ELEVENLABS[0].value;
@@ -396,4 +415,49 @@ export async function asegurarAgenteAlDia(
     error: String((e as Error)?.message ?? e),
   }));
   return { actualizado: r.ok, error: r.ok ? undefined : r.error };
+}
+
+/**
+ * La URL de la muestra de audio de una voz, resuelta EN VIVO.
+ *
+ * No se guarda en el catálogo a propósito: algunas muestras de ElevenLabs
+ * vienen firmadas con una caducidad dentro de la propia URL, así que una
+ * constante en el código dejaría de sonar sin que nadie lo notara hasta que el
+ * dueño le picara. Resolverla al momento cuesta una consulta y no caduca nunca.
+ *
+ * Busca primero en la cuenta del dueño (donde vive la voz que ya usa) y
+ * después en la biblioteca compartida (donde viven las que todavía no ha
+ * elegido). Devuelve null si no aparece en ninguna: el panel lo trata como
+ * "esta voz no se puede escuchar", no como un error de la pantalla.
+ */
+export async function urlDeMuestra(apiKey: string, voiceId: string): Promise<string | null> {
+  try {
+    const propias = await fetch(`${API}/voices`, { headers: { "xi-api-key": apiKey } });
+    if (propias.ok) {
+      const b = (await propias.json()) as { voices?: { voice_id?: string; preview_url?: string }[] };
+      const mia = (b.voices ?? []).find((v) => v.voice_id === voiceId);
+      if (mia?.preview_url) return mia.preview_url;
+    }
+  } catch {
+    /* si la cuenta no responde, todavía queda la biblioteca compartida */
+  }
+
+  for (let page = 0; page < MAX_PAGINAS_BUSQUEDA; page++) {
+    try {
+      const res = await fetch(`${API}/shared-voices?language=es&page_size=100&page=${page}`, {
+        headers: { "xi-api-key": apiKey },
+      });
+      if (!res.ok) return null;
+      const body = (await res.json()) as {
+        voices?: { voice_id?: string; preview_url?: string }[];
+        has_more?: boolean;
+      };
+      const hallada = (body.voices ?? []).find((v) => v.voice_id === voiceId);
+      if (hallada?.preview_url) return hallada.preview_url;
+      if (!body.has_more) break;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }

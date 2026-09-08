@@ -461,13 +461,49 @@ function renderVoiceSection(
         </div>
         <div style="display:flex;flex-direction:column;gap:6px">
           <label class="text-dim text-[11.5px]">Voz</label>
-          <p class="text-dim text-[11px]">Todas son de hablantes nativos de español. Puedes escucharlas en el sitio de ElevenLabs antes de elegir.</p>
-          <select name="${SETTING_KEYS.voiceElevenLabsVoiceId}" style="${SELECT_STYLE}">
-            ${VOCES_ELEVENLABS.map((v) => {
-              const actual = settings[SETTING_KEYS.voiceElevenLabsVoiceId] || VOZ_POR_DEFECTO;
-              return `<option value="${v.value}" ${actual === v.value ? "selected" : ""}>${esc(v.label)}</option>`;
-            }).join("")}
-          </select>
+          <p class="text-dim text-[11px]">Todas son mexicanas y de hablantes nativos. Elige una y dale a <b>Escuchar</b> — se reproduce aquí mismo, sin entrar a ElevenLabs.</p>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="voz-11labs" name="${SETTING_KEYS.voiceElevenLabsVoiceId}" style="${SELECT_STYLE};flex:1;min-width:240px">
+              ${VOCES_ELEVENLABS.map((v) => {
+                const actual = settings[SETTING_KEYS.voiceElevenLabsVoiceId] || VOZ_POR_DEFECTO;
+                return `<option value="${v.value}" ${actual === v.value ? "selected" : ""}>${esc(v.label)}</option>`;
+              }).join("")}
+            </select>
+            <button type="button" id="voz-escuchar"
+              style="background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:8px 14px;font-size:12px;cursor:pointer;white-space:nowrap">▶ Escuchar</button>
+          </div>
+          <p id="voz-aviso" class="text-dim text-[11px]" style="margin:0" hidden></p>
+          <audio id="voz-audio" preload="none" style="display:none"></audio>
+          <script>
+          (function () {
+            var sel = document.getElementById("voz-11labs");
+            var btn = document.getElementById("voz-escuchar");
+            var audio = document.getElementById("voz-audio");
+            var aviso = document.getElementById("voz-aviso");
+            if (!sel || !btn || !audio) return;
+            function decir(txt) { aviso.textContent = txt; aviso.hidden = !txt; }
+            btn.addEventListener("click", function () {
+              // Si ya está sonando, este botón la calla: darle dos veces y oír
+              // dos voces encimadas sería peor que no poder escucharlas.
+              if (!audio.paused) { audio.pause(); btn.textContent = "▶ Escuchar"; return; }
+              decir("");
+              btn.textContent = "… cargando";
+              audio.src = "/admin/config/voz/" + encodeURIComponent(sel.value) + "/muestra?t=" + Date.now();
+              audio.play().then(function () { btn.textContent = "■ Detener"; }).catch(function () {
+                btn.textContent = "▶ Escuchar";
+                decir("No se pudo reproducir. Guarda primero tu llave de ElevenLabs y vuelve a intentar.");
+              });
+            });
+            audio.addEventListener("ended", function () { btn.textContent = "▶ Escuchar"; });
+            audio.addEventListener("error", function () {
+              btn.textContent = "▶ Escuchar";
+              decir("Esa voz no tiene muestra disponible ahora mismo.");
+            });
+            // Cambiar de voz detiene la anterior: si no, se escucharía una voz
+            // mientras el selector ya dice otra.
+            sel.addEventListener("change", function () { audio.pause(); btn.textContent = "▶ Escuchar"; decir(""); });
+          })();
+          </script>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px">
           <label class="text-dim text-[11.5px]">Teléfonos que escuchan la voz nueva</label>
