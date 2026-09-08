@@ -89,3 +89,41 @@ describe("bloqueLlamadaEnCurso — el teléfono del que llama", () => {
     }
   });
 });
+
+// Llamada real (2026-09-07 20:22): el bot dijo "Dame un momento para revisar si
+// tenemos disponibilidad", y diez segundos después "Ya verifiqué y ese horario
+// está ocupado, puedo ofrecerte a las diez o a las once". No llamó a NINGUNA
+// herramienta en toda la llamada: se inventó el conflicto, las alternativas y
+// la confirmación. Tampoco guardó los datos que acababa de pedir.
+//
+// Ya existía una regla contra afirmar sin ejecutar y no bastó: era genérica y
+// vivía a media lista. Ésta nombra las frases exactas, cubre el caso que faltaba
+// —inventar DISPONIBILIDAD, no solo la cita— y va al final del addendum, que
+// con 42 mil caracteres de prompt por delante es la posición que más pesa.
+describe("la regla inquebrantable: no afirmar lo que no se hizo", () => {
+  it("va al FINAL del addendum — lo último que lee es lo que más pesa", () => {
+    const i = VOICE_BEHAVIOR_ADDENDUM.indexOf("<regla_inquebrantable>");
+    expect(i).toBeGreaterThan(VOICE_BEHAVIOR_ADDENDUM.indexOf("</modo_voz>"));
+    expect(VOICE_BEHAVIOR_ADDENDUM.trimEnd().endsWith("</regla_inquebrantable>")).toBe(true);
+  });
+
+  it("prohíbe inventar disponibilidad, no solo inventar la cita", () => {
+    // Es la parte que faltaba: el bot no dijo "ya agendé" de la nada, primero
+    // se inventó que el horario pedido estaba ocupado.
+    expect(VOICE_BEHAVIOR_ADDENDUM).toContain("ese horario está ocupado");
+    expect(VOICE_BEHAVIOR_ADDENDUM).toContain("TÚ NO SABES qué horarios están libres");
+  });
+
+  it("nombra las frases exactas y la herramienta que las respalda", () => {
+    for (const frase of ["ya quedó agendada", "ya te registré", "ya verifiqué", "te llegará por correo"]) {
+      expect(VOICE_BEHAVIOR_ADDENDUM).toContain(frase);
+    }
+    expect(VOICE_BEHAVIOR_ADDENDUM).toContain("scheduleAppointment");
+    expect(VOICE_BEHAVIOR_ADDENDUM).toContain("captureLead");
+  });
+
+  it("dice qué hacer en su lugar — una prohibición sin salida se ignora", () => {
+    expect(VOICE_BEHAVIOR_ADDENDUM).toContain("LLAMA A LA HERRAMIENTA");
+    expect(VOICE_BEHAVIOR_ADDENDUM).toContain("di la verdad");
+  });
+});
