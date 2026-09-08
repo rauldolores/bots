@@ -168,3 +168,66 @@ usa el que te dio. Nunca registres este número sin haberlo confirmado con él,
 y nunca se lo leas dígito por dígito salvo que te lo pida.
 </llamada_en_curso>`;
 }
+
+/**
+ * Lo que este bot NO puede hacer, derivado de las herramientas que de verdad
+ * tiene.
+ *
+ * Omitir una herramienta no es lo mismo que decir que no existe. El código
+ * venía haciendo lo primero: si el dueño no configuraba un número de
+ * transferencia, `transfer_to_human` simplemente no se registraba — y nadie se
+ * lo decía al modelo. El modelo llenó el hueco solo.
+ *
+ * Pasó en una llamada real (2026-09-08 13:18): el cliente pidió hablar con
+ * soporte, el bot contestó "voy a transferirte con alguien del equipo" y luego
+ * "ya te estoy pasando con el equipo de soporte". No hay número configurado,
+ * así que esa herramienta ni siquiera existía. El cliente se quedó esperando
+ * una transferencia que nunca iba a ocurrir, y colgó cuando entendió que no
+ * pasaba nada.
+ *
+ * Se genera a partir de la lista REAL de tools para que no se desincronice: el
+ * día que el dueño configure el número, la prohibición desaparece sola.
+ */
+export function bloqueLimites(nombresDeTools: string[]): string {
+  const tiene = (n: string) => nombresDeTools.includes(n);
+  const limites: string[] = [];
+
+  if (!tiene("transfer_to_human")) {
+    limites.push(
+      'NO PUEDES transferir la llamada ni pasarla con otra persona. No existe esa ' +
+        'función en esta línea. Nunca digas "te transfiero", "te comunico con", "te ' +
+        'paso con" ni "ya te estoy pasando". Si el cliente quiere hablar con alguien' +
+        (tiene("handoffHuman")
+          ? ', levanta el caso con handoffHuman y dile la verdad: "no te puedo pasar la ' +
+            'llamada, pero ya registré tu caso y alguien del equipo te contacta". Eso sí ' +
+            "lo puedes cumplir."
+          : ", dile que alguien del equipo lo va a contactar y toma sus datos."),
+    );
+  }
+
+  // El bot dijo "déjame revisar tu historial" tres turnos seguidos y después
+  // "ya verifiqué" — inventando incluso una fecha ("en enero"). Lo que sabe del
+  // cliente es lo que ya está escrito en este prompt; no hay nada más que
+  // consultar, así que fingir una búsqueda solo produce silencio y datos falsos.
+  limites.push(
+    'NO PUEDES consultar el historial de llamadas o conversaciones pasadas. Lo que ' +
+      'sabes de esta persona es lo que ya viene escrito más arriba, y nada más. Nunca ' +
+      'digas "déjame revisar tu historial" ni "ya verifiqué cuándo fue": si no lo ves ' +
+      "escrito, no lo sabes, y decirlo con seguridad es inventar.",
+  );
+
+  if (!tiene("sendEmail") && !tiene("enviarCorreo")) {
+    limites.push(
+      "NO PUEDES enviar correos ni mensajes desde esta llamada. No prometas que le " +
+        'vas a "mandar el enlace" o que "le llegará por correo" como si tú fueras a ' +
+        "hacerlo — puedes decir que alguien del equipo se lo hará llegar, que es cierto.",
+    );
+  }
+
+  return `<lo_que_no_puedes_hacer>
+Estas son limitaciones REALES de esta línea, no preferencias. Decir que haces
+algo de esto es mentirle al cliente:
+
+${limites.map((l) => `- ${l}`).join("\n")}
+</lo_que_no_puedes_hacer>`;
+}

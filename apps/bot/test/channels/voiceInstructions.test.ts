@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { VOICE_BEHAVIOR_ADDENDUM, bloqueLlamadaEnCurso } from "../../src/channels/voice/voiceInstructions";
+import { VOICE_BEHAVIOR_ADDENDUM, bloqueLlamadaEnCurso, bloqueLimites } from "../../src/channels/voice/voiceInstructions";
 
 describe("VOICE_BEHAVIOR_ADDENDUM", () => {
   it("instruye buscar el cierre en cuanto se logra el objetivo del cliente — llamadas cortas, no alargarlas", () => {
@@ -125,5 +125,66 @@ describe("la regla inquebrantable: no afirmar lo que no se hizo", () => {
   it("dice qué hacer en su lugar — una prohibición sin salida se ignora", () => {
     expect(VOICE_BEHAVIOR_ADDENDUM).toContain("LLAMA A LA HERRAMIENTA");
     expect(VOICE_BEHAVIOR_ADDENDUM).toContain("di la verdad");
+  });
+});
+
+/**
+ * Llamada real (2026-09-08 13:18). El cliente pidió hablar con soporte:
+ *
+ *   "Voy a transferirte con alguien del equipo de soporte."
+ *   "Ya te estoy pasando con el equipo de soporte."
+ *
+ * No hay número de transferencia configurado, así que transfer_to_human ni
+ * siquiera existía como herramienta. El cliente esperó una transferencia que
+ * nunca iba a ocurrir y colgó al entenderlo. Tampoco se levantó el ticket, que
+ * era lo único que el bot sí podía hacer.
+ *
+ * La causa de fondo: omitir una herramienta no es decirle al modelo que no
+ * existe. El código omitía; el modelo llenó el hueco solo.
+ */
+describe("bloqueLimites — decirle lo que NO puede hacer", () => {
+  const CON_TODO = ["searchKb", "captureLead", "handoffHuman", "transfer_to_human"];
+  const SIN_TRANSFERENCIA = ["searchKb", "captureLead", "handoffHuman"];
+
+  it("sin número configurado, le prohíbe decir que transfiere", () => {
+    const b = bloqueLimites(SIN_TRANSFERENCIA);
+    expect(b).toContain("NO PUEDES transferir");
+    for (const frase of ["te transfiero", "te comunico con", "ya te estoy pasando"]) {
+      expect(b).toContain(frase);
+    }
+  });
+
+  it("y le da la salida REAL: levantar el caso y decir la verdad", () => {
+    // Prohibir sin alternativa deja al modelo sin nada que decir, y ahí
+    // improvisa. Con handoffHuman disponible, la salida existe y es honesta.
+    const b = bloqueLimites(SIN_TRANSFERENCIA);
+    expect(b).toContain("handoffHuman");
+    expect(b).toContain("alguien del equipo te contacta");
+  });
+
+  it("CON número configurado, la prohibición desaparece sola", () => {
+    // Se deriva de las tools reales justo para que no se desincronice del
+    // sistema el día que el dueño configure el número.
+    expect(bloqueLimites(CON_TODO)).not.toContain("NO PUEDES transferir");
+  });
+
+  it("siempre le prohíbe fingir que consulta el historial", () => {
+    // Dijo "déjame revisar tu historial" tres turnos seguidos, luego "ya
+    // verifiqué", e inventó una fecha ("en enero"). No existe esa herramienta.
+    for (const tools of [CON_TODO, SIN_TRANSFERENCIA]) {
+      const b = bloqueLimites(tools);
+      expect(b).toContain("NO PUEDES consultar el historial");
+      expect(b).toContain("déjame revisar tu historial");
+    }
+  });
+
+  it("sin herramienta de correo, no promete mandarlo él mismo", () => {
+    const b = bloqueLimites(SIN_TRANSFERENCIA);
+    expect(b).toContain("NO PUEDES enviar correos");
+    expect(b).toContain("alguien del equipo se lo hará llegar");
+  });
+
+  it("deja claro que son límites reales, no preferencias", () => {
+    expect(bloqueLimites(SIN_TRANSFERENCIA)).toContain("limitaciones REALES");
   });
 });

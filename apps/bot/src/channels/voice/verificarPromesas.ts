@@ -57,12 +57,21 @@ const AFIRMACIONES = [
   "tu cita esta confirmada",
   "acabo de agendar",
   "acabo de registrar",
+  // Transferir es la promesa más fácil de incumplir sin darse cuenta: si el
+  // dueño no configuró número, la herramienta ni existe y el modelo lo dice
+  // igual (llamada del 2026-09-08: "ya te estoy pasando con el equipo").
+  "te estoy pasando",
+  "te paso con",
+  "te transfiero",
+  "te comunico con",
+  "voy a transferirte",
 ];
 
 /** Qué herramienta respalda cada tipo de promesa. */
 const RESPALDO: Record<string, string[]> = {
   cita: ["scheduleAppointment"],
   registro: ["captureLead", "handoffHuman"],
+  transferencia: ["transfer_to_human"],
 };
 
 function normalizar(s: string): string {
@@ -84,6 +93,15 @@ export function afirmaHaberloHecho(texto: string): string | null {
 /** De qué habla la promesa, para saber qué herramienta debió respaldarla. */
 export function tipoDePromesa(texto: string): keyof typeof RESPALDO {
   const t = normalizar(texto);
+  // La transferencia se revisa PRIMERO: "te paso con alguien para tu cita"
+  // habla de una cita, pero lo que promete es pasar la llamada.
+  // "transfer" y no "transfier": la raíz cubre transferir, transfiero,
+  // transferirte y transferencia. Con "transfier" se escapaba justo la forma
+  // que el bot usó de verdad — "voy a transferirte" — y caía en la rama de
+  // registro, donde un ticket la daba por cumplida.
+  if (t.includes("transfer") || t.includes("te paso") || t.includes("te comunico") || t.includes("estoy pasando")) {
+    return "transferencia";
+  }
   return t.includes("cita") || t.includes("demo") || t.includes("llamada") || t.includes("reunion")
     ? "cita"
     : "registro";
@@ -160,11 +178,25 @@ export async function hechosDeLaLlamada(
     }
   }
 
+  // Solo los turnos de ESTA llamada. La conversación se reutiliza entre
+  // llamadas del mismo número (conversationKeyOf es bot+canal+teléfono), así
+  // que sin acotar por tiempo se releían las promesas de llamadas anteriores y
+  // se reportaban como si fueran de ésta: el mismo incumplimiento volvía a
+  // avisar cada vez que la persona marcaba, y el aviso apuntaba a la llamada
+  // equivocada.
+  const sesion = await db.first<{ started_at: number; ended_at: number | null }>(
+    `SELECT started_at, ended_at FROM voice_sessions WHERE bot_id = ? AND id = ?`,
+    [botId, callId],
+  );
+  const desde = sesion?.started_at ?? 0;
+  const hasta = sesion?.ended_at ?? Date.now();
+
   const mensajes = await db.all<{ content: string }>(
     `SELECT content FROM messages
       WHERE bot_id = ? AND conversation_id = ? AND role = 'assistant'
+        AND created_at >= ? AND created_at <= ?
       ORDER BY created_at`,
-    [botId, conversationId],
+    [botId, conversationId, desde, hasta],
   );
   return { dichos: mensajes.map((m) => m.content).filter(Boolean), herramientas };
 }

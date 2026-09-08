@@ -27,7 +27,7 @@ import { transferirLlamadaViva } from "./transfer";
 import { encolarAnalisisDeLlamada } from "./analisisPostLlamada";
 import { verificarLlamada } from "./verificarPromesas";
 import { buildClearMessage, buildMediaMessage } from "./mediaStreamProtocol";
-import { bloqueLlamadaEnCurso, VOICE_BEHAVIOR_ADDENDUM } from "./voiceInstructions";
+import { bloqueLlamadaEnCurso, bloqueLimites, VOICE_BEHAVIOR_ADDENDUM } from "./voiceInstructions";
 import { resolveVoiceGreeting } from "./voiceGreeting";
 import { motivoDeFallo, camposConValor } from "./toolResult";
 
@@ -204,6 +204,11 @@ export class ElevenLabsCallBridge implements CallBridge {
       ctx.basePrompt,
       ...ctx.memoryBlocks,
       bloqueLlamadaEnCurso(callerId),
+      // Qué NO puede hacer, derivado de las tools que de verdad tiene en ESTA
+      // llamada. Va después de armar this.tools —que ya incluye
+      // transfer_to_human si el dueño configuró número— para que la lista nunca
+      // se desincronice: el día que lo configure, la prohibición se cae sola.
+      bloqueLimites(Object.keys(this.tools)),
       VOICE_BEHAVIOR_ADDENDUM,
     ].join("\n\n");
     // El bot SALUDA PRIMERO — mismo criterio que el puente de OpenAI
