@@ -116,6 +116,8 @@ export async function resolveAgentConfig(
   env: Env,
   toolNames: string[],
   botIdOverride?: string,
+  /** Qué canal va a usar este prompt. Solo cambia QUÉ playbook se inyecta. */
+  opciones?: { paraVoz?: boolean },
 ): Promise<AgentConfig> {
   const db = new Db(env.DB);
   const botId = botIdOverride ?? (await resolveBotId(db));
@@ -171,7 +173,12 @@ export async function resolveAgentConfig(
   // mezclar dos guiones potencialmente contradictorios en un slot sin tag
   // propio ({{NICHO_PLAYBOOK}}) es más riesgoso que "gana lo que el dueño
   // escribió a mano".
-  const ownerPlaybook = get(SETTING_KEYS.salesPlaybook);
+  // En voz gana el playbook de llamadas, si el dueño escribió uno. No se
+  // MEZCLAN: dos guiones a la vez se contradicen y el modelo elige sin
+  // criterio — el mismo motivo por el que bot_objective reemplaza al objetivo
+  // genérico del modo en vez de sumarse. Vacío = se usa el de chat.
+  const playbookDeVoz = opciones?.paraVoz ? get(SETTING_KEYS.voicePlaybook) : undefined;
+  const ownerPlaybook = playbookDeVoz ?? get(SETTING_KEYS.salesPlaybook);
   const nichoPlaybookBase = ownerPlaybook ?? (niche.playbook || undefined);
 
   const activeMcpConnectors = (await new BotConnectorsRepo(db).listByBot(botId)).filter(

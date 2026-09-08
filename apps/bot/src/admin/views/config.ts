@@ -805,6 +805,39 @@ export function renderConfig(
                 rows: 6,
               })}
 
+              ${(() => {
+                // Cuánto ocupa hoy cada uno, en la unidad que de verdad importa:
+                // el prompt de voz se recarga en CADA turno de la llamada, y
+                // ElevenLabs recomienda no pasar de ~2.000 tokens. Enseñarle el
+                // número al dueño es lo que convierte "escribe menos" en algo
+                // accionable — sin esto no tiene forma de saber si va bien.
+                const chat = (settings[SETTING_KEYS.salesPlaybook] ?? "").trim().length;
+                const voz = (settings[SETTING_KEYS.voicePlaybook] ?? "").trim().length;
+                const usado = voz > 0 ? voz : chat;
+                const tokens = Math.round(usado / 3.9);
+                const pasado = tokens > 2000;
+                return `
+                <div style="display:flex;align-items:flex-start;gap:9px;border:1px solid ${pasado ? "rgba(220,60,60,.45)" : "var(--line)"};background:${pasado ? "rgba(220,60,60,.08)" : "var(--panel2)"};border-radius:var(--radius-sm);padding:12px 14px">
+                  <span style="color:${pasado ? "#e05252" : "var(--muted)"};flex:none;line-height:1">${pasado ? "●" : "○"}</span>
+                  <p class="text-[12px]" style="color:var(--muted);margin:0">
+                    En llamadas se usa ${voz > 0 ? "<strong>el de abajo</strong>" : "<strong>éste de arriba</strong>, porque no has escrito uno para llamadas"}:
+                    <strong>~${tokens.toLocaleString("es-MX")} tokens</strong>.
+                    ${pasado
+                      ? `ElevenLabs recomienda no pasar de 2,000 en llamadas — arriba de eso el bot tarda más en contestar y empieza a <em>narrar</em> el guion en vez de ejecutarlo.`
+                      : `Dentro de los 2,000 que recomienda ElevenLabs para llamadas.`}
+                  </p>
+                </div>`;
+              })()}
+
+              ${renderTextArea({
+                name: SETTING_KEYS.voicePlaybook,
+                label: "Cómo atiende por teléfono (opcional)",
+                help: "El de arriba está pensado para chat, donde el cliente espera y puede leer. Una llamada es otra cosa: el prompt se recarga en cada turno, así que aquí va la versión CORTA — solo lo que el bot necesita en el momento. Lo de consulta (precios, objeciones, detalle de servicios) déjalo en la base de conocimiento y el bot lo busca cuando salga el tema. Vacío = se usa el de arriba.",
+                value: settings[SETTING_KEYS.voicePlaybook] ?? "",
+                placeholder: "Ej. Preséntate, pregunta en qué puedes ayudar, y en cuanto haya interés pide nombre, correo, teléfono y empresa. Ofrece el diagnóstico a quien no sepa por dónde empezar.",
+                rows: 6,
+              })}
+
               ${renderTextField({
                 name: SETTING_KEYS.escalationKeywords,
                 label: "Palabras que piden un humano",

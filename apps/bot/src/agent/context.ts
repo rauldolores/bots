@@ -32,6 +32,8 @@ export interface AgentContextInput {
   conversationKey: string | null;
   /** Sandbox de /admin/entrenamiento: las tools que escriben se simulan. Ver buildTools. */
   training?: boolean;
+  /** Llamada telefónica: usa el playbook de voz si el dueño escribió uno. */
+  paraVoz?: boolean;
 }
 
 export interface AgentContext {
@@ -124,7 +126,7 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
   // citas y si ya había hablado por otro canal — la diferencia entre saludar
   // por su nombre y saber de verdad con quién estás hablando.
   const [cfg, cliente] = await Promise.all([
-    resolveAgentConfig(env, toolNames, botId),
+    resolveAgentConfig(env, toolNames, botId, { paraVoz: input.paraVoz }),
     buildCustomerContext(db, botId, {
       conversationId,
       channelUserId: state?.channelUserId ?? null,

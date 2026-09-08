@@ -178,6 +178,46 @@ describe("resolveAgentConfig — sales_playbook (llena {{NICHO_PLAYBOOK}})", () 
   });
 });
 
+// Los dos canales tienen presupuestos de prompt incompatibles: en chat el guion
+// puede ser extenso, pero en voz se recarga en CADA turno y ElevenLabs
+// recomienda no pasar de ~2.000 tokens. El de chat solo ya iba en ~6.400, y un
+// guion largo en voz no solo cuesta latencia: el modelo se pone a interpretar
+// cómo SE VE una venta en vez de ejecutarla (llamada del 2026-09-07, donde se
+// inventó disponibilidad, alternativas y confirmación).
+describe("resolveAgentConfig — playbook aparte para llamadas", () => {
+  it("en voz gana el playbook de llamadas", async () => {
+    await repo.set(SETTING_KEYS.salesPlaybook, "GUION LARGO DE CHAT");
+    await repo.set(SETTING_KEYS.voicePlaybook, "guion corto de llamada");
+
+    const cfg = await resolveAgentConfig(env, TOOLS, undefined, { paraVoz: true });
+
+    expect(cfg.systemPrompt).toContain("guion corto de llamada");
+    // No se MEZCLAN: dos guiones a la vez se contradicen y el modelo elige sin
+    // criterio, que es justo lo que se quiere evitar.
+    expect(cfg.systemPrompt).not.toContain("GUION LARGO DE CHAT");
+  });
+
+  it("en chat sigue ganando el de siempre, aunque exista el de voz", async () => {
+    await repo.set(SETTING_KEYS.salesPlaybook, "GUION LARGO DE CHAT");
+    await repo.set(SETTING_KEYS.voicePlaybook, "guion corto de llamada");
+
+    const cfg = await resolveAgentConfig(env, TOOLS);
+
+    expect(cfg.systemPrompt).toContain("GUION LARGO DE CHAT");
+    expect(cfg.systemPrompt).not.toContain("guion corto de llamada");
+  });
+
+  it("sin playbook de voz, la llamada usa el de chat — nadie se queda sin guion", async () => {
+    // Es el caso de todos los bots que ya existían antes de este campo: si
+    // esto cayera a vacío, el bot perdería su guion al contestar el teléfono.
+    await repo.set(SETTING_KEYS.salesPlaybook, "GUION LARGO DE CHAT");
+
+    const cfg = await resolveAgentConfig(env, TOOLS, undefined, { paraVoz: true });
+
+    expect(cfg.systemPrompt).toContain("GUION LARGO DE CHAT");
+  });
+});
+
 describe("resolveAgentConfig — voice_greeting", () => {
   it("undefined cuando no está configurado — el saludo cae al default (voiceGreeting.ts)", async () => {
     const cfg = await resolveAgentConfig(env, TOOLS);

@@ -174,7 +174,16 @@ export class ElevenLabsCallBridge implements CallBridge {
     // idéntico y no se persiste el texto.
     this.guardarTranscripcion = ajustes[SETTING_KEYS.voiceStoreTranscript] === "1";
 
-    const ctx = await buildAgentContext({ env, botId, conversationId: conv.id, conversationKey });
+    // paraVoz: si el dueño escribió un playbook de llamadas, gana sobre el de
+    // chat. Los dos canales tienen presupuestos de prompt incompatibles —ver
+    // SETTING_KEYS.voicePlaybook—, y aquí es donde se elige cuál se inyecta.
+    const ctx = await buildAgentContext({
+      env,
+      botId,
+      conversationId: conv.id,
+      conversationKey,
+      paraVoz: true,
+    });
     this.timings = ctx.timings;
     // Se guardan para ejecutarlas cuando el agente las pida. Aquí SÍ vienen
     // las de MCP (buildAgentContext las agrega), aunque al registrar el agente

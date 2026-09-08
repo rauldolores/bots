@@ -1792,6 +1792,7 @@ adminApp.post("/config", async (c) => {
     SETTING_KEYS.systemPromptOverride,
     SETTING_KEYS.escalationKeywords,
     SETTING_KEYS.salesPlaybook,
+    SETTING_KEYS.voicePlaybook,
     SETTING_KEYS.voiceGreeting,
     SETTING_KEYS.voiceVadSilenceMs,
     SETTING_KEYS.agentMode,

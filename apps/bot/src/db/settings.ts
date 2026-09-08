@@ -83,6 +83,17 @@ export const SETTING_KEYS = {
   // cualquier agente (un tutor, un moderador). No se renombra la clave porque
   // ya tiene datos de clientes en producción — el panel dice lo correcto.
   salesPlaybook: "sales_playbook",
+  // El MISMO papel que salesPlaybook, pero solo para llamadas. Existe porque
+  // los dos canales tienen presupuestos de prompt incompatibles: en chat el
+  // guion puede ser extenso —el cliente espera y el modelo lo lee una vez—,
+  // pero en voz el prompt se recarga en CADA turno y ElevenLabs recomienda no
+  // pasar de ~2.000 tokens; el de chat solo ya iba en ~6.400. Un playbook
+  // largo en voz no solo cuesta latencia: el modelo se pone a interpretar el
+  // guion que describe cómo SE VE una venta en vez de ejecutarla (llamada del
+  // 2026-09-07: se inventó disponibilidad, alternativas y confirmación).
+  //
+  // Vacío = se usa el de chat, que es como funcionaba antes de existir esto.
+  voicePlaybook: "voice_playbook",
   // Voz de OpenAI Realtime para llamadas telefónicas — el panel solo ofrece
   // marin/cedar (las únicas dos que suenan bien en español); sin configurar,
   // cae al default hardcodeado "marin" en realtimeClient.ts.
