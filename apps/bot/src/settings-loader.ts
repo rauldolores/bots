@@ -33,7 +33,6 @@ export interface AgentConfig {
   /** Respaldo de otro proveedor si el principal falla — ver otherTierModel/fallbackModel en llm/provider.ts. */
   llmBackup?: { provider?: string; apiKey?: string };
   /** Voz de OpenAI Realtime para llamadas — undefined = default de realtimeClient.ts ("marin"). */
-  voiceName?: string;
   /** Plantilla del saludo de llamada — undefined = DEFAULT_VOICE_GREETING_TEMPLATE (voiceGreeting.ts). */
   voiceGreeting?: string;
 }
@@ -158,7 +157,6 @@ export async function resolveAgentConfig(
   // Tono elegido en el panel gana; si no hay, el tono por defecto del nicho.
   const tone = get(SETTING_KEYS.tone) ?? (niche.defaultTone || undefined);
   const escalationKeywords = parseCsvList(get(SETTING_KEYS.escalationKeywords));
-  const voiceName = get(SETTING_KEYS.voiceName);
   const voiceGreeting = get(SETTING_KEYS.voiceGreeting);
   const country = botConfig.country?.trim() || undefined;
   const currency = botConfig.currency?.trim() || undefined;
@@ -287,7 +285,6 @@ export async function resolveAgentConfig(
     monthlyBudgetUsd,
     llm: llmOverridesFrom(settings),
     llmBackup: llmBackupFrom(settings),
-    voiceName,
     voiceGreeting,
   };
 }

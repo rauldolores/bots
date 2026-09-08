@@ -178,19 +178,6 @@ describe("resolveAgentConfig — sales_playbook (llena {{NICHO_PLAYBOOK}})", () 
   });
 });
 
-describe("resolveAgentConfig — voice_name", () => {
-  it("undefined cuando no está configurado", async () => {
-    const cfg = await resolveAgentConfig(env, TOOLS);
-    expect(cfg.voiceName).toBeUndefined();
-  });
-
-  it("se lee tal cual del setting", async () => {
-    await repo.set(SETTING_KEYS.voiceName, "shimmer");
-    const cfg = await resolveAgentConfig(env, TOOLS);
-    expect(cfg.voiceName).toBe("shimmer");
-  });
-});
-
 describe("resolveAgentConfig — voice_greeting", () => {
   it("undefined cuando no está configurado — el saludo cae al default (voiceGreeting.ts)", async () => {
     const cfg = await resolveAgentConfig(env, TOOLS);

@@ -23,7 +23,6 @@ import { resolveChannelEnv } from "../effectiveEnv";
 import { verifyStreamToken } from "./streamToken";
 import { parseTwilioStreamEvent } from "./mediaStreamProtocol";
 import { VoiceChannel } from "./channel";
-import { RealtimeCallBridge } from "./realtimeBridge";
 import { ElevenLabsCallBridge } from "./elevenlabsBridge";
 import { credencialesElevenLabs, type CallBridge } from "./callBridge";
 import { Db } from "../../db/client";
@@ -210,9 +209,26 @@ async function handleMessage(ws: WebSocket, state: GatewayCallState, env: Env, r
         // teniendo un solo número. Sin lista de prueba configurada, esto es
         // siempre "openai" y el código de abajo es el de siempre.
         const callerId = state.from || msg.start.callSid;
+        // ElevenLabs es el único proveedor de voz. Antes había dos y se elegía
+        // por número de quien llamaba; la comparación terminó y el camino de
+        // OpenAI Realtime se retiró.
+        //
         // Sale de /admin/config, no del entorno: quien instala esto no
-        // configura servidores. null = esta llamada es de OpenAI.
-        const credsEleven = await credencialesElevenLabs(new Db(env.DB), state.botId, callerId, env).catch(() => null);
+        // configura servidores.
+        const credsEleven = await credencialesElevenLabs(new Db(env.DB), state.botId, env).catch(() => null);
+        if (!credsEleven) {
+          // Ya no hay un segundo proveedor donde caerse, así que esto se dice
+          // claro en vez de dejar la llamada muda sin explicación: al dueño le
+          // falta la llave o el agente de ElevenLabs en /admin/config.
+          logVoiceEvent("voz_sin_configurar", {
+            botId: state.botId,
+            callSid: maskId(state.callSid),
+          });
+          console.error(
+            "[voice-gateway] llamada sin atender: falta configurar ElevenLabs (llave o agente) en /admin/config",
+          );
+          return;
+        }
         const deps = {
           env,
           botId: state.botId,
@@ -222,28 +238,7 @@ async function handleMessage(ws: WebSocket, state: GatewayCallState, env: Env, r
           voiceSession,
           sendToTwilio: (json: string) => ws.send(json),
         };
-        if (credsEleven) {
-          logVoiceEvent("proveedor_beta", {
-            botId: state.botId,
-            callSid: maskId(state.callSid),
-            proveedor: "elevenlabs",
-          });
-          try {
-            state.bridge = await ElevenLabsCallBridge.start(deps, credsEleven);
-          } catch (e) {
-            // La prueba NUNCA puede tumbar una llamada real: si ElevenLabs no
-            // conecta, se atiende con OpenAI como cualquier otra. Quien llama
-            // no se entera de que había un experimento de por medio.
-            console.error("[voice-gateway] ElevenLabs falló, se cae a OpenAI:", e);
-            logVoiceEvent("proveedor_beta_fallback", {
-              botId: state.botId,
-              callSid: maskId(state.callSid),
-            });
-            state.bridge = await RealtimeCallBridge.start(deps);
-          }
-        } else {
-          state.bridge = await RealtimeCallBridge.start(deps);
-        }
+        state.bridge = await ElevenLabsCallBridge.start(deps, credsEleven);
       } catch (e) {
         console.error("[voice-gateway] no se pudo iniciar la llamada:", e);
       }

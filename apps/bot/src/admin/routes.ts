@@ -1792,7 +1792,6 @@ adminApp.post("/config", async (c) => {
     SETTING_KEYS.systemPromptOverride,
     SETTING_KEYS.escalationKeywords,
     SETTING_KEYS.salesPlaybook,
-    SETTING_KEYS.voiceName,
     SETTING_KEYS.voiceGreeting,
     SETTING_KEYS.voiceVadSilenceMs,
     SETTING_KEYS.agentMode,
@@ -1942,21 +1941,6 @@ adminApp.post("/config", async (c) => {
   }
   const vozEleven = String(form.get(SETTING_KEYS.voiceElevenLabsVoiceId) ?? "").trim();
   if (vozEleven) await repo.set(SETTING_KEYS.voiceElevenLabsVoiceId, vozEleven);
-  const betaCallers = form.get(SETTING_KEYS.voiceElevenLabsBetaCallers);
-  if (betaCallers !== null) {
-    await repo.set(SETTING_KEYS.voiceElevenLabsBetaCallers, String(betaCallers).trim());
-  }
-
-  // API key de OpenAI para Voz (Realtime) — mismo patrón que la de arriba.
-  if (form.get("voice_openai_api_key_clear") === "1") {
-    await repo.set(SETTING_KEYS.voiceOpenAiApiKey, "");
-  } else {
-    const voiceKeyRaw = form.get(SETTING_KEYS.voiceOpenAiApiKey);
-    if (voiceKeyRaw !== null && String(voiceKeyRaw).trim() !== "") {
-      await repo.set(SETTING_KEYS.voiceOpenAiApiKey, String(voiceKeyRaw).trim());
-    }
-  }
-
   // Correo saliente (/admin/config → Correo saliente) — DECIDIDO APARTE de
   // quién recibe (eso es /admin/conexiones → bot_channels canal "email").
   // Proveedor con allow-list (mismo criterio que llmProvider arriba);
@@ -1982,13 +1966,16 @@ adminApp.post("/config", async (c) => {
     }
   }
 
-  // Con llave Y alguien en la lista de prueba, se deja listo el agente en
-  // ElevenLabs. Va al FINAL y después de guardar: aunque esto falle, lo que el
-  // dueño escribió no se pierde — solo se le avisa que la prueba no quedó
-  // encendida, con el motivo.
+  // Con la llave basta para dejar listo el agente en ElevenLabs. Antes se
+  // exigía ADEMÁS que hubiera alguien en la lista de prueba, porque la voz
+  // convivía con OpenAI Realtime y solo esos teléfonos la escuchaban; esa lista
+  // desapareció junto con el otro proveedor, y de no cambiar esta condición el
+  // agente habría dejado de configurarse en silencio.
+  //
+  // Va al FINAL y después de guardar: aunque esto falle, lo que el dueño
+  // escribió no se pierde — solo se le avisa, con el motivo.
   const elevenApiKey = (await repo.get(SETTING_KEYS.voiceElevenLabsApiKey))?.trim();
-  const elevenCallers = (await repo.get(SETTING_KEYS.voiceElevenLabsBetaCallers))?.trim();
-  if (elevenApiKey && elevenCallers) {
+  if (elevenApiKey) {
     const { prepararAgenteElevenLabs, VOZ_POR_DEFECTO } = await import("../channels/voice/elevenlabsSetup");
     const voz = (await repo.get(SETTING_KEYS.voiceElevenLabsVoiceId))?.trim() || VOZ_POR_DEFECTO;
     const r = await prepararAgenteElevenLabs(new Db(c.env.DB), c.get("botId"), elevenApiKey, voz).catch((e) => ({

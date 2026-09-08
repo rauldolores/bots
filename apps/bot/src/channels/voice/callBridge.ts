@@ -1,12 +1,11 @@
 /**
- * Qué necesita el gateway de un puente de llamada, sin importar quién ponga la
- * voz.
+ * Qué necesita el gateway de un puente de llamada.
  *
- * Existe para poder probar ElevenLabs contra OpenAI Realtime EN EL MISMO NÚMERO:
- * no hay un segundo número donde aislar la prueba, así que la única forma
- * honesta de comparar es que convivan y que producción no pueda romperse. La
- * decisión de cuál usar es por LLAMADA (ver elegirProveedorDeVoz), no por
- * despliegue.
+ * La interfaz nació para que ElevenLabs y OpenAI Realtime convivieran mientras
+ * se comparaban en el mismo número. Esa comparación ya terminó —Realtime no
+ * resolvía lo que este producto necesita— y hoy ElevenLabs es el único
+ * proveedor de voz. La interfaz se conserva de todos modos: es lo que hace que
+ * cambiar de proveedor sea un archivo nuevo y no una cirugía del gateway.
  */
 import type { Env } from "../../env";
 import type { Db } from "../../db/client";
@@ -31,56 +30,27 @@ export interface CallBridge {
   close(reason: string): Promise<void>;
 }
 
-export type VoiceProvider = "openai" | "elevenlabs";
-
-/** Normaliza a solo dígitos para comparar teléfonos escritos de mil maneras. */
-function soloDigitos(s: string): string {
-  return s.replace(/\D/g, "");
-}
-
-/**
- * Qué proveedor atiende ESTA llamada.
- *
- * Por número de quien llama, no por bot ni por despliegue. Con un solo número
- * de teléfono disponible, es la única forma de probar el proveedor nuevo con
- * llamadas reales sin arriesgar las de clientes: quien no esté en la lista de
- * prueba ni se entera de que existe otra opción.
- *
- * La comparación es por los últimos 10 dígitos para no pelearse con el lada
- * internacional: "+52 1 55 1234 5678", "5215512345678" y "5512345678" son la
- * misma persona marcando desde el mismo teléfono.
- */
-export function elegirProveedorDeVoz(listaCruda: string | undefined, callerId: string): VoiceProvider {
-  const lista = (listaCruda ?? "")
-    .split(",")
-    .map((n) => soloDigitos(n))
-    .filter(Boolean);
-  if (lista.length === 0) return "openai";
-
-  const quienLlama = soloDigitos(callerId);
-  if (!quienLlama) return "openai";
-
-  const cola = (n: string) => n.slice(-10);
-  return lista.some((n) => cola(n) === cola(quienLlama)) ? "elevenlabs" : "openai";
-}
-
 /**
  * Lo que ElevenLabs necesita para atender ESTA llamada, salido de la pantalla
  * de configuración — no del entorno del servidor.
  *
- * Devuelve null si falta cualquier pieza: sin llave, sin agente o sin la
- * persona en la lista de prueba, la llamada es de OpenAI y punto.
+ * ElevenLabs es el ÚNICO proveedor de voz. Antes convivía con OpenAI Realtime
+ * y se elegía por número de quien llamaba (una lista de prueba), porque había
+ * un solo teléfono y era la única forma honesta de comparar sin arriesgar
+ * llamadas de clientes. La comparación terminó: Realtime no resolvía lo que
+ * este producto necesita, y mantener dos caminos costaba el doble de arreglos
+ * y confundía la configuración.
+ *
+ * Devuelve null si falta la llave o el agente. Sin eso NO hay a qué conectarse
+ * y la llamada no se puede atender: ya no existe un segundo proveedor donde
+ * caerse, así que el gateway lo dice claro en vez de fingir que hay plan B.
  */
 export async function credencialesElevenLabs(
   db: Db,
   botId: string,
-  callerId: string,
   env: Env,
 ): Promise<{ apiKey: string; agentId: string } | null> {
   const settings = await new SettingsRepo(db, botId).all();
-  if (elegirProveedorDeVoz(settings[SETTING_KEYS.voiceElevenLabsBetaCallers], callerId) !== "elevenlabs") {
-    return null;
-  }
   const apiKey = settings[SETTING_KEYS.voiceElevenLabsApiKey]?.trim();
   if (!apiKey) return null;
 
