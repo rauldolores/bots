@@ -27,6 +27,7 @@ import { consultarTareaTool, type TareaDelegada } from "./tools/consultarTarea";
 import { transferirLlamadaViva } from "./transfer";
 import { encolarAnalisisDeLlamada } from "./analisisPostLlamada";
 import { verificarLlamada } from "./verificarPromesas";
+import { validarParametros } from "./validarParametros";
 import { buildClearMessage, buildMediaMessage } from "./mediaStreamProtocol";
 import { bloqueLlamadaEnCurso, bloqueLimites, VOICE_BEHAVIOR_ADDENDUM } from "./voiceInstructions";
 import { resolveVoiceGreeting } from "./voiceGreeting";
@@ -325,7 +326,7 @@ export class ElevenLabsCallBridge implements CallBridge {
     nombre: string;
     parametros: unknown;
   }): Promise<void> {
-    const { nombre, toolCallId, parametros } = llamada;
+    const { nombre, toolCallId, parametros: parametrosCrudos } = llamada;
     logVoiceEvent("elevenlabs_tool_call", {
       botId: this.deps.botId,
       callSid: maskId(this.deps.callSid),
@@ -338,6 +339,26 @@ export class ElevenLabsCallBridge implements CallBridge {
       this.client?.sendToolResult(toolCallId, { error: "tool_not_available" }, true);
       return;
     }
+
+    // Validar los argumentos contra el esquema de la tool, igual que hace el
+    // AI SDK en el camino de texto. Aquí no lo hacía nadie, y por eso los
+    // `.default()` de Zod nunca se aplicaban: un campo omitido por el modelo
+    // llegaba como `undefined` hasta el INSERT y el driver de Postgres tiraba
+    // "UNDEFINED_VALUE". Ver validarParametros.ts para el caso real.
+    const validado = await validarParametros(def, parametrosCrudos);
+    if (!validado.ok) {
+      logVoiceEvent("elevenlabs_tool_argumentos_invalidos", {
+        botId: this.deps.botId,
+        callSid: maskId(this.deps.callSid),
+        tool: nombre,
+        motivo: validado.motivo,
+      });
+      // Con el motivo concreto el agente puede corregirse y volver a llamar
+      // dentro de la misma llamada, en vez de rendirse con un error opaco.
+      this.client?.sendToolResult(toolCallId, { error: "argumentos_invalidos", detalle: validado.motivo }, true);
+      return;
+    }
+    const parametros = validado.valor;
 
     // Delegar en vez de encolar (F-compañero, portado del puente de OpenAI):
     // una tool MCP puede tardar varios segundos — un viaje real a un servidor

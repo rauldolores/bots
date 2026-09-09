@@ -47,3 +47,43 @@ describe("camposConValor — para la bitácora, los nombres nunca el contenido",
     expect(campos.join(",")).not.toContain("@");
   });
 });
+
+/**
+ * Errores que llegan en la forma del protocolo MCP.
+ *
+ * El SDK de MCP no lanza cuando el servidor rechaza algo: DEVUELVE el
+ * resultado con `isError: true`. Sin mirar esa bandera, un rechazo del CRM
+ * entraba como resultado bueno.
+ *
+ * Caso real (2026-09-09, 14:02): el agente mandó
+ *   UPDATE tickets SET notes = ... WHERE contact_email = ... ORDER BY ... LIMIT 1
+ * contra columnas que no existen —y con un ORDER BY/LIMIT que Postgres no
+ * acepta en un UPDATE—. El CRM lo rechazó, el evento quedó como ok:true, y
+ * nada avisó de que el comentario del cliente nunca se guardó.
+ */
+describe("motivoDeFallo — errores en la forma del protocolo MCP", () => {
+  it("isError:true es un fallo, aunque no traiga campo error", () => {
+    expect(
+      motivoDeFallo({
+        isError: true,
+        content: [{ type: "text", text: 'ERROR: column "notes" of relation "tickets" does not exist' }],
+      }),
+    ).toContain("does not exist");
+  });
+
+  it("si isError viene sin texto, igual se reporta como fallo", () => {
+    expect(motivoDeFallo({ isError: true, content: [] })).toBeTruthy();
+  });
+
+  it("isError:false es un resultado bueno — no es un fallo disfrazado", () => {
+    expect(motivoDeFallo({ isError: false, content: [{ type: "text", text: "[]" }] })).toBeNull();
+  });
+
+  it("un resultado de MCP sin la bandera sigue siendo bueno", () => {
+    expect(motivoDeFallo({ content: [{ type: "text", text: "ok" }] })).toBeNull();
+  });
+
+  it("tambien entiende { error: { message } }, no solo el texto plano", () => {
+    expect(motivoDeFallo({ error: { message: "sin permisos" } })).toBe("sin permisos");
+  });
+});
