@@ -23,6 +23,7 @@ import { ElevenLabsClient } from "./elevenlabsClient";
 import { VOICE_CHANNEL } from "./session";
 import { BotChannelsRepo } from "../../db/botChannels";
 import { transferToHumanTool } from "./tools/transferToHuman";
+import { consultarTareaTool, type TareaDelegada } from "./tools/consultarTarea";
 import { transferirLlamadaViva } from "./transfer";
 import { encolarAnalisisDeLlamada } from "./analisisPostLlamada";
 import { verificarLlamada } from "./verificarPromesas";
@@ -62,6 +63,23 @@ export class ElevenLabsCallBridge implements CallBridge {
   private audioDelAgenteRecibido = false;
   /** Las tools del Agent Core — las MISMAS del chat, con su execute() real. */
   private tools: Record<string, any> = {};
+  /**
+   * Qué nombres de `this.tools` vienen de un servidor MCP — ver
+   * agent/context.ts::AgentContext.mcpToolNames. El prefijo lo elige el
+   * dueño por conector (nunca un patrón fijo tipo "mcp_algo"), así que sin
+   * este set no hay forma de saber, mirando solo el nombre, cuáles delegar.
+   */
+  private mcpToolNames: Set<string> = new Set();
+  /**
+   * Acciones MCP delegadas en esta llamada (F-compañero, portado del puente
+   * de OpenAI) y su resultado, para que consultar_tarea pueda responder
+   * cuando el agente pregunte "¿ya quedó?". En memoria del proceso porque el
+   * puente completo también — no hay nada que persistir aquí más allá de lo
+   * que ya persiste la tool en sí.
+   */
+  private tareasDelegadas: Map<string, TareaDelegada> = new Map();
+  /** La última tarea delegada — consultar_tarea la usa cuando el modelo omite tarea_id (el caso común: casi nunca hay más de una a la vez). */
+  private ultimaTareaDelegadaId: string | null = null;
   /** Transferencia pedida y aún no hecha — espera a que el agente termine de avisarle al cliente. */
   private transferenciaPendiente = false;
   /** Transcripción de la llamada — solo si el dueño la habilitó; se escribe UNA vez, al cerrar. */
@@ -189,6 +207,7 @@ export class ElevenLabsCallBridge implements CallBridge {
     // las de MCP (buildAgentContext las agrega), aunque al registrar el agente
     // solo se declaren las estáticas.
     this.tools = ctx.tools;
+    this.mcpToolNames = new Set(ctx.mcpToolNames);
 
     // transfer_to_human es SOLO de Voice — nunca pasa por buildTools (un chat
     // de WhatsApp no tiene una llamada que transferir), y solo se ofrece si el
@@ -198,6 +217,19 @@ export class ElevenLabsCallBridge implements CallBridge {
       this.tools = {
         ...this.tools,
         transfer_to_human: transferToHumanTool(env, botId, () => this.conversationId),
+      };
+    }
+
+    // consultar_tarea (F-compañero): solo tiene sentido si este bot tiene al
+    // menos un conector MCP — sin eso, ejecutarHerramienta() nunca delega
+    // nada y la tool no tendría nada que consultar.
+    if (this.mcpToolNames.size > 0) {
+      this.tools = {
+        ...this.tools,
+        consultar_tarea: consultarTareaTool(() => ({
+          tareas: this.tareasDelegadas,
+          ultimaId: this.ultimaTareaDelegadaId,
+        })),
       };
     }
     const prompt = [
@@ -307,6 +339,62 @@ export class ElevenLabsCallBridge implements CallBridge {
       return;
     }
 
+    // Delegar en vez de encolar (F-compañero, portado del puente de OpenAI):
+    // una tool MCP puede tardar varios segundos — un viaje real a un servidor
+    // ajeno, no una consulta a nuestra propia base — y esperarla aquí deja al
+    // cliente en silencio hasta TOOL_TIMEOUT_MS (8s). En vez de eso, se
+    // dispara y la llamada sigue: el agente le dice al cliente que lo está
+    // gestionando (ver <modo_voz> en voiceInstructions.ts) y usa
+    // consultar_tarea más adelante — cuando el cliente pregunte, o antes de
+    // despedirse — para confirmar el resultado real. Ningún otro tipo de tool
+    // se delega: captureLead, scheduleAppointment, etc. son escrituras
+    // rápidas a nuestra propia base y esperar por ellas no vale la vuelta de
+    // "consultar" después.
+    if (this.mcpToolNames.has(nombre)) {
+      const tareaId = crypto.randomUUID();
+      const tarea: TareaDelegada = { toolName: nombre, estado: "en_progreso", iniciadaEn: Date.now() };
+      this.tareasDelegadas.set(tareaId, tarea);
+      this.ultimaTareaDelegadaId = tareaId;
+
+      void def.execute(parametros, {} as any).then(
+        (resultado: unknown) => {
+          const fallo = motivoDeFallo(resultado) !== null;
+          tarea.estado = fallo ? "error" : "lista";
+          tarea.resultado = resultado;
+          void recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.tool_called", {
+            tool: nombre,
+            kind: "mcp",
+            ok: !fallo,
+          });
+        },
+        (e: unknown) => {
+          tarea.estado = "error";
+          // Opaco a propósito — igual que el camino síncrono de abajo: el
+          // motivo REAL solo va al log, nunca a lo que consultar_tarea le
+          // puede repetir al modelo (y de ahí, al cliente en voz alta).
+          tarea.error = "tool_execution_failed";
+          console.error(`[voice-elevenlabs] tool delegada "${nombre}" falló:`, e);
+          void recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.tool_called", {
+            tool: nombre,
+            kind: "mcp",
+            ok: false,
+          });
+        },
+      );
+
+      this.client?.sendToolResult(
+        toolCallId,
+        {
+          estado: "en_progreso",
+          tarea_id: tareaId,
+          instruccion:
+            "Se está procesando en segundo plano. NO digas que ya quedó hecho — avísale al cliente con naturalidad que lo estás gestionando, y usa consultar_tarea (con este tarea_id, o sin él para la más reciente) cuando el cliente pregunte o antes de despedirte, para confirmar el resultado real.",
+        },
+        false,
+      );
+      return;
+    }
+
     // El mismo tope que el puente de OpenAI: una herramienta lenta no puede
     // dejar al cliente esperando en silencio indefinidamente.
     try {
@@ -327,9 +415,14 @@ export class ElevenLabsCallBridge implements CallBridge {
       //    éxito y le dijo al cliente "ya quedó agendada" — sin cita.
       const motivo = motivoDeFallo(resultado);
 
+      // El prefijo de una tool MCP lo elige el dueño por conector (ver
+      // connectors/mcpNaming.ts: "Vinqulia" → vinqulia_query) — nunca un
+      // patrón fijo "mcp_algo". En la práctica una tool MCP real nunca llega
+      // aquí (se va por la rama delegada de arriba), pero el chequeo se deja
+      // correcto de todos modos en vez de asumir un prefijo que no existe.
       void recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.tool_called", {
         tool: nombre,
-        kind: nombre === "searchKb" ? "rag" : nombre.startsWith("mcp_") ? "mcp" : "other",
+        kind: nombre === "searchKb" ? "rag" : this.mcpToolNames.has(nombre) ? "mcp" : "other",
         ok: motivo === null,
         ...(motivo ? { motivo } : {}),
       });

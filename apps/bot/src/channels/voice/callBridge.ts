@@ -86,12 +86,26 @@ export async function credencialesElevenLabs(
     // tirar el resultado; era el cliente quien pagaba esa espera en silencio.
     const revisar = () =>
       asegurarAgenteAlDia(db, botId, apiKey, voiceId, async () => {
-        const [{ buildTools }, { loadMcpTools }] = await Promise.all([
+        const [{ buildTools }, { loadMcpTools }, { consultarTareaTool }] = await Promise.all([
           import("../../tools"),
           import("../../tools/mcpTools"),
+          import("./tools/consultarTarea"),
         ]);
         const mcp = await loadMcpTools(env, db, botId).catch(() => ({}));
-        return { ...buildTools({ env, botId, getConversationId: () => null }), ...mcp };
+        // consultar_tarea (F-compañero) solo se registra si el bot tiene MCP
+        // — sin eso, el puente nunca delega nada y no tendría qué consultar.
+        // Aquí SOLO importa el esquema (nombre/descripción/parámetros) que
+        // ElevenLabs necesita conocer de antemano en la cuenta — a diferencia
+        // de OpenAI Realtime, que aceptaba tools declaradas por llamada,
+        // ElevenLabs solo deja invocar lo que ya está registrado como
+        // entidad. El estado que le pasamos aquí es un relleno: nunca se lee
+        // en el registro, porque ejecutarHerramienta() en el puente en vivo
+        // usa SU PROPIA instancia (con el estado real de esa llamada), no
+        // esta — ver elevenlabsBridge.ts.
+        const extra = Object.keys(mcp).length > 0
+          ? { consultar_tarea: consultarTareaTool(() => ({ tareas: new Map(), ultimaId: null })) }
+          : {};
+        return { ...buildTools({ env, botId, getConversationId: () => null }), ...mcp, ...extra };
       }).catch(() => ({ actualizado: false, error: "no se pudo verificar" }));
 
     if (agenteExistente) {
