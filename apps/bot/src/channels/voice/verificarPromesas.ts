@@ -27,52 +27,60 @@ export interface PromesaIncumplida {
 }
 
 /**
- * Frases con las que el bot da algo por hecho.
+ * Cómo se detecta que el bot dio algo por hecho.
  *
- * Deliberadamente en pasado y en primera persona: "te agendo" (futuro) es una
- * intención y no promete nada, "ya quedó agendada" sí. Confundirlos llenaría
- * el aviso de falsos positivos, y un aviso que grita de más se ignora — que es
- * el mismo final que no tenerlo.
+ * Antes esto era una lista de frases exactas ("ya quedó", "ya te agendé"…) y
+ * el problema de esa forma es que siempre va una frase atrás. Lo demostró la
+ * llamada del 2026-09-09: el bot dijo "Listo, Federico, ya dejé registrado
+ * que no te han llamado" —sin haber llamado ninguna herramienta— y como
+ * "ya dejé registrado" no estaba en la lista, el aviso nunca salió. Agregar
+ * esa frase habría dejado fuera la siguiente.
+ *
+ * Ahora se detecta la ESTRUCTURA: una marca de hecho consumado ("ya",
+ * "listo", "acabo de", "quedó") junto a un verbo de acción que solo puede
+ * cumplirse con una herramienta ("registré", "agendé", "anoté", "comenté").
+ * Eso cubre las formas que todavía no se han visto, que son justo las que
+ * importan.
  */
-const AFIRMACIONES = [
-  "ya quedó",
-  "ya quedo",
-  "quedó agendada",
-  "quedo agendada",
-  "quedó registrada",
-  "quedo registrada",
-  "quedó registrado",
-  "quedo registrado",
-  "ya la agendé",
-  "ya la agende",
-  "ya te agendé",
-  "ya te agende",
-  "ya lo registré",
-  "ya lo registre",
-  "ya te registré",
-  "ya te registre",
-  "listo, tu cita",
-  "confirmada tu cita",
-  "tu cita está confirmada",
-  "tu cita esta confirmada",
-  "acabo de agendar",
-  "acabo de registrar",
-  // Transferir es la promesa más fácil de incumplir sin darse cuenta: si el
-  // dueño no configuró número, la herramienta ni existe y el modelo lo dice
-  // igual (llamada del 2026-09-08: "ya te estoy pasando con el equipo").
-  "te estoy pasando",
-  "te paso con",
-  "te transfiero",
-  "te comunico con",
-  "voy a transferirte",
-];
+const MARCA_DE_HECHO = /\b(ya|listo|acabo de|acabamos de|hecho|quedo|queda)\b/;
+
+/**
+ * Verbos que NO se cumplen hablando: hacen falta datos escritos en algún lado.
+ *
+ * En pasado o participio a propósito. "Te lo voy a registrar" es una
+ * intención y no promete nada todavía; "ya lo registré" sí. Confundirlos
+ * llenaría el aviso de falsos positivos, y un aviso que grita de más se
+ * ignora — que es el mismo final que no tenerlo.
+ */
+const ACCION_CUMPLIDA =
+  /\b(registr(e|é|ado|ada|amos)|agend(e|é|ada|ado|amos)|guard(e|é|ado|ada|amos)|anot(e|é|ado|ada|amos)|coment(e|é|ado|ada|amos)|abr(i|í|imos)|cre(e|é|ado|ada|amos)|actualic(e|é)|actualiz(ado|ada|amos)|deje|dejé|dejamos|envi(e|é|ado|ada|amos)|mand(e|é|ado|ada|amos)|añad(i|í|ido|ida)|agregu(e|é)|agreg(ado|ada))\b/;
+
+/** Prometer que la llamada pasa a otra persona: se incumple sin darse cuenta. */
+const TRANSFERENCIA_EN_CURSO = /\b(te (paso|transfiero|comunico)|estoy pasando|voy a transferirte|te estoy comunicando)\b/;
 
 /** Qué herramienta respalda cada tipo de promesa. */
 const RESPALDO: Record<string, string[]> = {
   cita: ["scheduleAppointment"],
   registro: ["captureLead", "handoffHuman"],
   transferencia: ["transfer_to_human"],
+  // Una nota o un comentario en el CRM se escribe con una tool del conector
+  // MCP, y el nombre de ésa lo elige el dueño al conectarlo ("Vinqulia" →
+  // `vinqulia_mutate`). Por eso aquí no puede ir una lista fija: se resuelve
+  // por forma en `respaldaLaNota`.
+  nota: [],
 };
+
+/**
+ * ¿Esta herramienta que sí corrió pudo haber escrito la nota o el comentario?
+ *
+ * Se decide por el nombre porque el del conector MCP lo pone el dueño y no lo
+ * conocemos de antemano. Es una heurística, y se prefiere pecar de generosa:
+ * dar por cumplida una promesa de más solo calla un aviso dudoso, mientras
+ * que un aviso falso enseña a ignorar los que sí importan.
+ */
+function respaldaLaNota(tool: string): boolean {
+  return /mutate|insert|create|update|add|note|nota|coment|complete|task|tarea|handoff/i.test(tool);
+}
 
 function normalizar(s: string): string {
   return s
@@ -81,12 +89,14 @@ function normalizar(s: string): string {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-/** ¿Esta frase del bot afirma que algo YA ocurrió? */
+/** ¿Esta frase del bot afirma que algo YA ocurrió? Devuelve el fragmento que lo dice. */
 export function afirmaHaberloHecho(texto: string): string | null {
   const t = normalizar(texto);
-  for (const frase of AFIRMACIONES) {
-    if (t.includes(normalizar(frase))) return frase;
-  }
+  if (TRANSFERENCIA_EN_CURSO.test(t)) return t.match(TRANSFERENCIA_EN_CURSO)![0];
+  // Las dos cosas, no una: "ya te confirmo el precio" tiene la marca pero
+  // ningún verbo que necesite herramienta, y "te lo registro enseguida" tiene
+  // el verbo pero en futuro. Ninguna de las dos promete que algo ya pasó.
+  if (MARCA_DE_HECHO.test(t) && ACCION_CUMPLIDA.test(t)) return t.match(ACCION_CUMPLIDA)![0];
   return null;
 }
 
@@ -108,6 +118,10 @@ export function tipoDePromesa(texto: string): keyof typeof RESPALDO {
   // había llamado— y se reportaba una promesa incumplida sobre una cita que SÍ
   // se había agendado. Un aviso falso enseña a ignorar los avisos.
   if (t.includes("agend")) return "cita";
+  // Una nota o un comentario sobre un caso que YA existe. Va antes de "cita"
+  // porque la frase suele nombrar el caso ("dejé un comentario en tu ticket")
+  // y no debe confundirse con agendar nada.
+  if (/coment|nota|anot|observacion|seguimiento en (tu|el|su)/.test(t)) return "nota";
   return t.includes("cita") || t.includes("demo") || t.includes("llamada") || t.includes("reunion")
     ? "cita"
     : "registro";
@@ -139,10 +153,34 @@ export function conciliar(
     const frase = afirmaHaberloHecho(dicho);
     if (!frase) continue;
 
-    const esperadas = RESPALDO[tipoDePromesa(dicho)];
-    if (esperadas.some((t) => exitosas.has(t))) continue; // se cumplió
+    const tipo = tipoDePromesa(dicho);
+    // La regla más fuerte y la que no depende de acertarle a la familia: si el
+    // bot afirmó haber hecho algo y en TODA la llamada no funcionó ni una sola
+    // herramienta, no hay forma de que lo haya hecho. Punto.
+    //
+    // Existe porque el mapeo frase→herramienta puede fallar y de hecho falló:
+    // el 2026-09-09 el bot dijo "ya dejé registrado tu comentario" en una
+    // llamada con CERO herramientas ejecutadas, y el aviso no salió porque la
+    // frase no estaba en la lista de entonces. Ese caso —el más grave y el
+    // más fácil de comprobar— ahora se detecta sin tener que adivinar qué
+    // herramienta le tocaba.
+    // Solo cuando NO se llamó a ninguna. Si alguna corrió y falló, la rama de
+    // abajo dice CUÁL y por qué — un dato que este atajo borraría.
+    if (herramientas.length === 0) {
+      hallazgos.push({ dijo: dicho.slice(0, 200), motivo: "nunca_lo_intento" });
+      continue;
+    }
 
-    const falloRelacionado = fallidas.find((h) => esperadas.includes(h.tool));
+    const esperadas = RESPALDO[tipo];
+    const cumplida =
+      tipo === "nota"
+        ? [...exitosas].some(respaldaLaNota)
+        : esperadas.some((t) => exitosas.has(t));
+    if (cumplida) continue;
+
+    const falloRelacionado = fallidas.find((h) =>
+      tipo === "nota" ? respaldaLaNota(h.tool) : esperadas.includes(h.tool),
+    );
     hallazgos.push({
       dijo: dicho.slice(0, 200),
       motivo: falloRelacionado ? "herramienta_fallo" : "nunca_lo_intento",

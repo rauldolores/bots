@@ -24,7 +24,35 @@ interface ToolConfig {
   name: string;
   description: string;
   parameters: unknown;
+  /**
+   * Que el agente ESPERE el resultado antes de seguir hablando.
+   *
+   * ElevenLabs lo deja en `false` por omisión, y ese default silencioso fue
+   * el peor bug que ha tenido este canal. Con `false`, la herramienta se
+   * dispara como un aviso: el modelo no recibe NUNCA lo que devolvió. El
+   * puente hacía su parte —ejecutaba, distinguía el fallo del éxito y mandaba
+   * `client_tool_result` con su `is_error` (ver elevenlabsClient.ts)— y
+   * ElevenLabs tiraba esa respuesta a la basura.
+   *
+   * O sea que el agente literalmente NO PODÍA saber si algo se había
+   * guardado, y para contestarle al cliente no le quedaba más que adivinar.
+   * De ahí sale toda la familia de "me dijo que ya lo había hecho y no lo
+   * hizo": no era un modelo mentiroso ni un prompt flojo — era que la única
+   * fuente de verdad disponible se descartaba antes de llegarle. Ninguna
+   * regla de prompt podía arreglar eso, y varias se escribieron intentándolo.
+   */
+  expects_response: boolean;
+  /**
+   * Cuánto espera ElevenLabs por esa respuesta. Va por encima del tope del
+   * puente (TOOL_TIMEOUT_MS, 8s) a propósito: quien debe rendirse primero es
+   * el puente, que sabe DECIR por qué falló. Si se rinde ElevenLabs, el
+   * agente se queda sin resultado y volvemos a que adivine.
+   */
+  response_timeout_secs: number;
 }
+
+/** Ver `response_timeout_secs`: por encima de los 8s del puente. */
+const ESPERA_RESULTADO_SEGS = 15;
 
 const ESQUEMA_VACIO = { type: "object", properties: {} };
 
@@ -113,6 +141,8 @@ async function aToolConfig(nombre: string, def: any): Promise<ToolConfig | null>
     name: nombre,
     description: String(def?.description ?? ""),
     parameters: limpiarEsquema(parameters),
+    expects_response: true,
+    response_timeout_secs: ESPERA_RESULTADO_SEGS,
   };
 }
 

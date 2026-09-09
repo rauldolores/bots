@@ -360,6 +360,15 @@ export function huellaDeConfiguracion(voiceId: string, toolIds: string[] = []): 
     // desde /admin/agente, el agente se actualiza solo en la próxima llamada.
     `tools:${[...toolIds].sort().join(",")}`,
     "overrides:v1",
+    // La FORMA de las herramientas, no solo cuáles son.
+    //
+    // La huella listaba los ids y nada más, así que un cambio en cómo se
+    // declara una herramienta —su esquema, su descripción, o algo tan
+    // decisivo como `expects_response`— no la movía: el agente del dueño se
+    // quedaba con la declaración vieja y no había forma de enterarse. Pasó
+    // exactamente eso con `expects_response`, que estuvo en false durante
+    // semanas. Subir este número obliga a volver a registrarlas una vez.
+    "tools_shape:v2-expects-response",
   ].join("|");
 }
 

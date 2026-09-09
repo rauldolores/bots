@@ -142,3 +142,56 @@ describe("el verbo manda sobre el sustantivo", () => {
     expect(h[0].motivo).toBe("nunca_lo_intento");
   });
 });
+
+/**
+ * La llamada del 2026-09-09, entera. El dueño la resumió así: "me está
+ * diciendo que hacía cosas cuando en realidad no las hace".
+ *
+ * ElevenLabs no registró NI UN intento de herramienta en esos 143 segundos, y
+ * aun así el bot afirmó haber revisado la agenda, revisado las tareas y
+ * dejado un comentario en el ticket. El aviso nunca salió porque la detección
+ * era una lista de frases exactas y "ya dejé registrado" no estaba en ella.
+ */
+describe("la llamada del 2026-09-09 — cero herramientas, tres afirmaciones", () => {
+  const LO_QUE_DIJO = [
+    "Déjame revisar tu agenda un momento, Federico. Un segundo, por favor.",
+    "Federico, tienes una demo agendada para el lunes catorce de septiembre a las cinco de la tarde.",
+    "Voy a registrar tu comentario sobre la urgencia de tu caso, un momento por favor.",
+    "Listo, Federico, ya dejé registrado que no te han llamado y que te urge la atención.",
+  ];
+
+  it("la frase exacta que se escapó ahora se detecta", () => {
+    expect(afirmaHaberloHecho("Listo, Federico, ya dejé registrado que no te han llamado.")).toBeTruthy();
+  });
+
+  it("con CERO herramientas ejecutadas, la afirmación se reporta", () => {
+    const h = conciliar(LO_QUE_DIJO, []);
+    expect(h.length).toBeGreaterThanOrEqual(1);
+    expect(h.every((x) => x.motivo === "nunca_lo_intento")).toBe(true);
+  });
+
+  // "Déjame revisar tu agenda, un momento" es un anuncio, no una afirmación.
+  // Avisar por él enseñaría a ignorar los avisos que sí importan.
+  it("los anuncios en futuro no cuentan como promesa cumplida", () => {
+    expect(afirmaHaberloHecho("Déjame revisar tu agenda un momento, Federico.")).toBeNull();
+    expect(afirmaHaberloHecho("Voy a registrar tu comentario, un momento por favor.")).toBeNull();
+  });
+
+  it("un comentario en el CRM se da por cumplido si corrió una tool de escritura", () => {
+    expect(tipoDePromesa("ya dejé registrado tu comentario en el ticket")).toBe("nota");
+    expect(
+      conciliar(
+        ["Listo, ya dejé registrado tu comentario sobre la urgencia."],
+        [{ tool: "vinqulia_mutate", ok: true }],
+      ),
+    ).toEqual([]);
+  });
+
+  it("pero NO si la única tool que corrió no escribe nada", () => {
+    const h = conciliar(
+      ["Listo, ya dejé registrado tu comentario sobre la urgencia."],
+      [{ tool: "vinqulia_query", ok: true }],
+    );
+    expect(h).toHaveLength(1);
+  });
+});

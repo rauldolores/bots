@@ -272,3 +272,40 @@ describe("el type es obligatorio: sin él ElevenLabs rechaza la herramienta ente
     expect(sinTipo).toEqual([]);
   });
 });
+
+/**
+ * El default silencioso que rompió el canal entero.
+ *
+ * ElevenLabs deja `expects_response` en false si no se manda: la herramienta
+ * se dispara como aviso y el modelo NO recibe lo que devolvió. El puente
+ * ejecutaba, distinguía el fallo del éxito y mandaba `client_tool_result` con
+ * su `is_error`... y esa respuesta se descartaba antes de llegarle al agente.
+ *
+ * Lo que el dueño veía era otra cosa: "me está diciendo que hacía cosas
+ * cuando en realidad no las hace". No era el modelo ni el prompt — era que la
+ * única fuente de verdad disponible nunca le llegaba, así que para contestar
+ * no le quedaba más que adivinar.
+ */
+describe("las herramientas ESPERAN el resultado", () => {
+  it("cada tool se registra con expects_response en true", async () => {
+    peticiones = [];
+    global.fetch = fetchQueRegistra(() => Response.json({ id: "tool_1" }));
+
+    await registrarHerramientas(LLAVE, { agendar: toolFalsa("Agenda una cita") }, {});
+
+    const creada = peticiones.find((p) => p.metodo === "POST")!;
+    expect(creada.cuerpo.tool_config.expects_response).toBe(true);
+  });
+
+  it("y con una espera MAYOR que el tope del puente, para que se rinda el puente primero", async () => {
+    // El puente corta a los 8s y sabe DECIR por qué falló. Si ElevenLabs se
+    // rindiera antes, el agente se quedaría sin resultado y volvería a adivinar.
+    peticiones = [];
+    global.fetch = fetchQueRegistra(() => Response.json({ id: "tool_1" }));
+
+    await registrarHerramientas(LLAVE, { agendar: toolFalsa("Agenda una cita") }, {});
+
+    const creada = peticiones.find((p) => p.metodo === "POST")!;
+    expect(creada.cuerpo.tool_config.response_timeout_secs).toBeGreaterThan(8);
+  });
+});
