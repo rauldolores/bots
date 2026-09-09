@@ -7,6 +7,19 @@ import { NurtureSequencesRepo } from "../../src/db/nurtureSequences";
 import { NurtureEnrollmentsRepo } from "../../src/db/nurtureEnrollments";
 import { BotConnectorsRepo } from "../../src/db/botConnectors";
 import { captureLeadTool } from "../../src/tools/captureLead";
+import { processLeadCapturedJobs } from "../../src/leads/postCaptura";
+
+/**
+ * Lo que pasa DESPUÉS de capturar el lead —empujarlo al CRM, inscribirlo en
+ * las secuencias— ya no corre dentro del turno: se encola como trabajo
+ * `lead_captured` y lo procesa leads/postCaptura.ts. Se movió para que el
+ * cliente no espere una llamada de red al CRM en medio de la conversación.
+ *
+ * Estas pruebas seguían esperándolo en línea, y por eso llevaban días en rojo
+ * sin que hubiera ningún bug: afirmaban un diseño que ya no era el nuestro.
+ * Correr la cola aquí prueba el camino REAL, encolado incluido.
+ */
+const correrPostCaptura = (env: any) => processLeadCapturedJobs(env, 10);
 
 const readSecretMock = vi.fn();
 vi.mock("../../src/db/vault", async (importOriginal) => {
@@ -65,11 +78,38 @@ describe("captureLeadTool — con un CRM conectado", () => {
       { name: "Ana", email: "ana@x.com", intent: "Quiere cotización" },
       {} as any,
     )) as { leadId: string };
+    await correrPostCaptura(env);
 
     const row = await leads.list(10);
     expect(row[0].exported_to).toBe("hubspot");
     expect(row[0].external_id).toBe("hs-777");
     expect(result.leadId).toBeTruthy();
+  });
+
+  // La RAZÓN de que esto se difiriera: el cliente no espera una llamada de red
+  // al CRM en medio de la conversación. Sin esta prueba, alguien "arregla" el
+  // orden volviéndolo a hacer en línea y la latencia regresa sin que nada lo
+  // note — solo se sentiría en una llamada real.
+  it("el turno termina ANTES de tocar el CRM: primero responde, después empuja", async () => {
+    await new BotConnectorsRepo(new Db(env.DB)).upsert({ botId: TEST_BOT_ID, category: "crm", provider: "hubspot", secretRef: "11111111-1111-1111-1111-111111111111" });
+    readSecretMock.mockResolvedValue("pat-fake");
+    const llamadas: string[] = [];
+    global.fetch = vi.fn(async (url: any) => {
+      llamadas.push(String(url));
+      return new Response(JSON.stringify({ id: "hs-777" }), { status: 201 });
+    }) as any;
+
+    const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+    await tool.execute!({ name: "Ana", email: "ana@x.com", intent: "Quiere cotización" }, {} as any);
+
+    // Al devolverle el control al agente todavía NO se habló con el CRM.
+    expect(llamadas).toEqual([]);
+    expect((await leads.list(10))[0].exported_to).toBeNull();
+
+    // Y el trabajo quedó encolado, no perdido.
+    await correrPostCaptura(env);
+    expect(llamadas.length).toBeGreaterThan(0);
+    expect((await leads.list(10))[0].exported_to).toBe("hubspot");
   });
 
   it("si el CRM falla, el lead local NO se pierde (best-effort)", async () => {
@@ -82,6 +122,7 @@ describe("captureLeadTool — con un CRM conectado", () => {
       { name: "Ana", email: "ana@x.com", intent: "Quiere cotización" },
       {} as any,
     )) as { leadId: string };
+    await correrPostCaptura(env);
 
     expect(result.leadId).toBeTruthy();
     const row = await leads.list(10);
@@ -406,6 +447,7 @@ describe("captureLeadTool — empresa y presupuesto (F-CRM-completo)", () => {
       { email: "ana@x.com", intent: "quiere cotización", company: "Acme Corp", estimatedValue: 3000 },
       {} as any,
     );
+    await correrPostCaptura(env);
 
     expect(calls).toContain("https://api.hubapi.com/crm/v3/objects/companies");
   });
@@ -493,11 +535,16 @@ describe("captureLeadTool — correo, teléfono y empresa", () => {
 describe("captureLeadTool — secuencia automática", () => {
   const paso = [{ afterHours: 24, instruction: "Pregúntale si vio la propuesta" }];
 
-  const capturar = (tel: string) =>
-    captureLeadTool(env, () => convId, TEST_BOT_ID).execute!(
+  // Capturar ENCOLA la inscripción; procesarla es el segundo paso. El helper
+  // hace los dos para que cada prueba lea lo que de verdad pasa al final.
+  const capturar = async (tel: string) => {
+    const r = await captureLeadTool(env, () => convId, TEST_BOT_ID).execute!(
       { name: "María", phone: tel, email: "maria@x.com", company: "ACME", intent: "Cotización" } as any,
       {} as any,
     );
+    await correrPostCaptura(env);
+    return r;
+  };
 
   it("un lead nuevo entra solo a la secuencia marcada", async () => {
     const db = new Db(env.DB);
