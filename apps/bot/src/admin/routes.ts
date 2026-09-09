@@ -85,6 +85,7 @@ import {
   renderMcpConnectModal,
   connectMcp,
   renderMcpToolsModal,
+  toggleMcpTool,
   renderMcpEditModal,
   saveMcpPurpose,
   reconnectMcp,
@@ -1451,6 +1452,22 @@ adminApp.post("/conexiones/connectors/mcp/add", async (c) => {
   const modalHtml = await connectMcp(c.env, c.get("botId"), form);
   const gridHtml = await renderConnectorsGrid(c.env, c.get("botId"), "mcp");
   return c.html(modalHtml + gridHtml);
+});
+
+// Apagar/encender una tool desde el LISTADO del conector — el mismo ajuste
+// que /admin/agente, pero donde se ven en fila y con su descripción. Con las
+// 41 que expone un CRM, el lienzo del agente no es sitio para elegir.
+//
+// Devuelve solo el botón (hx-swap="outerHTML"): redibujar el diálogo entero
+// obligaría a volver a listar contra el servidor MCP en cada clic.
+adminApp.post("/conexiones/connectors/mcp/:provider/tools/:tool/toggle", async (c) => {
+  const html = await toggleMcpTool(
+    c.env,
+    c.get("botId"),
+    c.req.param("provider"),
+    c.req.param("tool"),
+  );
+  return html ? c.html(html) : c.text("Herramienta desconocida", 404);
 });
 
 adminApp.get("/conexiones/connectors/mcp/:provider/tools", async (c) => {

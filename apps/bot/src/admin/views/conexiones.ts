@@ -24,7 +24,8 @@ import {
   type ProveedorOAuth,
 } from "../../connectors/oauthApp";
 import { listMcpConnectorTools } from "../../tools/mcpTools";
-import { mcpToolPrefixes } from "../../connectors/mcpNaming";
+import { mcpToolPrefixes, mcpToolName } from "../../connectors/mcpNaming";
+import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
 import { resolveConnectorCreds } from "../../connectors/creds";
 import type { PipelineStageOption } from "../../connectors/types";
 import {
@@ -1650,6 +1651,46 @@ export async function saveMcpPurpose(env: Env, botId: string, provider: string, 
 }
 
 /** Diálogo con scroll: qué herramientas expone un conector MCP conectado — se conecta de verdad para listarlas, F-MCP-OAuth. */
+/**
+ * El prefijo con el que el modelo ve las tools de UN conector.
+ *
+ * Se calcula sobre la lista completa porque la deduplicación depende de los
+ * vecinos (ver connectors/mcpNaming.ts): dos conectores llamados "Vinqulia"
+ * no pueden dar el mismo prefijo.
+ */
+async function prefijoDe(db: Db, botId: string, provider: string): Promise<string> {
+  const connectors = (await new BotConnectorsRepo(db).listByBot(botId)).filter(
+    (c) => c.category === "mcp" && c.enabled,
+  );
+  return mcpToolPrefixes(connectors).get(provider) ?? provider;
+}
+
+/**
+ * El interruptor de UNA herramienta, para intercambiarlo solo a él.
+ *
+ * Se devuelve el botón y no el diálogo entero a propósito: volver a dibujar
+ * el diálogo obliga a listar las herramientas otra vez —un viaje al servidor
+ * MCP— y con 41 en pantalla apagar unas cuantas se volvería insoportable.
+ */
+function botonDeTool(provider: string, nombreCompleto: string, apagada: boolean): string {
+  const ruta = `/admin/conexiones/connectors/mcp/${encodeURIComponent(provider)}/tools/${encodeURIComponent(nombreCompleto)}/toggle`;
+  return `<button type="button" class="text-[10.5px]"
+      hx-post="${ruta}" hx-swap="outerHTML" hx-target="this"
+      style="flex:none;border:1px solid ${apagada ? "var(--line)" : "var(--ok)"};color:${apagada ? "var(--dim)" : "var(--ok)"};background:${apagada ? "none" : "rgba(127,183,126,.08)"};padding:3px 9px;cursor:pointer;font-weight:700;letter-spacing:.08em">${apagada ? "OFF" : "ON"}</button>`;
+}
+
+/**
+ * Las herramientas de un conector MCP, con su interruptor.
+ *
+ * El apagado vive AQUÍ y no solo en /admin/agente porque este es el listado:
+ * el lienzo del agente dibuja una herramienta por columna, y con las 41 que
+ * expone un CRM se vuelve impracticable. Aquí se ven en fila, con su
+ * descripción al lado, que es lo que hace falta para decidir cuál sobra.
+ *
+ * Y sobran: una llamada telefónica usa seis o siete. Automatizaciones,
+ * plantillas de correo o fusionar contactos no pintan nada ahí y sí pesan en
+ * cada turno, porque las definiciones se cargan completas cada vez.
+ */
 export async function renderMcpToolsModal(env: Env, botId: string, provider: string): Promise<string> {
   const db = new Db(env.DB);
   const connector = await new BotConnectorsRepo(db).getByBotAndProvider(botId, provider);
@@ -1662,24 +1703,61 @@ export async function renderMcpToolsModal(env: Env, botId: string, provider: str
   } else if (result.tools.length === 0) {
     body = `<p class="text-dim text-[12.5px]" style="margin:0">Este servidor no expone ninguna herramienta.</p>`;
   } else {
+    const prefijo = await prefijoDe(db, botId, provider);
+    const apagadas = new Set(
+      ((await new SettingsRepo(db, botId).get(SETTING_KEYS.disabledTools)) ?? "")
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean),
+    );
     const count = result.tools.length;
+    const cuantasApagadas = result.tools.filter((t) => apagadas.has(mcpToolName(prefijo, t.name))).length;
+
     body = `
-      <p class="text-dim text-[11.5px]" style="margin:0 0 12px">${count} herramienta${count === 1 ? "" : "s"} disponible${count === 1 ? "" : "s"} para el agente.</p>
+      <p class="text-dim text-[11.5px]" style="margin:0 0 4px">${count} herramienta${count === 1 ? "" : "s"} en este servidor${cuantasApagadas > 0 ? ` · ${cuantasApagadas} apagada${cuantasApagadas === 1 ? "" : "s"}` : ""}.</p>
+      <p class="text-[11.5px]" style="color:var(--muted);margin:0 0 12px;line-height:1.5">Lo que apagues aquí el agente deja de verlo, en todos los canales. Menos herramientas también es menos contexto en cada turno — y en una llamada, menos espera.</p>
       <div style="display:flex;flex-direction:column;gap:10px">
         ${result.tools
-          .map(
-            (t) => `
+          .map((t) => {
+            const completo = mcpToolName(prefijo, t.name);
+            return `
           <div style="border:1px solid var(--line);padding:10px 12px;background:var(--bg)">
-            <div class="font-mono font-semibold text-[12.5px]" style="color:var(--accent-2)">${esc(t.title ?? t.name)}</div>
-            ${t.title ? `<div class="font-mono text-[10.5px]" style="color:var(--dim);margin-top:1px">${esc(t.name)}</div>` : ""}
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <div style="flex:1;min-width:0">
+                <div class="font-mono font-semibold text-[12.5px]" style="color:var(--accent-2)">${esc(t.title ?? t.name)}</div>
+                <div class="font-mono text-[10.5px]" style="color:var(--dim);margin-top:1px">${esc(completo)}</div>
+              </div>
+              ${botonDeTool(provider, completo, apagadas.has(completo))}
+            </div>
             ${t.description ? `<p class="text-[12px]" style="color:var(--muted);margin:6px 0 0;line-height:1.5">${esc(t.description)}</p>` : ""}
-          </div>`,
-          )
+          </div>`;
+          })
           .join("")}
       </div>`;
   }
 
   return modalShell("wrench", `Herramientas de ${name}`, body);
+}
+
+/**
+ * Apaga o enciende una herramienta desde el listado. Devuelve solo su botón.
+ *
+ * `null` si el nombre no existe — así la ruta contesta 404 en vez de escribir
+ * basura en los ajustes, igual que hace toggleTool en /admin/agente.
+ */
+export async function toggleMcpTool(
+  env: Env,
+  botId: string,
+  provider: string,
+  nombreCompleto: string,
+): Promise<string | null> {
+  const { toggleTool } = await import("./agente");
+  if (!(await toggleTool(env, botId, nombreCompleto))) return null;
+
+  const apagadas = ((await new SettingsRepo(new Db(env.DB), botId).get(SETTING_KEYS.disabledTools)) ?? "")
+    .split(",")
+    .map((x) => x.trim());
+  return botonDeTool(provider, nombreCompleto, apagadas.includes(nombreCompleto));
 }
 
 /**

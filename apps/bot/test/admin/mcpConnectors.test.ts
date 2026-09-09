@@ -16,8 +16,34 @@ vi.mock("../../src/db/vault", () => ({
   deleteSecret: (...args: unknown[]) => deleteSecretMock(...args),
 }));
 
-const { connectMcp, disconnectConnector, renderConnectorsGrid, categoryOfProvider, renderMcpConnectModal } =
+// El diálogo lista EN VIVO a propósito (así el dueño ve lo que de verdad
+// expone su servidor, no un caché viejo), así que aquí se simula el servidor.
+const listToolsMock = vi.fn();
+vi.mock("@ai-sdk/mcp", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@ai-sdk/mcp")>();
+  return {
+    ...actual,
+    // `listTools()` es lo que usa el diálogo; `tools()` lo que usa
+    // loadMcpTools —y por ahí pasa toggleTool para saber qué nombres existen—.
+    // Un cliente falso tiene que ofrecer los dos.
+    createMCPClient: async () => ({
+      listTools: () => listToolsMock(),
+      tools: async () => {
+        const { tools } = await listToolsMock();
+        return Object.fromEntries(
+          (tools ?? []).map((t: { name: string; description?: string }) => [
+            t.name,
+            { description: t.description, execute: async () => ({}) },
+          ]),
+        );
+      },
+    }),
+  };
+});
+
+const { connectMcp, disconnectConnector, renderConnectorsGrid, categoryOfProvider, renderMcpConnectModal, renderMcpToolsModal, toggleMcpTool } =
   await import("../../src/admin/views/conexiones");
+const { SettingsRepo, SETTING_KEYS } = await import("../../src/db/settings");
 
 let db: Db;
 let env: Env;
@@ -33,6 +59,7 @@ beforeEach(async () => {
   env = { DB: db.driver } as unknown as Env;
   createSecretMock.mockReset().mockResolvedValue("11111111-1111-1111-1111-111111111111");
   deleteSecretMock.mockReset().mockResolvedValue(undefined);
+  listToolsMock.mockReset().mockResolvedValue({ tools: [] });
 });
 
 describe("connectMcp", () => {
@@ -121,5 +148,71 @@ describe("aislamiento por bot", () => {
     const otherGrid = await renderConnectorsGrid(env, otherBotId, "mcp");
     expect(ownGrid).toContain("Conectores MCP: 1 conectado");
     expect(otherGrid).toContain("Conectores MCP: 0 conectados");
+  });
+});
+
+/**
+ * Apagar herramientas desde el LISTADO del conector.
+ *
+ * El apagado ya existía en /admin/agente, pero ahí cada herramienta es una
+ * columna del lienzo: con las 41 que expone un CRM (el de Vinqulia pasó de 3
+ * a 41 el 2026-09-09) elegir cuál sobra es impracticable. Aquí se ven en
+ * fila, con su descripción, que es lo que hace falta para decidir.
+ *
+ * El catálogo se siembra en el caché del conector para que no se toque la
+ * red — el mismo camino rápido que usa cada turno en producción.
+ */
+describe("apagar tools de MCP desde su listado", () => {
+  async function conectorConCatalogo() {
+    listToolsMock.mockResolvedValue({
+      tools: [
+        { name: "listar_tareas", description: "Tareas de un contacto" },
+        { name: "crear_automatizacion", description: "Crea una automatización" },
+      ],
+    });
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "mcp-crm",
+      name: "Vinqulia",
+      config: { url: "https://mcp.crm.example.com/mcp" },
+    });
+  }
+
+  it("el listado muestra el nombre COMPLETO, que es el que se apaga", async () => {
+    await conectorConCatalogo();
+    const html = await renderMcpToolsModal(env, TEST_BOT_ID, "mcp-crm");
+    // El modelo las ve prefijadas (connectors/mcpNaming.ts); si el diálogo
+    // mostrara el nombre pelado, el interruptor guardaría otro nombre.
+    expect(html).toContain("vinqulia_listar_tareas");
+    expect(html).toContain("vinqulia_crear_automatizacion");
+  });
+
+  it("apaga una y deja la otra encendida", async () => {
+    await conectorConCatalogo();
+    const boton = await toggleMcpTool(env, TEST_BOT_ID, "mcp-crm", "vinqulia_crear_automatizacion");
+
+    expect(boton).toContain("OFF");
+    expect(await new SettingsRepo(db, TEST_BOT_ID).get(SETTING_KEYS.disabledTools)).toBe(
+      "vinqulia_crear_automatizacion",
+    );
+
+    const html = await renderMcpToolsModal(env, TEST_BOT_ID, "mcp-crm");
+    expect(html).toContain("1 apagada");
+  });
+
+  it("vuelve a encenderla", async () => {
+    await conectorConCatalogo();
+    await toggleMcpTool(env, TEST_BOT_ID, "mcp-crm", "vinqulia_crear_automatizacion");
+    const boton = await toggleMcpTool(env, TEST_BOT_ID, "mcp-crm", "vinqulia_crear_automatizacion");
+
+    expect(boton).toContain("ON");
+    expect(await new SettingsRepo(db, TEST_BOT_ID).get(SETTING_KEYS.disabledTools)).toBe("");
+  });
+
+  it("un nombre que no existe no escribe nada en los ajustes", async () => {
+    await conectorConCatalogo();
+    expect(await toggleMcpTool(env, TEST_BOT_ID, "mcp-crm", "vinqulia_no_existe")).toBeNull();
+    expect(await new SettingsRepo(db, TEST_BOT_ID).get(SETTING_KEYS.disabledTools)).toBeNull();
   });
 });
