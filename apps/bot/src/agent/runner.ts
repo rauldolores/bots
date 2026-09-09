@@ -15,7 +15,7 @@ import { MessagesRepo } from "../db/messages";
 import { BotsRepo } from "../db/bots";
 import { resolveAgentConfig } from "../settings-loader";
 import type { WarmTarget } from "../customer/warm";
-import { chunkReply } from "../replies/chunker";
+import { chunkReplyForChannel } from "../replies/chunker";
 import { pickAdapter } from "../replies/sender";
 import { costOfUsage } from "../pricing";
 import type { ChannelId, EmailThread } from "../channels/shared";
@@ -346,7 +346,8 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
     })
     .catch((e) => console.warn("[runTurn] no se pudo encolar el análisis de CRM:", e));
 
-  const chunks = chunkReply(result.text, cfg.maxChunks);
+  // Mismo criterio que al enviar, para que el log diga lo que de verdad salió.
+  const chunks = chunkReplyForChannel(state.channel, result.text, cfg.maxChunks);
   console.log(
     `[runTurn] sent ${chunks.length} chunks, model=${result.modelId}, cost=$${costOfUsage(
       result.modelId,
@@ -369,7 +370,8 @@ async function enviarRespuesta(
     {
       channel,
       channelUserId: state.channelUserId,
-      chunks: chunkReply(texto, cfg.maxChunks),
+      // Por canal, no por config: en correo NUNCA se parte (ver chunker.ts).
+      chunks: chunkReplyForChannel(channel, texto, cfg.maxChunks),
       interChunkDelayMs: cfg.interChunkDelayMs,
       // Solo los usa el correo, para responder dentro del mismo hilo. Los
       // demás canales los ignoran.

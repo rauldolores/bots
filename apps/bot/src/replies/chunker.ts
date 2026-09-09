@@ -1,5 +1,36 @@
 const DEFAULT_MAX_CHUNKS = 3;
 
+/**
+ * Canales donde una respuesta NUNCA se parte, pase lo que pase en la config.
+ *
+ * El correo es el caso. En chat, varios mensajes cortos se leen como una
+ * persona escribiendo — es justo lo que el troceo busca. En correo se leen
+ * como spam, y los filtros opinan igual: varios correos seguidos al mismo
+ * destinatario castigan la reputación del dominio, así que el daño no se
+ * queda en cómo se ve.
+ *
+ * Y no basta con volver a pegar los pedazos al final: el troceo REESCRIBE el
+ * texto. Un párrafo se corta por oraciones y se le meten saltos dobles a
+ * media idea; y cuando hay más párrafos que trozos, la cola se une con
+ * ESPACIOS, así que el correo pierde sus párrafos. Por eso se decide aquí,
+ * antes de trocear, y no en el adaptador.
+ */
+const SIN_TROCEO: ReadonlySet<string> = new Set(["email"]);
+
+/**
+ * Trocea según el canal: uno solo donde partir haría daño, y lo de siempre en
+ * el resto. Es el único punto por el que debería pasar el troceo de una
+ * respuesta.
+ */
+export function chunkReplyForChannel(channel: string, text: string, maxChunks?: number): string[] {
+  if (SIN_TROCEO.has(channel)) {
+    const entero = text.trim();
+    // Vacío jamás: un canal que publica "" deja un mensaje en blanco.
+    return entero ? [entero] : [];
+  }
+  return chunkReply(text, maxChunks);
+}
+
 export function chunkReply(text: string, maxChunks: number = DEFAULT_MAX_CHUNKS): string[] {
   const cap = Math.max(1, Math.floor(maxChunks));
   const trimmed = text.trim();
