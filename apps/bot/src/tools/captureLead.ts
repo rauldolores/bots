@@ -22,7 +22,8 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
       "Es la tool correcta AUNQUE tú no puedas dar el precio y haya que pasárselo a alguien del equipo: eso es una venta en curso, no un ticket de soporte. " +
       "Guarda localmente y, si hay un CRM conectado, da de alta ahí el contacto, la empresa, la oportunidad y una tarea de seguimiento para el equipo. " +
       "Pídele SIEMPRE las tres cosas: correo, teléfono y empresa. Si solo te da uno de los dos medios de contacto, no insistas más de una vez — con uno basta para guardar. " +
-      "Sin NINGÚN medio de contacto la captura se rechaza (salvo que el canal ya traiga su contacto de por sí, como el teléfono en WhatsApp/una llamada, o la dirección en un correo).",
+      "Sin NINGÚN medio de contacto la captura se rechaza (salvo que el canal ya traiga su contacto de por sí, como el teléfono en WhatsApp/una llamada, o la dirección en un correo). " +
+      "EXCEPCIÓN — canal de correo: ahí la dirección del remitente ya cuenta como contacto, así que eso NO es excusa para capturar temprano con datos vacíos. En correo SÍ hace falta nombre y empresa antes de que esta tool guarde algo — pídeselos en tu respuesta si aún no los tienes, y no la llames hasta tenerlos (o hasta que quede claro que el cliente no los va a dar).",
     inputSchema: z.object({
       name: z.string().optional().describe("Nombre del cliente"),
       email: z.string().optional().describe("Su correo. Pídeselo aunque ya tengas el teléfono."),
@@ -79,6 +80,28 @@ export function captureLeadTool(env: Env, getConversationId: () => string | null
           captured: false,
           message:
             "No se guardó el lead: falta un teléfono o correo válido para poder contactarlo. Pídeselos al cliente y vuelve a llamar esta tool con esos datos.",
+        };
+      }
+
+      // Canal de correo (F9): la dirección del remitente YA cuenta como medio
+      // de contacto (convEmail arriba), así que el guard de "sin contacto" de
+      // arriba se satisface solo — sin que el modelo haya preguntado NADA. Un
+      // correo frío ("¿cuánto cuesta?", sin firma) pasaba de largo y creaba en
+      // el CRM un contacto con nombre placeholder ("(sin nombre)") y, si el
+      // dueño configuró pipeline, una oportunidad — ambos sin ningún dato real
+      // más allá de la dirección que ya traíamos de por sí. Nunca pasa en un
+      // chat en vivo (ahí el modelo pregunta antes de llamar la tool), pero en
+      // correo nada lo obliga. Por eso aquí SÍ se exige nombre y empresa antes
+      // de registrar — si el cliente no los da, mejor no guardar nada todavía
+      // que ensuciar el CRM con un contacto vacío.
+      if (conv?.channel === "email" && (!name || !company)) {
+        return {
+          leadId: null,
+          captured: false,
+          message:
+            "No se guardó todavía: falta " +
+            [!name && "el nombre", !company && "la empresa"].filter(Boolean).join(" y ") +
+            " de quien escribe. Si es pertinente, pídeselo en tu respuesta y vuelve a llamar esta tool en cuanto lo tengas — si el cliente no lo da, no registres nada por ahora.",
         };
       }
 

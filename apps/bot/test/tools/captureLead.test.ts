@@ -189,12 +189,15 @@ describe("captureLeadTool — el contacto es obligatorio", () => {
     expect(rows[0].contact).toBe("+525512345678");
   });
 
-  it("por el canal 'email' (F9) NO hace falta contact explícito — la dirección del canal ya sirve", async () => {
+  it("por el canal 'email' (F9) NO hace falta contact explícito — la dirección del canal ya sirve (con nombre y empresa, que en este canal SÍ son obligatorios)", async () => {
     const db = new Db(env.DB);
     const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("email", "cliente@ejemplo.com");
     const tool = captureLeadTool(env, () => conv.id, TEST_BOT_ID);
 
-    const result = (await tool.execute!({ name: "Cliente por correo", intent: "pregunta por el servicio" }, {} as any)) as {
+    const result = (await tool.execute!(
+      { name: "Cliente por correo", company: "Acme SA", intent: "pregunta por el servicio" },
+      {} as any,
+    )) as {
       captured: boolean;
       leadId: string;
     };
@@ -211,6 +214,77 @@ describe("captureLeadTool — el contacto es obligatorio", () => {
     // Antes caía como kind='channel' (opaco) — un correo SÍ es un contacto
     // real, no solo un identificador de conversación.
     expect(tipados).toContainEqual({ kind: "email", address_norm: "cliente@ejemplo.com" });
+  });
+
+  // Bug real: la dirección del remitente ya cuenta como medio de contacto en
+  // este canal, así que el guard genérico de "sin contacto" nunca se disparaba
+  // — un correo frío ("¿cuánto cuesta?", sin firma) creaba un contacto de CRM
+  // con nombre placeholder ("(sin nombre)"), sin ningún dato real. En un chat
+  // en vivo el modelo pregunta antes de llamar la tool; en correo nada lo
+  // obligaba, así que aquí el código sí lo exige.
+  describe("canal 'email': nombre y empresa son obligatorios antes de registrar", () => {
+    async function convEmail(db: Db, address = "frio@ejemplo.com") {
+      return new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("email", address);
+    }
+
+    it("sin nombre ni empresa: no registra nada — pide que se los den", async () => {
+      const db = new Db(env.DB);
+      const conv = await convEmail(db);
+      const tool = captureLeadTool(env, () => conv.id, TEST_BOT_ID);
+
+      const result = (await tool.execute!({ intent: "pregunta cuánto cuesta" }, {} as any)) as {
+        captured: boolean;
+        leadId: string | null;
+        message: string;
+      };
+
+      expect(result.captured).toBe(false);
+      expect(result.leadId).toBeNull();
+      expect(result.message).toContain("el nombre");
+      expect(result.message).toContain("la empresa");
+      expect(await leads.list(10)).toHaveLength(0);
+    });
+
+    it("con nombre pero sin empresa: tampoco registra — solo falta lo que falta", async () => {
+      const db = new Db(env.DB);
+      const conv = await convEmail(db);
+      const tool = captureLeadTool(env, () => conv.id, TEST_BOT_ID);
+
+      const result = (await tool.execute!({ name: "Ana", intent: "pregunta cuánto cuesta" }, {} as any)) as {
+        captured: boolean;
+        message: string;
+      };
+
+      expect(result.captured).toBe(false);
+      expect(result.message).toContain("la empresa");
+      expect(result.message).not.toContain("el nombre");
+      expect(await leads.list(10)).toHaveLength(0);
+    });
+
+    it("con nombre y empresa: sí registra, sin pedir nada más", async () => {
+      const db = new Db(env.DB);
+      const conv = await convEmail(db);
+      const tool = captureLeadTool(env, () => conv.id, TEST_BOT_ID);
+
+      const result = (await tool.execute!(
+        { name: "Ana", company: "Acme SA", intent: "pregunta cuánto cuesta" },
+        {} as any,
+      )) as { captured: boolean };
+
+      expect(result.captured).toBe(true);
+      expect(await leads.list(10)).toHaveLength(1);
+    });
+
+    it("el mismo requisito NO aplica a otros canales (telegram/whatsapp/voz) — ahí la empresa sigue sin bloquear", async () => {
+      // convId (del beforeEach) es canal "telegram" — mismo caso que ya cubre
+      // "sin empresa: el lead SÍ se guarda" arriba, pero aquí en contraste
+      // explícito con el gate de email para que quede claro que es a propósito.
+      const tool = captureLeadTool(env, () => convId, TEST_BOT_ID);
+      const result = (await tool.execute!({ name: "Ana", phone: "+5215512345678", intent: "x" }, {} as any)) as {
+        captured: boolean;
+      };
+      expect(result.captured).toBe(true);
+    });
   });
 });
 
