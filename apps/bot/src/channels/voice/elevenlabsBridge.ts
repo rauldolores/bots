@@ -31,7 +31,7 @@ import { validarParametros } from "./validarParametros";
 import { buildClearMessage, buildMediaMessage } from "./mediaStreamProtocol";
 import { bloqueLlamadaEnCurso, bloqueLimites, VOICE_BEHAVIOR_ADDENDUM } from "./voiceInstructions";
 import { resolveVoiceGreeting } from "./voiceGreeting";
-import { motivoDeFallo, camposConValor } from "./toolResult";
+import { motivoDeFallo, camposConValor, pistaAccionable } from "./toolResult";
 
 import { logVoiceEvent, maskId } from "./log";
 import { createCallMetrics, type CallMetrics } from "./metrics";
@@ -379,13 +379,30 @@ export class ElevenLabsCallBridge implements CallBridge {
 
       void def.execute(parametros, {} as any).then(
         (resultado: unknown) => {
-          const fallo = motivoDeFallo(resultado) !== null;
+          const motivo = motivoDeFallo(resultado);
+          const fallo = motivo !== null;
           tarea.estado = fallo ? "error" : "lista";
           tarea.resultado = resultado;
+          if (motivo) {
+            // Antes esto no se guardaba —`tarea.error` solo se llenaba cuando
+            // la tool LANZABA— así que consultar_tarea contestaba "no se pudo
+            // completar" y ahí se acababa el hilo: ni el agente sabía qué
+            // corregir ni nosotros qué había pasado. Pasó el 2026-09-09: el
+            // CRM rechazó un SELECT contra columnas inexistentes y el motivo
+            // se perdió en el aire.
+            tarea.error = pistaAccionable(motivo);
+            logVoiceEvent("elevenlabs_tool_mcp_rechazada", {
+              botId: this.deps.botId,
+              callSid: maskId(this.deps.callSid),
+              tool: nombre,
+              motivo,
+            });
+          }
           void recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.tool_called", {
             tool: nombre,
             kind: "mcp",
             ok: !fallo,
+            ...(motivo ? { motivo: motivo.slice(0, 300) } : {}),
           });
         },
         (e: unknown) => {

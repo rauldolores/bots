@@ -9,7 +9,7 @@
  * bueno (is_error=false) y lo anotaba como ok:true en la bitácora.
  */
 import { describe, it, expect } from "vitest";
-import { motivoDeFallo, camposConValor } from "../../src/channels/voice/toolResult";
+import { motivoDeFallo, camposConValor, pistaAccionable } from "../../src/channels/voice/toolResult";
 
 describe("motivoDeFallo — un await que termina bien no significa que la acción ocurrió", () => {
   it("reconoce el fallo que la tool devuelve sin lanzar", () => {
@@ -85,5 +85,37 @@ describe("motivoDeFallo — errores en la forma del protocolo MCP", () => {
 
   it("tambien entiende { error: { message } }, no solo el texto plano", () => {
     expect(motivoDeFallo({ error: { message: "sin permisos" } })).toBe("sin permisos");
+  });
+});
+
+/**
+ * Un fallo del MCP convertido en instrucción.
+ *
+ * La regla del prompt no bastó: se le pidió explícitamente consultar el
+ * esquema antes de escribir SQL, y en la llamada siguiente (2026-09-09,
+ * 15:01) volvió a inventar `contact_email` y `summary` en la tabla tickets.
+ * Una regla enterrada en 27.910 caracteres se pierde; un mensaje en el
+ * momento exacto del fallo, no.
+ */
+describe("pistaAccionable — el error le dice al agente qué hacer", () => {
+  it("columnas inexistentes: lo manda a leer el esquema y reintentar", () => {
+    const r = pistaAccionable('ERROR: column "contact_email" does not exist');
+    expect(r).toContain("_get_schema");
+    expect(r).toContain("does not exist"); // el motivo original no se pierde
+  });
+
+  it("SQL mal formado: le dice que lo simplifique, con el caso real", () => {
+    const r = pistaAccionable('syntax error at or near "ORDER"');
+    expect(r).toContain("ORDER BY");
+  });
+
+  it("sin permisos: NO lo manda a insistir, lo manda a abrir un ticket", () => {
+    const r = pistaAccionable("permission denied for table tickets");
+    expect(r).toContain("ticket");
+    expect(r).not.toContain("vuelve a intentarlo");
+  });
+
+  it("un error que no reconoce se devuelve tal cual, sin inventar instrucciones", () => {
+    expect(pistaAccionable("el servidor no respondió")).toBe("el servidor no respondió");
   });
 });
