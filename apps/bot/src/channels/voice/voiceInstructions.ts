@@ -206,14 +206,28 @@ export function bloqueLimites(nombresDeTools: string[]): string {
   }
 
   // El bot dijo "déjame revisar tu historial" tres turnos seguidos y después
-  // "ya verifiqué" — inventando incluso una fecha ("en enero"). Lo que sabe del
-  // cliente es lo que ya está escrito en este prompt; no hay nada más que
-  // consultar, así que fingir una búsqueda solo produce silencio y datos falsos.
+  // "ya verifiqué", inventando incluso una fecha ("en enero"). Pero la primera
+  // versión de esta regla se pasó de frenada: le prohibió consultar CUALQUIER
+  // historial, y el dueño lo cazó — el bot sí tiene herramientas para leer el
+  // CRM, donde viven las notas, tareas y citas de esa persona. Contestar "no
+  // puedo consultarlo" teniendo con qué es tan malo como inventar la respuesta.
+  //
+  // Lo que de verdad no existe es un registro de LLAMADAS de esta línea. Eso se
+  // prohíbe; lo demás se le recuerda que lo busque.
+  const consultables = nombresDeTools.filter((n) =>
+    /query|search|buscar|consultar|get_|list|catalog/i.test(n),
+  );
   limites.push(
-    'NO PUEDES consultar el historial de llamadas o conversaciones pasadas. Lo que ' +
-      'sabes de esta persona es lo que ya viene escrito más arriba, y nada más. Nunca ' +
-      'digas "déjame revisar tu historial" ni "ya verifiqué cuándo fue": si no lo ves ' +
-      "escrito, no lo sabes, y decirlo con seguridad es inventar.",
+    'NO PUEDES saber cuándo fue la última vez que hablaron por teléfono: no hay un ' +
+      'registro de llamadas que puedas consultar. Nunca inventes una fecha ni digas ' +
+      '"déjame revisar tu historial" para ganar tiempo.' +
+      (consultables.length > 0
+        ? ` Lo que SÍ puedes hacer, y debes intentar antes de decir que no puedes, es ` +
+          `buscar a esa persona en los sistemas del negocio con: ${consultables.join(", ")}. ` +
+          `Ahí viven sus notas, tareas, citas y su historial con nosotros. Decir "no ` +
+          `puedo consultarlo" sin haberlo intentado es dejar al cliente sin una ` +
+          `respuesta que sí tenías.`
+        : " Lo que sabes de esta persona es lo que ya viene escrito más arriba."),
   );
 
   if (!tiene("sendEmail") && !tiene("enviarCorreo")) {

@@ -113,3 +113,32 @@ describe("prometer una transferencia también es una promesa", () => {
     expect(tipoDePromesa("te paso con alguien para agendar tu cita")).toBe("transferencia");
   });
 });
+
+// Falso positivo real (2026-09-08 18:16). El bot SÍ agendó —scheduleAppointment
+// respondió ok— pero al confirmarlo dijo "quedó agendada correctamente para el
+// viernes once", sin repetir la palabra "reunión". El clasificador buscaba el
+// sustantivo, no encontró ninguno, lo mandó a "registro", buscó captureLead
+// (que no se había llamado) y reportó una promesa incumplida que no existía.
+//
+// Un aviso falso enseña a ignorar los avisos, así que cuenta como error grave.
+describe("el verbo manda sobre el sustantivo", () => {
+  it("no reporta nada si agendó de verdad, aunque no diga la palabra cita", () => {
+    expect(
+      conciliar(
+        ["Sí, quedó agendada correctamente para el viernes once de septiembre."],
+        [{ tool: "scheduleAppointment", ok: true }],
+      ),
+    ).toEqual([]);
+  });
+
+  it('"agendada" a secas ya clasifica como cita', () => {
+    expect(tipoDePromesa("quedó agendada correctamente para el viernes")).toBe("cita");
+    expect(tipoDePromesa("ya te agendé para mañana")).toBe("cita");
+  });
+
+  it("y sigue detectándolo cuando de verdad NO agendó", () => {
+    const h = conciliar(["Sí, quedó agendada correctamente para el viernes once."], []);
+    expect(h).toHaveLength(1);
+    expect(h[0].motivo).toBe("nunca_lo_intento");
+  });
+});

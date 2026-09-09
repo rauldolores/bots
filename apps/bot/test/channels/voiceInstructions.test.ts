@@ -168,12 +168,14 @@ describe("bloqueLimites — decirle lo que NO puede hacer", () => {
     expect(bloqueLimites(CON_TODO)).not.toContain("NO PUEDES transferir");
   });
 
-  it("siempre le prohíbe fingir que consulta el historial", () => {
+  it("siempre le prohíbe inventar cuándo hablaron y fingir que lo consulta", () => {
     // Dijo "déjame revisar tu historial" tres turnos seguidos, luego "ya
-    // verifiqué", e inventó una fecha ("en enero"). No existe esa herramienta.
+    // verifiqué", e inventó una fecha ("en enero"). Lo que NO existe es un
+    // registro de llamadas; el CRM sí lo puede leer (ver la prueba de abajo),
+    // y por eso la prohibición se acotó a lo que de verdad no tiene.
     for (const tools of [CON_TODO, SIN_TRANSFERENCIA]) {
       const b = bloqueLimites(tools);
-      expect(b).toContain("NO PUEDES consultar el historial");
+      expect(b).toContain("no hay un registro de llamadas");
       expect(b).toContain("déjame revisar tu historial");
     }
   });
@@ -186,5 +188,34 @@ describe("bloqueLimites — decirle lo que NO puede hacer", () => {
 
   it("deja claro que son límites reales, no preferencias", () => {
     expect(bloqueLimites(SIN_TRANSFERENCIA)).toContain("limitaciones REALES");
+  });
+});
+
+// El dueño lo cazó tras la prueba del 2026-09-08: el bot contestó "no puedo
+// consultar el historial de llamadas o conversaciones previas" cuando le
+// preguntaron cuándo habían hablado por última vez. Pero SÍ tiene herramientas
+// para leer el CRM, donde viven sus notas, tareas y citas. La primera versión
+// de esta regla se pasó de frenada, y decir "no puedo" teniendo con qué es tan
+// dañino como inventar la respuesta: deja al cliente sin algo que sí tenías.
+describe("bloqueLimites — no prohibir lo que sí puede consultar", () => {
+  const CON_MCP = ["searchKb", "captureLead", "handoffHuman", "vinqulia_query", "vinqulia_get_schema"];
+
+  it("le recuerda que busque en los sistemas antes de decir que no puede", () => {
+    const b = bloqueLimites(CON_MCP);
+    expect(b).toContain("vinqulia_query");
+    expect(b).toContain("antes de decir que no puedes");
+  });
+
+  it("pero sigue prohibiendo inventar cuándo hablaron por teléfono", () => {
+    // Eso sí no existe: no hay registro de llamadas consultable.
+    const b = bloqueLimites(CON_MCP);
+    expect(b).toContain("no hay un registro de llamadas");
+    expect(b).toContain("déjame revisar tu historial");
+  });
+
+  it("sin herramientas de consulta, cae al mensaje anterior", () => {
+    const b = bloqueLimites(["captureLead", "handoffHuman"]);
+    expect(b).toContain("lo que ya viene escrito más arriba");
+    expect(b).not.toContain("antes de decir que no puedes");
   });
 });

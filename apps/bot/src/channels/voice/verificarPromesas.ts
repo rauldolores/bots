@@ -102,6 +102,12 @@ export function tipoDePromesa(texto: string): keyof typeof RESPALDO {
   if (t.includes("transfer") || t.includes("te paso") || t.includes("te comunico") || t.includes("estoy pasando")) {
     return "transferencia";
   }
+  // El VERBO manda sobre el sustantivo. Falso positivo real (2026-09-08 18:16):
+  // "quedó agendada correctamente para el viernes once" no repite la palabra
+  // "reunión", así que caía en "registro", se buscaba captureLead —que no se
+  // había llamado— y se reportaba una promesa incumplida sobre una cita que SÍ
+  // se había agendado. Un aviso falso enseña a ignorar los avisos.
+  if (t.includes("agend")) return "cita";
   return t.includes("cita") || t.includes("demo") || t.includes("llamada") || t.includes("reunion")
     ? "cita"
     : "registro";
@@ -231,7 +237,16 @@ export async function verificarLlamada(
 
     const { recordCallEvent } = await import("./events");
     await recordCallEvent(db, botId, callId, "call.promesa_incumplida", {
-      hallazgos: hallazgos.map((h) => ({ motivo: h.motivo, herramienta: h.herramienta, detalle: h.detalle })),
+      // Se guarda TAMBIÉN la frase: sin ella, un hallazgo en la bitácora dice
+      // "algo se prometió y no pasó" y no hay forma de saber qué, ni de
+      // distinguir un incumplimiento real de un falso positivo del
+      // clasificador. Pasó: hubo que reconstruirlo leyendo la transcripción.
+      hallazgos: hallazgos.map((h) => ({
+        dijo: h.dijo.slice(0, 160),
+        motivo: h.motivo,
+        herramienta: h.herramienta,
+        detalle: h.detalle,
+      })),
     }).catch(() => {});
 
     // Al dueño se le avisa por donde ya recibe lo demás (Telegram/WhatsApp/
