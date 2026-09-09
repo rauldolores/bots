@@ -24,6 +24,17 @@ export interface AgentConfig {
   botPaused: boolean;
   /** Tool names still enabled after applying the dashboard's disabled_tools. */
   enabledToolNames: string[];
+  /**
+   * Las que el dueño apagó desde el panel, tal cual.
+   *
+   * Se expone además de `enabledToolNames` porque hay herramientas que no
+   * pasan por aquí y aun así deben poder apagarse: las de un servidor MCP,
+   * cuyos nombres no se conocen hasta conectarse. Filtrar con esta lista las
+   * respeta sin tener que meterlas en el prompt — el modelo ya recibe sus
+   * definiciones completas por otro lado, y repetir 41 nombres solo engorda
+   * el contexto de cada turno.
+   */
+  disabledToolNames: string[];
   /** Sampling temperature (0-1). undefined = use the provider default. */
   temperature?: number;
   /** Monthly AI budget (USD). undefined = no cap. */
@@ -240,6 +251,7 @@ export async function resolveAgentConfig(
   // the model never tries to call something that was turned off.
   const disabledTools = parseCsvList(get(SETTING_KEYS.disabledTools));
   const enabledToolNames = toolNames.filter((n) => !disabledTools.includes(n));
+  const disabledToolNames = disabledTools;
 
   const timezone = resolveTimezone(get(SETTING_KEYS.timezone));
 
@@ -290,6 +302,7 @@ export async function resolveAgentConfig(
     modelOverride,
     botPaused,
     enabledToolNames,
+    disabledToolNames,
     temperature,
     monthlyBudgetUsd,
     llm: llmOverridesFrom(settings),

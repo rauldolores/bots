@@ -161,6 +161,31 @@ describe("contexto que viene del CRM", () => {
     expect(out).not.toContain("Trabaja en");
   });
 
+  /**
+   * El id de la ficha, que el CRM pide en sus herramientas.
+   *
+   * Lo teníamos en el snapshot desde siempre y no se imprimía. Sin él, para
+   * responder "¿qué tareas tengo?" el agente tiene que BUSCAR a la persona
+   * primero y luego consultar — y ese primer paso es justo donde el
+   * 2026-09-09 se equivocó tres veces seguidas inventando nombres de columna.
+   */
+  it("dice el id del contacto, para que no tenga que buscarlo", () => {
+    const out = renderCustomerContext(
+      ctx({ lead: lead(), crm: { contactId: "42", oportunidades: [], notasRecientes: [] } }),
+      TZ,
+    )!;
+    expect(out).toContain("42");
+    expect(out).toMatch(/sin buscarlo antes/i);
+  });
+
+  it("sin id, no inventa la línea", () => {
+    const out = renderCustomerContext(
+      ctx({ lead: lead(), crm: { contactId: "", oportunidades: [], notasRecientes: [] } }),
+      TZ,
+    )!;
+    expect(out).not.toMatch(/id en el CRM/i);
+  });
+
   it("cuenta la empresa con su industria y tamaño", () => {
     const out = renderCustomerContext(
       ctx({

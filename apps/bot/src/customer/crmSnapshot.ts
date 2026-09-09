@@ -123,6 +123,19 @@ export function renderCrmSnapshot(s: CrmCustomerSnapshot | null): string | null 
   if (!s) return null;
   const lineas: string[] = [];
 
+  // El id de su ficha, porque las herramientas del CRM lo piden.
+  //
+  // Lo teníamos desde siempre en el snapshot y no se imprimía. Sin él, para
+  // responder "¿qué tareas tengo?" el agente primero tiene que BUSCAR a la
+  // persona y luego consultar: dos viajes, y ese primer paso es justo donde
+  // se equivocó tres veces seguidas inventando columnas (2026-09-09). Con el
+  // id delante, la primera llamada le sale bien.
+  if (s.contactId) {
+    lineas.push(
+      `Su id en el CRM es ${s.contactId} — úsalo tal cual cuando una herramienta pida el id del contacto, sin buscarlo antes.`,
+    );
+  }
+
   if (s.empresa) {
     const detalle = [s.empresa.industria, s.empresa.tamano ? `${s.empresa.tamano} empleados` : null]
       .filter(Boolean)

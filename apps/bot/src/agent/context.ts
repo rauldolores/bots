@@ -138,7 +138,23 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
   const enabledTools = Object.fromEntries(
     Object.entries(tools).filter(([name]) => cfg.enabledToolNames.includes(name)),
   );
-  Object.assign(enabledTools, mcpTools);
+
+  // Las de MCP también obedecen al panel. Antes se volvían a meter todas
+  // aquí con un Object.assign, después del filtro: el dueño no podía apagar
+  // ninguna aunque quisiera. Con un servidor de 3 herramientas casi no se
+  // notaba; con uno de 41 —el CRM pasó a tener 41 el 2026-09-09— sí: son 41
+  // definiciones cargadas en CADA turno y 41 altas en ElevenLabs, cuando una
+  // llamada telefónica usa seis o siete. Automatizaciones, plantillas de
+  // correo o fusionar contactos no tienen nada que hacer al teléfono.
+  //
+  // Se filtra por la lista de APAGADAS, no por la de encendidas: los nombres
+  // de un MCP no se conocen hasta conectarse, así que no están en la lista
+  // del panel y filtrar por ella las borraría todas de golpe. Así siguen
+  // habilitadas por defecto y solo desaparecen las que el dueño apague.
+  const mcpHabilitadas = Object.fromEntries(
+    Object.entries(mcpTools).filter(([name]) => !cfg.disabledToolNames.includes(name)),
+  );
+  Object.assign(enabledTools, mcpHabilitadas);
 
   const memoryBlocks: string[] = [];
   let knownCustomerName: string | undefined;
@@ -164,7 +180,7 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
     basePrompt: cfg.systemPrompt,
     memoryBlocks,
     tools: enabledTools,
-    mcpToolNames: Object.keys(mcpTools),
+    mcpToolNames: Object.keys(mcpHabilitadas),
     cfg,
     state,
     knownCustomerName,

@@ -111,6 +111,34 @@ describe("resolveAgentConfig — disabled_tools", () => {
     expect(cfg.systemPrompt).not.toContain("- handoffHuman");
   });
 
+  /**
+   * Las herramientas de un servidor MCP también se pueden apagar.
+   *
+   * Sus nombres no se conocen hasta conectarse, así que nunca llegan en
+   * `toolNames` y no aparecen en `enabledToolNames`. Por eso se expone
+   * ADEMÁS la lista de apagadas: quien las tenga —ver agent/context.ts—
+   * filtra con ella y las respeta sin meterlas en el prompt.
+   *
+   * Antes se volvían a añadir todas después del filtro, así que no había
+   * forma de apagar ninguna. Con un MCP de 3 tools casi no se notaba; el CRM
+   * pasó a tener 41 el 2026-09-09, y una llamada telefónica usa seis.
+   */
+  it("expone las apagadas, para poder filtrar tambien las que no vinieron en toolNames", async () => {
+    await repo.set(SETTING_KEYS.disabledTools, "vinqulia_crear_automatizacion, handoffHuman");
+    const cfg = await resolveAgentConfig(env, TOOLS);
+
+    expect(cfg.disabledToolNames).toContain("vinqulia_crear_automatizacion");
+    // Y sigue filtrando las de siempre, sin cambiar nada de lo anterior.
+    expect(cfg.enabledToolNames).toEqual(["searchKb"]);
+    // Un nombre de MCP nunca ensucia el prompt, aunque esté apagado o no.
+    expect(cfg.systemPrompt).not.toContain("vinqulia_crear_automatizacion");
+  });
+
+  it("sin nada apagado, la lista viene vacia — no borra herramientas por accidente", async () => {
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.disabledToolNames).toEqual([]);
+  });
+
   it("keeps everything enabled when the setting is absent or empty", async () => {
     let cfg = await resolveAgentConfig(env, TOOLS);
     expect(cfg.enabledToolNames).toEqual(TOOLS);
