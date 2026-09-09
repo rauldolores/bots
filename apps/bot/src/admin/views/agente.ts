@@ -12,6 +12,7 @@ import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
 import { BotsRepo } from "../../db/bots";
 import { resolveAgentConfig, type AgentConfig } from "../../settings-loader";
 import { buildTools } from "../../tools";
+import { loadMcpTools } from "../../tools/mcpTools";
 import { resolveProvider, modelIdFor } from "../../llm/provider";
 import { channelLabel, configuredChannels } from "../../channels/labels";
 import { layout } from "./layout";
@@ -185,9 +186,33 @@ async function loadAgenteData(env: Env, botId: string): Promise<AgenteData> {
   const usage = new Map(usageRows.filter((r) => r.tool).map((r) => [r.tool, r]));
 
   const bot = await new BotsRepo(db).getById(botId);
-  const toolNames = Object.keys(buildTools({ env, getConversationId: () => null, botId }));
-  const cfg = await resolveAgentConfig(env, toolNames, botId);
-  const disabled = toolNames.filter((n) => !cfg.enabledToolNames.includes(n));
+  const estaticas = Object.keys(buildTools({ env, getConversationId: () => null, botId }));
+
+  // Las de un servidor MCP también se listan, para poder apagarlas.
+  //
+  // El panel las ignoraba: armaba la lista solo con buildTools(), así que las
+  // del CRM no salían y no había forma de tocarlas. Con un MCP de 3
+  // herramientas apenas importaba; el CRM pasó a exponer 41 el 2026-09-09, y
+  // una llamada telefónica usa seis o siete. Sin este listado, el dueño no
+  // puede quitar del camino automatizaciones, plantillas de correo o
+  // fusionar contactos — que en una llamada no pintan nada y sí pesan en
+  // cada turno.
+  //
+  // Si el MCP no responde se sigue sin ellas: la pantalla del agente no
+  // puede quedarse en blanco porque un servidor ajeno esté caído.
+  const deMcp = Object.keys(
+    await loadMcpTools(env, db, botId).catch((e) => {
+      console.warn("[admin/agente] no se pudieron listar las tools de MCP:", e);
+      return {};
+    }),
+  );
+  const toolNames = [...estaticas, ...deMcp];
+
+  // El prompt se calcula con las ESTÁTICAS: es lo que de verdad se le
+  // anuncia al modelo (ver agent/context.ts), y la vista previa de esta
+  // pantalla tiene que coincidir con la realidad.
+  const cfg = await resolveAgentConfig(env, estaticas, botId);
+  const disabled = toolNames.filter((n) => cfg.disabledToolNames.includes(n));
   const settings = await new SettingsRepo(db, botId).all();
 
   return { channels, turns30d, lastAssistantAt, toolNames, usage, cfg, disabled, settings };
@@ -700,7 +725,13 @@ export async function renderNodeModal(env: Env, botId: string, nodeId: string, s
  */
 export async function toggleTool(env: Env, botId: string, name: string): Promise<boolean> {
   const db = new Db(env.DB);
-  const known = Object.keys(buildTools({ env, getConversationId: () => null, botId }));
+  // Las de MCP cuentan como conocidas: si no, el interruptor se dibuja y al
+  // pulsarlo no pasa nada. Se consultan por el caché del catálogo, así que
+  // esto no es un viaje a la red en el caso normal.
+  const known = [
+    ...Object.keys(buildTools({ env, getConversationId: () => null, botId })),
+    ...Object.keys(await loadMcpTools(env, db, botId).catch(() => ({}))),
+  ];
   if (!known.includes(name)) return false;
 
   const repo = new SettingsRepo(db, botId);

@@ -9,6 +9,7 @@ import { adminApp } from "../../src/admin/routes";
 import { Db } from "../../src/db/client";
 import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
 import { ConversationsRepo } from "../../src/db/conversations";
+import { BotConnectorsRepo } from "../../src/db/botConnectors";
 import type { Env } from "../../src/env";
 
 const PASSWORD = "secret123";
@@ -26,6 +27,7 @@ const AUTH = { Authorization: basicAuthHeader("admin", PASSWORD) };
 
 let env: Env;
 let settings: SettingsRepo;
+let db: Db;
 
 beforeEach(async () => {
   const d1 = (await createTestDb()) as any;
@@ -39,6 +41,7 @@ beforeEach(async () => {
     BUFFER_SECONDS: "8",
     DASHBOARD_PASSWORD: PASSWORD,
   } as unknown as Env;
+  db = d1 as Db;
   settings = new SettingsRepo(d1, TEST_BOT_ID);
 });
 
@@ -139,6 +142,45 @@ describe("Mi Agente — tool toggle", () => {
     );
     expect(await settings.get(SETTING_KEYS.disabledTools)).toBe("");
     expect(await res.text()).toContain("Apagar tool");
+  });
+
+  /**
+   * Las herramientas de un servidor MCP también se pueden apagar desde aquí.
+   *
+   * El panel armaba su lista solo con buildTools(), así que las del CRM no
+   * salían y `toggleTool` además las rechazaba por "desconocidas". Con un MCP
+   * de 3 herramientas apenas importaba; el CRM pasó a exponer 41 el
+   * 2026-09-09 y una llamada telefónica usa seis o siete.
+   *
+   * El catálogo se siembra en el caché del conector para que `loadMcpTools`
+   * lo lea de ahí y no toque la red — es el mismo camino rápido que usa cada
+   * turno en producción.
+   */
+  it("lista y apaga una tool que vino de un servidor MCP", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "mcp-crm",
+      name: "Vinqulia",
+      config: {
+        url: "https://mcp.crm.example.com/mcp",
+        mcpToolsCache: JSON.stringify([
+          { name: "crear_automatizacion", description: "Crea una automatización" },
+        ]),
+        mcpToolsCachedAt: String(Date.now()),
+      },
+    });
+
+    const canvas = await adminApp.request("/agente/canvas", { headers: AUTH }, env);
+    expect(await canvas.text()).toContain("vinqulia_crear_automatizacion");
+
+    const res = await adminApp.request(
+      "/agente/tools/vinqulia_crear_automatizacion/toggle",
+      { method: "POST", headers: AUTH },
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(await settings.get(SETTING_KEYS.disabledTools)).toBe("vinqulia_crear_automatizacion");
   });
 
   it("rejects unknown tool names", async () => {
