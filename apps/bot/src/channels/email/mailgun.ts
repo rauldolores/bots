@@ -13,7 +13,7 @@
 import type { IncomingMessage } from "../shared";
 import {
   type Cabeceras,
-  direcciones,
+  destinatariosDe,
   dirigidoAEsteBot,
   esCorreoAutomatico,
   limpiarCuerpoReenviado,
@@ -66,11 +66,6 @@ export function parseMailgunInbound(form: FormData, opts: OpcionesEntrada = {}):
   const sender = String(form.get("sender") ?? "").trim().toLowerCase();
   if (!sender) return null;
 
-  // Mismas reglas que Resend: si un proveedor filtra el reenvío y el otro no,
-  // el dueño cambia de proveedor y el bot se comporta distinto sin motivo.
-  const destinatarios = direcciones(String(form.get("recipient") ?? form.get("To") ?? ""));
-  if (!dirigidoAEsteBot(destinatarios, opts.direccionDeEntrada)) return null;
-
   // Mailgun entrega las cabeceras como un JSON de pares [nombre, valor].
   const headers: Cabeceras = {};
   try {
@@ -79,6 +74,15 @@ export function parseMailgunInbound(form: FormData, opts: OpcionesEntrada = {}):
   } catch {
     // Sin cabeceras se pierde la detección de automáticos, no el correo.
   }
+
+  // Mismas reglas que Resend: si un proveedor filtra el reenvío y el otro no,
+  // el dueño cambia de proveedor y el bot se comporta distinto sin motivo.
+  // `recipient` es la entrega real; el `To` conserva el destinatario original.
+  const destinatarios = destinatariosDe(
+    [String(form.get("recipient") ?? ""), String(form.get("To") ?? "")].filter(Boolean).join(","),
+    headers,
+  );
+  if (!dirigidoAEsteBot(destinatarios, { entrada: opts.direccionDeEntrada, buzon: opts.buzonDeAtencion })) return null;
   if (esCorreoAutomatico(sender, headers)) return null;
 
   const subject = String(form.get("subject") ?? "");

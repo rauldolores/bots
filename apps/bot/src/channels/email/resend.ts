@@ -13,7 +13,7 @@
 import type { IncomingMessage } from "../shared";
 import {
   type Cabeceras,
-  direcciones,
+  destinatariosDe,
   dirigidoAEsteBot,
   esCorreoAutomatico,
   limpiarCuerpoReenviado,
@@ -147,10 +147,10 @@ export async function parseResendInbound(
   const from = full?.from ?? payload.data.from;
   if (!from) return null;
 
-  const destinatarios = direcciones(full?.to ?? payload.data.to ?? []);
-  if (!dirigidoAEsteBot(destinatarios, opts.direccionDeEntrada)) return null;
-
   const headers = normalizarCabeceras(full?.headers);
+  const destinatarios = destinatariosDe(full?.to ?? payload.data.to ?? [], headers);
+  if (!dirigidoAEsteBot(destinatarios, { entrada: opts.direccionDeEntrada, buzon: opts.buzonDeAtencion })) return null;
+
   if (esCorreoAutomatico(from, headers)) return null;
 
   const texto = (full?.text ?? "").trim();

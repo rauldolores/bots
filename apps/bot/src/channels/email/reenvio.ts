@@ -162,6 +162,21 @@ export function limpiarCuerpoReenviado(text: string): string {
 }
 
 /**
+ * Todas las direcciones a las que iba dirigido un correo.
+ *
+ * No basta con el `to`: al REENVIAR, el `To:` original se conserva —sigue
+ * diciendo el buzón del negocio— y la dirección real de entrega queda en el
+ * sobre o en `Delivered-To`. Mirar solo una de las dos deja fuera la mitad de
+ * los casos según cómo reenvíe cada proveedor.
+ */
+export function destinatariosDe(to: string | string[] | null | undefined, h: Cabeceras = {}): string[] {
+  const desdeCabeceras = ["delivered-to", "x-forwarded-to", "x-original-to", "envelope-to", "cc"].flatMap((n) =>
+    direcciones(cabecera(h, n)),
+  );
+  return [...new Set([...direcciones(to), ...desdeCabeceras])];
+}
+
+/**
  * ¿Este correo es para ESTE bot?
  *
  * Hace falta porque el webhook de Resend es de CUENTA, no de bot: no se puede
@@ -169,11 +184,23 @@ export function limpiarCuerpoReenviado(text: string): string {
  * TODOS los correos de la cuenta. Sin este filtro, con dos bots en el mismo
  * despliegue, el correo de un cliente aparecería en la conversación del otro.
  *
- * Sin dirección configurada devuelve true: es el caso de un solo bot, donde
- * exigirla rompería instalaciones que hoy funcionan.
+ * Quien ENCIENDE el filtro es `entrada`, y solo ella: es el campo que el dueño
+ * llena cuando tiene más de un bot. Sin ella no se filtra nada — un correo
+ * mandado directo a la dirección del proveedor tiene que seguir entrando.
+ *
+ * Ya encendido, `buzon` también vale como destinatario propio. Va porque al
+ * REENVIAR el `To:` conserva el buzón del negocio y la dirección del proveedor
+ * queda solo en el sobre: exigir justo la que no venga descartaría TODO el
+ * correo reenviado, en silencio.
  */
-export function dirigidoAEsteBot(destinatarios: string[], direccionDeEntrada: string | null | undefined): boolean {
-  const propia = soloDireccion(direccionDeEntrada);
-  if (!propia) return true;
-  return destinatarios.map((d) => soloDireccion(d)).includes(propia);
+export function dirigidoAEsteBot(
+  destinatarios: string[],
+  nuestras: { entrada?: string | null; buzon?: string | null },
+): boolean {
+  const entrada = soloDireccion(nuestras.entrada);
+  if (!entrada) return true;
+
+  const aceptadas = [entrada, soloDireccion(nuestras.buzon)].filter(Boolean);
+  const recibido = new Set(destinatarios.map((d) => soloDireccion(d)).filter(Boolean));
+  return aceptadas.some((a) => recibido.has(a));
 }

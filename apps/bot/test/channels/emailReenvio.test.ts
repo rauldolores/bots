@@ -14,6 +14,7 @@ import {
   remitenteReal,
   limpiarCuerpoReenviado,
   dirigidoAEsteBot,
+  destinatariosDe,
 } from "../../src/channels/email/reenvio";
 
 const BUZON = "soporte@empresa.com";
@@ -172,20 +173,54 @@ describe("limpiarCuerpoReenviado", () => {
  * correos. Sin este filtro, con dos bots en el mismo despliegue el correo de
  * un cliente aparece en la conversación del otro.
  */
+describe("destinatariosDe", () => {
+  // Al REENVIAR, el To: original se conserva y la entrega real queda en el
+  // sobre o en Delivered-To. Mirar solo una de las dos deja fuera la mitad de
+  // los casos según cómo reenvíe cada proveedor.
+  it("junta el To con las cabeceras de entrega", () => {
+    const r = destinatariosDe(["soporte@empresa.com"], {
+      "delivered-to": "bot-a@mail.nodia.io",
+      cc: "Otro <otro@x.com>",
+    });
+    expect(r).toEqual(["soporte@empresa.com", "bot-a@mail.nodia.io", "otro@x.com"]);
+  });
+
+  it("no repite una dirección que venga en dos lados", () => {
+    expect(destinatariosDe("a@x.com", { "delivered-to": "A@X.com" })).toEqual(["a@x.com"]);
+  });
+});
+
 describe("dirigidoAEsteBot", () => {
-  it("acepta el correo cuya dirección de entrada es la suya", () => {
-    expect(dirigidoAEsteBot(["bot-a@mail.nodia.io"], "bot-a@mail.nodia.io")).toBe(true);
-    expect(dirigidoAEsteBot(["Otro <otro@x.com>", "BOT-A@mail.nodia.io"], "bot-a@mail.nodia.io")).toBe(true);
+  const NUESTRAS = { entrada: "bot-a@mail.nodia.io", buzon: BUZON };
+
+  it("acepta por la dirección de entrada del proveedor", () => {
+    expect(dirigidoAEsteBot(["bot-a@mail.nodia.io"], NUESTRAS)).toBe(true);
+    expect(dirigidoAEsteBot(["Otro <otro@x.com>", "BOT-A@mail.nodia.io"], NUESTRAS)).toBe(true);
+  });
+
+  // EL CASO QUE IMPORTA: al reenviar, el To: sigue diciendo el buzón del
+  // negocio y la dirección del proveedor solo va en el sobre. Exigir esa
+  // segunda descartaría TODO el correo reenviado, en silencio.
+  it("acepta también por el buzón del negocio — es lo que trae un reenvío", () => {
+    expect(dirigidoAEsteBot([BUZON], NUESTRAS)).toBe(true);
   });
 
   it("descarta el del otro bot", () => {
-    expect(dirigidoAEsteBot(["bot-b@mail.nodia.io"], "bot-a@mail.nodia.io")).toBe(false);
+    expect(dirigidoAEsteBot(["bot-b@mail.nodia.io"], NUESTRAS)).toBe(false);
   });
 
-  // Sin dirección configurada = un solo bot. Exigirla rompería las
-  // instalaciones que hoy funcionan.
-  it("sin dirección configurada acepta todo", () => {
-    expect(dirigidoAEsteBot(["lo-que-sea@x.com"], null)).toBe(true);
-    expect(dirigidoAEsteBot([], "")).toBe(true);
+  // Quien enciende el filtro es la dirección de ENTRADA, y solo ella: es el
+  // campo que el dueño llena cuando tiene más de un bot.
+  it("sin dirección de entrada NO se filtra, aunque haya buzón", () => {
+    expect(dirigidoAEsteBot(["lo-que-sea@x.com"], { buzon: BUZON })).toBe(true);
+    expect(dirigidoAEsteBot(["lo-que-sea@x.com"], {})).toBe(true);
+    expect(dirigidoAEsteBot([], { entrada: "" })).toBe(true);
+  });
+
+  // Un correo mandado DIRECTO a la dirección del proveedor, sin reenvío de
+  // por medio, tiene que seguir entrando.
+  it("con entrada configurada y sin buzón, la entrada basta", () => {
+    expect(dirigidoAEsteBot(["bot-a@mail.nodia.io"], { entrada: "bot-a@mail.nodia.io" })).toBe(true);
+    expect(dirigidoAEsteBot([BUZON], { entrada: "bot-a@mail.nodia.io" })).toBe(false);
   });
 });

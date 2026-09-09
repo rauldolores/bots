@@ -72,6 +72,26 @@ describe("parseResendInbound — correo reenviado desde el buzón del negocio", 
     expect(await parseResendInbound(sobre, "re_x", OPTS)).toBeNull();
   });
 
+  // El escenario REAL de producción: el proveedor reenvía asesor@kontrolia.io
+  // hacia asesor@…resend.app. El To: sigue diciendo el buzón del negocio y la
+  // dirección de Resend solo aparece en Delivered-To. Comparar únicamente
+  // contra la de entrada habría descartado TODOS los correos, en silencio.
+  it("un reenviado cuyo To sigue siendo el buzón del negocio SÍ entra", async () => {
+    resendResponde({
+      from: "Ana <ana@x.com>",
+      to: [BUZON],
+      headers: { "Delivered-To": ENTRADA },
+      subject: "Cotización",
+      text: "Quiero cotizar.",
+    });
+    expect((await parseResendInbound(sobre, "re_x", OPTS))?.channelUserId).toBe("ana@x.com");
+  });
+
+  it("y si el proveedor sí reescribe el To, también", async () => {
+    resendResponde({ from: "Ana <ana@x.com>", to: [ENTRADA], subject: "x", text: "y" });
+    expect((await parseResendInbound(sobre, "re_x", OPTS))?.channelUserId).toBe("ana@x.com");
+  });
+
   it("sin dirección de entrada configurada acepta todo — es el caso de un solo bot", async () => {
     resendResponde({ from: "Ana <ana@x.com>", to: ["lo-que-sea@x.com"], subject: "Hola", text: "x" });
     const msg = await parseResendInbound(sobre, "re_x", { buzonDeAtencion: BUZON });
