@@ -9,6 +9,7 @@
 //   DEMO_EMAIL_FROM_NAME    — nombre del remitente (default: Nodia Agents)
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
+import { ipDe, registrarEnvio } from "./limite";
 
 export const runtime = "nodejs";
 
@@ -22,7 +23,32 @@ interface DemoPayload {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * Tope de caracteres por campo. Un formulario legítimo no se acerca ni de
+ * lejos; sin el tope, el cuerpo del correo lo escribe quien llame al endpoint.
+ */
+const MAX_LARGO: Record<keyof DemoPayload, number> = {
+  name: 120,
+  email: 200,
+  phone: 40,
+  company: 160,
+  message: 2000,
+};
+
 export async function POST(req: Request) {
+  // El límite va ANTES de leer el cuerpo: a quien está abusando no se le gasta
+  // ni el parseo.
+  const veredicto = registrarEnvio(ipDe(req.headers));
+  if (!veredicto.permitido) {
+    return NextResponse.json(
+      {
+        error: "rate_limited",
+        message: "Recibimos varias solicitudes seguidas. Intenta de nuevo en unos minutos.",
+      },
+      { status: 429, headers: { "Retry-After": String(veredicto.esperaSegundos ?? 60) } },
+    );
+  }
+
   let body: DemoPayload;
   try {
     body = (await req.json()) as DemoPayload;
@@ -47,6 +73,15 @@ export async function POST(req: Request) {
       { error: "bad_email", message: "El correo electrónico no parece válido." },
       { status: 400 },
     );
+  }
+  // Sin tope, el cuerpo del correo lo redacta quien llame al endpoint.
+  for (const [campo, valor] of Object.entries({ name, email, phone, company, message })) {
+    if (valor.length > MAX_LARGO[campo as keyof DemoPayload]) {
+      return NextResponse.json(
+        { error: "too_long", message: `El campo "${campo}" es demasiado largo.` },
+        { status: 400 },
+      );
+    }
   }
 
   const apiKey = process.env.RESEND_API_KEY;
