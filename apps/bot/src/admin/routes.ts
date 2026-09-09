@@ -1700,6 +1700,7 @@ adminApp.get("/config", async (c) => {
   const mcpConnectors = (await new BotConnectorsRepo(configDb).listByBot(configBotId)).filter(
     (conn) => conn.category === "mcp" && conn.enabled,
   );
+  const telegramChannel = await new BotChannelsRepo(configDb).getByBotAndChannel(configBotId, "telegram");
   const saved = c.req.query("saved") === "1";
   return c.html(
     renderConfig(
@@ -1713,8 +1714,33 @@ adminApp.get("/config", async (c) => {
       mcpConnectors.map((conn) => ({ name: conn.name, provider: conn.provider })),
       visibleNavIds(c.get("kontroliaClaims")),
       c.req.query("eleven_error") ?? undefined,
+      Boolean(telegramChannel),
     ),
   );
+});
+
+/**
+ * Código de un solo uso para vincular Telegram sin pedirle al dueño su
+ * chat_id a mano — lo consume ingestMessage() (agent/runner.ts) cuando
+ * llega un mensaje de Telegram con este texto exacto, antes de cualquier
+ * otra cosa (guardas, buffer, turno).
+ */
+adminApp.post("/config/owner-telegram/generate-code", async (c) => {
+  const db = new Db(c.env.DB);
+  const botId = c.get("botId");
+  const repo = new SettingsRepo(db, botId);
+  const codigo = Array.from({ length: 6 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)]).join("");
+  await repo.set(SETTING_KEYS.ownerTelegramClaimCode, `NODIA-${codigo}`);
+  await repo.set(SETTING_KEYS.ownerTelegramClaimExpiresAt, String(Date.now() + 30 * 60_000));
+  return c.redirect("/admin/config?section=aviso", 302);
+});
+
+adminApp.post("/config/owner-telegram/unlink", async (c) => {
+  const db = new Db(c.env.DB);
+  const botId = c.get("botId");
+  const repo = new SettingsRepo(db, botId);
+  await repo.set(SETTING_KEYS.ownerTelegramChatId, "");
+  return c.redirect("/admin/config?section=aviso", 302);
 });
 
 const SUGGEST_FIELDS_SCHEMA = z.object({
@@ -1833,6 +1859,8 @@ adminApp.post("/config", async (c) => {
     SETTING_KEYS.voiceVadSilenceMs,
     SETTING_KEYS.agentMode,
     SETTING_KEYS.botObjective,
+    SETTING_KEYS.ownerEmail,
+    SETTING_KEYS.ownerWaNumber,
   ];
   for (const key of textKeys) {
     const raw = form.get(key);

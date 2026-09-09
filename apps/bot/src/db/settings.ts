@@ -25,6 +25,21 @@ export const SETTING_KEYS = {
   fxUsdMxnCacheAt: "fx_usd_mxn_cache_at", // epoch ms de esa consulta
   learnedLessons: "learned_lessons", // JSON array of rules distilled from owner takeovers
   twilioHandoffContentSid: "twilio_handoff_content_sid", // HSM del aviso de handoff (fallback del secret)
+  // A dónde avisarle al dueño cuando el bot escala (handoffHuman) — ver
+  // tools/handoffHuman.ts::handoffNotifyStatus/notifyOwner. Antes SOLO se
+  // podían poner como variables de entorno del despliegue (OWNER_EMAIL,
+  // OWNER_TELEGRAM_CHAT_ID, OWNER_WA_NUMBER) — fricción real para quien no
+  // toca servidores. Estas tres son el mismo dato, configurable desde
+  // /admin/config → "Aviso al dueño"; el env sigue ganando si está puesto
+  // (compatibilidad con despliegues viejos).
+  ownerEmail: "owner_email",
+  ownerTelegramChatId: "owner_telegram_chat_id",
+  ownerWaNumber: "owner_wa_number",
+  // El código de un solo uso para vincular Telegram sin pedirle al dueño su
+  // chat_id a mano (ver admin/routes.ts: generar/consumir). Vencido o ya
+  // usado = ninguno de los dos campos sirve para nada.
+  ownerTelegramClaimCode: "owner_telegram_claim_code",
+  ownerTelegramClaimExpiresAt: "owner_telegram_claim_expires_at",
   autonomyLevel: "autonomy_level", // flywheel: manual (default) | copilot (auto-aplica lo seguro de noche)
   // BYO-LLM (dashboard "Modelo de IA"): the owner plugs their own provider,
   // API key y/o modelo concreto. Empty = the instance's env defaults.

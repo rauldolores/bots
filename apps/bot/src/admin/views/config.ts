@@ -376,6 +376,103 @@ function renderCorreoSalienteSection(settings: Record<string, string>): string {
     </script>`;
 }
 
+/**
+ * "Aviso al dueño" — a dónde manda handoffHuman.ts cuando el bot escala
+ * (nuevo ticket, nueva oportunidad). Antes SOLO se podía poner por variable
+ * de entorno del despliegue — quien no toca servidores no tenía forma de
+ * configurarlo, y el botón "Configurar" de la alerta en /admin/overview
+ * llevaba a Conexiones, que nunca tuvo estos campos (ver commit de esta
+ * sección). Tres canales, cada uno con su propia fricción real:
+ *   - Correo: el más fácil de armar, el menos inmediato.
+ *   - Telegram: el más reactivo — y el único sin el límite de WhatsApp de
+ *     abajo — pero pedir el chat_id a mano es el punto donde la gente se
+ *     atora. Se resuelve con un código de un solo uso (ver
+ *     agent/runner.ts::ingestMessage): el dueño se lo escribe a su propio
+ *     bot y el sistema captura el chat_id solo.
+ *   - WhatsApp: técnicamente evita la ventana de 24h (manda plantilla
+ *     aprobada, no texto libre — ver tools/handoffHuman.ts), pero esa
+ *     plantilla la aprueba Meta y toma días. No hay forma de hacerlo
+ *     "fácil" desde aquí, así que se deja marcado como avanzado.
+ */
+function renderAvisoAlDuenoSection(
+  settings: Record<string, string>,
+  telegramChannelConnected: boolean,
+): string {
+  const ownerEmail = settings[SETTING_KEYS.ownerEmail] ?? "";
+  const outboundReady = Boolean(
+    (settings[SETTING_KEYS.emailOutboundProvider] ?? "").trim() && (settings[SETTING_KEYS.emailOutboundApiKey] ?? "").trim(),
+  );
+  const telegramChatId = (settings[SETTING_KEYS.ownerTelegramChatId] ?? "").trim();
+  const waNumber = settings[SETTING_KEYS.ownerWaNumber] ?? "";
+  const waTemplateReady = Boolean((settings[SETTING_KEYS.twilioHandoffContentSid] ?? "").trim());
+
+  const claimCode = (settings[SETTING_KEYS.ownerTelegramClaimCode] ?? "").trim();
+  const claimExpiresAt = Number(settings[SETTING_KEYS.ownerTelegramClaimExpiresAt] ?? "0");
+  const claimVigente = Boolean(claimCode && claimExpiresAt > Date.now());
+
+  return `
+    <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:20px">
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <h3 class="font-display font-semibold text-[13.5px] text-cream">🔔 Aviso al dueño</h3>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:9px;background:var(--accent-soft);border:1px solid rgba(245,197,24,.35);border-radius:var(--radius-sm);padding:13px 15px">
+        <span style="color:var(--accent-2);flex:none;line-height:1">◆</span>
+        <p class="text-[12px]" style="color:var(--muted);margin:0">Cuando el bot escala a alguien del equipo (un ticket) o registra una oportunidad, aquí decides quién se entera y por dónde. Puedes activar más de uno.</p>
+      </div>
+
+      <div style="border-top:1px solid var(--line);padding-top:18px;display:flex;flex-direction:column;gap:10px">
+        <label class="font-display font-semibold text-[12.5px] text-cream">✉️ Correo</label>
+        ${
+          outboundReady
+            ? ""
+            : `<p class="text-[11.5px]" style="color:var(--bad);margin:0">Primero configura arriba, en "Correo saliente", con qué proveedor manda tu bot correos — sin eso este campo no sirve de nada.</p>`
+        }
+        <p class="text-dim text-[11px]" style="margin:0">El menos inmediato de los tres (la gente revisa menos el correo), pero el que nunca falla.</p>
+        <input type="text" name="${SETTING_KEYS.ownerEmail}" value="${esc(ownerEmail)}" placeholder="tucorreo@negocio.com" style="${INPUT_STYLE}">
+      </div>
+
+      <div style="border-top:1px solid var(--line);padding-top:18px;display:flex;flex-direction:column;gap:10px">
+        <label class="font-display font-semibold text-[12.5px] text-cream">✈️ Telegram <span class="text-dim" style="font-weight:400">— el más rápido</span></label>
+        <p class="text-dim text-[11px]" style="margin:0">Llega como notificación al instante, y —a diferencia de WhatsApp— no necesita ninguna plantilla aprobada.</p>
+        ${
+          telegramChatId
+            ? `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                 <span class="text-[12px]" style="color:var(--ok)">✓ Vinculado</span>
+                 <button type="submit" formaction="/admin/config/owner-telegram/unlink" formmethod="POST"
+                         class="text-[11px]" style="border:1px solid var(--line);color:var(--muted);padding:5px 10px;cursor:pointer;background:none">Desvincular</button>
+               </div>`
+            : !telegramChannelConnected
+              ? `<p class="text-[11.5px]" style="color:var(--bad);margin:0">Primero conecta Telegram como canal en <a href="/admin/conexiones" style="color:var(--accent-2)">Conexiones</a> — el aviso usa ese mismo bot.</p>`
+              : claimVigente
+                ? `<div style="display:flex;flex-direction:column;gap:8px">
+                     <p class="text-[12px]" style="color:var(--cream);margin:0">Abre Telegram, busca tu bot y mándale exactamente este código:</p>
+                     <div class="font-mono text-[16px] font-bold" style="color:var(--accent-2);background:var(--bg);border:1px solid var(--line);padding:8px 12px;letter-spacing:.08em;width:fit-content">${esc(claimCode)}</div>
+                     <p class="text-dim text-[11px]" style="margin:0">Vence en unos minutos. En cuanto lo recibas, el bot te confirma y este campo cambia solo — no hace falta recargar.</p>
+                     <button type="submit" formaction="/admin/config/owner-telegram/generate-code" formmethod="POST"
+                             class="text-[11px]" style="border:1px solid var(--line);color:var(--muted);padding:5px 10px;cursor:pointer;background:none;width:fit-content">Generar otro código</button>
+                   </div>`
+                : `<button type="submit" formaction="/admin/config/owner-telegram/generate-code" formmethod="POST"
+                           class="bigbtn font-display font-bold text-[12px] cursor-pointer" style="width:fit-content;background:var(--accent);border:1px solid var(--accent);color:#1a1206;padding:8px 16px">Generar código para vincular</button>`
+        }
+      </div>
+
+      <details style="border-top:1px solid var(--line);padding-top:18px">
+        <summary class="font-display font-semibold text-[12.5px] text-cream" style="cursor:pointer">📱 WhatsApp — avanzado</summary>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
+          <p class="text-dim text-[11px]" style="margin:0">Manda una plantilla APROBADA por Meta (no un mensaje libre), así que sí funciona aunque hayan pasado más de 24h desde el último contacto — pero conseguir esa aprobación toma días y necesita un número de WhatsApp Business de Twilio ya activo. No es algo que se resuelva solo desde aquí.</p>
+          <label class="text-dim text-[11.5px]">Tu WhatsApp (con lada de país, ej. +5215512345678)</label>
+          <input type="text" name="${SETTING_KEYS.ownerWaNumber}" value="${esc(waNumber)}" placeholder="+5215512345678" style="${INPUT_STYLE}">
+          ${
+            waTemplateReady
+              ? `<p class="text-[11.5px]" style="color:var(--ok);margin:0">✓ Plantilla configurada</p>`
+              : `<button type="submit" formaction="/admin/handoff/template/setup" formmethod="POST"
+                         class="text-[11px]" style="border:1px solid var(--line);color:var(--muted);padding:6px 12px;cursor:pointer;background:none;width:fit-content">Configurar plantilla en Twilio</button>`
+          }
+        </div>
+      </details>
+    </div>`;
+}
+
 /** Sección "Voz": la llave de ElevenLabs, la voz (con su muestra) y cómo contesta el bot. */
 function renderVoiceSection(
   settings: Record<string, string>,
@@ -517,6 +614,7 @@ const SECTIONS = [
   { id: "modelo", label: "Modelo de IA" },
   { id: "negocio", label: "Información del negocio" },
   { id: "correo", label: "Correo saliente" },
+  { id: "aviso", label: "Aviso al dueño" },
   { id: "instrucciones", label: "Instrucciones avanzadas" },
 ] as const;
 
@@ -549,6 +647,8 @@ export function renderConfig(
   visibleNavIds: Set<string> | null = null,
   /** Por qué no se pudo dejar lista la prueba de ElevenLabs — ver POST /admin/config. */
   elevenError?: string,
+  /** ¿Ya conectó Telegram como canal? El código de vínculo de "Aviso al dueño" lo necesita — sin canal, no hay a qué bot escribirle el código. */
+  telegramChannelConnected = false,
 ): string {
   const personalidadCards = CONTROL_LIST.filter((c) => c.key !== SETTING_KEYS.modelOverride)
     .map((c) => renderCardGroup(c, settings))
@@ -804,6 +904,10 @@ export function renderConfig(
             ${renderCorreoSalienteSection(settings)}
           </div>
 
+          <div class="cfg-pane" data-pane="aviso" style="display:none;flex-direction:column;gap:24px">
+            ${renderAvisoAlDuenoSection(settings, telegramChannelConnected)}
+          </div>
+
           <div class="cfg-pane" data-pane="instrucciones" style="display:none;flex-direction:column;gap:24px">
             <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:18px">
               ${renderTextArea({
@@ -923,6 +1027,15 @@ export function renderConfig(
           });
         });
       });
+
+      // ?section=aviso (ej. el botón "Configurar" de la alerta en /admin/overview)
+      // abre esa pestaña directo, en vez de dejar al dueño en "Personalidad"
+      // buscando dónde quedó lo que vino a configurar.
+      var wanted = new URLSearchParams(window.location.search).get("section");
+      if (wanted) {
+        var target = document.querySelector('.cfg-nav-item[data-target="' + wanted + '"]');
+        if (target) target.click();
+      }
 
       // Aviso de cambios sin guardar: cualquier input/change dentro del form
       // prende el punto y el botón de Descartar (que recarga, sin persistir).

@@ -5,13 +5,19 @@ import { TicketsRepo } from "../../src/db/tickets";
 import { ConversationsRepo } from "../../src/db/conversations";
 import { MessagesRepo } from "../../src/db/messages";
 import { BotConnectorsRepo } from "../../src/db/botConnectors";
-import { handoffHumanTool } from "../../src/tools/handoffHuman";
+import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
+import { handoffHumanTool, handoffNotifyStatus, notifyOwner } from "../../src/tools/handoffHuman";
 
 const readSecretMock = vi.fn();
 vi.mock("../../src/db/vault", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/db/vault")>();
   return { ...actual, readSecret: (...args: unknown[]) => readSecretMock(...args) };
 });
+
+const sendOutboundEmailMock = vi.fn(async (..._args: any[]) => ({ ok: true }) as { ok: boolean; error?: string });
+vi.mock("../../src/channels/email/outbound", () => ({
+  sendOutboundEmail: (...args: unknown[]) => sendOutboundEmailMock(...args),
+}));
 
 let env: any;
 let tickets: TicketsRepo;
@@ -33,6 +39,7 @@ beforeEach(async () => {
     DASHBOARD_BASE_URL: "https://dash.test",
     BOT_TIER: "free",
   };
+  sendOutboundEmailMock.mockReset().mockResolvedValue({ ok: true });
 });
 
 describe("handoffHumanTool", () => {
@@ -227,5 +234,144 @@ describe("handoffHumanTool — prioridad, quién pide, y transcripción", () => 
 
     expect(pushedBody.ticket.priority).toBe("high");
     expect(pushedBody.ticket.requester).toEqual({ name: "Ana", email: "ana@x.com" });
+  });
+});
+
+// Antes SOLO se podían configurar como variable de entorno del despliegue —
+// alguien sin acceso al servidor no tenía forma de ponerlas. Ahora
+// /admin/config → "Aviso al dueño" las guarda como settings normales, y el
+// entorno sigue ganando si está puesto (compatibilidad con despliegues viejos).
+describe("handoffNotifyStatus — un canal configurado SOLO en settings (sin variables de entorno)", () => {
+  it("Telegram: basta el chat_id en settings si el token del bot ya está en env", () => {
+    const status = handoffNotifyStatus({ TELEGRAM_BOT_TOKEN: "tok" } as any, {
+      [SETTING_KEYS.ownerTelegramChatId]: "123456",
+    });
+    expect(status.ok).toBe(true);
+    expect(status.channels).toEqual(["Telegram"]);
+  });
+
+  it("WhatsApp: número + plantilla en settings, con las credenciales de Twilio en env", () => {
+    const status = handoffNotifyStatus(
+      { TWILIO_ACCOUNT_SID: "AC1", TWILIO_AUTH_TOKEN: "tok", TWILIO_WA_FROM: "+10000000000" } as any,
+      { [SETTING_KEYS.ownerWaNumber]: "+5215500000000", [SETTING_KEYS.twilioHandoffContentSid]: "HX123" },
+    );
+    expect(status.channels).toEqual(["WhatsApp"]);
+  });
+
+  it("Email: el correo saliente ya configurado (Resend) + ownerEmail en settings — sin RESEND_API_KEY suelto", () => {
+    const status = handoffNotifyStatus(
+      {} as any,
+      {
+        [SETTING_KEYS.ownerEmail]: "dueno@negocio.com",
+        [SETTING_KEYS.emailOutboundProvider]: "resend",
+        [SETTING_KEYS.emailOutboundApiKey]: "re_123",
+        [SETTING_KEYS.emailFromAddress]: "bot@negocio.com",
+      },
+    );
+    expect(status.channels).toEqual(["Email"]);
+  });
+
+  it("correo saliente a medias (falta la API key): NO cuenta como canal listo", () => {
+    const status = handoffNotifyStatus(
+      {} as any,
+      { [SETTING_KEYS.ownerEmail]: "dueno@negocio.com", [SETTING_KEYS.emailOutboundProvider]: "resend" },
+    );
+    expect(status.channels).toEqual([]);
+  });
+
+  it("sin nada configurado, ni en env ni en settings: ok=false", () => {
+    expect(handoffNotifyStatus({} as any, {}).ok).toBe(false);
+  });
+
+  it("sin pasar settings (compatibilidad con la firma vieja): sigue funcionando solo con env", () => {
+    const status = handoffNotifyStatus({ TELEGRAM_BOT_TOKEN: "tok", OWNER_TELEGRAM_CHAT_ID: "999" } as any);
+    expect(status.channels).toEqual(["Telegram"]);
+  });
+});
+
+describe("notifyOwner — resuelve destinos desde settings cuando el entorno no los trae", () => {
+  it("Telegram: manda al chat_id guardado en settings", async () => {
+    const db = new Db(env.DB);
+    await new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.ownerTelegramChatId, "999888777");
+    let sentBody: any;
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      if (String(url).includes("sendMessage")) sentBody = JSON.parse(init.body);
+      return new Response("{}", { status: 200 });
+    }) as any;
+
+    await notifyOwner(
+      { ...env, TELEGRAM_BOT_TOKEN: "tok", RESEND_API_KEY: undefined, OWNER_EMAIL: undefined },
+      { reason: "soporte", summary: "no le funciona el checkout", ticketId: "t1" },
+      TEST_BOT_ID,
+    );
+
+    expect(sentBody.chat_id).toBe("999888777");
+    expect(sentBody.text).toContain("no le funciona el checkout");
+  });
+
+  it("WhatsApp: manda al número y con la plantilla guardados en settings", async () => {
+    const db = new Db(env.DB);
+    const repo = new SettingsRepo(db, TEST_BOT_ID);
+    await repo.set(SETTING_KEYS.ownerWaNumber, "+5215511112222");
+    await repo.set(SETTING_KEYS.twilioHandoffContentSid, "HXabc");
+    let waBody: URLSearchParams | undefined;
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      if (String(url).includes("Messages.json")) waBody = new URLSearchParams(init.body);
+      return new Response("{}", { status: 200 });
+    }) as any;
+
+    await notifyOwner(
+      {
+        ...env,
+        RESEND_API_KEY: undefined,
+        OWNER_EMAIL: undefined,
+        TWILIO_ACCOUNT_SID: "AC1",
+        TWILIO_AUTH_TOKEN: "tok",
+        TWILIO_WA_FROM: "+10000000000",
+      },
+      { reason: "x", summary: "y", ticketId: "t1" },
+      TEST_BOT_ID,
+    );
+
+    expect(waBody?.get("To")).toBe("whatsapp:+5215511112222");
+    expect(waBody?.get("ContentSid")).toBe("HXabc");
+  });
+
+  it("Email: usa el correo saliente ya configurado (sendOutboundEmail), no el RESEND_API_KEY suelto del entorno", async () => {
+    const db = new Db(env.DB);
+    const repo = new SettingsRepo(db, TEST_BOT_ID);
+    await repo.set(SETTING_KEYS.ownerEmail, "dueno@negocio.com");
+    await repo.set(SETTING_KEYS.emailOutboundProvider, "resend");
+    await repo.set(SETTING_KEYS.emailOutboundApiKey, "re_fake");
+    await repo.set(SETTING_KEYS.emailFromAddress, "bot@negocio.com");
+
+    await notifyOwner({ ...env, RESEND_API_KEY: undefined, OWNER_EMAIL: undefined }, { reason: "x", summary: "y", ticketId: "t1" }, TEST_BOT_ID);
+
+    expect(sendOutboundEmailMock).toHaveBeenCalledTimes(1);
+    expect(sendOutboundEmailMock.mock.calls[0][1]).toBe("dueno@negocio.com");
+  });
+
+  it("Email: si el correo saliente falla, cae al RESEND_API_KEY viejo del entorno en vez de perder el aviso", async () => {
+    sendOutboundEmailMock.mockResolvedValue({ ok: false, error: "no configurado" });
+    global.fetch = vi.fn(async () => new Response("{}", { status: 200 })) as any;
+
+    // env ya trae OWNER_EMAIL + RESEND_API_KEY del beforeEach (el camino viejo).
+    await notifyOwner(env, { reason: "x", summary: "y", ticketId: "t1" }, TEST_BOT_ID);
+
+    expect(sendOutboundEmailMock).toHaveBeenCalled(); // se intentó primero
+    // No se puede espiar el SDK de Resend sin mockearlo aparte, pero lo que
+    // sí se puede confirmar es que notifyOwner NO se detuvo en el intento
+    // fallido — no lanzó, y llegó hasta el final de la función.
+  });
+
+  it("sin ningún canal configurado (ni env ni settings): no truena, solo deja rastro en el log", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await notifyOwner(
+      { ...env, RESEND_API_KEY: undefined, OWNER_EMAIL: undefined },
+      { reason: "x", summary: "y", ticketId: "t1" },
+      TEST_BOT_ID,
+    );
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("SIN canal de aviso configurado"));
+    errorSpy.mockRestore();
   });
 });

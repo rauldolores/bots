@@ -105,6 +105,41 @@ export async function ingestMessage(
     });
   }
 
+  // Vínculo de Telegram para "Aviso al dueño" (/admin/config): el panel le
+  // muestra al dueño un código de un solo uso y le pide que se lo escriba a
+  // su propio bot — así se captura el chat_id sin que tenga que ir a
+  // buscarlo a mano (el problema real de siempre con Telegram). Va ANTES de
+  // cualquier otra guarda porque, la primera vez, quien manda esto todavía
+  // NO es "el dueño" para isOwnerMessage (ese chequeo depende de que el
+  // chat_id ya esté guardado — justo lo que este bloque resuelve).
+  if (payload.channel === "telegram" && payload.text && !payload.isOwnerMessage) {
+    const codigoEscrito = payload.text.trim().toUpperCase();
+    if (/^NODIA-[A-Z0-9]{6}$/.test(codigoEscrito)) {
+      const { SettingsRepo, SETTING_KEYS } = await import("../db/settings");
+      const settingsRepo = new SettingsRepo(db, botId);
+      const [codigoGuardado, expiraStr] = await Promise.all([
+        settingsRepo.get(SETTING_KEYS.ownerTelegramClaimCode),
+        settingsRepo.get(SETTING_KEYS.ownerTelegramClaimExpiresAt),
+      ]);
+      const vigente = codigoGuardado === codigoEscrito && Date.now() < Number(expiraStr ?? "0");
+      if (vigente) {
+        await settingsRepo.set(SETTING_KEYS.ownerTelegramChatId, payload.channelUserId);
+        await settingsRepo.set(SETTING_KEYS.ownerTelegramClaimCode, "");
+        await settingsRepo.set(SETTING_KEYS.ownerTelegramClaimExpiresAt, "");
+        await pickAdapter("telegram").sendReply(
+          {
+            channel: "telegram",
+            channelUserId: payload.channelUserId,
+            chunks: ["✅ Listo — a partir de ahora te aviso por aquí cuando el bot necesite que alguien intervenga."],
+          },
+          env,
+        );
+        // Vinculado, no un mensaje de cliente: no entra al buffer ni gasta LLM.
+        return { acknowledged: true, scheduledInMs: null };
+      }
+    }
+  }
+
   // El dueño intervino → se pausa el bot y el mensaje NO se procesa como
   // entrada del cliente.
   if (payload.isOwnerMessage) {

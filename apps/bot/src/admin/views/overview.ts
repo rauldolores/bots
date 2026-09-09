@@ -7,6 +7,7 @@ import { resolveAgentConfig, type AgentConfig } from "../../settings-loader";
 import { buildTools } from "../../tools";
 import { resolveProvider, modelIdFor } from "../../llm/provider";
 import { handoffNotifyStatus } from "../../tools/handoffHuman";
+import { SettingsRepo } from "../../db/settings";
 import { connectionsSummary } from "./conexiones";
 import { KbDocsRepo, FIXTURE_CHUNKS } from "../../kb/docs";
 import { InsightsRepo } from "../../db/insights";
@@ -55,6 +56,10 @@ export async function renderOverview(env: Env, botId: string, visibleNavIds: Set
   const bot = await new BotsRepo(db).getById(botId);
   const niche = getNiche(bot?.niche);
   const conn = await connectionsSummary(env, botId);
+  // Una sola lectura para las dos veces que se usa abajo (antes eran dos
+  // llamadas por separado, y encima env-only — un canal configurado SOLO
+  // desde el panel se reportaba como "sin aviso" aunque sí funcionara).
+  const notify = handoffNotifyStatus(env, await new SettingsRepo(db, botId).all());
   const oneDay = Date.now() - 86_400_000;
   const sevenDays = Date.now() - 7 * 86_400_000;
   const thirtyDays = Date.now() - 30 * 86_400_000;
@@ -323,7 +328,6 @@ export async function renderOverview(env: Env, botId: string, visibleNavIds: Set
           // Cuando el bot escala a humano, ¿alguien se entera? Antes esto
           // fallaba en silencio; ahora es la alerta principal de esta tarjeta
           // si falta configurar, porque un handoff mudo deja tickets huérfanos.
-          const notify = handoffNotifyStatus(env);
           if (notify.ok) return "";
           return `
           <div class="mt-3" style="display:flex;align-items:flex-start;gap:10px;background:#fdf4f3;border:1px solid #f0cfc9;border-radius:10px;padding:11px 13px">
@@ -332,7 +336,7 @@ export async function renderOverview(env: Env, botId: string, visibleNavIds: Set
               <div class="text-[13px] font-semibold" style="color:#7c2d12">Handoff sin aviso</div>
               <div class="text-[12px]" style="color:#8a5a44;line-height:1.45">El bot crea tickets pero nadie recibe notificación. Configura Telegram, WhatsApp o email del dueño.</div>
             </div>
-            <a href="/admin/conexiones" class="flex-none text-[11.5px]" style="background:var(--panel);border:1px solid #e5c9c2;border-radius:8px;padding:6px 10px;color:#7c2d12;white-space:nowrap">Configurar</a>
+            <a href="/admin/config?section=aviso" class="flex-none text-[11.5px]" style="background:var(--panel);border:1px solid #e5c9c2;border-radius:8px;padding:6px 10px;color:#7c2d12;white-space:nowrap">Configurar</a>
           </div>`;
         })()}
         <div class="mt-3" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -342,7 +346,6 @@ export async function renderOverview(env: Env, botId: string, visibleNavIds: Set
             return `<span class="text-[11.5px]" style="display:flex;align-items:center;gap:6px;color:${ok ? "var(--muted)" : color};border:1px solid ${ok ? "var(--line)" : color};border-radius:8px;padding:6px 10px">${ok ? "✓" : "⚠"} ${openTickets} tickets abiertos</span>`;
           })()}
           ${(() => {
-            const notify = handoffNotifyStatus(env);
             if (!notify.ok) return "";
             return `<span class="text-[11.5px]" style="display:flex;align-items:center;gap:6px;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:6px 10px">✓ handoff avisa por ${notify.channels.join(" + ")}</span>`;
           })()}

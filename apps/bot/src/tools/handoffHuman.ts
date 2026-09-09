@@ -105,30 +105,10 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
       // plataforma de tickets conectada, además se empuja ahí, best-effort.
       await pushToTicketsIfConnected(env, db, botId, ticketId, `[${reason}] ${summary}`, category, priority as TicketPriority, requesterName, requesterContact);
 
-      // Send email if Resend configured
-      if (env.RESEND_API_KEY && env.OWNER_EMAIL) {
-        try {
-          const bot = await new BotsRepo(db).getById(botId);
-          const resend = new Resend(env.RESEND_API_KEY);
-          await resend.emails.send({
-            from: `${bot?.business_name ?? env.BUSINESS_NAME} Bot <onboarding@resend.dev>`,
-            to: env.OWNER_EMAIL,
-            subject: `[Bot] Ticket ${reason}: ${summary.slice(0, 60)}`,
-            html: `<p><strong>Categoría:</strong> ${category}</p>
-                   <p><strong>Resumen:</strong> ${summary}</p>
-                   <p><a href="${env.ADMIN_BASE_URL ?? env.DASHBOARD_BASE_URL}/admin/tickets/${ticketId}">Ver ticket</a></p>`,
-          });
-        } catch (e) {
-          console.error("[handoffHuman] resend failed:", e);
-        }
-      }
-
-      // Notify the owner. The ticket is already saved in D1 + dashboard; these
-      // are just the "ping" so the owner sees it fast. Default channel is
-      // Telegram DM (free, reuses the bot token). Twilio WhatsApp is optional
-      // and, because this is a business-INITIATED message outside any 24h
-      // session window, MUST use a pre-approved Content Template (HSM) — free
-      // text would be rejected by WhatsApp. Both are best-effort.
+      // Avisar al dueño. El ticket ya quedó guardado (local + plataforma
+      // conectada, arriba); esto es solo el "ping" para que se entere rápido
+      // — por Telegram, WhatsApp (plantilla aprobada) y/o correo, cada uno
+      // best-effort e independiente. Ver notifyOwner().
       await notifyOwner(env, { reason, summary, ticketId }, botId);
 
       return { ticketId, created: true };
@@ -181,88 +161,116 @@ interface HandoffNotice {
 }
 
 /**
+ * A dónde manda cada canal, y si tiene TODO lo que necesita para de verdad
+ * enviar — una sola vez, la reusan handoffNotifyStatus() (solo lee) y
+ * notifyOwner() (manda de verdad), para que las dos nunca se desincronicen
+ * sobre qué cuenta como "configurado".
+ *
+ * `env` primero, `settings` como respaldo — el mismo criterio que ya usaba
+ * twilioHandoffContentSid: un despliegue viejo con las variables de entorno
+ * puestas a mano sigue funcionando igual, sin que el dueño tenga que volver
+ * a capturar nada en el panel.
+ */
+function resolveNotifyTargets(
+  env: Env,
+  settings: Record<string, string>,
+): {
+  telegramChatId: string;
+  telegramOk: boolean;
+  waNumber: string;
+  waContentSid: string;
+  waOk: boolean;
+  ownerEmail: string;
+  emailOk: boolean;
+} {
+  const get = (key: string) => settings[key]?.trim() || "";
+
+  const telegramChatId = env.OWNER_TELEGRAM_CHAT_ID || get(SETTING_KEYS.ownerTelegramChatId);
+  const telegramOk = Boolean(env.TELEGRAM_BOT_TOKEN && telegramChatId);
+
+  const waNumber = env.OWNER_WA_NUMBER || get(SETTING_KEYS.ownerWaNumber);
+  const waContentSid = env.TWILIO_HANDOFF_CONTENT_SID || get(SETTING_KEYS.twilioHandoffContentSid);
+  const waOk = Boolean(waNumber && env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_WA_FROM && waContentSid);
+
+  const ownerEmail = env.OWNER_EMAIL || get(SETTING_KEYS.ownerEmail);
+  // Dos formas de poder mandar el correo: la vieja (RESEND_API_KEY suelto,
+  // solo Resend, env-only) o la nueva — reusa lo que ya se configuró en
+  // /admin/config → "Correo saliente" (Resend o Mailgun), así el dueño no
+  // captura una segunda llave solo para esto.
+  const emailViaLegacy = Boolean(env.RESEND_API_KEY);
+  const emailViaOutboundSettings = Boolean(get(SETTING_KEYS.emailOutboundProvider) && get(SETTING_KEYS.emailOutboundApiKey) && get(SETTING_KEYS.emailFromAddress));
+  const emailOk = Boolean(ownerEmail && (emailViaLegacy || emailViaOutboundSettings));
+
+  return { telegramChatId, telegramOk, waNumber, waContentSid, waOk, ownerEmail, emailOk };
+}
+
+/**
  * Qué canales de aviso al dueño están configurados. Lo usa el dashboard
  * (Salud del bot) para hacer VISIBLE cuando un handoff no le avisaría a nadie
  * — antes fallaba en silencio y el ticket se quedaba huérfano.
+ *
+ * `settings` es opcional para no romper a quien ya la llamaba solo con
+ * `env` — pero sin ella, un canal configurado ÚNICAMENTE desde el panel
+ * (no por variable de entorno) se reporta como "no configurado". Los
+ * llamadores nuevos (overview.ts) sí la pasan.
  */
-export function handoffNotifyStatus(env: Env): { ok: boolean; channels: string[] } {
+export function handoffNotifyStatus(env: Env, settings: Record<string, string> = {}): { ok: boolean; channels: string[] } {
+  const t = resolveNotifyTargets(env, settings);
   const channels: string[] = [];
-  if (env.TELEGRAM_BOT_TOKEN && env.OWNER_TELEGRAM_CHAT_ID) channels.push("Telegram");
-  if (
-    env.OWNER_WA_NUMBER &&
-    env.TWILIO_ACCOUNT_SID &&
-    env.TWILIO_AUTH_TOKEN &&
-    env.TWILIO_WA_FROM &&
-    env.TWILIO_HANDOFF_CONTENT_SID
-  )
-    channels.push("WhatsApp");
-  if (env.RESEND_API_KEY && env.OWNER_EMAIL) channels.push("Email");
+  if (t.telegramOk) channels.push("Telegram");
+  if (t.waOk) channels.push("WhatsApp");
+  if (t.emailOk) channels.push("Email");
   return { ok: channels.length > 0, channels };
 }
 
 /**
  * Best-effort owner notification on handoff. Default = Telegram DM (free,
- * reuses the bot token). Optional = Twilio WhatsApp via an approved Content
- * Template. Each channel is independent and never throws into the tool.
+ * reuses the bot token). WhatsApp = Twilio vía plantilla aprobada. Email =
+ * el correo saliente que ya tenga configurado (Resend/Mailgun) o el
+ * RESEND_API_KEY viejo del entorno. Cada canal es independiente y nunca
+ * lanza hacia la tool — un canal roto no debe tumbar el aviso de los demás.
  */
 export async function notifyOwner(rawEnv: Env, notice: HandoffNotice, botIdOverride?: string): Promise<void> {
   const notifyDb = new Db(rawEnv.DB);
   const notifyBotId = botIdOverride ?? (await resolveBotId(notifyDb));
   // El aviso al dueño sale por los MISMOS canales que le habla al cliente
-  // (el token de Telegram/Twilio de este bot, si ya lo conectó) — sin esto,
-  // un bot con canal propio le avisaría al dueño con el token de otro bot.
+  // (el token de Telegram/Twilio/correo de este bot, si ya lo conectó) —
+  // sin esto, un bot con canal propio le avisaría al dueño con el token de
+  // otro bot. "email" aquí es el SALIENTE (settings.email_outbound_*), no
+  // el conector de correo ENTRANTE de bot_channels.
   const env = await resolveChannelEnv(
-    await resolveChannelEnv(rawEnv, notifyBotId, "telegram"),
+    await resolveChannelEnv(await resolveChannelEnv(rawEnv, notifyBotId, "telegram"), notifyBotId, "twilio"),
     notifyBotId,
-    "twilio",
+    "email",
   );
   const ticketUrl = `${env.ADMIN_BASE_URL ?? env.DASHBOARD_BASE_URL}${notice.ruta ?? "/admin/tickets"}`;
   const titulo = notice.titulo ?? "Nuevo ticket";
 
-  // El SID de la plantilla puede venir del secret O del setting que escribe el
-  // setup del panel. Se resuelve ANTES del guard: si vive solo en settings, el
-  // guard sync (env-only) diría "sin canal" y saldríamos sin avisar a nadie.
-  let handoffContentSid = env.TWILIO_HANDOFF_CONTENT_SID ?? "";
-  if (!handoffContentSid) {
-    try {
-      const { SettingsRepo, SETTING_KEYS } = await import("../db/settings");
-      const settingsDb = new Db(env.DB);
-      handoffContentSid =
-        (await new SettingsRepo(settingsDb, notifyBotId).get(SETTING_KEYS.twilioHandoffContentSid)) ?? "";
-    } catch {
-      // settings no disponible — se comporta como no configurado
-    }
-  }
-  const waViaSetting = Boolean(
-    handoffContentSid && env.OWNER_WA_NUMBER && env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_WA_FROM,
-  );
+  const settings = await new SettingsRepo(new Db(env.DB), notifyBotId).all().catch(() => ({}) as Record<string, string>);
+  const t = resolveNotifyTargets(env, settings);
 
   // Fail-LOUD (en logs) cuando no hay ningún canal de aviso configurado: el
   // ticket existe en el dashboard pero nadie se entera. El dashboard también
   // lo muestra en "Salud del bot" (handoffNotifyStatus).
-  if (!handoffNotifyStatus(env).ok && !waViaSetting) {
+  if (!t.telegramOk && !t.waOk && !t.emailOk) {
     console.error(
       `[notifyOwner] ticket ${notice.ticketId} creado pero SIN canal de aviso configurado ` +
-        "(faltan OWNER_TELEGRAM_CHAT_ID, OWNER_WA_NUMBER+template o RESEND_API_KEY+OWNER_EMAIL) — el dueño no será notificado",
+        "(falta Telegram/WhatsApp/correo del dueño en /admin/config → Aviso al dueño) — el dueño no será notificado",
     );
     return;
   }
 
   // --- Telegram DM (default) ------------------------------------------------
-  if (env.TELEGRAM_BOT_TOKEN && env.OWNER_TELEGRAM_CHAT_ID) {
+  if (t.telegramOk) {
     try {
-      await fetch(
-        `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: env.OWNER_TELEGRAM_CHAT_ID,
-            text:
-              `🚨 ${titulo} [${notice.reason}]\n${notice.summary}\n\nVer: ${ticketUrl}`,
-          }),
-        },
-      );
+      await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: t.telegramChatId,
+          text: `🚨 ${titulo} [${notice.reason}]\n${notice.summary}\n\nVer: ${ticketUrl}`,
+        }),
+      });
     } catch (e) {
       console.error("[notifyOwner] telegram failed:", e);
     }
@@ -272,20 +280,13 @@ export async function notifyOwner(rawEnv: Env, notice: HandoffNotice, botIdOverr
   // A business-initiated WhatsApp message outside a 24h session window REQUIRES
   // an approved template — Twilio rejects free-form Body. We send ContentSid +
   // ContentVariables (the template's {{1}}, {{2}}, {{3}} placeholders), not Body.
-  // El SID (secret o setting) ya se resolvió arriba, antes del guard.
-  if (
-    env.OWNER_WA_NUMBER &&
-    env.TWILIO_ACCOUNT_SID &&
-    env.TWILIO_AUTH_TOKEN &&
-    env.TWILIO_WA_FROM &&
-    handoffContentSid
-  ) {
+  if (t.waOk) {
     try {
       const auth = btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`);
       const body = new URLSearchParams({
         From: `whatsapp:${env.TWILIO_WA_FROM}`,
-        To: `whatsapp:${env.OWNER_WA_NUMBER}`,
-        ContentSid: handoffContentSid,
+        To: `whatsapp:${t.waNumber}`,
+        ContentSid: t.waContentSid,
         // Template placeholders: {{1}}=reason, {{2}}=summary, {{3}}=ticket URL.
         // The member authors the template in Twilio to match this ordering.
         ContentVariables: JSON.stringify({
@@ -294,19 +295,45 @@ export async function notifyOwner(rawEnv: Env, notice: HandoffNotice, botIdOverr
           "3": ticketUrl,
         }),
       });
-      await fetch(
-        `https://api.twilio.com/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID}/Messages.json`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Basic ${auth}`,
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          body,
+      await fetch(`https://api.twilio.com/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID}/Messages.json`, {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${auth}`,
+          "Content-Type": "application/x-www-form-urlencoded",
         },
-      );
+        body,
+      });
     } catch (e) {
       console.error("[notifyOwner] twilio template failed:", e);
+    }
+  }
+
+  // --- Correo ------------------------------------------------------------
+  // Dos caminos: el saliente que ya tenga configurado el bot (Resend o
+  // Mailgun, misma config que usa para responderle a clientes), o el
+  // RESEND_API_KEY viejo del entorno (compatibilidad con despliegues que ya
+  // lo traían puesto así, de antes de que existiera "Correo saliente").
+  if (t.emailOk) {
+    const subject = `[Bot] ${titulo} [${notice.reason}]: ${notice.summary.slice(0, 60)}`;
+    const text = `${notice.summary}\n\nVer: ${ticketUrl}`;
+    try {
+      const { sendOutboundEmail } = await import("../channels/email/outbound");
+      const viaOutbound = await sendOutboundEmail(env, t.ownerEmail, subject, text);
+      if (!viaOutbound.ok && env.RESEND_API_KEY) {
+        // El correo saliente no quedó configurado (o falló) pero SÍ hay el
+        // RESEND_API_KEY viejo del entorno — se intenta por ahí antes de
+        // darlo por perdido, igual que se hacía antes de esta función tener
+        // un camino de correo propio.
+        const bot = await new BotsRepo(new Db(env.DB)).getById(notifyBotId);
+        await new Resend(env.RESEND_API_KEY).emails.send({
+          from: `${bot?.business_name ?? env.BUSINESS_NAME} Bot <onboarding@resend.dev>`,
+          to: t.ownerEmail,
+          subject,
+          html: `<p>${notice.summary}</p><p><a href="${ticketUrl}">Ver ticket</a></p>`,
+        });
+      }
+    } catch (e) {
+      console.error("[notifyOwner] email failed:", e);
     }
   }
 }
