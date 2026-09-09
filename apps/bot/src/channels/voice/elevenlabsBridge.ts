@@ -28,6 +28,7 @@ import { transferirLlamadaViva } from "./transfer";
 import { encolarAnalisisDeLlamada } from "./analisisPostLlamada";
 import { verificarLlamada } from "./verificarPromesas";
 import { validarParametros } from "./validarParametros";
+import { esLecturaMcp, ESPERA_LECTURA_MCP_MS } from "./delegacion";
 import { buildClearMessage, buildMediaMessage } from "./mediaStreamProtocol";
 import { bloqueLlamadaEnCurso, bloqueLimites, VOICE_BEHAVIOR_ADDENDUM } from "./voiceInstructions";
 import { resolveVoiceGreeting } from "./voiceGreeting";
@@ -371,7 +372,11 @@ export class ElevenLabsCallBridge implements CallBridge {
     // se delega: captureLead, scheduleAppointment, etc. son escrituras
     // rápidas a nuestra propia base y esperar por ellas no vale la vuelta de
     // "consultar" después.
-    if (this.mcpToolNames.has(nombre)) {
+    // Solo las ESCRITURAS se delegan. Una lectura tiene que volver dentro del
+    // mismo turno: su respuesta es justo lo que el agente necesita para poder
+    // contestar, y delegarla lo obliga a un "pregunta después" que en una
+    // llamada real no llega a completar (ver delegacion.ts para el caso).
+    if (this.mcpToolNames.has(nombre) && !esLecturaMcp(nombre)) {
       const tareaId = crypto.randomUUID();
       const tarea: TareaDelegada = { toolName: nombre, estado: "en_progreso", iniciadaEn: Date.now() };
       this.tareasDelegadas.set(tareaId, tarea);
@@ -435,10 +440,13 @@ export class ElevenLabsCallBridge implements CallBridge {
 
     // El mismo tope que el puente de OpenAI: una herramienta lenta no puede
     // dejar al cliente esperando en silencio indefinidamente.
+    // Una lectura de MCP tiene su propio tope: medimos 4-6s reales contra un
+    // servidor ajeno, y los 8s de una tool local se le quedan cortos.
+    const tope = this.mcpToolNames.has(nombre) ? ESPERA_LECTURA_MCP_MS : TOOL_TIMEOUT_MS;
     try {
       const resultado = await Promise.race([
         def.execute(parametros, {} as any),
-        new Promise((_r, reject) => setTimeout(() => reject(new Error("tool_timeout")), TOOL_TIMEOUT_MS)),
+        new Promise((_r, reject) => setTimeout(() => reject(new Error("tool_timeout")), tope)),
       ]);
       // Una tool que NO lanza puede haber fallado igual: las del Agent Core
       // devuelven { error: "..." } en vez de tirar una excepción (es la misma
@@ -488,7 +496,17 @@ export class ElevenLabsCallBridge implements CallBridge {
       // El tercer parámetro es is_error: sin él, ElevenLabs le entrega al
       // agente un fallo como si fuera un resultado bueno, y el agente le
       // promete al cliente algo que no ocurrió.
-      this.client?.sendToolResult(toolCallId, resultado, motivo !== null);
+      //
+      // Cuando falla, lo que se le manda NO es el resultado crudo sino el
+      // motivo con su instrucción (ver pistaAccionable): un "column X does
+      // not exist" a secas es un callejón sin salida, y con el siguiente paso
+      // escrito el agente se corrige dentro de la misma llamada. Ya se le vio
+      // hacerlo el 2026-09-09.
+      this.client?.sendToolResult(
+        toolCallId,
+        motivo ? { error: pistaAccionable(motivo) } : resultado,
+        motivo !== null,
+      );
     } catch (e) {
       const porTiempo = e instanceof Error && e.message === "tool_timeout";
       logVoiceEvent(porTiempo ? "elevenlabs_tool_timeout" : "elevenlabs_tool_failed", {

@@ -109,7 +109,80 @@ async function esperarTareaLista(bridge: Awaited<ReturnType<typeof ElevenLabsCal
   }
 }
 
-describe("tool MCP: se delega — 'en_progreso' de inmediato, y consultar_tarea trae el resultado real", () => {
+/**
+ * Una LECTURA no se delega: su respuesta es lo que el agente necesita para
+ * poder contestar.
+ *
+ * Llamada del 2026-09-09 15:35, completa: el agente llamó vinqulia_get_schema,
+ * recibió "en_progreso", preguntó por él un segundo antes de que estuviera
+ * listo, y ya no volvió a preguntar. El esquema llegó y nadie lo recogió; sin
+ * él, volvió a adivinar nombres de tabla. 79 segundos, cinco "un momento más",
+ * y el cliente sin su respuesta.
+ */
+describe("tool MCP de LECTURA: se espera y el dato vuelve en el mismo turno", () => {
+  it("el agente recibe el resultado real, no un 'en_progreso'", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "vinqulia",
+      name: "Vinqulia",
+      config: { url: "https://mcp.vinqulia.example.com/mcp" },
+    });
+    createMCPClientMock.mockResolvedValue({
+      tools: async () => ({
+        get_schema: {
+          description: "Devuelve el esquema",
+          inputSchema: jsonSchema({ type: "object", properties: {} }),
+          // Tarda como las de verdad (4-6s medidos); aquí basta con que tarde algo.
+          execute: vi.fn(
+            () => new Promise((resolve) => setTimeout(() => resolve({ tablas: ["tickets", "contacts"] }), 120)),
+          ),
+        },
+      }),
+    });
+    const bridge = await startBridge("+5215500000009");
+
+    const { resultado, esError } = await llamarTool(bridge, "vinqulia_get_schema", {});
+
+    expect(esError).toBe(false);
+    // Lo que importa: NO es un "en_progreso" que haya que ir a buscar después.
+    expect((resultado as any).estado).toBeUndefined();
+    expect((resultado as any).tablas).toEqual(["tickets", "contacts"]);
+  });
+
+  it("si la lectura falla, el error vuelve con la instrucción para corregirse", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "vinqulia2",
+      name: "Vinqulia2",
+      config: { url: "https://mcp.v2.example.com/mcp" },
+    });
+    createMCPClientMock.mockResolvedValue({
+      tools: async () => ({
+        query: {
+          description: "Consulta",
+          inputSchema: jsonSchema({ type: "object", properties: { sql: { type: "string" } } }),
+          // Forma real de un error de MCP: se DEVUELVE, no se lanza.
+          execute: vi.fn(async () => ({
+            isError: true,
+            content: [{ type: "text", text: 'Error: column "summary" does not exist' }],
+          })),
+        },
+      }),
+    });
+    const bridge = await startBridge("+5215500000010");
+
+    const { resultado, esError } = await llamarTool(bridge, "vinqulia2_query", { sql: "SELECT summary FROM tickets" });
+
+    expect(esError).toBe(true);
+    const texto = JSON.stringify(resultado);
+    expect(texto).toContain("does not exist"); // el motivo real
+    expect(texto).toContain("_get_schema"); // y qué hacer al respecto
+  });
+});
+
+describe("tool MCP de ESCRITURA: se delega — 'en_progreso' de inmediato, y consultar_tarea trae el resultado real", () => {
   it("responde de inmediato aunque la tool tarde, y el resultado real llega después", async () => {
     await new BotConnectorsRepo(db).upsert({
       botId: TEST_BOT_ID,
@@ -126,8 +199,8 @@ describe("tool MCP: se delega — 'en_progreso' de inmediato, y consultar_tarea 
     );
     createMCPClientMock.mockResolvedValue({
       tools: async () => ({
-        searchTickets: {
-          description: "Busca tickets abiertos por email",
+        createTicket: {
+          description: "Abre un ticket",
           inputSchema: jsonSchema({ type: "object", properties: { email: { type: "string" } }, required: ["email"] }),
           execute,
         },
@@ -136,7 +209,7 @@ describe("tool MCP: se delega — 'en_progreso' de inmediato, y consultar_tarea 
     const bridge = await startBridge("+5215500000001");
 
     const startedAt = Date.now();
-    const { resultado, esError } = await llamarTool(bridge, "zendesk_searchTickets", { email: "cliente@x.com" });
+    const { resultado, esError } = await llamarTool(bridge, "zendesk_createTicket", { email: "cliente@x.com" });
     expect(Date.now() - startedAt).toBeLessThan(200); // no esperó los 300ms reales de la tool
     expect(esError).toBe(false); // "en_progreso" no es un fallo
     expect((resultado as any).estado).toBe("en_progreso");
@@ -158,8 +231,8 @@ describe("tool MCP: se delega — 'en_progreso' de inmediato, y consultar_tarea 
     });
     createMCPClientMock.mockResolvedValue({
       tools: async () => ({
-        lookup: {
-          description: "Busca algo",
+        registrar: {
+          description: "Escribe algo",
           inputSchema: jsonSchema({ type: "object", properties: {} }),
           execute: vi.fn(async () => {
             throw new Error("ETIMEDOUT: conexión perdida con el CRM interno");
@@ -169,7 +242,7 @@ describe("tool MCP: se delega — 'en_progreso' de inmediato, y consultar_tarea 
     });
     const bridge = await startBridge("+5215500000002");
 
-    const { resultado } = await llamarTool(bridge, "flaky_lookup", {});
+    const { resultado } = await llamarTool(bridge, "flaky_registrar", {});
     expect((resultado as any).estado).toBe("en_progreso");
 
     const consulta = await esperarTareaLista(bridge, (resultado as any).tarea_id);
