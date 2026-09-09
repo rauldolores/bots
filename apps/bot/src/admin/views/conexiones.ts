@@ -16,9 +16,17 @@ import { VoiceNumbersRepo, DuplicateVoiceNumberError } from "../../db/voiceNumbe
 import { createSecret, updateSecret, deleteSecret, readSecret } from "../../db/vault";
 import { setTelegramWebhook } from "../../channels/telegram";
 import { registerKapsoWebhook } from "../../channels/kapso";
+import {
+  esProveedorOAuth,
+  tieneAppOAuth,
+  guardarAppOAuth,
+  clientIdGuardado,
+  type ProveedorOAuth,
+} from "../../connectors/oauthApp";
 import { listMcpConnectorTools } from "../../tools/mcpTools";
 import { mcpToolPrefixes } from "../../connectors/mcpNaming";
 import { resolveConnectorCreds } from "../../connectors/creds";
+import type { PipelineStageOption } from "../../connectors/types";
 import {
   CRM_PROVIDERS,
   TICKET_PROVIDERS,
@@ -26,6 +34,7 @@ import {
   MCP_PROVIDERS,
   CRM_ADAPTERS,
   TICKET_ADAPTERS,
+  CALENDAR_ADAPTERS,
   CATEGORY_LABELS,
   familyPeers,
   type ConnectorCategory,
@@ -460,6 +469,120 @@ function modalShell(icon: string, title: string, inner: string): string {
       <div class="p-[18px]">${inner}</div>
     </div>
   </div>`;
+}
+
+// ── Aplicación OAuth del dueño (Google Calendar / Jira) ───────────────────
+//
+// Estas dos conexiones necesitan una app registrada en Google Cloud o en
+// Atlassian ANTES de poder pedir el consentimiento. Eso vivía solo en
+// variables de entorno, y la tarjeta le decía a alguien que no toca
+// servidores "Falta configurar GOOGLE_CALENDAR_CLIENT_ID (y su _SECRET) en
+// este despliegue" — un mensaje correcto y completamente inútil para él. Se
+// captura aquí, con los pasos, como cualquier otro dato.
+
+const PASOS_APP_OAUTH: Record<ProveedorOAuth, { nombre: string; icono: string; pasos: string[]; idLabel: string; idPlaceholder: string }> = {
+  "google-calendar": {
+    nombre: "Google Calendar",
+    icono: "calendar-clock",
+    pasos: [
+      'Entra a <span class="font-mono">console.cloud.google.com</span> y crea un proyecto (o usa uno que ya tengas).',
+      'En <b>APIs y servicios → Biblioteca</b>, busca <b>Google Calendar API</b> y dale <b>Habilitar</b>.',
+      'En <b>APIs y servicios → Pantalla de consentimiento</b>, complétala con los datos de tu negocio (tipo "Externo" está bien).',
+      'En <b>APIs y servicios → Credenciales → Crear credenciales → ID de cliente de OAuth</b>, elige <b>Aplicación web</b>.',
+      "En <b>URI de redireccionamiento autorizados</b> pega exactamente esta dirección:",
+    ],
+    idLabel: "ID de cliente",
+    idPlaceholder: "123456789-abc.apps.googleusercontent.com",
+  },
+  jira: {
+    nombre: "Jira",
+    icono: "life-buoy",
+    pasos: [
+      'Entra a <span class="font-mono">developer.atlassian.com/console/myapps</span> y crea una app: <b>Create → OAuth 2.0 integration</b>.',
+      'En <b>Permissions</b>, agrega <b>Jira API</b> y dale <b>Add</b>.',
+      "En <b>Authorization → OAuth 2.0 (3LO) → Configure</b>, pega exactamente esta dirección como Callback URL:",
+    ],
+    idLabel: "Client ID",
+    idPlaceholder: "AbCdEf123456...",
+  },
+};
+
+/**
+ * El diálogo para registrar la app. Muestra la URL de redirección ya armada
+ * para copiar: es el dato que el proveedor pide y que el dueño no tiene forma
+ * de adivinar, y equivocarse en un carácter da un error que no explica nada.
+ */
+export async function renderAppOAuthModal(
+  env: Env,
+  botId: string,
+  provider: string,
+  opts?: { error?: string },
+): Promise<string> {
+  if (!esProveedorOAuth(provider)) {
+    return modalShell("plug", "Conectar", `<div class="text-[12.5px]" style="color:var(--bad)">Proveedor desconocido.</div>`);
+  }
+  const info = PASOS_APP_OAUTH[provider];
+  const base = (env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
+  const redirectUri = `${base}/admin/conexiones/oauth/${provider}/callback`;
+  const idActual = await clientIdGuardado(new Db(env.DB), botId, provider);
+
+  const pasos = info.pasos
+    .map((p, i) => `<li style="margin-bottom:6px"><span class="font-mono" style="color:var(--accent-2)">${i + 1}.</span> ${p}</li>`)
+    .join("");
+  const error = opts?.error
+    ? `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;margin-bottom:14px">${esc(opts.error)}</div>`
+    : "";
+
+  return modalShell(
+    info.icono,
+    `Registrar tu aplicación de ${info.nombre}`,
+    `
+    <p class="text-[12.5px]" style="color:var(--muted);margin:0 0 14px;line-height:1.6">
+      Esto se hace <b>una sola vez</b>. Después, conectar ${esc(info.nombre)} es un clic.
+    </p>
+    <ol class="text-[12.5px]" style="color:var(--muted);line-height:1.6;padding-left:0;list-style:none;margin:0 0 12px">${pasos}</ol>
+    ${copyRow("URI de redirección", redirectUri)}
+    <p class="text-[12.5px]" style="color:var(--muted);margin:12px 0 16px;line-height:1.6">
+      Al guardar te va a dar dos datos. Pégalos aquí abajo:
+    </p>
+    ${error}
+    <form hx-post="/admin/conexiones/oauth/${provider}/app" hx-target="#modal-root" hx-swap="innerHTML">
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+        <label for="client_id" class="font-display font-semibold text-[12.5px] text-cream">${esc(info.idLabel)}</label>
+        <input type="text" id="client_id" name="client_id" required value="${esc(idActual)}" placeholder="${esc(info.idPlaceholder)}"
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+        <label for="client_secret" class="font-display font-semibold text-[12.5px] text-cream">Secreto de cliente</label>
+        <input type="password" id="client_secret" name="client_secret" required placeholder="········"
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
+        ${idActual ? `<span class="text-[11px]" style="color:var(--dim)">Ya hay uno guardado — escribe el secreto otra vez para reemplazarlo.</span>` : ""}
+      </div>
+      <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:10px">Guardar y continuar</button>
+    </form>`,
+  );
+}
+
+/**
+ * Guarda la app y devuelve a dónde mandar al dueño: directo al consentimiento
+ * del proveedor, sin un paso intermedio de "ahora sí dale a Conectar".
+ */
+export async function guardarAppOAuthDesdePanel(
+  env: Env,
+  botId: string,
+  provider: string,
+  form: FormData,
+): Promise<{ redirectTo: string } | { modal: string }> {
+  if (!esProveedorOAuth(provider)) {
+    return { modal: await renderAppOAuthModal(env, botId, provider) };
+  }
+  const clientId = String(form.get("client_id") ?? "").trim();
+  const clientSecret = String(form.get("client_secret") ?? "").trim();
+  if (!clientId || !clientSecret) {
+    return { modal: await renderAppOAuthModal(env, botId, provider, { error: "Faltan datos — los dos campos son obligatorios." }) };
+  }
+  await guardarAppOAuth(new Db(env.DB), botId, provider, clientId, clientSecret);
+  return { redirectTo: `/admin/conexiones/oauth/${provider}/start` };
 }
 
 /** Diálogo de conexión: instrucciones paso a paso + el formulario para pegar el token. */
@@ -1056,7 +1179,7 @@ export function categoryOfProvider(provider: string): ConnectorCategory | null {
   return null;
 }
 
-async function renderConnectorCard(db: Db, botId: string, meta: ConnectorMeta): Promise<string> {
+async function renderConnectorCard(env: Env, db: Db, botId: string, meta: ConnectorMeta): Promise<string> {
   if (meta.comingSoon) {
     return `
     <div class="bg-panel border border-line" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;opacity:.6">
@@ -1088,6 +1211,14 @@ async function renderConnectorCard(db: Db, botId: string, meta: ConnectorMeta): 
          <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Desconectar</button>
        </form>`;
 
+  // Un calendario que vive DENTRO de un CRM comparte tabla con los demás
+  // pendientes; el tipo es lo único que distingue una cita en el tablero.
+  const taskTypeButton =
+    ok && meta.category === "calendar" && CALENDAR_ADAPTERS[meta.id]?.listTaskTypes
+      ? `<button type="button" class="text-[11px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 10px;cursor:pointer;background:none"
+                hx-get="/admin/conexiones/connectors/calendar/${encodeURIComponent(meta.id)}/tipo-tarea" hx-target="#modal-root" hx-swap="innerHTML">Tipo de tarea</button>`
+      : "";
+
   const stageButton =
     ok && meta.category === "crm" && CRM_ADAPTERS[meta.id]?.listPipelineStages
       ? `<button type="button" class="text-[11px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 10px;cursor:pointer;background:none"
@@ -1111,15 +1242,30 @@ async function renderConnectorCard(db: Db, botId: string, meta: ConnectorMeta): 
 
   let action: string;
   if (!ok) {
-    action =
-      meta.authType === "oauth"
-        ? `<a href="/admin/conexiones/oauth/${meta.id}/start" class="text-[12px]" style="display:inline-block;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600;text-decoration:none">Conectar con ${esc(meta.name)}</a>`
+    if (meta.authType === "oauth") {
+      // Sin la app registrada, "Conectar" no puede llevar a ningún lado: el
+      // proveedor necesita un client_id que todavía no existe. Antes el botón
+      // igual mandaba al arranque y volvía con "falta configurar
+      // GOOGLE_CALENDAR_CLIENT_ID en este despliegue" — culpando al servidor
+      // de algo que el dueño podía resolver él. Ahora el primer clic abre el
+      // diálogo que la registra, y a partir del segundo va directo.
+      const hayApp = await tieneAppOAuth(env, db, botId, meta.id);
+      action = hayApp
+        ? `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+             <a href="/admin/conexiones/oauth/${meta.id}/start" class="text-[12px]" style="display:inline-block;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600;text-decoration:none">Conectar con ${esc(meta.name)}</a>
+             <button type="button" class="text-[11px]" style="border:none;background:none;color:var(--dim);cursor:pointer;text-decoration:underline;padding:0"
+                     hx-get="/admin/conexiones/oauth/${meta.id}/app" hx-target="#modal-root" hx-swap="innerHTML">Cambiar la aplicación</button>
+           </div>`
         : `<button type="button" class="text-[12px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600"
+                   hx-get="/admin/conexiones/oauth/${meta.id}/app" hx-target="#modal-root" hx-swap="innerHTML">Conectar con ${esc(meta.name)}</button>`;
+    } else {
+      action = `<button type="button" class="text-[12px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600"
                hx-get="/admin/conexiones/connectors/${meta.category}/${meta.id}/connect" hx-target="#modal-root" hx-swap="innerHTML">Conectar</button>`;
+    }
   } else if (editableConfigFields(meta).length) {
-    action = `${renderPostAuthForm(meta, row!)}${stageButton}${disconnectForm}`;
+    action = `${renderPostAuthForm(meta, row!)}${stageButton}${taskTypeButton}${disconnectForm}`;
   } else {
-    action = `${stageButton}${disconnectForm}`;
+    action = `${stageButton}${taskTypeButton}${disconnectForm}`;
   }
 
   // Un CRM conectado que solo crea contactos y nunca la oportunidad deja leads
@@ -1248,6 +1394,83 @@ export async function renderPipelineStageModal(env: Env, botId: string, provider
   );
 }
 
+/**
+ * Diálogo: con qué tipo de tarea nace una cita en un calendario que vive
+ * DENTRO de un CRM.
+ *
+ * Importa por LECTURA, no por funcionamiento: la cita se agenda igual, pero
+ * si nace con el tipo genérico queda en el tablero con la misma píldora que
+ * un recordatorio de llamar, y el equipo no las distingue. Las opciones salen
+ * del catálogo del propio CRM por lo mismo que la etapa inicial — se guarda
+ * por VALUE interno y se muestra por LABEL, así que teclearlo a mano guarda
+ * algo que su tablero no dibuja.
+ */
+export async function renderTaskTypeModal(env: Env, botId: string, provider: string): Promise<string> {
+  const TITULO = "Tipo de tarea";
+  const db = new Db(env.DB);
+  const connector = await new BotConnectorsRepo(db).getByBotAndProvider(botId, provider);
+  const meta = CALENDAR_PROVIDERS[provider];
+  const adapter = CALENDAR_ADAPTERS[provider];
+  if (!connector || !meta) {
+    return modalShell("calendar-clock", TITULO, `<div class="text-[12.5px]" style="color:var(--bad)">Este conector ya no existe.</div>`);
+  }
+  if (!adapter?.listTaskTypes) {
+    return modalShell(
+      "calendar-clock",
+      TITULO,
+      `<p class="text-[12.5px]" style="color:var(--muted);margin:0">${esc(meta.name)} no maneja tipos de tarea.</p>`,
+    );
+  }
+
+  const creds = await resolveConnectorCreds(db, connector, env);
+  if (!creds) {
+    return modalShell("calendar-clock", TITULO, `<div class="text-[12.5px]" style="color:var(--bad)">No se pudieron leer las credenciales de ${esc(meta.name)}.</div>`);
+  }
+  const result = await adapter.listTaskTypes(creds);
+  if (!result.ok || result.items.length === 0) {
+    // El error del adaptador dice qué encontró de verdad. Un selector vacío
+    // sin explicación deja al dueño sin saber si el problema es su CRM, su
+    // clave o nosotros.
+    return modalShell(
+      "calendar-clock",
+      TITULO,
+      `<div class="text-[12.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:10px 12px;line-height:1.55">${esc(result.error ?? "No se pudo consultar " + meta.name)}</div>
+       <p class="text-[12px]" style="color:var(--muted);margin:12px 0 0">Mientras tanto las citas siguen agendándose bien, con el tipo genérico.</p>`,
+    );
+  }
+
+  const actual = connector.config.taskType ?? "";
+  const options = result.items
+    .map((o: PipelineStageOption) => `<option value="${esc(o.id)}" ${o.id === actual ? "selected" : ""}>${esc(o.label)}</option>`)
+    .join("");
+  return modalShell(
+    "calendar-clock",
+    `${TITULO} en ${meta.name}`,
+    `
+    <p class="text-[12.5px]" style="color:var(--muted);line-height:1.6;margin:0 0 16px">Con este tipo nacen las citas que agende el bot, para que en tu tablero no se confundan con los demás pendientes.</p>
+    <form hx-post="/admin/conexiones/connectors/calendar/${encodeURIComponent(provider)}/tipo-tarea" hx-target="#modal-root" hx-swap="innerHTML">
+      <select name="task_type" style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 10px;font-size:12.5px;font-family:inherit;outline:none;width:100%;margin-bottom:14px">
+        ${options}
+      </select>
+      <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:10px">Guardar</button>
+    </form>`,
+  );
+}
+
+/** Guarda el tipo elegido y devuelve el modal de éxito. */
+export async function saveTaskType(env: Env, botId: string, provider: string, form: FormData): Promise<string> {
+  const taskType = String(form.get("task_type") ?? "").trim();
+  await new BotConnectorsRepo(new Db(env.DB)).mergeConfig(botId, provider, { taskType });
+  return modalShell(
+    "calendar-clock",
+    "Guardado",
+    `<div class="text-[13px]" style="color:var(--ok);font-weight:600;margin-bottom:12px">✓ Listo</div>
+     <p class="text-[12.5px]" style="color:var(--muted);margin:0 0 14px">Las próximas citas nacerán con ese tipo.</p>
+     <button type="button" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:9px"
+             onclick="document.getElementById('modal-root').innerHTML=''">Listo</button>`,
+  );
+}
+
 /** Guarda la etapa elegida y devuelve el modal de éxito. */
 export async function savePipelineStage(env: Env, botId: string, provider: string, form: FormData): Promise<string> {
   const pipelineStage = String(form.get("pipeline_stage") ?? "").trim();
@@ -1311,20 +1534,32 @@ function renderMcpConnectedCard(c: BotConnector, prefix: string): string {
   const estado = falloReciente
     ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:3px 10px;font-weight:700">● SIN CONEXIÓN</span>`
     : `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>`;
-  // El token de OAuth se refresca solo (ver connectors/mcpOAuth.ts +
-  // tools/mcpTools.ts: cada conexión intenta refrescar con el refresh_token
-  // antes de fallar) — si de todos modos llegó aquí, es porque ESE refresco
-  // también falló (el proveedor revocó el acceso, o el refresh_token venció).
-  // No hay nada que un reintento simple arregle: hace falta volver a autorizar
-  // de verdad, por eso el botón manda al proveedor en vez de solo reintentar.
+  // El acceso OAuth se renueva SOLO, cada minuto, en el tick — antes de que
+  // caduque (ver connectors/mcpRefresh.ts). Hasta hace poco no era así:
+  // refrescar se intentaba dentro del turno del cliente, con un presupuesto
+  // que no alcanzaba, y el token quedaba a medio rotar. Ése era el "tengo que
+  // reconectarlo manualmente a cada rato" del dueño.
+  //
+  // El texto de este aviso importa: decía "el acceso se refresca solo
+  // normalmente" cuando nada lo refrescaba, así que lo mandaba a reconectar
+  // sin decirle que iba a volver a pasar. Ahora se distingue lo que se
+  // arregla solo de lo que de verdad necesita su autorización.
+  const cuandoSeRenovo = Number(c.config.oauthRefreshedAt ?? "");
+  const seRenovoDespues = Number.isFinite(cuandoSeRenovo) && cuandoSeRenovo > falloAt;
   const falloBlock = falloReciente
     ? isOauth
-      ? `<div class="text-[11.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;line-height:1.5">
-           <b>El agente no pudo conectarse</b> (${esc(new Date(falloAt).toLocaleString("es-MX"))}). Mientras siga así, no tiene estas herramientas.
-           Esto es OAuth: el acceso se refresca solo normalmente, así que si sigue fallando es que caducó o lo revocaron del lado del proveedor.
-           Dale a <b>Reconectar</b> para volver a autorizarlo.
-           <div class="font-mono text-[10.5px]" style="color:var(--dim);margin-top:5px;word-break:break-word">${esc(fallo)}</div>
-         </div>`
+      ? seRenovoDespues
+        ? `<div class="text-[11.5px]" style="color:var(--muted);border:1px solid var(--line);padding:8px 11px;line-height:1.5">
+             Hubo un fallo (${esc(new Date(falloAt).toLocaleString("es-MX"))}), pero el acceso <b>ya se renovó solo</b> después.
+             No tienes que hacer nada — si vuelve a fallar, aquí te lo va a decir.
+             <div class="font-mono text-[10.5px]" style="color:var(--dim);margin-top:5px;word-break:break-word">${esc(fallo)}</div>
+           </div>`
+        : `<div class="text-[11.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;line-height:1.5">
+             <b>El agente no pudo conectarse</b> (${esc(new Date(falloAt).toLocaleString("es-MX"))}). Mientras siga así, no tiene estas herramientas.
+             El acceso se renueva solo cada minuto; si el aviso sigue aquí, es que el proveedor ya no acepta la renovación — te revocó el permiso o expiró del todo.
+             Eso sí necesita que lo autorices otra vez: dale a <b>Reconectar</b>.
+             <div class="font-mono text-[10.5px]" style="color:var(--dim);margin-top:5px;word-break:break-word">${esc(fallo)}</div>
+           </div>`
       : `<div class="text-[11.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;line-height:1.5">
            <b>El agente no pudo conectarse</b> (${esc(new Date(falloAt).toLocaleString("es-MX"))}). Mientras siga así, no tiene estas herramientas.
            Revisa el token o la URL en tu servidor y dale a <b>Reconectar</b> para probar sin esperar.
@@ -1630,7 +1865,7 @@ async function renderCategoryBody(
   const connectedCount = (await Promise.all(real.map((m) => repo.getByBotAndProvider(botId, m.id)))).filter(
     Boolean,
   ).length;
-  const cards = (await Promise.all(list.map((m) => renderConnectorCard(db, botId, m)))).join("");
+  const cards = (await Promise.all(list.map((m) => renderConnectorCard(env, db, botId, m)))).join("");
   return { summary: `${CATEGORY_LABELS[category]} conectados: ${connectedCount} de ${real.length}`, cards };
 }
 

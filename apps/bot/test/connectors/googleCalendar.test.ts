@@ -39,9 +39,12 @@ describe("googleCalendarExchangeCode", () => {
     await expect(googleCalendarExchangeCode(envOk, "https://bot.test/callback", "the-code")).rejects.toThrow(/refresh_token/);
   });
 
-  it("sin client_id/secret configurados, lanza antes de llamar a Google", async () => {
+  // El mensaje apunta al panel y no a una variable de entorno: quien instala
+  // esto normalmente no administra el servidor, y la app OAuth ya se captura
+  // desde /admin/conexiones (ver connectors/oauthApp.ts).
+  it("sin la aplicación OAuth registrada, lanza antes de llamar a Google y dice dónde arreglarlo", async () => {
     global.fetch = vi.fn() as any;
-    await expect(googleCalendarExchangeCode({} as Env, "https://x", "code")).rejects.toThrow(/GOOGLE_CALENDAR_CLIENT_ID/);
+    await expect(googleCalendarExchangeCode({} as Env, "https://x", "code")).rejects.toThrow(/\/admin\/conexiones/);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 });

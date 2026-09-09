@@ -77,6 +77,32 @@ export class BotConnectorsRepo {
     return rows.map(toBotConnector);
   }
 
+  /**
+   * Todos los conectores MCP por OAuth activos, de TODOS los bots — para
+   * renovar su token antes de que caduque, fuera del camino de nadie (ver
+   * connectors/mcpRefresh.ts).
+   *
+   * El filtro por `authMode` va en TypeScript y no en la consulta, y no es
+   * pereza: en esta tabla `config` quedó guardada como una CADENA JSON dentro
+   * del jsonb, no como objeto (`jsonb_typeof(config)` = "string" — el mismo
+   * comportamiento de postgres.js que ya documenta mergeConfig más abajo).
+   * Por eso `config->>'authMode'` devuelve NULL aquí para todas las filas, y
+   * una consulta que dependa de eso no falla: simplemente no encuentra nada,
+   * en silencio. `toBotConnector` ya desenvuelve la cadena, así que del lado
+   * de TypeScript la config es un objeto normal.
+   *
+   * Son unas cuantas filas por instalación, así que traerlas y filtrarlas
+   * aquí no cuesta nada medible.
+   */
+  async listOAuthMcp(): Promise<BotConnector[]> {
+    const rows = await this.db.all<BotConnectorRow>(
+      `SELECT * FROM bot_connectors
+        WHERE category = 'mcp' AND enabled = true AND secret_ref IS NOT NULL
+        ORDER BY created_at ASC`,
+    );
+    return rows.map(toBotConnector).filter((c) => c.config.authMode === "oauth");
+  }
+
   async upsert(input: {
     botId: string;
     category: string;

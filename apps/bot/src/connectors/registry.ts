@@ -7,6 +7,7 @@ import type { CrmConnector, TicketConnector, CalendarConnector } from "./types";
 import { hubspotConnector } from "./crm/hubspot";
 import { pipedriveConnector } from "./crm/pipedrive";
 import { vinquliaConnector } from "./crm/vinqulia";
+import { salesforceConnector } from "./crm/salesforce";
 import { vinquliaTicketConnector } from "./tickets/vinqulia";
 import { zendeskConnector } from "./tickets/zendesk";
 import { jiraConnector } from "./tickets/jira";
@@ -143,6 +144,33 @@ export const CRM_PROVIDERS: Record<string, ConnectorMeta> = {
       SEGUIMIENTO_FIELD,
     ],
   },
+  salesforce: {
+    id: "salesforce",
+    category: "crm",
+    name: "Salesforce",
+    icon: "target",
+    desc: "Los leads del bot se dan de alta como contactos, con su cuenta, oportunidad y tarea de seguimiento.",
+    steps: [
+      'En Salesforce: <span class="font-mono">Configuración → Gestor de aplicaciones → Nueva aplicación conectada</span> (App Manager → New Connected App).',
+      'Marca <b>Habilitar configuración de OAuth</b>. En <b>Ámbitos seleccionados</b> agrega <span class="font-mono">Manage user data via APIs (api)</span>, y activa <b>Habilitar flujo de credenciales de cliente</b>.',
+      'Guarda, y en <b>Administrar → Editar políticas</b> elige el usuario de <b>"Ejecutar como" (Run As)</b> — es a nombre de quién van a quedar los registros que cree el bot. Usa un usuario de integración, no el tuyo.',
+      'De vuelta en la app, en <b>Claves y secretos de consumidor</b>, copia la <b>Clave de consumidor</b> y el <b>Secreto de consumidor</b>.',
+      'La dirección es la de tu instancia — la que ves en el navegador al entrar, hasta <span class="font-mono">.salesforce.com</span> y sin nada más.',
+      'Ya conectado, usa <b>"Configurar etapa inicial"</b> para elegir en qué etapa nacen las oportunidades del bot. Sin eso registra el contacto pero NO la oportunidad.',
+    ],
+    apiKeyLabel: "Secreto de consumidor",
+    apiKeyPlaceholder: "········",
+    fields: [
+      {
+        name: "instanceUrl",
+        label: "Dirección de tu Salesforce",
+        placeholder: "https://miempresa.my.salesforce.com",
+        isConfig: true,
+      },
+      { name: "consumerKey", label: "Clave de consumidor", placeholder: "3MVG9...", isConfig: true },
+      SEGUIMIENTO_FIELD,
+    ],
+  },
   twenty: {
     id: "twenty",
     category: "crm",
@@ -275,6 +303,7 @@ export const CRM_ADAPTERS: Record<string, CrmConnector> = {
   vinqulia: vinquliaConnector,
   hubspot: hubspotConnector,
   pipedrive: pipedriveConnector,
+  salesforce: salesforceConnector,
 };
 export const TICKET_ADAPTERS: Record<string, TicketConnector> = {
   "vinqulia-tickets": vinquliaTicketConnector,

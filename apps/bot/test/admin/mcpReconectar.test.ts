@@ -2,11 +2,12 @@
  * Botón "Reconectar" en la tarjeta de un conector MCP fallando.
  *
  * Hay DOS conectores muy distintos escondidos bajo el mismo nombre de botón:
- *   - OAuth: el token se refresca solo en cada conexión (@ai-sdk/mcp, ver
- *     tools/mcpTools.ts). Si de todos modos está fallando, es porque ESE
- *     refresco también falló — el proveedor lo revocó, o el refresh_token
- *     venció. Un reintento no arregla nada; hace falta volver a autorizar de
- *     verdad, así que el botón es una navegación real a /oauth/start.
+ *   - OAuth: el acceso se renueva solo, cada minuto y antes de que caduque
+ *     (connectors/mcpRefresh.ts). Si de todos modos está fallando, es porque
+ *     ESA renovación también falló — el proveedor lo revocó, o el
+ *     refresh_token venció del todo. Un reintento no arregla nada; hace falta
+ *     volver a autorizar de verdad, así que el botón es una navegación real a
+ *     /oauth/start.
  *   - Token estático: no hay nada que refrescar solo. El botón es un
  *     reintento inmediato (limpia el enfriamiento de 5 min y prueba ya).
  * Confundir los dos casos era el riesgo real: mandar un botón "Reconectar"
@@ -78,10 +79,27 @@ describe("conector OAuth fallando: el botón manda a re-autorizar de verdad", ()
     expect(grid).toContain("client_id=nodia-fijo");
   });
 
-  it("el texto explica que el token normal se refresca solo — esto es cuando ESO también falló", async () => {
+  it("el texto explica que la renovación automática ya se intentó — esto es cuando ESO también falló", async () => {
     await conector({ authMode: "oauth", mcpLastError: "Unauthorized", mcpLastErrorAt: String(Date.now()) });
     const grid = await renderConnectorsGrid(env, TEST_BOT_ID, "mcp");
-    expect(grid).toContain("se refresca solo");
+    expect(grid).toContain("se renueva solo cada minuto");
+    expect(grid).toContain("autorices otra vez");
+  });
+
+  // El aviso se quedaba puesto aunque el acceso ya se hubiera recuperado, y
+  // entonces mandaba al dueño a reconectar algo que ya funcionaba. Peor: le
+  // enseñaba a desconfiar de un aviso que sí importa cuando aparece de verdad.
+  it("si la renovación funcionó DESPUÉS del fallo, no lo manda a reconectar", async () => {
+    const hace10min = Date.now() - 10 * 60_000;
+    await conector({
+      authMode: "oauth",
+      mcpLastError: "Unauthorized",
+      mcpLastErrorAt: String(hace10min),
+      oauthRefreshedAt: String(Date.now()),
+    });
+    const grid = await renderConnectorsGrid(env, TEST_BOT_ID, "mcp");
+    expect(grid).toContain("ya se renovó solo");
+    expect(grid).not.toContain("autorices otra vez");
   });
 });
 

@@ -25,7 +25,7 @@ export function googleCalendarAuthorizeUrl(env: Env, redirectUri: string, state:
 
 export async function googleCalendarExchangeCode(env: Env, redirectUri: string, code: string): Promise<OAuthTokenSet> {
   if (!env.GOOGLE_CALENDAR_CLIENT_ID || !env.GOOGLE_CALENDAR_CLIENT_SECRET) {
-    throw new Error("Falta configurar GOOGLE_CALENDAR_CLIENT_ID/GOOGLE_CALENDAR_CLIENT_SECRET en el despliegue.");
+    throw new Error("Falta registrar tu aplicación OAuth. Ve a /admin/conexiones y captura la clave y el secreto de cliente.");
   }
   const res = await fetch(TOKEN_URL, {
     method: "POST",
@@ -52,7 +52,7 @@ export async function googleCalendarExchangeCode(env: Env, redirectUri: string, 
 
 export async function refreshGoogleCalendarToken(env: Env, refreshToken: string): Promise<OAuthTokenSet> {
   if (!env.GOOGLE_CALENDAR_CLIENT_ID || !env.GOOGLE_CALENDAR_CLIENT_SECRET) {
-    throw new Error("Falta configurar GOOGLE_CALENDAR_CLIENT_ID/GOOGLE_CALENDAR_CLIENT_SECRET en el despliegue.");
+    throw new Error("Falta registrar tu aplicación OAuth. Ve a /admin/conexiones y captura la clave y el secreto de cliente.");
   }
   const res = await fetch(TOKEN_URL, {
     method: "POST",

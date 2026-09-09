@@ -46,6 +46,7 @@ describe("categoryOfProvider", () => {
   it("resuelve la categoría de cada proveedor conocido", () => {
     expect(categoryOfProvider("hubspot")).toBe("crm");
     expect(categoryOfProvider("pipedrive")).toBe("crm");
+    expect(categoryOfProvider("salesforce")).toBe("crm");
     expect(categoryOfProvider("zendesk")).toBe("tickets");
     expect(categoryOfProvider("no-existe")).toBeNull();
   });
@@ -74,6 +75,42 @@ describe("connectConnector — hubspot (CRM, solo API key)", () => {
     expect(html).toContain("Falta");
     expect(createSecretMock).not.toHaveBeenCalled();
     expect(await new BotConnectorsRepo(db).getByBotAndProvider(TEST_BOT_ID, "hubspot")).toBeNull();
+  });
+});
+
+describe("connectConnector — salesforce", () => {
+  it("el secreto de consumidor va a Vault; instancia y clave, a config", async () => {
+    const html = await connectConnector(
+      env,
+      TEST_BOT_ID,
+      "crm",
+      "salesforce",
+      form({
+        api_key: "el-secreto",
+        instanceUrl: "https://acme.my.salesforce.com",
+        consumerKey: "3MVG9abc",
+      }),
+    );
+
+    expect(html).toContain("conectado a este bot");
+    const row = await new BotConnectorsRepo(db).getByBotAndProvider(TEST_BOT_ID, "salesforce");
+    expect(row?.config).toEqual({ instanceUrl: "https://acme.my.salesforce.com", consumerKey: "3MVG9abc" });
+    // La clave de consumidor NO es secreta —viaja en la petición del token—
+    // pero el secreto sí, y no debe quedar en la config.
+    expect(JSON.stringify(row?.config)).not.toContain("el-secreto");
+    expect(createSecretMock).toHaveBeenCalledWith(expect.anything(), "el-secreto", expect.stringContaining("salesforce"));
+  });
+
+  it("sin la clave de consumidor no se conecta: sin ella no hay forma de pedir el token", async () => {
+    const html = await connectConnector(
+      env,
+      TEST_BOT_ID,
+      "crm",
+      "salesforce",
+      form({ api_key: "el-secreto", instanceUrl: "https://acme.my.salesforce.com" }),
+    );
+    expect(html).toContain("Falta");
+    expect(await new BotConnectorsRepo(db).getByBotAndProvider(TEST_BOT_ID, "salesforce")).toBeNull();
   });
 });
 

@@ -7,6 +7,7 @@ import { metaFor, type ConnectorCategory } from "./registry";
 import { ensureFreshToken } from "./oauthCreds";
 import { refreshGoogleCalendarToken } from "./calendar/googleCalendar";
 import { refreshJiraToken } from "./tickets/jira";
+import { envConAppOAuth } from "./oauthApp";
 
 /**
  * Saca las credenciales que espera un adaptador. Para conectores de API key,
@@ -19,7 +20,11 @@ export async function resolveConnectorCreds(db: Db, connector: BotConnector, env
 
   if (meta?.authType === "oauth") {
     if (!env) return null;
-    const refresh = oauthRefresherFor(connector.provider, env);
+    // La app OAuth del dueño puede estar capturada en el panel en vez de en el
+    // entorno (connectors/oauthApp.ts). Sin esto, refrescar el token usaría un
+    // client_id que no es con el que se autorizó y el proveedor lo rechaza.
+    const conApp = await envConAppOAuth(env, db, connector.bot_id, connector.provider);
+    const refresh = oauthRefresherFor(connector.provider, conApp);
     if (!refresh) return null;
     const accessToken = await ensureFreshToken(db, connector, refresh);
     if (!accessToken) return null;

@@ -36,11 +36,22 @@ describe("categoryOfProvider — proveedores oauth", () => {
 });
 
 describe("tarjeta de un conector oauth sin conectar", () => {
-  it("muestra un link 'Conectar con X' hacia /admin/conexiones/oauth/:provider/start, no el botón de API key", async () => {
-    const grid = await renderConnectorsGrid(env, TEST_BOT_ID, "calendar");
+  it("con la app ya registrada, lleva directo a /oauth/:provider/start", async () => {
+    const conApp = { ...env, GOOGLE_CALENDAR_CLIENT_ID: "cid", GOOGLE_CALENDAR_CLIENT_SECRET: "sec" } as Env;
+    const grid = await renderConnectorsGrid(conApp, TEST_BOT_ID, "calendar");
     expect(grid).toContain("/admin/conexiones/oauth/google-calendar/start");
     expect(grid).toContain("Conectar con Google Calendar");
     expect(grid).not.toContain("/admin/conexiones/connectors/calendar/google-calendar/connect");
+  });
+
+  // Antes el botón mandaba al arranque de todos modos, y el dueño volvía con
+  // "Falta configurar GOOGLE_CALENDAR_CLIENT_ID (y su _SECRET) en este
+  // despliegue" — un mensaje sobre el servidor, dirigido a alguien que no lo
+  // administra. Ahora el primer clic abre el diálogo que registra la app.
+  it("sin la app registrada, el botón abre el diálogo que la registra", async () => {
+    const grid = await renderConnectorsGrid(env, TEST_BOT_ID, "calendar");
+    expect(grid).toContain("/admin/conexiones/oauth/google-calendar/app");
+    expect(grid).not.toContain("/admin/conexiones/oauth/google-calendar/start");
   });
 });
 

@@ -48,8 +48,8 @@ beforeEach(async () => {
 });
 
 describe("startOAuth", () => {
-  it("arma la URL de Google con el redirect_uri de este despliegue", () => {
-    const result = startOAuth(env, "google-calendar", TEST_BOT_ID);
+  it("arma la URL de Google con el redirect_uri de este despliegue", async () => {
+    const result = await startOAuth(env, "google-calendar", TEST_BOT_ID);
     expect("url" in result).toBe(true);
     if ("url" in result) {
       expect(result.url).toContain(encodeURIComponent("https://bot.test/admin/conexiones/oauth/google-calendar/callback"));
@@ -57,13 +57,13 @@ describe("startOAuth", () => {
     }
   });
 
-  it("sin las credenciales del proveedor configuradas, devuelve un error explicativo", () => {
-    const result = startOAuth({ ...env, GOOGLE_CALENDAR_CLIENT_ID: undefined } as unknown as Env, "google-calendar", TEST_BOT_ID);
+  it("sin las credenciales del proveedor configuradas, devuelve un error explicativo", async () => {
+    const result = await startOAuth({ ...env, GOOGLE_CALENDAR_CLIENT_ID: undefined } as unknown as Env, "google-calendar", TEST_BOT_ID);
     expect("error" in result).toBe(true);
   });
 
-  it("proveedor desconocido: error", () => {
-    const result = startOAuth(env, "no-existe", TEST_BOT_ID);
+  it("proveedor desconocido: error", async () => {
+    const result = await startOAuth(env, "no-existe", TEST_BOT_ID);
     expect("error" in result).toBe(true);
   });
 });
@@ -71,7 +71,7 @@ describe("startOAuth", () => {
 describe("handleOAuthCallback", () => {
   it("con state válido, canjea el código y guarda el conector de Google Calendar", async () => {
     googleExchangeMock.mockResolvedValue({ access_token: "at", refresh_token: "rt", expires_at: Date.now() + 3600_000 });
-    const { state } = startOAuth(env, "google-calendar", TEST_BOT_ID) as { state: { botId: string; nonce: string } };
+    const { state } = (await startOAuth(env, "google-calendar", TEST_BOT_ID)) as { state: { botId: string; nonce: string } };
     const cookieRaw = JSON.stringify(state);
     const stateParam = encodeURIComponent(JSON.stringify(state));
 
@@ -111,7 +111,7 @@ describe("handleOAuthCallback", () => {
       cloudId: "cloud-1",
       siteUrl: "https://acme.atlassian.net",
     });
-    const { state } = startOAuth(env, "jira", TEST_BOT_ID) as { state: { botId: string; nonce: string } };
+    const { state } = (await startOAuth(env, "jira", TEST_BOT_ID)) as { state: { botId: string; nonce: string } };
     const cookieRaw = JSON.stringify(state);
     const stateParam = encodeURIComponent(JSON.stringify(state));
 
@@ -123,7 +123,7 @@ describe("handleOAuthCallback", () => {
 
   it("si el intercambio de código falla, no crea la fila y avisa el motivo", async () => {
     googleExchangeMock.mockRejectedValue(new Error("Google no devolvió refresh_token"));
-    const { state } = startOAuth(env, "google-calendar", TEST_BOT_ID) as { state: { botId: string; nonce: string } };
+    const { state } = (await startOAuth(env, "google-calendar", TEST_BOT_ID)) as { state: { botId: string; nonce: string } };
     const cookieRaw = JSON.stringify(state);
     const stateParam = encodeURIComponent(JSON.stringify(state));
 

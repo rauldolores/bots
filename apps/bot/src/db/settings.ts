@@ -162,6 +162,21 @@ export const SETTING_KEYS = {
   // un campo de más para gente que no es técnica.
   emailInboundAddress: "email_inbound_address",
   emailFromName: "email_from_name",
+  // Aplicación OAuth del dueño para Google Calendar y Jira.
+  //
+  // Vivían SOLO como variables de entorno del despliegue, y ahí no las podía
+  // poner alguien que no toca servidores: la pantalla le decía "falta
+  // configurar GOOGLE_CALENDAR_CLIENT_ID en este despliegue" y no había nada
+  // que pudiera hacer al respecto desde el panel. Ahora se capturan aquí y
+  // MANDAN sobre las del entorno — el mismo criterio que Meta/WhatsApp.
+  //
+  // El _secret va cifrado en Vault (ver setSecret y migrarSecretos.ts); el
+  // _id no, porque no es secreto: viaja en la URL de autorización a la vista
+  // de todos.
+  googleCalendarClientId: "google_calendar_client_id",
+  googleCalendarClientSecret: "google_calendar_client_secret",
+  jiraClientId: "jira_client_id",
+  jiraClientSecret: "jira_client_secret",
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

@@ -15,6 +15,7 @@ import { processSkillJobs } from "../skills/routes";
 import { processNurtureJobs } from "../nurture/run";
 import { processCrmAnalysisJobs } from "../crm/analizar";
 import { processLeadCapturedJobs } from "../leads/postCaptura";
+import { refrescarTokensMcp } from "../connectors/mcpRefresh";
 
 /** Cuántas conversaciones atiende un tick. */
 const DEFAULT_LIMIT = 10;
@@ -193,6 +194,22 @@ export async function tick(
     if (leads.procesados > 0) console.log(`[tick] ${leads.procesados} lead(s) empujados al CRM`);
   } catch (e) {
     console.error("[tick] processLeadCapturedJobs:", e);
+  }
+
+  // Conectores MCP por OAuth: renovar el acceso ANTES de que caduque.
+  //
+  // Aquí y no dentro del turno porque refrescar cuesta más que el presupuesto
+  // que tiene el turno para hablar con un MCP — intentarlo allá terminaba en
+  // "no respondió en 4000ms" con el token a medio rotar, y el dueño teniendo
+  // que reconectar a mano. Ver connectors/mcpRefresh.ts.
+  try {
+    const mcp = await refrescarTokensMcp(env);
+    if (mcp.renovados > 0) console.log(`[tick] ${mcp.renovados} token(s) de MCP renovados`);
+    if (mcp.requierenAutorizacion > 0) {
+      console.warn(`[tick] ${mcp.requierenAutorizacion} conector(es) MCP necesitan que el dueño vuelva a autorizar`);
+    }
+  } catch (e) {
+    console.error("[tick] refrescarTokensMcp:", e);
   }
 
   // Campañas (F6): un lote chico de envíos pendientes por corrida — nunca

@@ -29,7 +29,7 @@ export async function jiraExchangeCode(
   code: string,
 ): Promise<{ tokens: OAuthTokenSet; cloudId: string; siteUrl: string }> {
   if (!env.JIRA_CLIENT_ID || !env.JIRA_CLIENT_SECRET) {
-    throw new Error("Falta configurar JIRA_CLIENT_ID/JIRA_CLIENT_SECRET en el despliegue.");
+    throw new Error("Falta registrar tu aplicación OAuth. Ve a /admin/conexiones y captura la clave y el secreto de cliente.");
   }
   const res = await fetch(TOKEN_URL, {
     method: "POST",
@@ -64,7 +64,7 @@ export async function jiraExchangeCode(
 
 export async function refreshJiraToken(env: Env, refreshToken: string): Promise<OAuthTokenSet> {
   if (!env.JIRA_CLIENT_ID || !env.JIRA_CLIENT_SECRET) {
-    throw new Error("Falta configurar JIRA_CLIENT_ID/JIRA_CLIENT_SECRET en el despliegue.");
+    throw new Error("Falta registrar tu aplicación OAuth. Ve a /admin/conexiones y captura la clave y el secreto de cliente.");
   }
   const res = await fetch(TOKEN_URL, {
     method: "POST",

@@ -251,12 +251,20 @@ async function conectarYListarTools(env: Env, db: Db, c: BotConnector): Promise<
       initializationOptions: { timeout: MCP_TIMEOUT_MS },
     });
     const tools = await client.tools();
-    // Si el SDK refrescó el token durante la conexión, persistirlo —
-    // best-effort: si falla, el próximo turno simplemente refresca de nuevo,
-    // nunca vale la pena tronar el turno actual por esto.
+    // Si el SDK refrescó el token durante la conexión, persistirlo — y SE
+    // ESPERA, no es best-effort.
+    //
+    // Antes iba con `void`. En un despliegue serverless la invocación se
+    // congela en cuanto se contesta, así que esa escritura se quedaba a medio
+    // camino con demasiada frecuencia — y no es una escritura recuperable: el
+    // proveedor rota el refresh_token al entregarlo (OAuth 2.1 lo exige para
+    // clientes públicos como éste), o sea que el que quedó en Vault ya no
+    // sirve y el siguiente intento tampoco va a poder refrescar. Ese era el
+    // "tengo que reconectarlo a cada rato". Lo normal es que no haya nada que
+    // guardar; cuando lo hay, vale la espera.
     const refreshedTokens = JSON.stringify(provider.snapshot.tokens ?? {});
     if (c.secret_ref && refreshedTokens !== tokenJson) {
-      void updateSecret(db, c.secret_ref, refreshedTokens).catch((e) =>
+      await updateSecret(db, c.secret_ref, refreshedTokens).catch((e) =>
         console.error(`[mcpTools] no se pudo persistir el refresh de token de ${c.name ?? c.provider}:`, e),
       );
     }

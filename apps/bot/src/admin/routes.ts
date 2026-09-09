@@ -72,6 +72,8 @@ import {
   renderConexiones,
   renderConnectModal,
   esCanalConectable,
+  renderAppOAuthModal,
+  guardarAppOAuthDesdePanel,
   renderConexionesGrid,
   connectChannel,
   disconnectChannel,
@@ -89,6 +91,8 @@ import {
   updateConnectorConfig,
   saveWidgetConfig,
   renderPipelineStageModal,
+  renderTaskTypeModal,
+  saveTaskType,
   savePipelineStage,
   renderEmailConnectModal,
   connectEmailChannel,
@@ -1494,6 +1498,21 @@ adminApp.post("/conexiones/connectors/crm/:provider/etapa", async (c) => {
   return c.html(modalHtml + gridHtml);
 });
 
+// Con qué tipo nacen las citas en un calendario que vive DENTRO de un CRM:
+// mismo patrón que la etapa inicial, y por el mismo motivo — las opciones
+// salen del catálogo del propio CRM en vez de teclearse.
+adminApp.get("/conexiones/connectors/calendar/:provider/tipo-tarea", async (c) => {
+  const provider = c.req.param("provider");
+  return c.html(await renderTaskTypeModal(c.env, c.get("botId"), provider));
+});
+
+adminApp.post("/conexiones/connectors/calendar/:provider/tipo-tarea", async (c) => {
+  const provider = c.req.param("provider");
+  const modalHtml = await saveTaskType(c.env, c.get("botId"), provider, await c.req.formData());
+  const gridHtml = await renderConnectorsGrid(c.env, c.get("botId"), "calendar");
+  return c.html(modalHtml + gridHtml);
+});
+
 // Config posterior a un OAuth (ej. Project Key de Jira) — solo config, nunca el token.
 adminApp.post("/conexiones/connectors/:provider/config", async (c) => {
   const provider = c.req.param("provider");
@@ -1506,9 +1525,25 @@ adminApp.post("/conexiones/connectors/:provider/config", async (c) => {
 // consentimiento del proveedor — no es un diálogo HTMX como los de API key.
 const OAUTH_STATE_COOKIE = "nodia_oauth_state";
 
-adminApp.get("/conexiones/oauth/:provider/start", (c) => {
+// Registrar la aplicación OAuth del dueño (client_id + secret) desde el
+// panel. Antes esto solo podía venir del entorno del despliegue — ver
+// connectors/oauthApp.ts.
+adminApp.get("/conexiones/oauth/:provider/app", async (c) =>
+  c.html(await renderAppOAuthModal(c.env, c.get("botId"), c.req.param("provider"))),
+);
+
+adminApp.post("/conexiones/oauth/:provider/app", async (c) => {
+  const r = await guardarAppOAuthDesdePanel(c.env, c.get("botId"), c.req.param("provider"), await c.req.formData());
+  if ("modal" in r) return c.html(r.modal);
+  // HX-Redirect y no un c.redirect: la petición viene de htmx, que seguiría el
+  // 302 por detrás y pintaría el consentimiento de Google DENTRO del modal.
+  c.header("HX-Redirect", r.redirectTo);
+  return c.body(null, 204);
+});
+
+adminApp.get("/conexiones/oauth/:provider/start", async (c) => {
   const provider = c.req.param("provider");
-  const result = startOAuth(c.env, provider, c.get("botId"));
+  const result = await startOAuth(c.env, provider, c.get("botId"));
   if ("error" in result) return c.redirect(`/admin/conexiones?err=${encodeURIComponent(result.error)}`, 302);
   setCookie(c, OAUTH_STATE_COOKIE, JSON.stringify(result.state), {
     httpOnly: true,

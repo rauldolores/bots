@@ -27,6 +27,8 @@ export const AJUSTES_SECRETOS: readonly string[] = [
   SETTING_KEYS.emailOutboundApiKey,
   SETTING_KEYS.voiceElevenLabsApiKey,
   SETTING_KEYS.voiceOpenAiApiKey,
+  SETTING_KEYS.googleCalendarClientSecret,
+  SETTING_KEYS.jiraClientSecret,
 ];
 
 /**

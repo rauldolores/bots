@@ -1,14 +1,17 @@
 // F5 Fase 4: conectar Google Calendar / Jira por OAuth — "click en Conectar,
 // autoriza en el proveedor, vuelve ya conectado", sin pegar ningún token a
-// mano. El client_id/secret son del DESPLIEGUE (una sola app registrada por
-// el dueño en Google Cloud / Atlassian); cada bot autoriza el suyo (su propio
-// refresh_token), igual que cualquier "Iniciar sesión con Google" de terceros.
+// mano. El client_id/secret son de la APLICACIÓN del dueño (una sola app
+// registrada por él en Google Cloud / Atlassian); cada bot autoriza la suya
+// (su propio refresh_token), igual que cualquier "Iniciar sesión con Google"
+// de terceros. Esa app se captura desde el panel —y si no, se toma del
+// entorno del despliegue— ver connectors/oauthApp.ts.
 import type { Env } from "../env";
 import { Db } from "../db/client";
 import { BotConnectorsRepo } from "../db/botConnectors";
 import { createSecret } from "../db/vault";
 import { googleCalendarAuthorizeUrl, googleCalendarExchangeCode } from "../connectors/calendar/googleCalendar";
 import { jiraAuthorizeUrl, jiraExchangeCode } from "../connectors/tickets/jira";
+import { envConAppOAuth } from "../connectors/oauthApp";
 
 export interface OAuthStateData {
   botId: string;
@@ -33,21 +36,29 @@ function redirectUriFor(env: Env, provider: string): string {
 
 export type StartOAuthResult = { url: string; state: OAuthStateData } | { error: string };
 
-/** Arma la URL de autorización del proveedor + el state que hay que guardar en cookie para validar el callback. */
-export function startOAuth(env: Env, provider: string, botId: string): StartOAuthResult {
+/**
+ * Arma la URL de autorización del proveedor + el state que hay que guardar en
+ * cookie para validar el callback.
+ *
+ * Async porque la app OAuth puede venir de los ajustes del bot y no del
+ * entorno del despliegue (ver connectors/oauthApp.ts): antes, un dueño sin
+ * acceso al servidor se topaba con "falta configurar GOOGLE_CALENDAR_CLIENT_ID
+ * en este despliegue" y ahí se acababa el camino.
+ */
+export async function startOAuth(env: Env, provider: string, botId: string): Promise<StartOAuthResult> {
   if (!isOAuthProvider(provider)) return { error: "Proveedor desconocido." };
+  const conApp = await envConAppOAuth(env, new Db(env.DB), botId, provider);
   const state: OAuthStateData = { botId, nonce: crypto.randomUUID() };
-  const redirectUri = redirectUriFor(env, provider);
+  const redirectUri = redirectUriFor(conApp, provider);
   const encodedState = encodeURIComponent(JSON.stringify(state));
 
   const url =
     provider === "google-calendar"
-      ? googleCalendarAuthorizeUrl(env, redirectUri, encodedState)
-      : jiraAuthorizeUrl(env, redirectUri, encodedState);
+      ? googleCalendarAuthorizeUrl(conApp, redirectUri, encodedState)
+      : jiraAuthorizeUrl(conApp, redirectUri, encodedState);
 
   if (!url) {
-    const envVar = provider === "google-calendar" ? "GOOGLE_CALENDAR_CLIENT_ID" : "JIRA_CLIENT_ID";
-    return { error: `Falta configurar ${envVar} (y su _SECRET) en este despliegue.` };
+    return { error: `Todavía no has registrado tu aplicación de ${provider === "google-calendar" ? "Google" : "Atlassian"}.` };
   }
   return { url, state };
 }
@@ -87,8 +98,11 @@ export async function handleOAuthCallback(
   }
 
   const botId = expected.botId;
-  const redirectUri = redirectUriFor(env, provider);
   const db = new Db(env.DB);
+  // Mismo `env` enriquecido que en el arranque: el canje tiene que ir contra
+  // la MISMA app con la que se pidió el consentimiento.
+  env = await envConAppOAuth(env, db, botId, provider);
+  const redirectUri = redirectUriFor(env, provider);
 
   try {
     if (provider === "google-calendar") {
