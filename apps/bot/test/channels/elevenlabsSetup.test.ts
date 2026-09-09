@@ -391,3 +391,73 @@ describe("un tropiezo de red no puede encoger al agente", () => {
     expect(r.error).toBeUndefined();
   });
 });
+
+/**
+ * Guardar la pantalla NO debe dejar al agente sin herramientas.
+ *
+ * El cuerpo del PATCH manda `tool_ids` siempre, así que un arreglo vacío se
+ * lo BORRA todo. El guardado del panel llama sin pasar herramientas —no las
+ * tiene a la mano— y con eso el agente quedaba hablando pero sin poder
+ * agendar, capturar un lead ni consultar el CRM. Se recuperaba solo en la
+ * llamada siguiente, así que el daño era invisible salvo para quien llamara
+ * justo en medio.
+ *
+ * La huella de producción lo delataba: "tools:" vacío con 12 herramientas
+ * guardadas.
+ */
+describe("guardar la pantalla no le quita las herramientas al agente", () => {
+  const IDS_YA_REGISTRADAS = { searchKb: "tool_a", scheduleAppointment: "tool_b" };
+
+  beforeEach(() => {
+    settingsGuardados.voice_elevenlabs_agent_id = "agent-1";
+    settingsGuardados.voice_elevenlabs_tool_ids = JSON.stringify(IDS_YA_REGISTRADAS);
+  });
+
+  it("sin argumento de herramientas, CONSERVA las que el agente ya tenía", async () => {
+    let enviado: any;
+    global.fetch = fetchQueRespondePor({
+      voces: () => Response.json({ voices: [{ voice_id: VOZ_DEL_CATALOGO }] }),
+      crearAgente: (cuerpo) => {
+        enviado = cuerpo;
+        return Response.json({ agent_id: "agent-1" });
+      },
+    });
+
+    const r = await prepararAgenteElevenLabs({} as any, "bot-1", LLAVE, VOZ_DEL_CATALOGO);
+
+    expect(r.ok).toBe(true);
+    expect(enviado.conversation_config.agent.prompt.tool_ids).toEqual(["tool_a", "tool_b"]);
+  });
+
+  // Si la huella se guardara con "tools:" vacío, la llamada siguiente vería
+  // una diferencia falsa y reconfiguraría al agente entero sin necesidad.
+  it("y la huella queda con esas herramientas, no vacía", async () => {
+    global.fetch = fetchQueRespondePor({
+      voces: () => Response.json({ voices: [{ voice_id: VOZ_DEL_CATALOGO }] }),
+      crearAgente: () => Response.json({ agent_id: "agent-1" }),
+    });
+
+    await prepararAgenteElevenLabs({} as any, "bot-1", LLAVE, VOZ_DEL_CATALOGO);
+
+    expect(settingsGuardados.voice_elevenlabs_config_hash).toBe(
+      huellaDeConfiguracion(VOZ_DEL_CATALOGO, ["tool_a", "tool_b"]),
+    );
+    expect(settingsGuardados.voice_elevenlabs_config_hash).not.toContain("tools:|");
+  });
+
+  // Un mapa VACÍO sí es una orden: el dueño las apagó todas en /admin/agente.
+  it("pero un mapa vacío SÍ se las quita — eso es explícito", async () => {
+    let enviado: any;
+    global.fetch = fetchQueRespondePor({
+      voces: () => Response.json({ voices: [{ voice_id: VOZ_DEL_CATALOGO }] }),
+      crearAgente: (cuerpo) => {
+        enviado = cuerpo;
+        return Response.json({ agent_id: "agent-1" });
+      },
+    });
+
+    await prepararAgenteElevenLabs({} as any, "bot-1", LLAVE, VOZ_DEL_CATALOGO, {});
+
+    expect(enviado.conversation_config.agent.prompt.tool_ids).toEqual([]);
+  });
+});

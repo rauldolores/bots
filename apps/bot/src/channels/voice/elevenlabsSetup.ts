@@ -224,7 +224,22 @@ export async function prepararAgenteElevenLabs(
   // "le pedí que me agendara y no pudo".
   let toolIds: string[] = [];
   let faltaronHerramientas = false;
-  if (tools && Object.keys(tools).length > 0) {
+
+  // SIN argumento de herramientas significa "no las toques", NO "quítaselas
+  // todas". La diferencia importa: el guardado del panel llama aquí sin
+  // pasarlas, y como el cuerpo manda `tool_ids` siempre, mandar [] le borraba
+  // al agente sus 12 herramientas en cada guardado — quedaba hablando pero
+  // sin poder agendar, capturar un lead ni consultar el CRM. Se recuperaba
+  // solo en la siguiente llamada (asegurarAgenteAlDia veía la huella
+  // distinta), así que el daño era invisible salvo para quien llamara justo
+  // en medio. La huella de producción lo delataba: "tools:" vacío con 12
+  // herramientas guardadas.
+  //
+  // Un mapa VACÍO sí es una orden explícita de dejarlo sin ninguna (el dueño
+  // las apagó todas en /admin/agente), y por eso se distingue de `undefined`.
+  if (tools === undefined) {
+    toolIds = Object.values(leerMapa(await repo.get(SETTING_KEYS.voiceElevenLabsToolIds)));
+  } else if (Object.keys(tools).length > 0) {
     const { registrarHerramientas } = await import("./elevenlabsTools");
     const previos = leerMapa(await repo.get(SETTING_KEYS.voiceElevenLabsToolIds));
     const r = await registrarHerramientas(apiKey, tools, previos);
