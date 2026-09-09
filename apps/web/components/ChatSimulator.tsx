@@ -49,7 +49,7 @@ const SCRIPT: TimelineTurn[] = [
   {
     type: "text",
     from: "bot",
-    text: "¡Claro! Te paso con un humano al momento. Le aviso con el resumen de tu conversación para que te atienda sin repetir nada.",
+    text: "¡Claro! Te paso con alguien del equipo al momento. Le aviso con el resumen de tu conversación para que te atienda sin repetir nada.",
   },
   {
     type: "action",

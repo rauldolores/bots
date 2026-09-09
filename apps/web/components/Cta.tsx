@@ -1,5 +1,9 @@
+"use client";
+
 import { ArrowRight, Sparkles } from "lucide-react";
 import { Container } from "./ui";
+import { useAffiliateRedirect } from "./AffiliateRedirect";
+import { useDemoDialog } from "./DemoDialog";
 
 const items = [
   "Una llamada de prueba real a tu número, contestada por el agente",
@@ -9,6 +13,9 @@ const items = [
 ];
 
 export default function Cta() {
+  const openAffiliate = useAffiliateRedirect();
+  const openDemo = useDemoDialog();
+
   return (
     <section id="demo" className="relative py-24">
       <Container>
@@ -43,21 +50,21 @@ export default function Cta() {
             </div>
 
             <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
-              <a
-                href="https://www.kontrolia.io"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-7 py-3.5 text-[15px] font-bold text-stone-900 shadow-glow transition-all hover:-translate-y-0.5 hover:bg-amber-400"
+              <button
+                type="button"
+                onClick={openDemo}
+                className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-amber-500 px-7 py-3.5 text-[15px] font-bold text-stone-900 shadow-glow transition-all hover:-translate-y-0.5 hover:bg-amber-400"
               >
                 Solicitar una demo
                 <ArrowRight size={17} strokeWidth={2.5} />
-              </a>
-              <a
-                href="#afiliados"
-                className="inline-flex items-center gap-2 rounded-xl border border-line px-7 py-3.5 text-[15px] font-semibold text-stone-800 transition-colors hover:border-line2 hover:text-stone-900"
+              </button>
+              <button
+                type="button"
+                onClick={openAffiliate}
+                className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-line px-7 py-3.5 text-[15px] font-semibold text-stone-800 transition-colors hover:border-line2 hover:text-stone-900"
               >
                 Quiero vender bots
-              </a>
+              </button>
             </div>
           </div>
         </div>

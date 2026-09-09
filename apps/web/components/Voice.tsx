@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Container } from "./ui";
 import VoiceCallSimulator from "./VoiceCallSimulator";
+import { DemoRequestButton } from "./DemoDialog";
 
 const checks = [
   "Contesta a la primera: sin llamadas perdidas ni buzón de voz",
@@ -80,13 +81,13 @@ export default function Voice() {
               ))}
             </ul>
 
-            <a
-              href="#demo"
-              className="mt-8 inline-flex items-center gap-2 rounded-xl bg-amber-500 px-6 py-3.5 text-[15px] font-bold text-stone-900 shadow-glow transition-all hover:-translate-y-0.5 hover:bg-amber-400"
+            <DemoRequestButton
+              className="mt-8 inline-flex cursor-pointer items-center gap-2 rounded-xl bg-amber-500 px-6 py-3.5 text-[15px] font-bold text-stone-900 shadow-glow transition-all hover:-translate-y-0.5 hover:bg-amber-400"
+              label="Quiero probar una llamada"
             >
               Quiero probar una llamada
               <ArrowRight size={17} strokeWidth={2.5} />
-            </a>
+            </DemoRequestButton>
           </div>
 
           {/* simulador de llamada */}

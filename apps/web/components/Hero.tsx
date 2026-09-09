@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Container } from "./ui";
 import ChatSimulator from "./ChatSimulator";
+import { DemoRequestButton } from "./DemoDialog";
 
 const channels = [
   { name: "WhatsApp", color: "#22c55e" },
@@ -60,13 +61,13 @@ export default function Hero() {
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            <a
-              href="#demo"
-              className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-6 py-3.5 text-[15px] font-bold text-stone-900 shadow-glow transition-all hover:-translate-y-0.5 hover:bg-amber-400"
+            <DemoRequestButton
+              className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-amber-500 px-6 py-3.5 text-[15px] font-bold text-stone-900 shadow-glow transition-all hover:-translate-y-0.5 hover:bg-amber-400"
+              label="Solicitar una demo"
             >
               Solicitar una demo
               <ArrowRight size={17} strokeWidth={2.5} />
-            </a>
+            </DemoRequestButton>
             <a
               href="#como-funciona"
               className="inline-flex items-center gap-2 rounded-xl border border-line px-6 py-3.5 text-[15px] font-semibold text-stone-800 transition-colors hover:border-line2 hover:text-stone-900"

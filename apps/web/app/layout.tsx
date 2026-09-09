@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AffiliateRedirectProvider } from "@/components/AffiliateRedirect";
+import { DemoDialogProvider } from "@/components/DemoDialog";
 
 export const metadata: Metadata = {
   title: "Nodia Agents — Agentes de IA que atienden llamadas y chats 24/7 | Kontrolia",
@@ -50,8 +52,19 @@ export default function RootLayout({
           href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
           rel="stylesheet"
         />
+        {/* Widget de Nodia Agents (chat de la web pública) */}
+        <script
+          src="https://agentes.kontrolia.io/widget.js"
+          data-bot="534072dd-b853-463f-b33c-eaa41fed9162"
+          data-key="61dad282-91c8-4995-9312-115ed742e888"
+          async
+        />
       </head>
-      <body className="font-sans antialiased">{children}</body>
+      <body className="font-sans antialiased">
+        <AffiliateRedirectProvider>
+          <DemoDialogProvider>{children}</DemoDialogProvider>
+        </AffiliateRedirectProvider>
+      </body>
     </html>
   );
 }

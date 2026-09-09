@@ -1,5 +1,8 @@
+"use client";
+
 import { Wrench, Handshake, Check, ArrowRight } from "lucide-react";
 import { Container, SectionHeading } from "./ui";
+import { useAffiliateRedirect } from "./AffiliateRedirect";
 
 const plans = [
   {
@@ -29,6 +32,8 @@ const plans = [
 ];
 
 export default function Affiliate() {
+  const openAffiliate = useAffiliateRedirect();
+
   return (
     <section id="afiliados" className="relative py-24">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-line to-transparent" />
@@ -75,16 +80,17 @@ export default function Affiliate() {
         </div>
 
         <div className="mt-10 flex flex-col items-center gap-4 text-center">
-          <a
-            href="#demo"
-            className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-7 py-3.5 text-[15px] font-bold text-stone-900 shadow-glow transition-all hover:-translate-y-0.5 hover:bg-amber-400"
+          <button
+            type="button"
+            onClick={openAffiliate}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-amber-500 px-7 py-3.5 text-[15px] font-bold text-stone-900 shadow-glow transition-all hover:-translate-y-0.5 hover:bg-amber-400"
           >
             Quiero ser afiliado
             <ArrowRight size={17} strokeWidth={2.5} />
-          </a>
+          </button>
           <p className="max-w-xl text-[13px] leading-relaxed text-stone-500">
-            Las comisiones y condiciones se definen al unirte. Solicita una demo
-            y te contamos todos los detalles.
+            Nodia Agents forma parte del ecosistema de Kontrolia: el proceso de
+            afiliados y las comisiones se definen en la página de Kontrolia.
           </p>
         </div>
       </Container>
