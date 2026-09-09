@@ -21,6 +21,8 @@ import type {
   ConnectorCreds,
   ConnectorListResult,
   ConnectorPushResult,
+  PipelineStageListResult,
+  PipelineStageOption,
 } from "../types";
 import {
   vinquliaBaseUrl,
@@ -35,20 +37,29 @@ import {
 } from "../vinquliaApi";
 
 /**
- * El `type` con el que nacen las tareas de cita.
- *
- * Fijo, no configurable. Pedirle al dueño que escriba un tipo de tarea es el
- * mismo error que ya costó un bug en producción con el pipeline: Vinqulia
- * guarda por VALUE interno y muestra por LABEL, así que quien teclea lo que ve
- * en pantalla guarda algo que su propio tablero no dibuja. Y este conector solo
- * crea y borra citas — no hay nada que el dueño pueda decidir aquí.
+ * El `type` con el que nacen las tareas de cita cuando el dueño no eligió otro.
  *
  * "follow-up" es el único valor comprobado contra un Vinqulia real (lo usan el
- * alta de leads y el aplicado de propuestas). Si una instalación tiene su
- * propio catálogo, lo correcto es un selector poblado desde su
- * `crm.configuration` —como listPipelineStages— no un campo de texto libre.
+ * alta de leads y el aplicado de propuestas), así que es el que no puede
+ * fallar. Su problema es de LECTURA: en el tablero, una cita queda con la
+ * misma píldora que un recordatorio de llamar, y el equipo no las distingue.
+ *
+ * Por eso se puede elegir otro — pero de una lista sacada de SU Vinqulia, no
+ * escribiéndolo. Vinqulia guarda por VALUE interno y muestra por LABEL, así
+ * que quien teclea lo que ve en pantalla guarda algo que su propio tablero no
+ * dibuja: pasó en producción con el pipeline.
  */
-const TIPO_TAREA = "follow-up";
+const TIPO_TAREA_DEFAULT = "follow-up";
+
+/** El tipo elegido en el panel, o el que no puede fallar. */
+function tipoDeTarea(creds: ConnectorCreds): string {
+  return (creds.config.taskType ?? "").trim() || TIPO_TAREA_DEFAULT;
+}
+
+/** Un catálogo de `crm.configuration.config`: lista de opciones con su valor interno y su etiqueta. */
+function esCatalogo(v: unknown): v is Array<{ value?: string; label?: string }> {
+  return Array.isArray(v) && v.length > 0 && v.every((o) => o && typeof o === "object" && "value" in o);
+}
 
 /** El id de tarea sale de `crearTarea`, que es numérico; se guarda como texto en `appointments.external_ref`. */
 interface TareaVinqulia {
@@ -91,12 +102,50 @@ export const vinquliaCalendarConnector: CalendarConnector = {
 
     const tareaId = await crearTarea(creds, base, {
       contactId,
-      tipo: TIPO_TAREA,
+      tipo: tipoDeTarea(creds),
       texto: [`Cita con ${appt.name}`, appt.notes?.trim()].filter(Boolean).join(" — "),
       vence,
     });
     if (tareaId === undefined) return { ok: false, error: "Vinqulia no aceptó la tarea de la cita." };
     return { ok: true, externalId: String(tareaId) };
+  },
+
+  /**
+   * Los tipos de tarea que existen en SU Vinqulia, para elegir de una lista.
+   *
+   * No se adivina bajo qué llave viven: se recorre `crm.configuration.config`
+   * buscando un catálogo (lista de {value,label}) cuyo nombre hable de tareas.
+   * Y si no aparece ninguno, el error DICE qué llaves sí traía la
+   * configuración — un selector vacío sin explicación deja al dueño sin saber
+   * si el problema es su CRM, su clave o nosotros.
+   */
+  async listTaskTypes(creds: ConnectorCreds): Promise<PipelineStageListResult> {
+    const base = vinquliaBaseUrl(creds);
+    if (!base) return { ok: false, items: [], error: VINQULIA_MISSING_URL };
+
+    const filas = await vinquliaBuscar<{ config?: Record<string, unknown> }>(creds, base, "/configuration?limit=1");
+    const config = filas[0]?.config;
+    if (!config) {
+      return { ok: false, items: [], error: "Vinqulia no devolvió su configuración." };
+    }
+
+    const entrada = Object.entries(config).find(([k, v]) => /task|tarea/i.test(k) && esCatalogo(v));
+    if (!entrada) {
+      const disponibles = Object.keys(config).join(", ") || "(ninguna)";
+      return {
+        ok: false,
+        items: [],
+        error: `No encontré un catálogo de tipos de tarea en tu Vinqulia. Lo que sí trae su configuración: ${disponibles}.`,
+      };
+    }
+
+    const [, catalogo] = entrada as [string, Array<{ value?: string; label?: string }>];
+    const items: PipelineStageOption[] = catalogo
+      .filter((o) => o.value)
+      .map((o) => ({ id: o.value!, label: o.label ?? o.value! }));
+    return items.length > 0
+      ? { ok: true, items }
+      : { ok: false, items: [], error: "Tu Vinqulia no tiene ningún tipo de tarea configurado." };
   },
 
   /**

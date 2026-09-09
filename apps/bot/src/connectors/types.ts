@@ -202,4 +202,13 @@ export interface CalendarConnector {
    * avisándole al cliente en vez de callarse el evento fantasma.
    */
   cancelAppointment?(creds: ConnectorCreds, externalId: string): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Los tipos de tarea/evento que existen en la cuenta conectada, para que el
+   * dueño elija de una lista en vez de teclear un valor interno.
+   *
+   * Solo aplica a los calendarios que viven DENTRO de un CRM, donde una cita
+   * comparte tabla con los demás pendientes y el tipo es lo único que las
+   * distingue en el tablero. Ausente = el conector usa el suyo y ya.
+   */
+  listTaskTypes?(creds: ConnectorCreds): Promise<PipelineStageListResult>;
 }

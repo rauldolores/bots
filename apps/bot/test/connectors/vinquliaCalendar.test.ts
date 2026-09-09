@@ -134,6 +134,37 @@ describe("vinquliaCalendarConnector.pushAppointment", () => {
     expect(JSON.parse(llamada("/tasks")!.init.body)).not.toHaveProperty("sales_id");
   });
 
+  // Importa por LECTURA: con el tipo genérico, una cita queda en el tablero
+  // con la misma píldora que un recordatorio de llamar.
+  it("usa el tipo que el dueño eligió del catálogo de su CRM", async () => {
+    responder({
+      "/contacts?": () => new Response(JSON.stringify([{ id: 42 }]), { status: 200 }),
+      "/tasks": () => new Response(JSON.stringify([{ id: 903 }]), { status: 201 }),
+    });
+
+    await vinquliaCalendarConnector.pushAppointment(
+      { ...creds, config: { ...creds.config, taskType: "meeting" } },
+      { name: "Pedro", contact: "pedro@x.com", startTime: "2026-09-07T16:00:00.000Z" },
+    );
+
+    expect(JSON.parse(llamada("/tasks")!.init.body).type).toBe("meeting");
+  });
+
+  it("sin elegir ninguno cae al único valor comprobado, que no puede fallar", async () => {
+    responder({
+      "/contacts?": () => new Response(JSON.stringify([{ id: 42 }]), { status: 200 }),
+      "/tasks": () => new Response(JSON.stringify([{ id: 904 }]), { status: 201 }),
+    });
+
+    await vinquliaCalendarConnector.pushAppointment(creds, {
+      name: "Pedro",
+      contact: "pedro@x.com",
+      startTime: "2026-09-07T16:00:00.000Z",
+    });
+
+    expect(JSON.parse(llamada("/tasks")!.init.body).type).toBe("follow-up");
+  });
+
   it("sin URL configurada: error claro y ni una llamada a la red", async () => {
     global.fetch = vi.fn() as any;
     const r = await vinquliaCalendarConnector.pushAppointment(
@@ -234,5 +265,82 @@ describe("vinquliaCalendarConnector.listUpcoming", () => {
     const r = await vinquliaCalendarConnector.listUpcoming(creds, 10);
     expect(r).toEqual({ ok: true, items: [] });
     expect(llamada("/contacts?")).toBeUndefined();
+  });
+});
+
+/**
+ * De dónde salen las opciones del selector. Se leen de SU Vinqulia por lo
+ * mismo que la etapa inicial: el CRM guarda por VALUE interno y muestra por
+ * LABEL, así que teclear lo que se ve en pantalla guarda algo que su propio
+ * tablero no dibuja.
+ */
+describe("vinquliaCalendarConnector.listTaskTypes", () => {
+  it("saca el catálogo de la configuración del CRM, sin importar cómo se llame la llave", async () => {
+    responder({
+      "/configuration": () =>
+        new Response(
+          JSON.stringify([
+            {
+              config: {
+                dealPipelines: [{ value: "ventas", label: "Ventas" }],
+                taskTypes: [
+                  { value: "meeting", label: "Reunión" },
+                  { value: "follow-up", label: "Seguimiento" },
+                ],
+              },
+            },
+          ]),
+          { status: 200 },
+        ),
+    });
+
+    const r = await vinquliaCalendarConnector.listTaskTypes!(creds);
+    expect(r.ok).toBe(true);
+    expect(r.items).toEqual([
+      { id: "meeting", label: "Reunión" },
+      { id: "follow-up", label: "Seguimiento" },
+    ]);
+  });
+
+  it("no confunde el catálogo de pipelines con el de tareas", async () => {
+    responder({
+      "/configuration": () =>
+        new Response(JSON.stringify([{ config: { dealPipelines: [{ value: "ventas", label: "Ventas" }] } }]), {
+          status: 200,
+        }),
+    });
+    expect((await vinquliaCalendarConnector.listTaskTypes!(creds)).ok).toBe(false);
+  });
+
+  // Lo que convierte un fallo mudo en algo accionable: el error DICE qué
+  // llaves sí traía la configuración, así el dueño no queda sin saber si el
+  // problema es su CRM, su clave o nosotros.
+  it("si no lo encuentra, el error dice qué llaves SÍ vio", async () => {
+    responder({
+      "/configuration": () =>
+        new Response(JSON.stringify([{ config: { dealPipelines: [], noteStatuses: [], sectors: [] } }]), {
+          status: 200,
+        }),
+    });
+
+    const r = await vinquliaCalendarConnector.listTaskTypes!(creds);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("dealPipelines");
+    expect(r.error).toContain("noteStatuses");
+    expect(r.error).toContain("sectors");
+  });
+
+  it("sin URL configurada no llama a la red", async () => {
+    global.fetch = vi.fn() as any;
+    const r = await vinquliaCalendarConnector.listTaskTypes!({ apiKey: "vk", config: {} });
+    expect(r.ok).toBe(false);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("una configuración vacía se reporta, no truena", async () => {
+    responder({ "/configuration": () => new Response("[]", { status: 200 }) });
+    const r = await vinquliaCalendarConnector.listTaskTypes!(creds);
+    expect(r.ok).toBe(false);
+    expect(r.items).toEqual([]);
   });
 });
