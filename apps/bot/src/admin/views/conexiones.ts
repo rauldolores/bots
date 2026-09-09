@@ -41,7 +41,15 @@ function esc(s: string): string {
   );
 }
 
-type ConnectableChannel = "telegram" | "twilio" | "kapso" | "voice" | "manychat" | "widget" | "meta" | "whatsapp";
+export type ConnectableChannel =
+  | "telegram"
+  | "twilio"
+  | "kapso"
+  | "voice"
+  | "manychat"
+  | "widget"
+  | "meta"
+  | "whatsapp";
 
 interface FieldSpec {
   name: string;
@@ -192,6 +200,21 @@ const CHANNEL_META: Record<ConnectableChannel, ChannelMeta> = {
     webhookNote: "Copia el código y pégalo en tu sitio.",
   },
 };
+
+/**
+ * ¿Este segmento de la URL es un canal que se puede conectar desde el panel?
+ *
+ * Sale de CHANNEL_META, no de una lista escrita a mano. La lista a mano ya
+ * existía —repetida en las tres rutas de /conexiones/:channel— y se quedó
+ * atrás cuando se agregaron Meta y WhatsApp Cloud: las tarjetas se dibujaban,
+ * el formulario existía, conectarCanalDeMeta() estaba escrito y probado, pero
+ * la ruta contestaba 404 antes de llegar a nada de eso. Para el dueño eso se
+ * veía como que el botón "Conectar" no hacía absolutamente nada, porque htmx
+ * no reemplaza el modal cuando la respuesta es un error.
+ */
+export function esCanalConectable(channel: string): channel is ConnectableChannel {
+  return Object.prototype.hasOwnProperty.call(CHANNEL_META, channel);
+}
 
 function webhookUrlFor(env: Env, channel: string, botId: string): string {
   const base = (env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");

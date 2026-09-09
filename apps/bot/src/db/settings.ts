@@ -1,4 +1,5 @@
 import { Db } from "./client";
+import { createSecret, deleteSecret, readSecret, updateSecret } from "./vault";
 
 // Canonical setting keys. Every value is stored as TEXT; the loader parses.
 // Empty/absent => default (see settings-loader.ts).
@@ -210,4 +211,100 @@ export class SettingsRepo {
     }
     return out;
   }
+
+  // ── Ajustes que son SECRETOS ───────────────────────────────────────────
+  //
+  // Cuatro ajustes guardan llaves de API (el cerebro y su respaldo, Resend,
+  // ElevenLabs) y vivían en texto plano en esta tabla, mientras el resto de
+  // las credenciales del producto ya iban cifradas por Vault. Con más de un
+  // bot eso deja de ser un riesgo propio y pasa a ser el de los clientes.
+  //
+  // El valor guardado pasa a ser `vault:<uuid>` en vez de la llave. El
+  // prefijo es explícito a propósito: adivinar por la FORMA del valor —"esto
+  // parece un UUID"— es la clase de heurística que un día se equivoca con la
+  // llave de alguien y le tumba el bot.
+
+  /**
+   * Un ajuste cuyo valor puede estar cifrado. Devuelve SIEMPRE el valor
+   * usable.
+   *
+   * Lo que no lleva el prefijo se devuelve tal cual, y esa compatibilidad es
+   * deliberada: mientras haya llaves sin migrar, el bot tiene que seguir
+   * respondiendo. Nada de días de corte.
+   */
+  async getSecret(key: string): Promise<string | null> {
+    return resolverSecreto(this.db, await this.get(key));
+  }
+
+  /** Guarda un ajuste secreto cifrado, reusando su entrada de Vault si ya tenía una. */
+  async setSecret(key: string, value: string): Promise<void> {
+    const actual = await this.get(key);
+    const limpio = value.trim();
+
+    // Vaciarlo borra el secreto: dejar el cifrado huérfano en Vault sería
+    // guardar para siempre una llave que el dueño quiso quitar.
+    if (!limpio) {
+      if (esRefDeVault(actual)) await deleteSecret(this.db, idDeVault(actual!)).catch(() => {});
+      await this.set(key, "");
+      return;
+    }
+
+    if (esRefDeVault(actual)) {
+      await updateSecret(this.db, idDeVault(actual), limpio);
+      return; // el ajuste ya apunta a esa entrada; no hay que reescribirlo
+    }
+    // El nombre lleva un sufijo aleatorio porque `vault.secrets.name` es
+    // ÚNICO: sin él, volver a crear el secreto de un mismo ajuste —tras
+    // borrarlo, o si el ajuste perdió su referencia— choca contra
+    // secrets_name_idx y la llave no se guarda. El prefijo sigue diciendo de
+    // qué ajuste y de qué bot es, que es para lo que sirve el nombre.
+    const nombre = `setting:${key}:${this.botId}:${crypto.randomUUID().slice(0, 8)}`;
+    const id = await createSecret(this.db, limpio, nombre);
+    await this.set(key, `${PREFIJO_VAULT}${id}`);
+  }
+
+  /**
+   * Como `all()`, pero con los secretos ya descifrados.
+   *
+   * Resuelve TODOS los cifrados en UNA consulta, no una por llave: esto corre
+   * en el camino caliente (cada turno carga los ajustes) y cuatro viajes de
+   * más a la base por turno se notan.
+   */
+  async allWithSecrets(): Promise<Record<string, string>> {
+    const ajustes = await this.all();
+    const ids = [...new Set(Object.values(ajustes).filter(esRefDeVault).map((v) => idDeVault(v)))];
+    if (ids.length === 0) return ajustes;
+
+    const marcas = ids.map(() => "?").join(", ");
+    const filas = await this.db.all<{ id: string; decrypted_secret: string }>(
+      `SELECT id, decrypted_secret FROM vault.decrypted_secrets WHERE id IN (${marcas})`,
+      ids,
+    );
+    const porId = new Map(filas.map((f) => [String(f.id), f.decrypted_secret]));
+
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(ajustes)) {
+      // Un secreto que ya no se puede descifrar queda VACÍO, nunca como
+      // "vault:…": si se colara así, se mandaría esa cadena como si fuera la
+      // llave y el proveedor devolvería un 401 imposible de entender.
+      out[k] = esRefDeVault(v) ? (porId.get(idDeVault(v)) ?? "") : v;
+    }
+    return out;
+  }
+}
+
+const PREFIJO_VAULT = "vault:";
+
+export function esRefDeVault(valor: string | null | undefined): valor is string {
+  return typeof valor === "string" && valor.startsWith(PREFIJO_VAULT);
+}
+
+function idDeVault(valor: string): string {
+  return valor.slice(PREFIJO_VAULT.length);
+}
+
+/** El valor usable de un ajuste que puede venir cifrado o en claro. */
+export async function resolverSecreto(db: Db, valor: string | null): Promise<string | null> {
+  if (!esRefDeVault(valor)) return valor;
+  return readSecret(db, idDeVault(valor));
 }

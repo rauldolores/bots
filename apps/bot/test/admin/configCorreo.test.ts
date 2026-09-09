@@ -54,7 +54,12 @@ describe("POST /admin/config — correo saliente", () => {
     expect(settings[SETTING_KEYS.emailOutboundProvider]).toBe("resend");
     expect(settings[SETTING_KEYS.emailFromName]).toBe("Soporte");
     expect(settings[SETTING_KEYS.emailFromAddress]).toBe("soporte@minegocio.com");
-    expect(settings[SETTING_KEYS.emailOutboundApiKey]).toBe("re_fake_key");
+    // La llave se guarda CIFRADA en Vault: en la tabla ya no queda en claro,
+    // pero se sigue leyendo. Lo que importa es el valor, no dónde vive.
+    expect(settings[SETTING_KEYS.emailOutboundApiKey]).not.toBe("re_fake_key");
+    expect(await new SettingsRepo(db, TEST_BOT_ID).getSecret(SETTING_KEYS.emailOutboundApiKey)).toBe(
+      "re_fake_key",
+    );
   });
 
   it("un proveedor fuera del allow-list se normaliza a vacío (nunca texto libre)", async () => {
@@ -76,8 +81,9 @@ describe("POST /admin/config — correo saliente", () => {
   it("la API key NO se re-escribe si el campo llega vacío (no la borra por accidente al guardar otra pestaña)", async () => {
     await postConfig({ [SETTING_KEYS.emailOutboundApiKey]: "key-original" });
     await postConfig({ [SETTING_KEYS.emailFromName]: "Solo cambio el nombre" });
-    const settings = await new SettingsRepo(db, TEST_BOT_ID).all();
-    expect(settings[SETTING_KEYS.emailOutboundApiKey]).toBe("key-original");
+    expect(await new SettingsRepo(db, TEST_BOT_ID).getSecret(SETTING_KEYS.emailOutboundApiKey)).toBe(
+      "key-original",
+    );
   });
 
   it("el checkbox de borrar SÍ la quita explícitamente", async () => {

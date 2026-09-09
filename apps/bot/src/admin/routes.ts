@@ -71,6 +71,7 @@ import { renderConfig } from "./views/config";
 import {
   renderConexiones,
   renderConnectModal,
+  esCanalConectable,
   renderConexionesGrid,
   connectChannel,
   disconnectChannel,
@@ -614,7 +615,7 @@ adminApp.get("/config/voz/:voiceId/muestra", async (c) => {
   const { VOCES_ELEVENLABS, urlDeMuestra } = await import("../channels/voice/elevenlabsSetup");
   if (!VOCES_ELEVENLABS.some((v) => v.value === voiceId)) return c.text("Voz desconocida", 404);
 
-  const apiKey = (await (await settingsFor(c)).get(SETTING_KEYS.voiceElevenLabsApiKey))?.trim();
+  const apiKey = (await (await settingsFor(c)).getSecret(SETTING_KEYS.voiceElevenLabsApiKey))?.trim();
   if (!apiKey) return c.text("Todavía no has guardado tu llave de ElevenLabs", 409);
 
   const url = await urlDeMuestra(apiKey, voiceId);
@@ -1341,7 +1342,7 @@ adminApp.get("/conexiones", async (c) =>
 // terminal (F5/F4: cada bot conecta sus propios canales desde el panel).
 adminApp.get("/conexiones/:channel/connect", (c) => {
   const channel = c.req.param("channel");
-  if (channel !== "telegram" && channel !== "twilio" && channel !== "kapso" && channel !== "voice" && channel !== "manychat" && channel !== "widget") {
+  if (!esCanalConectable(channel)) {
     return c.text("Canal desconocido", 404);
   }
   return c.html(renderConnectModal(channel));
@@ -1349,7 +1350,7 @@ adminApp.get("/conexiones/:channel/connect", (c) => {
 
 adminApp.post("/conexiones/:channel/connect", async (c) => {
   const channel = c.req.param("channel");
-  if (channel !== "telegram" && channel !== "twilio" && channel !== "kapso" && channel !== "voice" && channel !== "manychat" && channel !== "widget") {
+  if (!esCanalConectable(channel)) {
     return c.text("Canal desconocido", 404);
   }
   const form = await c.req.formData();
@@ -1392,7 +1393,7 @@ adminApp.post("/conexiones/email/:provider/connect", async (c) => {
 
 adminApp.post("/conexiones/:channel/disconnect", async (c) => {
   const channel = c.req.param("channel");
-  if (channel !== "telegram" && channel !== "twilio" && channel !== "kapso" && channel !== "voice" && channel !== "manychat" && channel !== "widget") {
+  if (!esCanalConectable(channel)) {
     return c.text("Canal desconocido", 404);
   }
   await disconnectChannel(c.env, c.get("botId"), channel);
@@ -1659,7 +1660,7 @@ adminApp.post("/campanas/send", async (c) => {
 adminApp.get("/config", async (c) => {
   const configDb = new Db(c.env.DB);
   const configBotId = c.get("botId");
-  const settings = await new SettingsRepo(configDb, configBotId).all();
+  const settings = await new SettingsRepo(configDb, configBotId).allWithSecrets();
   const bot = await new BotsRepo(configDb).getById(configBotId);
   const mcpConnectors = (await new BotConnectorsRepo(configDb).listByBot(configBotId)).filter(
     (conn) => conn.category === "mcp" && conn.enabled,
@@ -1906,11 +1907,11 @@ adminApp.post("/config", async (c) => {
   // La API key SOLO se sobreescribe si escribieron algo (el input siempre
   // llega vacío cuando no la tocaron); el checkbox la borra explícitamente.
   if (form.get("llm_api_key_clear") === "1") {
-    await repo.set(SETTING_KEYS.llmApiKey, "");
+    await repo.setSecret(SETTING_KEYS.llmApiKey, "");
   } else {
     const keyRaw = form.get(SETTING_KEYS.llmApiKey);
     if (keyRaw !== null && String(keyRaw).trim() !== "") {
-      await repo.set(SETTING_KEYS.llmApiKey, String(keyRaw).trim());
+      await repo.setSecret(SETTING_KEYS.llmApiKey, String(keyRaw).trim());
     }
   }
 
@@ -1924,11 +1925,11 @@ adminApp.post("/config", async (c) => {
     );
   }
   if (form.get("llm_backup_api_key_clear") === "1") {
-    await repo.set(SETTING_KEYS.llmBackupApiKey, "");
+    await repo.setSecret(SETTING_KEYS.llmBackupApiKey, "");
   } else {
     const backupKeyRaw = form.get(SETTING_KEYS.llmBackupApiKey);
     if (backupKeyRaw !== null && String(backupKeyRaw).trim() !== "") {
-      await repo.set(SETTING_KEYS.llmBackupApiKey, String(backupKeyRaw).trim());
+      await repo.setSecret(SETTING_KEYS.llmBackupApiKey, String(backupKeyRaw).trim());
     }
   }
 
@@ -1938,7 +1939,7 @@ adminApp.post("/config", async (c) => {
   // teléfono. Ver channels/voice/elevenlabsSetup.ts.
   const elevenKeyRaw = form.get(SETTING_KEYS.voiceElevenLabsApiKey);
   if (elevenKeyRaw !== null && String(elevenKeyRaw).trim() !== "") {
-    await repo.set(SETTING_KEYS.voiceElevenLabsApiKey, String(elevenKeyRaw).trim());
+    await repo.setSecret(SETTING_KEYS.voiceElevenLabsApiKey, String(elevenKeyRaw).trim());
   }
   const vozEleven = String(form.get(SETTING_KEYS.voiceElevenLabsVoiceId) ?? "").trim();
   if (vozEleven) await repo.set(SETTING_KEYS.voiceElevenLabsVoiceId, vozEleven);
@@ -1964,11 +1965,11 @@ adminApp.post("/config", async (c) => {
   const emailFromNameRaw = form.get(SETTING_KEYS.emailFromName);
   if (emailFromNameRaw !== null) await repo.set(SETTING_KEYS.emailFromName, String(emailFromNameRaw).trim());
   if (form.get("email_outbound_api_key_clear") === "1") {
-    await repo.set(SETTING_KEYS.emailOutboundApiKey, "");
+    await repo.setSecret(SETTING_KEYS.emailOutboundApiKey, "");
   } else {
     const emailKeyRaw = form.get(SETTING_KEYS.emailOutboundApiKey);
     if (emailKeyRaw !== null && String(emailKeyRaw).trim() !== "") {
-      await repo.set(SETTING_KEYS.emailOutboundApiKey, String(emailKeyRaw).trim());
+      await repo.setSecret(SETTING_KEYS.emailOutboundApiKey, String(emailKeyRaw).trim());
     }
   }
 
@@ -1980,7 +1981,7 @@ adminApp.post("/config", async (c) => {
   //
   // Va al FINAL y después de guardar: aunque esto falle, lo que el dueño
   // escribió no se pierde — solo se le avisa, con el motivo.
-  const elevenApiKey = (await repo.get(SETTING_KEYS.voiceElevenLabsApiKey))?.trim();
+  const elevenApiKey = (await repo.getSecret(SETTING_KEYS.voiceElevenLabsApiKey))?.trim();
   if (elevenApiKey) {
     const { prepararAgenteElevenLabs, VOZ_POR_DEFECTO } = await import("../channels/voice/elevenlabsSetup");
     const voz = (await repo.get(SETTING_KEYS.voiceElevenLabsVoiceId))?.trim() || VOZ_POR_DEFECTO;

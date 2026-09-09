@@ -108,7 +108,7 @@ function applyChannelConfig(env: Env, channel: ConnectionChannel, config: BotCha
  * applyChannelConfig: sale de `settings`, no de bot_channels.
  */
 async function applyOutboundEmailSettings(env: Env, botId: string): Promise<Env> {
-  const settings = await new SettingsRepo(new Db(env.DB), botId).all();
+  const settings = await new SettingsRepo(new Db(env.DB), botId).allWithSecrets();
   const get = (key: string): string | undefined => settings[key]?.trim() || undefined;
   const provider = get(SETTING_KEYS.emailOutboundProvider);
   return {

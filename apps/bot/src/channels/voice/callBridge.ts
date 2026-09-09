@@ -50,7 +50,7 @@ export async function credencialesElevenLabs(
   botId: string,
   env: Env,
 ): Promise<{ apiKey: string; agentId: string } | null> {
-  const settings = await new SettingsRepo(db, botId).all();
+  const settings = await new SettingsRepo(db, botId).allWithSecrets();
   const apiKey = settings[SETTING_KEYS.voiceElevenLabsApiKey]?.trim();
   if (!apiKey) return null;
 

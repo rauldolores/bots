@@ -589,7 +589,15 @@ export async function runScheduledJobs(env: Env, cron?: string): Promise<void> {
   const bots = await new BotsRepo(new Db(env.DB)).listAll();
   const { runFlywheel } = await import("./flywheel/detect");
   const { autoApplyPending } = await import("./flywheel/apply");
+  const { migrarSecretosDeAjustes } = await import("./db/migrarSecretos");
   for (const bot of bots) {
+    // Las llaves de API que quedaron en texto plano en `settings` se van
+    // cifrando solas. Va primero y aparte del resto: es idempotente, cuesta
+    // una consulta, y un paso manual en una instalación de alguien que no
+    // programa es un paso que no se da.
+    await migrarSecretosDeAjustes(new Db(env.DB), bot.id).catch((e) =>
+      console.error(`secretos (${bot.id}):`, e),
+    );
     // Corrida nocturna del Analista de insights (F2). No debe tumbar la purga.
     await analyzeConversations(env, { limit: 50, botId: bot.id }).catch((e) =>
       console.error(`insights (${bot.id}):`, e),

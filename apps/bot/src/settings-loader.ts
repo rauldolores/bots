@@ -75,7 +75,7 @@ export function llmBackupFrom(settings: Record<string, string>): { provider?: st
 export async function loadLlmOverrides(env: Env, botId?: string): Promise<LlmOverrides> {
   try {
     const db = new Db(env.DB);
-    const settings = await new SettingsRepo(db, botId ?? (await resolveBotId(db))).all();
+    const settings = await new SettingsRepo(db, botId ?? (await resolveBotId(db))).allWithSecrets();
     return llmOverridesFrom(settings);
   } catch {
     return {};
@@ -122,7 +122,9 @@ export async function resolveAgentConfig(
   const db = new Db(env.DB);
   const botId = botIdOverride ?? (await resolveBotId(db));
   const repo = new SettingsRepo(db, botId);
-  const settings = await repo.all();
+  // Con secretos: aquí sale la llave del cerebro (llm_api_key). Sin esto,
+  // un bot con la llave ya cifrada se quedaría sin proveedor y no respondería.
+  const settings = await repo.allWithSecrets();
   // F3 (docs/multitenancy.md): member/config.local.ts se retiró — el negocio
   // (horarios, servicios, catálogo…) vive en bots.config. Si por lo que sea
   // la fila no existe (nunca debería, resolveBotId ya la exige), un negocio

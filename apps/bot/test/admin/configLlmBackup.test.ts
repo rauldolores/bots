@@ -52,7 +52,11 @@ describe("POST /admin/config — respaldo de otro proveedor", () => {
 
     const settings = await new SettingsRepo(db, TEST_BOT_ID).all();
     expect(settings[SETTING_KEYS.llmBackupProvider]).toBe("openai");
-    expect(settings[SETTING_KEYS.llmBackupApiKey]).toBe("sk-backup-fake");
+    // Cifrada en Vault: fuera de la tabla en claro, pero legible.
+    expect(settings[SETTING_KEYS.llmBackupApiKey]).not.toBe("sk-backup-fake");
+    expect(await new SettingsRepo(db, TEST_BOT_ID).getSecret(SETTING_KEYS.llmBackupApiKey)).toBe(
+      "sk-backup-fake",
+    );
   });
 
   it("un proveedor fuera del allow-list se normaliza a vacío (nunca texto libre)", async () => {
@@ -68,8 +72,9 @@ describe("POST /admin/config — respaldo de otro proveedor", () => {
     });
     await postConfig({ [SETTING_KEYS.llmBackupProvider]: "openai", [SETTING_KEYS.llmBackupApiKey]: "" });
 
-    const settings = await new SettingsRepo(db, TEST_BOT_ID).all();
-    expect(settings[SETTING_KEYS.llmBackupApiKey]).toBe("sk-backup-fake");
+    expect(await new SettingsRepo(db, TEST_BOT_ID).getSecret(SETTING_KEYS.llmBackupApiKey)).toBe(
+      "sk-backup-fake",
+    );
   });
 
   it("el checkbox de borrar sí la quita", async () => {
