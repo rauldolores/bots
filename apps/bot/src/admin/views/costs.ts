@@ -138,9 +138,13 @@ export async function renderCosts(env: Env, botId: string, saved = false, visibl
       </div>
     </div>`;
 
-  // --- Voz (F7 fase 10): estimado, NO exacto — ver channels/voice/callCost.ts.
-  // El lado de IA usa tokens reales de Realtime (mismo costOfUsage que arriba),
-  // el de telefonía es minutos × tarifa configurable (Twilio no da tokens).
+  // --- Voz: estimado, NO exacto — ver channels/voice/callCost.ts.
+  // ElevenLabs (el único proveedor de voz) cobra POR MINUTO, no por token, así
+  // que el lado de IA también es duración × tarifa — igual de estimado que la
+  // telefonía, no el costOfUsage() exacto que usa el resto de esta pantalla.
+  // (Antes, con OpenAI Realtime, el lado de IA sí salía de tokens reales —
+  // ese proveedor ya no existe, ver commit "ElevenLabs queda como el único
+  // flujo de voz".)
   const voiceRows = await db.all<{ day: string; calls: number; ai_cost: number; tel_cost: number }>(
     `SELECT to_char(to_timestamp(started_at / 1000.0) AT TIME ZONE 'UTC', 'YYYY-MM-DD') as day,
             COUNT(*) as calls,
@@ -251,7 +255,7 @@ export async function renderCosts(env: Env, botId: string, saved = false, visibl
       <table class="w-full text-[12px] mt-2">
         <thead><tr class="text-[9.5px] tracking-[.1em] uppercase text-dim text-left"><th class="font-normal pb-2">Concepto</th><th class="font-normal text-right pb-2">Costo</th></tr></thead>
         <tbody>
-          <tr style="border-top:1px solid var(--line)"><td class="py-2 pr-2 text-cream">🧠 IA (Realtime, tokens reales)</td><td class="text-right font-semibold text-cream">${money4(voiceAiMonth)}</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-2 pr-2 text-cream">🧠 IA (ElevenLabs, minutos × tarifa)</td><td class="text-right font-semibold text-cream">${money4(voiceAiMonth)}</td></tr>
           <tr style="border-top:1px solid var(--line)"><td class="py-2 pr-2 text-cream">📞 Telefonía (minutos × tarifa)</td><td class="text-right font-semibold text-cream">${money4(voiceTelMonth)}</td></tr>
         </tbody>
       </table>
@@ -281,8 +285,8 @@ export async function renderCosts(env: Env, botId: string, saved = false, visibl
       El de <b class="text-muted">Twilio</b> viene de la Usage Records API de Twilio: es lo que tu cuenta
       realmente gastó (incluye renta de números). Los precios de Meta por conversación de
       WhatsApp aparecen dentro de las categorías de Twilio. El de <b class="text-muted">Llamadas</b>
-      es un ESTIMADO: la IA usa tokens reales de Realtime (igual de exacto que el resto), pero la
-      telefonía es minutos × una tarifa configurable, no tu factura real de Twilio Voice.
+      es un ESTIMADO completo: ElevenLabs cobra por minuto, así que tanto la IA como la telefonía
+      salen de duración × una tarifa configurable — ninguna de las dos es tu factura real.
     </p>
     <p class="text-[10.5px] text-dim leading-relaxed">
       Todas las cifras están en <b class="text-muted">pesos mexicanos</b>. Tus proveedores
