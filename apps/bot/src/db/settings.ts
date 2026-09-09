@@ -148,19 +148,17 @@ export const SETTING_KEYS = {
   // Resend no lo necesita (la key ya trae el remitente verificado implícito).
   emailOutboundDomain: "email_outbound_domain",
   emailFromAddress: "email_from_address",
-  // El buzón que el negocio YA usaba para atender (soporte@suempresa.com) y
-  // que ahora reenvía hacia nosotros. Sirve para dos cosas y las dos importan:
-  //   1. Va como Reply-To, para que el cliente final le siga escribiendo a la
-  //      dirección de siempre y su respuesta vuelva por el mismo reenvío.
-  //   2. Es la guarda de identidad: si un correo entrante viene DE este buzón,
-  //      el proveedor reescribió el remitente al reenviar, y hay que recuperar
-  //      al cliente real (ver channels/email/reenvio.ts). Sin esto, todos sus
-  //      clientes caerían en UNA sola conversación.
-  emailSupportMailbox: "email_support_mailbox",
-  // La dirección NUESTRA a la que ese buzón reenvía. El webhook de Resend es
-  // de CUENTA, no de bot —no se puede filtrar por dirección al suscribirlo—
-  // así que cada bot recibe TODOS los correos y este dato es lo que le
-  // permite quedarse solo con los suyos.
+  // La dirección NUESTRA a la que el buzón del negocio reenvía. El webhook de
+  // Resend es de CUENTA, no de bot —su create-webhook solo acepta endpoint y
+  // eventos, no filtra por dirección— así que cada bot conectado recibe TODOS
+  // los correos, y este dato es lo que le permite quedarse solo con los suyos.
+  // Vacío = acepta todo, que es lo correcto con un solo bot.
+  //
+  // NO hay un campo aparte para el "buzón de atención": en este diseño es la
+  // MISMA dirección que emailFromAddress. El bot envía desde el buzón que el
+  // negocio ya usaba, el cliente responde ahí (un correo sin Reply-To se
+  // responde al From), y el reenvío lo trae de vuelta. Pedirlo dos veces era
+  // un campo de más para gente que no es técnica.
   emailInboundAddress: "email_inbound_address",
   emailFromName: "email_from_name",
 } as const;

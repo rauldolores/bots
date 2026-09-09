@@ -5,7 +5,7 @@
  * Aquí se prueba el cableado completo, no las funciones sueltas (eso está en
  * test/channels/emailReenvio.test.ts): que el parser descarte lo que no debe
  * llegarle al agente, que recupere al cliente real detrás del reenvío, y que
- * la respuesta salga con Reply-To al buzón del negocio y dentro del hilo.
+ * la respuesta salga desde el buzón del negocio y dentro del hilo.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { parseResendInbound } from "../../../src/channels/email/resend";
@@ -13,7 +13,6 @@ import { parseMailgunInbound } from "../../../src/channels/email/mailgun";
 import {
   asuntoDeRespuesta,
   cabecerasDeHilo,
-  loadOutboundEmailConfig,
   sendOutboundEmail,
 } from "../../../src/channels/email/outbound";
 import type { Env } from "../../../src/env";
@@ -199,30 +198,30 @@ describe("cabecerasDeHilo", () => {
 });
 
 /**
- * El Reply-To es lo que cierra el circuito: sin él la respuesta del cliente
- * llegaría a NUESTRO dominio en vez de al buzón del negocio, y el reenvío
- * nunca la traería de vuelta.
+ * El bot escribe DESDE el buzón que el negocio ya usaba, así que el circuito
+ * cierra sin Reply-To: un correo sin esa cabecera se responde al From, la
+ * respuesta llega al buzón del negocio, y su reenvío la trae de vuelta.
  */
-describe("salida — Reply-To al buzón del negocio y respuesta dentro del hilo", () => {
+describe("salida — se escribe desde el buzón del negocio, y dentro del hilo", () => {
   const env = {
     EMAIL_OUTBOUND_PROVIDER: "mailgun",
     EMAIL_OUTBOUND_API_KEY: "key-x",
     EMAIL_OUTBOUND_DOMAIN: "minegocio.com",
-    EMAIL_FROM_ADDRESS: "bot@mail.nodia.io",
+    EMAIL_FROM_ADDRESS: BUZON,
     EMAIL_FROM_NAME: "Soporte Mi Negocio",
-    EMAIL_SUPPORT_MAILBOX: BUZON,
-  } as Env;
+  } as unknown as Env;
 
-  it("la config toma el buzón de atención como Reply-To", () => {
-    expect(loadOutboundEmailConfig(env)?.replyTo).toBe(BUZON);
-  });
-
-  it("el correo sale con Reply-To y con las cabeceras del hilo", async () => {
-    let enviado = new URLSearchParams();
+  function capturarEnvio() {
+    const capturado = { body: new URLSearchParams() };
     globalThis.fetch = vi.fn(async (_url: any, init: any) => {
-      enviado = new URLSearchParams(init.body as string);
+      capturado.body = new URLSearchParams(init.body as string);
       return new Response("{}", { status: 200 });
     }) as any;
+    return capturado;
+  }
+
+  it("el correo sale del buzón del negocio y con las cabeceras del hilo", async () => {
+    const capturado = capturarEnvio();
 
     const r = await sendOutboundEmail(env, "ana@x.com", "Re: Cotización", "Claro que sí.", {
       subject: "Cotización",
@@ -230,21 +229,23 @@ describe("salida — Reply-To al buzón del negocio y respuesta dentro del hilo"
     });
 
     expect(r.ok).toBe(true);
-    expect(enviado.get("h:Reply-To")).toBe(BUZON);
-    expect(enviado.get("h:In-Reply-To")).toBe("<abc@x.com>");
-    expect(enviado.get("subject")).toBe("Re: Cotización");
-    expect(enviado.get("from")).toBe("Soporte Mi Negocio <bot@mail.nodia.io>");
+    expect(capturado.body.get("from")).toBe(`Soporte Mi Negocio <${BUZON}>`);
+    expect(capturado.body.get("h:In-Reply-To")).toBe("<abc@x.com>");
+    expect(capturado.body.get("subject")).toBe("Re: Cotización");
   });
 
-  it("sin buzón configurado no manda un Reply-To vacío", async () => {
-    let enviado = new URLSearchParams();
-    globalThis.fetch = vi.fn(async (_url: any, init: any) => {
-      enviado = new URLSearchParams(init.body as string);
-      return new Response("{}", { status: 200 });
-    }) as any;
+  // Un Reply-To igual al From es ruido, y pedirlo aparte en el panel era
+  // pedir dos veces el mismo dato.
+  it("NO manda Reply-To: responder al From ya llega al buzón correcto", async () => {
+    const capturado = capturarEnvio();
+    await sendOutboundEmail(env, "ana@x.com", "Re: x", "y", { messageId: "<abc@x.com>" });
+    expect(capturado.body.has("h:Reply-To")).toBe(false);
+  });
 
-    await sendOutboundEmail({ ...env, EMAIL_SUPPORT_MAILBOX: undefined }, "ana@x.com", "Re: x", "y");
-    expect(enviado.has("h:Reply-To")).toBe(false);
-    expect(enviado.has("h:In-Reply-To")).toBe(false);
+  it("sin hilo no manda cabeceras vacías", async () => {
+    const capturado = capturarEnvio();
+    await sendOutboundEmail(env, "ana@x.com", "Re: x", "y");
+    expect(capturado.body.has("h:In-Reply-To")).toBe(false);
+    expect(capturado.body.has("h:References")).toBe(false);
   });
 });

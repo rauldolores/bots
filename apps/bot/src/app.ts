@@ -192,7 +192,11 @@ app.post("/webhooks/voice/:botId/transfer-status", (c) => handleTransferStatusCa
  */
 async function opcionesDeEntrada(rawEnv: Env, botId: string) {
   const env = await resolveChannelEnv(rawEnv, botId, "email");
-  return { buzonDeAtencion: env.EMAIL_SUPPORT_MAILBOX, direccionDeEntrada: env.EMAIL_INBOUND_ADDRESS };
+  // El "buzón de atención" NO es un campo aparte: es el mismo remitente que el
+  // bot usa para escribir. El negocio envía desde el buzón que ya tenía, y ese
+  // es justamente el que reenvía hacia acá — así que es la dirección cuyo
+  // reenvío hay que detectar para recuperar al cliente real.
+  return { buzonDeAtencion: env.EMAIL_FROM_ADDRESS, direccionDeEntrada: env.EMAIL_INBOUND_ADDRESS };
 }
 
 async function routeEmailToAgent(

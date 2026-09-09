@@ -1956,11 +1956,8 @@ adminApp.post("/config", async (c) => {
   if (emailDomainRaw !== null) await repo.set(SETTING_KEYS.emailOutboundDomain, String(emailDomainRaw).trim());
   const emailFromAddressRaw = form.get(SETTING_KEYS.emailFromAddress);
   if (emailFromAddressRaw !== null) await repo.set(SETTING_KEYS.emailFromAddress, String(emailFromAddressRaw).trim());
-  // Las dos del reenvío: el buzón del negocio (va como Reply-To) y la
-  // dirección nuestra a la que reenvía (filtra qué correo es de este bot).
-  const emailSupportMailboxRaw = form.get(SETTING_KEYS.emailSupportMailbox);
-  if (emailSupportMailboxRaw !== null)
-    await repo.set(SETTING_KEYS.emailSupportMailbox, String(emailSupportMailboxRaw).trim().toLowerCase());
+  // La dirección nuestra a la que el buzón del negocio reenvía: filtra qué
+  // correo es de este bot cuando hay varios en la misma cuenta del proveedor.
   const emailInboundAddressRaw = form.get(SETTING_KEYS.emailInboundAddress);
   if (emailInboundAddressRaw !== null)
     await repo.set(SETTING_KEYS.emailInboundAddress, String(emailInboundAddressRaw).trim().toLowerCase());

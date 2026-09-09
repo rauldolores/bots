@@ -22,14 +22,12 @@ export interface OutboundEmailConfig {
   domain?: string;
   fromAddress: string;
   fromName?: string;
-  /**
-   * El buzón de siempre del negocio. Va como Reply-To para que el cliente le
-   * siga escribiendo a la dirección que ya conoce y su respuesta vuelva por el
-   * mismo reenvío que trajo la primera. Sin esto el circuito no cierra: la
-   * respuesta llegaría a nuestro dominio en vez del suyo.
-   */
-  replyTo?: string;
 }
+
+// NO se manda Reply-To, y es a propósito: el bot escribe DESDE el buzón que el
+// negocio ya usaba, así que un correo sin Reply-To ya se responde ahí (el
+// cliente de correo usa el From). Poner uno igual al From sería ruido, y
+// pedirlo aparte en el panel era pedir dos veces el mismo dato.
 
 /** Cómo enganchar la respuesta al hilo que el cliente ya tiene abierto. */
 export interface HiloDeCorreo {
@@ -50,7 +48,6 @@ export function loadOutboundEmailConfig(env: Env): OutboundEmailConfig | null {
     domain: env.EMAIL_OUTBOUND_DOMAIN,
     fromAddress: EMAIL_FROM_ADDRESS,
     fromName: env.EMAIL_FROM_NAME,
-    replyTo: env.EMAIL_SUPPORT_MAILBOX,
   };
 }
 
@@ -99,7 +96,6 @@ async function sendViaResend(
       to,
       subject,
       text,
-      ...(cfg.replyTo ? { replyTo: cfg.replyTo } : {}),
       ...(Object.keys(headers).length ? { headers } : {}),
     });
     if (result.error) return { ok: false, error: result.error.message };
@@ -119,7 +115,6 @@ async function sendViaMailgun(
   if (!cfg.domain) return { ok: false, error: "Falta el dominio de envío de Mailgun." };
   try {
     const body = new URLSearchParams({ from: formatFrom(cfg), to, subject, text });
-    if (cfg.replyTo) body.set("h:Reply-To", cfg.replyTo);
     // Mailgun manda cabeceras arbitrarias con el prefijo "h:".
     for (const [nombre, valor] of Object.entries(cabecerasDeHilo(hilo))) body.set(`h:${nombre}`, valor);
     const res = await fetch(`https://api.mailgun.net/v3/${encodeURIComponent(cfg.domain)}/messages`, {

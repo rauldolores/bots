@@ -118,7 +118,6 @@ async function applyOutboundEmailSettings(env: Env, botId: string): Promise<Env>
     ...(get(SETTING_KEYS.emailOutboundDomain) ? { EMAIL_OUTBOUND_DOMAIN: get(SETTING_KEYS.emailOutboundDomain) } : {}),
     ...(get(SETTING_KEYS.emailFromAddress) ? { EMAIL_FROM_ADDRESS: get(SETTING_KEYS.emailFromAddress) } : {}),
     ...(get(SETTING_KEYS.emailFromName) ? { EMAIL_FROM_NAME: get(SETTING_KEYS.emailFromName) } : {}),
-    ...(get(SETTING_KEYS.emailSupportMailbox) ? { EMAIL_SUPPORT_MAILBOX: get(SETTING_KEYS.emailSupportMailbox) } : {}),
     ...(get(SETTING_KEYS.emailInboundAddress) ? { EMAIL_INBOUND_ADDRESS: get(SETTING_KEYS.emailInboundAddress) } : {}),
   };
 }
