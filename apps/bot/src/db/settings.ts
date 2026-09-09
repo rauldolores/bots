@@ -50,11 +50,14 @@ export const SETTING_KEYS = {
   // citas y las fechas del panel se lean en la hora del dueño, no en UTC.
   // Vacío = America/Mexico_City (ver src/datetime.ts DEFAULT_TIMEZONE).
   timezone: "timezone",
-  // Canal Voice (F7 fase 3): API key de OpenAI para el modelo de audio en
-  // tiempo real (Realtime) — proveedor distinto al de "Modelo de IA" de
-  // arriba, así que necesita la suya aunque el bot piense con Claude/otro.
-  // Vacío = se detecta sola (BYO-LLM si eligieron OpenAI ahí, si no la del
-  // despliegue) — ver channels/voice/openaiKey.ts.
+  // RETIRADA con OpenAI Realtime (42ba3b1): era la API key de su modelo de
+  // audio, y hoy NADIE la lee — el channels/voice/openaiKey.ts al que apuntaba
+  // ya no existe. No la uses para nada nuevo.
+  //
+  // Se conserva solo porque sigue en AJUSTES_SECRETOS (db/migrarSecretos.ts):
+  // una instalación vieja puede tener ahí una llave de verdad en texto plano,
+  // y quitar la clave la dejaría sin cifrar para siempre. Borrarla cuando ya
+  // no queden.
   voiceOpenAiApiKey: "voice_openai_api_key",
   // F7 fase 10 — observabilidad de Voice. "No almacenar datos sensibles
   // innecesariamente": el transcript estructurado de una llamada (más
@@ -95,10 +98,14 @@ export const SETTING_KEYS = {
   //
   // Vacío = se usa el de chat, que es como funcionaba antes de existir esto.
   voicePlaybook: "voice_playbook",
-  // Voz de OpenAI Realtime para llamadas telefónicas — el panel solo ofrece
-  // marin/cedar (las únicas dos que suenan bien en español); sin configurar,
-  // cae al default hardcodeado "marin" en realtimeClient.ts.
-  voiceName: "voice_name",
+  // `voice_name` (la voz de OpenAI Realtime) se retiró junto con ese proveedor
+  // en 42ba3b1: nada la leía ni la escribía, y su comentario seguía apuntando
+  // a un realtimeClient.ts que ya no existe. Una clave así es una trampa —
+  // alguien la usa creyendo que hace algo. La voz se elige con
+  // voiceElevenLabsVoiceId, más abajo.
+  //
+  // Quedan filas huérfanas con ese nombre en instalaciones viejas; no estorban
+  // (nadie las lee) y borrarlas tocaría datos del dueño sin necesidad.
   // --- Prueba de ElevenLabs como proveedor de voz (mismo número que producción) ---
   // La llave del dueño. Va en la pantalla y no en variables de entorno: quien
   // instala esto no sabe configurar un servidor, y ése era justo el problema.

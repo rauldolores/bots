@@ -11,6 +11,15 @@ import { Db } from "../../src/db/client";
 import { BotChannelsRepo } from "../../src/db/botChannels";
 import type { Env } from "../../src/env";
 
+/**
+ * Lo que devuelve el Vault simulado: un UUID de verdad.
+ *
+ * Antes devolvía "secret-1", y como bot_channels.secret_ref es una columna
+ * UUID el INSERT moría con "invalid input syntax for type uuid" — las cinco
+ * pruebas de este archivo fallaban por el mock, no por el código.
+ */
+const refDeVault = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
 const createSecretMock = vi.fn();
 const updateSecretMock = vi.fn();
 const deleteSecretMock = vi.fn();
@@ -36,7 +45,7 @@ beforeEach(async () => {
   db = await createTestDb();
   env = { DB: db.driver, DASHBOARD_BASE_URL: "https://bot.test" } as unknown as Env;
   secretCounter = 0;
-  createSecretMock.mockReset().mockImplementation(async () => `secret-${++secretCounter}`);
+  createSecretMock.mockReset().mockImplementation(async () => refDeVault(++secretCounter));
   updateSecretMock.mockReset().mockResolvedValue(undefined);
   deleteSecretMock.mockReset().mockResolvedValue(undefined);
 });
@@ -94,8 +103,8 @@ describe("connectEmailChannel — una u otra (F9)", () => {
     await connectEmailChannel(env, TEST_BOT_ID, "resend", form({ api_key: "re_key_2", signing_secret: "whsec_2" }));
 
     expect(createSecretMock).not.toHaveBeenCalled(); // rotó, no creó de nuevo
-    expect(updateSecretMock).toHaveBeenCalledWith(expect.anything(), "secret-1", "re_key_2");
-    expect(updateSecretMock).toHaveBeenCalledWith(expect.anything(), "secret-2", "whsec_2");
+    expect(updateSecretMock).toHaveBeenCalledWith(expect.anything(), refDeVault(1), "re_key_2");
+    expect(updateSecretMock).toHaveBeenCalledWith(expect.anything(), refDeVault(2), "whsec_2");
   });
 });
 

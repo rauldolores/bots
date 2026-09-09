@@ -11,6 +11,7 @@ import { adminApp } from "../../src/admin/routes";
 import { BotsRepo } from "../../src/db/bots";
 import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
 import type { Env } from "../../src/env";
+import { VOCES_ELEVENLABS, VOZ_POR_DEFECTO } from "../../src/channels/voice/elevenlabsSetup";
 
 const PASSWORD = "secret123";
 function basicAuthHeader(user: string, pass: string): string {
@@ -137,16 +138,26 @@ describe("POST /admin/config — negocio (giro, idioma, país, moneda, campos di
     expect(html).toContain("Efectivo, Tarjeta");
   });
 
-  it("GET /config solo ofrece marin/cedar como voz, con etiquetas descriptivas", async () => {
+  // Esta prueba pedía marin/cedar, las voces de OpenAI Realtime. Ese proveedor
+  // se retiró (42ba3b1) y con él su selector, así que la prueba quedó
+  // afirmando una pantalla que ya no existe. Ahora cubre lo que SÍ hay: el
+  // catálogo de ElevenLabs, que es el único flujo de voz.
+  it("GET /config ofrece el catálogo de voces de ElevenLabs, no el de OpenAI", async () => {
     const res = await adminApp.request("/config", { headers: AUTH }, env);
     const html = await res.text();
-    expect(html).toContain('<option value="marin"');
-    expect(html).toContain('<option value="cedar"');
-    expect(html).toContain("Voz femenina");
-    expect(html).toContain("Voz masculina");
-    // El resto del catálogo de OpenAI (acento en inglés) ya no se ofrece.
-    expect(html).not.toContain('value="alloy"');
-    expect(html).not.toContain('value="shimmer"');
+
+    expect(html).toContain(`name="${SETTING_KEYS.voiceElevenLabsVoiceId}"`);
+    for (const voz of VOCES_ELEVENLABS) {
+      expect(html, `falta la voz ${voz.label}`).toContain(`<option value="${voz.value}"`);
+    }
+    // Y la que el bot usa hoy viene preseleccionada: sin eso, guardar la
+    // pantalla por cualquier otro motivo le cambiaría la voz al bot.
+    expect(html).toContain(`value="${VOZ_POR_DEFECTO}" selected`);
+
+    // Las de OpenAI ya no se ofrecen — si volvieran, sería una regresión.
+    for (const vieja of ["marin", "cedar", "alloy", "shimmer"]) {
+      expect(html, `volvió la voz de OpenAI ${vieja}`).not.toContain(`<option value="${vieja}"`);
+    }
   });
 
   // Bug real reportado: `services` (el campo VIEJO de precios, todavía
@@ -181,16 +192,18 @@ describe("POST /admin/config — negocio (giro, idioma, país, moneda, campos di
     });
   });
 
-  it("guarda sales_playbook, voice_name, voice_greeting y agent_mode como settings de texto plano", async () => {
+  // voice_name salió de aquí junto con OpenAI Realtime: hoy nada lo lee ni lo
+  // escribe. La voz se elige con voice_elevenlabs_voice_id.
+  it("guarda sales_playbook, la voz, voice_greeting y agent_mode como settings de texto plano", async () => {
     await postConfig({
       [SETTING_KEYS.salesPlaybook]: "Ofrece siempre agendar al final.",
-      [SETTING_KEYS.voiceName]: "shimmer",
+      [SETTING_KEYS.voiceElevenLabsVoiceId]: VOCES_ELEVENLABS[1].value,
       [SETTING_KEYS.voiceGreeting]: "Hola, {{negocio}} al habla{{nombre}}.",
       [SETTING_KEYS.agentMode]: "soporte_tecnico",
     });
     const settings = await new SettingsRepo(db, TEST_BOT_ID).all();
     expect(settings[SETTING_KEYS.salesPlaybook]).toBe("Ofrece siempre agendar al final.");
-    expect(settings[SETTING_KEYS.voiceName]).toBe("shimmer");
+    expect(settings[SETTING_KEYS.voiceElevenLabsVoiceId]).toBe(VOCES_ELEVENLABS[1].value);
     expect(settings[SETTING_KEYS.voiceGreeting]).toBe("Hola, {{negocio}} al habla{{nombre}}.");
     expect(settings[SETTING_KEYS.agentMode]).toBe("soporte_tecnico");
   });
