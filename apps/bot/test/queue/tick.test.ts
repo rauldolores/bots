@@ -26,16 +26,44 @@ import type { Db } from "../../src/db/client";
 
 const KEY = conversationKeyOf(TEST_BOT_ID, "telegram", "u1");
 
+// runAgentTurnCore recorre `fullStream` (no `textStream`) para poder ver el
+// momento exacto en que el modelo llama a una herramienta — ver turn.ts. Este
+// helper se había quedado con la forma vieja, y como `fullStream` llegaba
+// undefined el for-await moría con "undefined no es iterable": las 9 pruebas
+// del archivo fallaban por el mock, no por la cola que vienen a probar.
+// Copiado de test/agent/turn.test.ts, que es el que está al día.
 function makeStreamResult(text: string) {
   async function* gen() {
-    yield text;
+    yield { type: "text-delta", text };
   }
   return {
-    textStream: gen(),
+    fullStream: gen(),
     usage: Promise.resolve({ inputTokens: 10, outputTokens: 5, cachedInputTokens: 0 }),
     steps: Promise.resolve([{ toolCalls: [] }]),
+    finishReason: Promise.resolve("stop"),
+    warnings: Promise.resolve([]),
   };
 }
+
+/**
+ * El resultado de un tick, con todos los contadores en cero salvo lo que la
+ * prueba provoque.
+ *
+ * Existe porque cada vez que el tick gana un contador (el último fue
+ * `nurtureSent`) las SEIS aserciones de este archivo se rompían a la vez, sin
+ * que nada estuviera mal. Así el exhaustivo se conserva —que no corra nada de
+ * más sigue siendo parte de lo que se prueba— pero se actualiza en un solo
+ * lugar.
+ */
+const resultadoDeTick = (over: Record<string, number> = {}) => ({
+  claimed: 0,
+  answered: 0,
+  failed: 0,
+  campaignsSent: 0,
+  skillsRun: 0,
+  nurtureSent: 0,
+  ...over,
+});
 
 let db: Db;
 let env: any;
@@ -87,7 +115,7 @@ describe("tres mensajes seguidos = una sola respuesta", () => {
     await vencerTurnos();
     const r = await tick(env);
 
-    expect(r).toEqual({ claimed: 1, answered: 1, failed: 0, campaignsSent: 0, skillsRun: 0 });
+    expect(r).toEqual(resultadoDeTick({ claimed: 1, answered: 1 }));
     expect(streamTextMock).toHaveBeenCalledTimes(1);
     expect(sendReply).toHaveBeenCalledTimes(1);
 
@@ -105,7 +133,7 @@ describe("tres mensajes seguidos = una sola respuesta", () => {
     await tick(env);
     const segundo = await tick(env);
 
-    expect(segundo).toEqual({ claimed: 0, answered: 0, failed: 0, campaignsSent: 0, skillsRun: 0 });
+    expect(segundo).toEqual(resultadoDeTick());
     expect(sendReply).toHaveBeenCalledTimes(1);
   });
 
@@ -138,14 +166,14 @@ describe("tres mensajes seguidos = una sola respuesta", () => {
 
 describe("tick — sin trabajo y con fallos", () => {
   it("no hace nada cuando la cola está vacía", async () => {
-    expect(await tick(env)).toEqual({ claimed: 0, answered: 0, failed: 0, campaignsSent: 0, skillsRun: 0 });
+    expect(await tick(env)).toEqual(resultadoDeTick());
     expect(streamTextMock).not.toHaveBeenCalled();
   });
 
   it("no toma trabajos que todavía no vencen", async () => {
     await ingestMessage(env, { channel: "telegram", channelUserId: "u1", text: "hola" });
     // Sin vencerTurnos(): el buffer de 8s sigue corriendo.
-    expect(await tick(env)).toEqual({ claimed: 0, answered: 0, failed: 0, campaignsSent: 0, skillsRun: 0 });
+    expect(await tick(env)).toEqual(resultadoDeTick());
     expect(sendReply).not.toHaveBeenCalled();
   });
 
@@ -241,7 +269,7 @@ describe("tick — sin trabajo y con fallos", () => {
 
     const r = await tick(env);
 
-    expect(r).toEqual({ claimed: 1, answered: 0, failed: 0, campaignsSent: 0, skillsRun: 0 });
+    expect(r).toEqual(resultadoDeTick({ claimed: 1 }));
     // Si no se cerrara, reintentaría para siempre sobre un buffer vacío.
     expect(await db.all("SELECT conversation_key FROM agent_jobs")).toHaveLength(0);
   });
@@ -288,7 +316,7 @@ describe("con 2+ bots en la tabla (F5): el webhook trae su propio botId, no debe
     );
 
     const r = await tick(env);
-    expect(r).toEqual({ claimed: 1, answered: 1, failed: 0, campaignsSent: 0, skillsRun: 0 });
+    expect(r).toEqual(resultadoDeTick({ claimed: 1, answered: 1 }));
     expect(sendReply).toHaveBeenCalledTimes(1);
   });
 });

@@ -323,14 +323,28 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
     // La respuesta se aparta ANTES de mandarla. Si el canal falla, el reintento
     // la reenvía en vez de perderla — que era lo que pasaba antes.
     await jobs.savePendingReply(conversationKey, result.text);
+  }
+
+  // Los mensajes que produjeron esta respuesta se dan por contestados AQUÍ,
+  // antes de intentar el envío, porque su respuesta ya está apartada arriba.
+  //
+  // Antes se vaciaban después, y eso hacía que un envío fallido los dejara en
+  // el buffer: al reintentar, el turno reenviaba la respuesta apartada Y
+  // ADEMÁS volvía a pensar los mismos mensajes. El cliente recibía dos
+  // respuestas a un solo mensaje, se pagaba una segunda llamada al LLM, y su
+  // mensaje quedaba guardado dos veces en el historial — lo cazaron las tres
+  // pruebas del reenvío en tick.test.ts, con el historial duplicado como
+  // evidencia.
+  //
+  // Lo que motivó el orden viejo sigue cubierto: un mensaje que llega DURANTE
+  // la caída del canal no está reclamado por este turno, así que no lo toca
+  // esta línea y el drenaje de la siguiente pasada lo recoge normal.
+  await jobs.clearClaimedPending(conversationKey);
+
+  if (result.text.trim()) {
     await enviarRespuesta(env, state, result.text, cfg, botId);
     await jobs.clearPendingReply(conversationKey);
   }
-
-  // Hasta AQUÍ no se tiran los mensajes del cliente: ya se respondieron. Si
-  // cualquier cosa de arriba hubiera fallado, siguen marcados en el buffer y
-  // el tick los devuelve a la cola (releaseClaimedPending) para reintentar.
-  await jobs.clearClaimedPending(conversationKey);
 
   // Poner el CRM al día: se ENCOLA, no se hace aquí. El cliente ya recibió su
   // respuesta y este análisis cuesta otra llamada al LLM — cobrársela al turno
