@@ -30,8 +30,8 @@ import { verificarLlamada } from "./verificarPromesas";
 import { validarParametros } from "./validarParametros";
 import { esLecturaMcp, ESPERA_LECTURA_MCP_MS } from "./delegacion";
 import { buildClearMessage, buildMediaMessage } from "./mediaStreamProtocol";
-import { bloqueLlamadaEnCurso, bloqueLimites, VOICE_BEHAVIOR_ADDENDUM } from "./voiceInstructions";
-import { resolveVoiceGreeting } from "./voiceGreeting";
+import { bloqueLlamadaEnCurso, bloqueLimites, bloqueTransferenciaFallida, VOICE_BEHAVIOR_ADDENDUM } from "./voiceInstructions";
+import { resolveVoiceGreeting, resolveTransferFallbackGreeting } from "./voiceGreeting";
 import { motivoDeFallo, camposConValor, pistaAccionable } from "./toolResult";
 
 import { logVoiceEvent, maskId } from "./log";
@@ -215,7 +215,14 @@ export class ElevenLabsCallBridge implements CallBridge {
     // de WhatsApp no tiene una llamada que transferir), y solo se ofrece si el
     // dueño configuró un número destino: sin él, sería una herramienta que
     // falla garantizado y el agente la ofrecería igual.
-    if (canal?.config.transferNumber) {
+    //
+    // Y NO se ofrece si esta llamada VIENE de una transferencia fallida
+    // (deps.retomada): el humano acaba de no contestar, volver a marcarle es
+    // otros veinte segundos de timbre para el mismo resultado. Sin la tool,
+    // bloqueLimites le prohíbe transferir por su cuenta y
+    // bloqueTransferenciaFallida le explica por qué.
+    const retomada = (this.deps.retomada ?? "").trim();
+    if (canal?.config.transferNumber && !retomada) {
       this.tools = {
         ...this.tools,
         transfer_to_human: transferToHumanTool(env, botId, () => this.conversationId),
@@ -238,6 +245,7 @@ export class ElevenLabsCallBridge implements CallBridge {
       ctx.basePrompt,
       ...ctx.memoryBlocks,
       bloqueLlamadaEnCurso(callerId),
+      ...(retomada ? [bloqueTransferenciaFallida(retomada)] : []),
       // Qué NO puede hacer, derivado de las tools que de verdad tiene en ESTA
       // llamada. Va después de armar this.tools —que ya incluye
       // transfer_to_human si el dueño configuró número— para que la lista nunca
@@ -250,11 +258,15 @@ export class ElevenLabsCallBridge implements CallBridge {
     // hable, y desde el teléfono eso se oye EXACTAMENTE igual que estar roto:
     // el dueño estuvo probando llamadas creyendo que el puente no servía,
     // cuando lo único que faltaba era que alguien abriera la boca primero.
-    const saludo = resolveVoiceGreeting(
-      ctx.cfg.voiceGreeting,
-      ctx.bot?.business_name ?? env.BUSINESS_NAME ?? "",
-      ctx.knownCustomerName,
-    );
+    //
+    // Salvo que la llamada vuelva de una transferencia fallida: ahí el saludo
+    // de siempre es justo lo que NO se quiere oír después de veinte segundos
+    // de timbre. Se dice la disculpa configurada en /admin/telefono (o la de
+    // fábrica), con los mismos placeholders.
+    const negocio = ctx.bot?.business_name ?? env.BUSINESS_NAME ?? "";
+    const saludo = retomada
+      ? resolveTransferFallbackGreeting(canal?.config.transferFallbackGreeting, negocio, ctx.knownCustomerName)
+      : resolveVoiceGreeting(ctx.cfg.voiceGreeting, negocio, ctx.knownCustomerName);
     return { prompt, saludo };
   }
 

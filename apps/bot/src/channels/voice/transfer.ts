@@ -136,9 +136,13 @@ export async function handleTransferStatusCallback(request: Request, rawEnv: Env
   }
 
   // La IA recupera la conversación: mismo mecanismo que una llamada entrante
-  // normal, mismo botId/callSid — el cliente nunca se entera de que hubo un
-  // intento de transferencia fallido, solo sigue hablando con el agente.
-  return buildStreamConnectResponse(rawEnv, authToken, { botId, callSid, from, to });
+  // normal, mismo botId/callSid, así que cae en la misma conversación y con
+  // el mismo historial. `retomada` le dice al puente que NO es una llamada
+  // nueva: cambia el saludo por la disculpa y le quita al agente la
+  // transferencia en esta reanudación (ver elevenlabsBridge.ts). Antes se
+  // reconectaba sin esa marca y el cliente oía otra vez "Hola, gracias por
+  // llamar a…" después de veinte segundos de timbre.
+  return buildStreamConnectResponse(rawEnv, authToken, { botId, callSid, from, to, retomada: reason });
 }
 
 /**

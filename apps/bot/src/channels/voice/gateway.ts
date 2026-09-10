@@ -91,7 +91,7 @@ export function attachVoiceGateway(httpServer: UpgradeCapableServer, env: Env): 
  */
 async function authorizeStreamStart(
   rawEnv: Env,
-  payload: { botId: string; callSid: string; from: string; to: string; exp: string },
+  payload: { botId: string; callSid: string; from: string; to: string; exp: string; retomada?: string },
   token: string,
 ): Promise<boolean> {
   const expNum = Number(payload.exp);
@@ -151,12 +151,19 @@ async function handleMessage(ws: WebSocket, state: GatewayCallState, env: Env, r
       // (Twilio no lo preserva). Sin un "start" autorizado no hay sesión ni
       // bridge: se cierra la conexión aquí mismo.
       const custom = msg.start.customParameters ?? {};
+      // `retomada` (vuelve de una transferencia fallida, ver transfer.ts) se
+      // mete al payload SOLO si viene: forma parte de lo firmado, así que
+      // agregarla cuando no estaba —o quitarla cuando sí— rompe la firma.
+      // Es lo que impide que alguien la inyecte para saltarse el saludo o
+      // para dejar al agente sin transferencia.
+      const retomada = (custom.retomada ?? "").trim();
       const authPayload = {
         botId: state.botId,
         callSid: custom.callSid ?? "",
         from: custom.from ?? "",
         to: custom.to ?? "",
         exp: custom.exp ?? "",
+        ...(retomada ? { retomada } : {}),
       };
       const ok = await authorizeStreamStart(env, authPayload, custom.t ?? "");
       if (!ok) {
@@ -237,6 +244,7 @@ async function handleMessage(ws: WebSocket, state: GatewayCallState, env: Env, r
           streamSid,
           voiceSession,
           sendToTwilio: (json: string) => ws.send(json),
+          ...(retomada ? { retomada } : {}),
         };
         state.bridge = await ElevenLabsCallBridge.start(deps, credsEleven);
       } catch (e) {

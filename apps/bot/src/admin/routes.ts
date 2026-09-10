@@ -1318,11 +1318,18 @@ adminApp.post("/telefono/transfer-number", async (c) => {
   const botId = c.get("botId");
   const form = await c.req.formData();
   const transferNumber = String(form.get("transfer_number") ?? "").trim();
+  // Lo que dice el agente al retomar si nadie contestó. Vacío = el texto de
+  // fábrica (voiceGreeting.ts), así que no se guarda una cadena vacía.
+  const transferFallbackGreeting = String(form.get("transfer_fallback") ?? "").trim();
   const db = new Db(c.env.DB);
   const repo = new BotChannelsRepo(db);
   const row = await repo.getByBotAndChannel(botId, "voice");
   if (!row) return c.redirect("/admin/telefono?err=Primero conecta Voice.", 302);
-  await repo.updateConfig(botId, "voice", { ...row.config, transferNumber: transferNumber || undefined });
+  await repo.updateConfig(botId, "voice", {
+    ...row.config,
+    transferNumber: transferNumber || undefined,
+    transferFallbackGreeting: transferFallbackGreeting || undefined,
+  });
   return c.redirect("/admin/telefono?ok=1", 302);
 });
 

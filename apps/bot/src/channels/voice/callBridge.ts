@@ -21,6 +21,14 @@ export interface CallBridgeDeps {
   voiceSession: VoiceSession;
   /** Inyectado por el gateway — ya sabe a qué WebSocket/llamada mandar. */
   sendToTwilio: (json: string) => void;
+  /**
+   * Presente cuando la llamada VUELVE de una transferencia que el humano no
+   * contestó (busy / no_answer / failed / canceled — ver transfer.ts). El
+   * puente lo usa para no saludar de cero y para no volver a ofrecer la
+   * transferencia en esta reanudación. Llega firmado desde el webhook, no es
+   * algo que el gateway pueda recibir suelto.
+   */
+  retomada?: string;
 }
 
 /** Lo único que el gateway le pide a un puente. Nada más de esto es público. */

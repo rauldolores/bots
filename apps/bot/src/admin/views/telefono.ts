@@ -10,6 +10,7 @@ import type { OnboardingMilestone, VoiceOnboardingStatus } from "../../db/voiceO
 import { ONBOARDING_MILESTONES } from "../../db/voiceOnboardings";
 import { getOnboardingDiagnostics } from "../../channels/voice/onboarding/service";
 import { listOnboardingMethods, getOnboardingMethod } from "../../channels/voice/onboarding/registry";
+import { DEFAULT_TRANSFER_FALLBACK_GREETING } from "../../channels/voice/voiceGreeting";
 import { layout } from "./layout";
 
 function esc(s: string): string {
@@ -80,20 +81,37 @@ function instructionsBlock(sourcePhoneNumber: string, destinationPhoneNumber: st
   </div>`;
 }
 
-/** F7 fase 9: a qué número transfiere el agente cuando el cliente pide un humano — nunca lo elige el modelo, siempre este valor. Independiente del estado del onboarding: se puede configurar en cuanto Voice está conectado. */
-function transferNumberSection(currentNumber: string | null): string {
+/**
+ * F7 fase 9: a qué número transfiere el agente cuando el cliente pide un
+ * humano — nunca lo elige el modelo, siempre este valor. Independiente del
+ * estado del onboarding: se puede configurar en cuanto Voice está conectado.
+ *
+ * Y qué dice si ese humano NO contesta: la llamada vuelve al agente (ver
+ * channels/voice/transfer.ts) y esta es su primera frase al retomarla. Va en
+ * la misma tarjeta porque es la otra mitad de la misma decisión — quien
+ * pone un número tiene que saber qué pasa cuando nadie lo levanta.
+ */
+function transferNumberSection(config: { transferNumber?: string; transferFallbackGreeting?: string }): string {
+  const inputStyle = "background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;outline:none";
   return `<div style="border:1px solid var(--line);background:var(--panel);padding:18px 20px;display:flex;flex-direction:column;gap:10px">
     <div>
       <div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:4px">Transferir a un humano</div>
       <p class="text-[12.5px]" style="color:var(--muted);margin:0">Cuando un cliente pide hablar con una persona, el agente transfiere la llamada aquí. Sin este número, el agente no puede transferir — solo puede ofrecer anotar el contacto.</p>
     </div>
-    <form method="POST" action="/admin/telefono/transfer-number" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+    <form method="POST" action="/admin/telefono/transfer-number" style="display:flex;flex-direction:column;gap:12px">
       <div style="display:flex;flex-direction:column;gap:5px">
         <label for="transfer_number" class="text-[11px]" style="color:var(--dim)">Número de teléfono</label>
-        <input type="text" id="transfer_number" name="transfer_number" value="${esc(currentNumber ?? "")}" placeholder="+52 55 1234 5678"
-               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;outline:none;width:220px">
+        <input type="text" id="transfer_number" name="transfer_number" value="${esc(config.transferNumber ?? "")}" placeholder="+52 55 1234 5678"
+               style="${inputStyle};width:220px">
       </div>
-      <button type="submit" class="text-[12px]" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;font-weight:700;padding:9px 16px;cursor:pointer">Guardar</button>
+      <div style="display:flex;flex-direction:column;gap:5px">
+        <label for="transfer_fallback" class="text-[11px]" style="color:var(--dim)">Si no contestan en 20 segundos, el agente retoma la llamada y dice</label>
+        <input type="text" id="transfer_fallback" name="transfer_fallback" value="${esc(config.transferFallbackGreeting ?? "")}"
+               placeholder="${esc(DEFAULT_TRANSFER_FALLBACK_GREETING)}"
+               style="${inputStyle};width:100%;max-width:640px">
+        <p class="text-[11px]" style="color:var(--dim);margin:0">Vacío = el texto de ejemplo. Puedes usar {{negocio}} y {{nombre}} igual que en el saludo. Después de decirlo, el agente ya no vuelve a intentar transferir en esa llamada: toma el recado o sigue ayudando.</p>
+      </div>
+      <div><button type="submit" class="text-[12px]" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;font-weight:700;padding:9px 16px;cursor:pointer">Guardar</button></div>
     </form>
   </div>`;
 }
@@ -207,7 +225,7 @@ export async function renderTelefono(env: Env, botId: string, notice?: { ok?: bo
       ${noticeBanner}
       <p class="text-muted text-[12.5px]" style="margin:0">Conecta el número que tus clientes YA tienen guardado — sin cambiarlo de dueño, sin perder continuidad.</p>
       ${content}
-      ${voiceChannelRow ? transferNumberSection(voiceChannelRow.config.transferNumber ?? null) : ""}
+      ${voiceChannelRow ? transferNumberSection(voiceChannelRow.config) : ""}
     </div>`;
 
   return layout({ title: "Tu número", activeTab: "telefono", body, visibleNavIds });

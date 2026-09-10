@@ -11,6 +11,10 @@ export interface BotChannelConfig {
   // el agente pide un humano (transfer_to_human). Nunca lo elige el modelo —
   // siempre este valor, configurado por el dueño.
   transferNumber?: string;
+  // canal "voice": qué dice el agente cuando transfirió y el humano NO
+  // contestó (ocupado, 20 s de timbre, fallo). Vacío = el texto por defecto
+  // de voiceGreeting.ts. Acepta {{negocio}} y {{nombre}} igual que el saludo.
+  transferFallbackGreeting?: string;
   // widget (channel "widget"): la llave pública va en external_id, no aquí.
   bubbleColor?: string;
   position?: "bottom-right" | "bottom-left";

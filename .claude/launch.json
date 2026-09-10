@@ -5,7 +5,8 @@
       "name": "nodia-dev",
       "runtimeExecutable": "C:\\Codigo\\KONTROLIA\\bots\\.claude\\dev-server.cmd",
       "runtimeArgs": [],
-      "port": 8787
+      "port": 8787,
+      "autoPort": true
     },
     {
       "name": "nodia-web",

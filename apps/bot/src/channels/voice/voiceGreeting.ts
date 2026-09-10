@@ -22,3 +22,20 @@ export function resolveVoiceGreeting(template: string | undefined, businessName:
     .replaceAll("{{negocio}}", businessName)
     .replaceAll("{{nombre}}", callerName ? `, ${callerName}` : "");
 }
+
+/**
+ * Lo que dice el agente cuando RETOMA la llamada porque transfirió y el
+ * humano no contestó (ocupado, timbre agotado, fallo del marcado).
+ *
+ * Existe porque sin esto el puente arrancaba igual que una llamada nueva y
+ * el cliente oía "te comunico…", veinte segundos de timbre, y luego "Hola,
+ * gracias por llamar a X, ¿en qué te ayudo?" — como si nada. No se perdía
+ * nada, pero sonaba a que el bot no se acordaba de lo que acababa de hacer.
+ */
+export const DEFAULT_TRANSFER_FALLBACK_GREETING =
+  "Disculpa{{nombre}}, en este momento no me contestan. ¿Te tomo el recado para que te devuelvan la llamada, o te ayudo yo con algo más?";
+
+/** Mismos placeholders que el saludo normal; solo cambia el texto por defecto. */
+export function resolveTransferFallbackGreeting(template: string | undefined, businessName: string, callerName?: string): string {
+  return resolveVoiceGreeting((template ?? "").trim() || DEFAULT_TRANSFER_FALLBACK_GREETING, businessName, callerName);
+}

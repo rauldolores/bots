@@ -33,12 +33,23 @@ function toWsUrl(httpBaseUrl: string): string {
 export function buildStreamConnectResponse(
   rawEnv: Env,
   authToken: string,
-  input: { botId: string; callSid: string; from: string; to: string },
+  input: { botId: string; callSid: string; from: string; to: string; retomada?: string },
 ): Promise<Response> {
   return (async () => {
     const base = (rawEnv.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
     const exp = Date.now() + STREAM_TOKEN_TTL_MS;
-    const tokenPayload = { botId: input.botId, callSid: input.callSid, from: input.from, to: input.to, exp: String(exp) };
+    // `retomada` solo existe cuando la llamada vuelve de una transferencia
+    // fallida (transfer.ts). Va DENTRO de lo firmado: es lo que le cambia el
+    // saludo y le quita la transferencia al agente, y no puede depender de un
+    // parámetro que cualquiera pudiera inyectar en el "start" del WebSocket.
+    const tokenPayload: Record<string, string> = {
+      botId: input.botId,
+      callSid: input.callSid,
+      from: input.from,
+      to: input.to,
+      exp: String(exp),
+      ...(input.retomada ? { retomada: input.retomada } : {}),
+    };
     const token = await signStreamToken(authToken, tokenPayload);
 
     // El query string NO va en la URL: Twilio no lo preserva al abrir el
@@ -50,6 +61,7 @@ export function buildStreamConnectResponse(
       from: input.from,
       to: input.to,
       exp: String(exp),
+      ...(input.retomada ? { retomada: input.retomada } : {}),
       t: token,
     });
 

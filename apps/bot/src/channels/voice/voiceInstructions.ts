@@ -169,6 +169,40 @@ y nunca se lo leas dígito por dígito salvo que te lo pida.
 </llamada_en_curso>`;
 }
 
+/** Cómo se le cuenta al modelo por qué falló la transferencia — con las palabras del cliente, no las de Twilio. */
+const MOTIVO_TRANSFERENCIA: Record<string, string> = {
+  busy: "la línea estaba ocupada",
+  no_answer: "sonó y nadie contestó",
+  failed: "la llamada no se pudo conectar",
+  canceled: "la llamada se canceló antes de conectar",
+};
+
+/**
+ * El agente RETOMÓ la llamada porque transfirió y el humano no contestó.
+ *
+ * Sin esto, el modelo volvía a arrancar como si fuera una llamada nueva:
+ * tenía el historial (misma conversación), pero nada le decía que lo último
+ * que hizo fue intentar pasar la llamada. Podía saludar de cero o —peor—
+ * volver a ofrecer la transferencia y repetir el ciclo entero. La
+ * herramienta transfer_to_human ya NO se le da en esta reanudación (ver
+ * elevenlabsBridge.ts), así que bloqueLimites le prohíbe transferir por su
+ * cuenta; este bloque le explica POR QUÉ y qué hacer en su lugar.
+ */
+export function bloqueTransferenciaFallida(motivo: string): string {
+  const porQue = MOTIVO_TRANSFERENCIA[motivo] ?? "no se pudo completar";
+  return `<transferencia_fallida>
+Acabas de intentar pasar esta llamada a una persona del equipo y NO funcionó:
+${porQue}. El cliente ya escuchó que lo ibas a comunicar y luego el timbre —
+esta es la MISMA llamada, no una nueva: no vuelvas a saludar ni a presentarte,
+y no le preguntes de nuevo lo que ya te dijo antes del intento.
+
+Tu primera frase ya se la dijo el sistema por ti (la disculpa). A partir de
+ahí: ofrece tomar el recado con su nombre y teléfono para que le devuelvan la
+llamada, o ayudarlo tú con lo que necesitaba. No prometas volver a intentar
+la transferencia en esta llamada: no puedes.
+</transferencia_fallida>`;
+}
+
 /**
  * Lo que este bot NO puede hacer, derivado de las herramientas que de verdad
  * tiene.
