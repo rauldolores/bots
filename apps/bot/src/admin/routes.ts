@@ -125,6 +125,7 @@ import {
   buildAuthorizeUrl,
   exchangeCode,
   refreshSession,
+  revokeSession,
   verifyAccessToken,
   listMemberships,
   switchActiveOrganization,
@@ -352,7 +353,23 @@ adminApp.get("/oauth/callback", async (c) => {
   return c.redirect(next, 302);
 });
 
-adminApp.post("/logout", (c) => {
+adminApp.post("/logout", async (c) => {
+  // Primero se revoca en GoTrue (ver revokeSession): sin esto, /admin/login
+  // rebotaba al auth-server, que seguía con la sesión abierta, y el usuario
+  // volvía a entrar solo con la misma cuenta.
+  const cfg = kontroliaConfig(c.env);
+  const raw = getCookie(c, SESSION_COOKIE);
+  if (cfg && raw) {
+    try {
+      const session = JSON.parse(raw) as KontroliaSession;
+      if (session?.accessToken) {
+        const ok = await revokeSession(cfg, session.accessToken);
+        if (!ok) console.warn("[logout] GoTrue no confirmó la revocación; la cookie se borra igual");
+      }
+    } catch {
+      // Cookie ilegible: no hay nada que revocar, solo que borrar.
+    }
+  }
   deleteCookie(c, SESSION_COOKIE);
   return c.redirect("/admin/login", 302);
 });

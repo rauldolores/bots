@@ -13,6 +13,7 @@ const exchangeCodeMock = vi.fn();
 const refreshSessionMock = vi.fn();
 const listMembershipsMock = vi.fn();
 const switchActiveOrganizationMock = vi.fn();
+const revokeSessionMock = vi.fn();
 
 vi.mock("../../src/admin/kontroliaAuth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/admin/kontroliaAuth")>();
@@ -23,6 +24,7 @@ vi.mock("../../src/admin/kontroliaAuth", async (importOriginal) => {
     refreshSession: (...args: unknown[]) => refreshSessionMock(...args),
     listMemberships: (...args: unknown[]) => listMembershipsMock(...args),
     switchActiveOrganization: (...args: unknown[]) => switchActiveOrganizationMock(...args),
+    revokeSession: (...args: unknown[]) => revokeSessionMock(...args),
   };
 });
 
@@ -310,11 +312,68 @@ describe("GET /admin/bots/new + POST /admin/bots — alta del primer bot (F5)", 
 });
 
 describe("POST /admin/logout", () => {
-  it("borra la cookie de sesión y redirige a /admin/login", async () => {
+  it("sin cookie: nada que revocar — borra la cookie y redirige a /admin/login", async () => {
+    revokeSessionMock.mockReset();
     const res = await adminApp.fetch(req("/logout", { method: "POST" }), KONTROLIA_ENV);
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/admin/login");
     expect(res.headers.get("set-cookie") ?? "").toMatch(new RegExp(`${SESSION_COOKIE}=;`));
+    expect(revokeSessionMock).not.toHaveBeenCalled();
+  });
+
+  // Borrar solo la cookie NO cerraba sesión: /admin/login rebotaba al
+  // auth-server, que seguía con la sesión abierta, y el usuario volvía a
+  // entrar con la misma cuenta sin que nadie le preguntara nada.
+  it("con sesión: revoca en GoTrue (scope global, con SU access token) ANTES de borrar la cookie", async () => {
+    revokeSessionMock.mockReset().mockResolvedValue(true);
+    const res = await adminApp.fetch(
+      req("/logout", { method: "POST", headers: { cookie: `${SESSION_COOKIE}=${encodeURIComponent(SESSION)}` } }),
+      KONTROLIA_ENV,
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/admin/login");
+    expect(revokeSessionMock).toHaveBeenCalledTimes(1);
+    expect(revokeSessionMock.mock.calls[0][1]).toBe("at");
+    expect(res.headers.get("set-cookie") ?? "").toMatch(new RegExp(`${SESSION_COOKIE}=;`));
+  });
+
+  it("si GoTrue no responde, la cookie se borra igual — quedarse adentro por un error de red sería peor", async () => {
+    revokeSessionMock.mockReset().mockResolvedValue(false);
+    const res = await adminApp.fetch(
+      req("/logout", { method: "POST", headers: { cookie: `${SESSION_COOKIE}=${encodeURIComponent(SESSION)}` } }),
+      KONTROLIA_ENV,
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("set-cookie") ?? "").toMatch(new RegExp(`${SESSION_COOKIE}=;`));
+  });
+});
+
+describe("revokeSession — la llamada real a GoTrue", () => {
+  it("es POST /auth/v1/logout?scope=global con apikey y Bearer — lo mismo que hace supabase.auth.signOut() en el SDK", async () => {
+    const { revokeSession: real } = await vi.importActual<typeof import("../../src/admin/kontroliaAuth")>("../../src/admin/kontroliaAuth");
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const ok = await real({ supabaseUrl: "https://proj.supabase.co", supabaseAnonKey: "anon-key", clientId: "c" }, "tok");
+      expect(ok).toBe(true);
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe("https://proj.supabase.co/auth/v1/logout?scope=global");
+      expect(init.method).toBe("POST");
+      expect((init.headers as Record<string, string>).authorization).toBe("Bearer tok");
+      expect((init.headers as Record<string, string>).apikey).toBe("anon-key");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("nunca lanza: red caída = false", async () => {
+    const { revokeSession: real } = await vi.importActual<typeof import("../../src/admin/kontroliaAuth")>("../../src/admin/kontroliaAuth");
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("ECONNRESET"); }));
+    try {
+      await expect(real({ supabaseUrl: "https://x", supabaseAnonKey: "k", clientId: "c" }, "tok")).resolves.toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

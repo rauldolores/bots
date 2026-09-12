@@ -141,6 +141,37 @@ export async function refreshSession(
   return toSession((await res.json()) as TokenResponse);
 }
 
+/**
+ * Cierra la sesión EN GOTRUE, no solo en este panel.
+ *
+ * Borrar la cookie del bot no era cerrar sesión: /admin/login rebota a
+ * /oauth/authorize, y como el auth-server todavía tenía la sesión del
+ * usuario en el navegador, autorizaba al instante y lo devolvía a
+ * /admin/overview con la misma cuenta. "Cerrar sesión" no hacía nada
+ * visible, y "probar otra cuenta" era imposible.
+ *
+ * Es la MISMA llamada que hace el SDK oficial por debajo de
+ * KontroliaClient.logout() → supabase.auth.signOut(): POST /auth/v1/logout
+ * con scope=global. Global a propósito: la sesión que hay que matar es la
+ * del auth-server (otra distinta a la nuestra), y "local" solo tocaría la
+ * de este token, que de todos modos se olvida al borrar la cookie. Es el
+ * mismo alcance con el que cierran sesión las demás apps del ecosistema.
+ *
+ * Nunca lanza: si GoTrue no responde, la cookie se borra igual — quedarse
+ * "adentro" por un error de red sería peor que un logout a medias.
+ */
+export async function revokeSession(cfg: KontroliaAuthConfig, accessToken: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${cfg.supabaseUrl}/auth/v1/logout?scope=global`, {
+      method: "POST",
+      headers: { apikey: cfg.supabaseAnonKey, authorization: `Bearer ${accessToken}` },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 function bearerRequest(accessToken: string): Request {
   return new Request("https://admin.local/verify", {
     headers: { authorization: `Bearer ${accessToken}` },
