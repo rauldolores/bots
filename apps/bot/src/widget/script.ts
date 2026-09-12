@@ -45,9 +45,20 @@ export const WIDGET_SCRIPT_JS = `(function () {
     if (!sessionId) { sessionId = uuid(); localStorage.setItem(SID_KEY, sessionId); }
   } catch (e) { sessionId = uuid(); }
 
+  var DISPLAY_NAME_KEY = "nodia_widget_name_" + botId;
+  var OPENED_ONCE_KEY = "nodia_widget_opened_" + botId;
+
   var state = {
     open: false,
-    config: { businessName: "Chat", bubbleColor: "#F5C518", position: "bottom-right", greeting: "" },
+    config: {
+      businessName: "Chat", bubbleColor: "#F5C518", position: "bottom-right", greeting: "",
+      title: "", subtitle: "", avatarUrl: "", placeholder: "Escribe un mensaje…", launcherLabel: "",
+      launcherIcon: "chat", theme: "light", size: "regular", radius: 16, offsetX: 20, offsetY: 20,
+      openOnLoad: "never", openDelaySec: 3, showPoweredBy: true, hideOnMobile: false
+    },
+    displayName: "",
+    listeners: {},
+    ready: false,
     messages: [],
     cursor: 0,
     unread: 0,
@@ -67,6 +78,15 @@ export const WIDGET_SCRIPT_JS = `(function () {
     }
   } catch (e) {}
 
+  try { state.displayName = localStorage.getItem(DISPLAY_NAME_KEY) || ""; } catch (e) {}
+
+  function emit(event, payload) {
+    var list = state.listeners[event] || [];
+    for (var i = 0; i < list.length; i++) {
+      try { list[i](payload); } catch (e) { console.error("[nodia-widget] listener", e); }
+    }
+  }
+
   function saveCache() {
     try {
       localStorage.setItem(MSG_CACHE_KEY, JSON.stringify({
@@ -78,70 +98,101 @@ export const WIDGET_SCRIPT_JS = `(function () {
 
   var CSS_TEXT = [
     ":host{all:initial}",
-    ".nw-root{position:fixed;bottom:20px;z-index:2147483000;display:flex;flex-direction:column-reverse;align-items:flex-end;",
+    ".nw-root{position:fixed;bottom:var(--nw-offset-y,20px);z-index:2147483000;display:flex;flex-direction:column-reverse;align-items:flex-end;",
     "font-family:-apple-system,BlinkMacSystemFont,\\"Segoe UI\\",Roboto,Helvetica,Arial,sans-serif;",
-    "--nw-accent:#F5C518;--nw-bg:#fff;--nw-text:#1a1a1a;--nw-muted:#767164;--nw-border:#e6e3db;",
-    "--nw-shadow:0 12px 32px rgba(0,0,0,.18);--nw-radius:16px}",
+    "--nw-accent:#F5C518;--nw-on-accent:#1a1a1a;--nw-bg:#fff;--nw-surface:#fafaf8;--nw-text:#1a1a1a;--nw-muted:#767164;--nw-border:#e6e3db;",
+    "--nw-shadow:0 12px 32px rgba(0,0,0,.18);--nw-radius:16px;--nw-panel-w:360px;--nw-panel-h:520px}",
+    ".nw-root[data-theme=dark]{--nw-bg:#1c1c1e;--nw-surface:#121214;--nw-text:#f2f2f0;--nw-muted:#9a9a94;--nw-border:#34343a;",
+    "--nw-shadow:0 12px 32px rgba(0,0,0,.5)}",
+    ".nw-root[data-size=compact]{--nw-panel-w:320px;--nw-panel-h:440px}",
+    ".nw-root[data-size=large]{--nw-panel-w:420px;--nw-panel-h:640px}",
     ".nw-root *{box-sizing:border-box}",
-    ".nw-root[data-position=bottom-right]{right:20px;align-items:flex-end}",
-    ".nw-root[data-position=bottom-left]{left:20px;align-items:flex-start}",
+    ".nw-root[data-position=bottom-right]{right:var(--nw-offset-x,20px);align-items:flex-end}",
+    ".nw-root[data-position=bottom-left]{left:var(--nw-offset-x,20px);align-items:flex-start}",
+    ".nw-launcher{display:flex;align-items:center;gap:10px;flex:none}",
+    ".nw-root[data-position=bottom-left] .nw-launcher{flex-direction:row-reverse}",
+    ".nw-launcher-label{background:var(--nw-bg);color:var(--nw-text);border:1px solid var(--nw-border);box-shadow:var(--nw-shadow);",
+    "border-radius:999px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;max-width:240px;",
+    "overflow:hidden;text-overflow:ellipsis}",
+    ".nw-launcher-label[hidden]{display:none}",
     ".nw-bubble{width:58px;height:58px;border-radius:50%;background:var(--nw-accent);border:none;cursor:pointer;",
     "display:flex;align-items:center;justify-content:center;box-shadow:var(--nw-shadow);transition:transform .15s ease;",
     "position:relative;flex:none}",
     ".nw-bubble:hover{transform:scale(1.06)}",
-    ".nw-bubble svg{width:26px;height:26px;color:#1a1a1a}",
+    ".nw-bubble svg{width:26px;height:26px;color:var(--nw-on-accent)}",
     ".nw-badge{position:absolute;top:-2px;right:-2px;background:#e0393e;color:#fff;font-size:11px;font-weight:700;",
     "min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;",
     "border:2px solid #fff}",
-    ".nw-panel{width:360px;max-width:calc(100vw - 32px);height:520px;max-height:calc(100vh - 120px);background:var(--nw-bg);",
+    ".nw-badge[hidden]{display:none}",
+    ".nw-panel{width:var(--nw-panel-w);max-width:calc(100vw - 32px);height:var(--nw-panel-h);max-height:calc(100vh - 120px);background:var(--nw-bg);",
     "border-radius:var(--nw-radius);box-shadow:var(--nw-shadow);display:flex;flex-direction:column;overflow:hidden;",
     "margin-bottom:14px;transform-origin:bottom right;transition:opacity .18s ease,transform .18s ease}",
     ".nw-root[data-position=bottom-left] .nw-panel{transform-origin:bottom left}",
     ".nw-panel[data-hidden=true]{opacity:0;transform:scale(.92) translateY(8px);pointer-events:none;position:absolute}",
-    ".nw-header{background:var(--nw-accent);color:#1a1a1a;padding:16px 18px;display:flex;align-items:center;",
-    "justify-content:space-between;flex:none}",
-    ".nw-title{font-size:15px;font-weight:700}",
-    ".nw-close{background:none;border:none;cursor:pointer;color:#1a1a1a;padding:4px;display:flex;opacity:.75}",
+    ".nw-header{background:var(--nw-accent);color:var(--nw-on-accent);padding:14px 18px;display:flex;align-items:center;",
+    "justify-content:space-between;gap:10px;flex:none}",
+    ".nw-header-main{display:flex;align-items:center;gap:10px;min-width:0}",
+    ".nw-avatar{width:36px;height:36px;border-radius:50%;object-fit:cover;flex:none;background:rgba(255,255,255,.35)}",
+    ".nw-avatar[hidden]{display:none}",
+    ".nw-heading{display:flex;flex-direction:column;min-width:0}",
+    ".nw-title{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+    ".nw-subtitle{font-size:11.5px;opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+    ".nw-subtitle[hidden]{display:none}",
+    ".nw-close{background:none;border:none;cursor:pointer;color:var(--nw-on-accent);padding:4px;display:flex;opacity:.75;flex:none}",
     ".nw-close:hover{opacity:1}",
-    ".nw-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;background:#fafaf8}",
+    ".nw-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;background:var(--nw-surface)}",
     ".nw-msg{display:flex;flex-direction:column;gap:3px;max-width:80%}",
     ".nw-msg.user{align-self:flex-end;align-items:flex-end}",
     ".nw-msg.bot{align-self:flex-start;align-items:flex-start}",
     ".nw-msg.error{align-self:center;align-items:center;max-width:100%}",
     ".nw-bubble-text{padding:9px 13px;border-radius:14px;font-size:13.5px;line-height:1.45;white-space:pre-wrap;",
     "word-break:break-word}",
-    ".nw-msg.user .nw-bubble-text{background:var(--nw-accent);color:#1a1a1a;border-bottom-right-radius:4px}",
-    ".nw-msg.bot .nw-bubble-text{background:#fff;color:var(--nw-text);border:1px solid var(--nw-border);",
+    ".nw-msg.user .nw-bubble-text{background:var(--nw-accent);color:var(--nw-on-accent);border-bottom-right-radius:4px}",
+    ".nw-msg.bot .nw-bubble-text{background:var(--nw-bg);color:var(--nw-text);border:1px solid var(--nw-border);",
     "border-bottom-left-radius:4px}",
     ".nw-msg.error .nw-bubble-text{background:transparent;border:none;color:var(--nw-muted);font-size:11.5px;",
     "text-align:center;padding:2px 8px}",
     ".nw-time{font-size:10px;color:var(--nw-muted);padding:0 3px}",
     ".nw-typing{padding:0 16px 8px;font-size:12px;color:var(--nw-muted);font-style:italic;flex:none}",
     ".nw-typing[hidden]{display:none}",
-    ".nw-composer{display:flex;gap:8px;padding:12px;border-top:1px solid var(--nw-border);background:#fff;flex:none}",
+    ".nw-composer{display:flex;gap:8px;padding:12px;border-top:1px solid var(--nw-border);background:var(--nw-bg);flex:none}",
     ".nw-input{flex:1;border:1px solid var(--nw-border);border-radius:20px;padding:9px 14px;font-size:13px;",
-    "outline:none;font-family:inherit;color:var(--nw-text);background:#fff}",
+    "outline:none;font-family:inherit;color:var(--nw-text);background:var(--nw-bg)}",
     ".nw-input:focus{border-color:var(--nw-accent)}",
     ".nw-send{width:38px;height:38px;border-radius:50%;border:none;background:var(--nw-accent);cursor:pointer;",
     "display:flex;align-items:center;justify-content:center;flex:none}",
-    ".nw-send svg{width:17px;height:17px;color:#1a1a1a}",
+    ".nw-send svg{width:17px;height:17px;color:var(--nw-on-accent)}",
     ".nw-send:disabled{opacity:.5;cursor:default}",
-    ".nw-footer{text-align:center;padding:7px 0 10px;font-size:10.5px;flex:none}",
+    ".nw-footer{text-align:center;padding:7px 0 10px;font-size:10.5px;flex:none;background:var(--nw-bg)}",
+    ".nw-footer[hidden]{display:none}",
+    ".nw-root[data-hide-mobile=true]{display:none}",
     ".nw-footer a{color:var(--nw-muted);text-decoration:none}",
     ".nw-footer a:hover{text-decoration:underline}",
     "@media (max-width:480px){",
     ".nw-panel{position:fixed;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;border-radius:0;margin:0}",
-    "}"
+    "}",
+    "@media (min-width:481px){.nw-root[data-hide-mobile=true]{display:flex}}"
   ].join("");
 
+  var SVG_OPEN = "<svg viewBox=\\"0 0 24 24\\" fill=\\"none\\" stroke=\\"currentColor\\" stroke-width=\\"2\\" stroke-linecap=\\"round\\" stroke-linejoin=\\"round\\"";
+  var ICONS = {
+    chat: SVG_OPEN + " class=\\"nw-bubble-icon\\" data-icon=\\"chat\\"><path d=\\"M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z\\"/></svg>",
+    message: SVG_OPEN + " class=\\"nw-bubble-icon\\" data-icon=\\"message\\" style=\\"display:none\\"><path d=\\"M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z\\"/><polyline points=\\"22,6 12,13 2,6\\"/></svg>",
+    help: SVG_OPEN + " class=\\"nw-bubble-icon\\" data-icon=\\"help\\" style=\\"display:none\\"><circle cx=\\"12\\" cy=\\"12\\" r=\\"10\\"/><path d=\\"M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3\\"/><line x1=\\"12\\" y1=\\"17\\" x2=\\"12.01\\" y2=\\"17\\"/></svg>",
+    sparkles: SVG_OPEN + " class=\\"nw-bubble-icon\\" data-icon=\\"sparkles\\" style=\\"display:none\\"><path d=\\"M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z\\"/><path d=\\"M19 16l.9 2.1L22 19l-2.1.9L19 22l-.9-2.1L16 19l2.1-.9z\\"/></svg>"
+  };
+
   var ICON_MARKUP = [
+    "<div class=\\"nw-launcher\\">",
+    "<button class=\\"nw-launcher-label\\" type=\\"button\\" hidden></button>",
     "<button class=\\"nw-bubble\\" type=\\"button\\" aria-label=\\"Abrir chat\\">",
-    "<svg class=\\"nw-bubble-icon\\" viewBox=\\"0 0 24 24\\" fill=\\"none\\" stroke=\\"currentColor\\" stroke-width=\\"2\\" stroke-linecap=\\"round\\" stroke-linejoin=\\"round\\"><path d=\\"M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z\\"/></svg>",
+    ICONS.chat, ICONS.message, ICONS.help, ICONS.sparkles,
     "<svg class=\\"nw-bubble-close-icon\\" style=\\"display:none\\" viewBox=\\"0 0 24 24\\" fill=\\"none\\" stroke=\\"currentColor\\" stroke-width=\\"2\\" stroke-linecap=\\"round\\" stroke-linejoin=\\"round\\"><line x1=\\"18\\" y1=\\"6\\" x2=\\"6\\" y2=\\"18\\"/><line x1=\\"6\\" y1=\\"6\\" x2=\\"18\\" y2=\\"18\\"/></svg>",
     "<span class=\\"nw-badge\\" hidden>0</span>",
     "</button>",
+    "</div>",
     "<div class=\\"nw-panel\\" data-hidden=\\"true\\">",
-    "<div class=\\"nw-header\\"><span class=\\"nw-title\\">Chat</span>",
+    "<div class=\\"nw-header\\"><div class=\\"nw-header-main\\"><img class=\\"nw-avatar\\" alt=\\"\\" hidden><div class=\\"nw-heading\\"><span class=\\"nw-title\\">Chat</span><span class=\\"nw-subtitle\\" hidden></span></div></div>",
     "<button class=\\"nw-close\\" type=\\"button\\" aria-label=\\"Cerrar\\"><svg viewBox=\\"0 0 24 24\\" width=\\"18\\" height=\\"18\\" fill=\\"none\\" stroke=\\"currentColor\\" stroke-width=\\"2\\" stroke-linecap=\\"round\\"><line x1=\\"18\\" y1=\\"6\\" x2=\\"6\\" y2=\\"18\\"/><line x1=\\"6\\" y1=\\"6\\" x2=\\"18\\" y2=\\"18\\"/></svg></button>",
     "</div>",
     "<div class=\\"nw-messages\\"></div>",
@@ -169,7 +220,11 @@ export const WIDGET_SCRIPT_JS = `(function () {
   shadow.appendChild(root);
 
   var bubbleBtn = root.querySelector(".nw-bubble");
-  var bubbleIcon = root.querySelector(".nw-bubble-icon");
+  var bubbleIcons = root.querySelectorAll(".nw-bubble-icon");
+  var launcherLabel = root.querySelector(".nw-launcher-label");
+  var avatarEl = root.querySelector(".nw-avatar");
+  var subtitleEl = root.querySelector(".nw-subtitle");
+  var footerEl = root.querySelector(".nw-footer");
   var closeIcon = root.querySelector(".nw-bubble-close-icon");
   var badge = root.querySelector(".nw-badge");
   var panel = root.querySelector(".nw-panel");
@@ -255,22 +310,37 @@ export const WIDGET_SCRIPT_JS = `(function () {
     badge.hidden = true;
   }
 
+  // SVGElement no implementa la propiedad hidden (solo HTMLElement), así
+  // que los íconos se muestran/ocultan por style.display, igual que el de cerrar.
+  function showLauncherIcon() {
+    for (var i = 0; i < bubbleIcons.length; i++) {
+      var el = bubbleIcons[i];
+      var show = !state.open && el.getAttribute("data-icon") === state.config.launcherIcon;
+      el.style.display = show ? "" : "none";
+    }
+    closeIcon.style.display = state.open ? "" : "none";
+    launcherLabel.hidden = state.open || !state.config.launcherLabel;
+  }
+
   function setOpen(open) {
+    var changed = state.open !== open;
     state.open = open;
     panel.setAttribute("data-hidden", open ? "false" : "true");
-    bubbleIcon.style.display = open ? "none" : "";
-    closeIcon.style.display = open ? "" : "none";
+    showLauncherIcon();
     if (open) {
       clearUnread();
       messagesEl.scrollTop = messagesEl.scrollHeight;
       schedulePoll(300);
       setTimeout(function () { try { input.focus(); } catch (e) {} }, 50);
+      try { localStorage.setItem(OPENED_ONCE_KEY, "1"); } catch (e) {}
     } else {
       clearTimeout(state.pollTimer);
     }
+    if (changed) emit(open ? "open" : "close", {});
   }
 
   bubbleBtn.addEventListener("click", function () { setOpen(!state.open); });
+  launcherLabel.addEventListener("click", function () { setOpen(true); });
   closeBtn.addEventListener("click", function () { setOpen(false); });
 
   function schedulePoll(delayMs) {
@@ -296,7 +366,7 @@ export const WIDGET_SCRIPT_JS = `(function () {
             if (m.created_at > state.cursor) state.cursor = m.created_at;
             if (m.role === "user" && hadLocal) continue;
             state.messages.push(m);
-            if (m.role === "assistant" || m.role === "owner") gotBotMsg = true;
+            if (m.role === "assistant" || m.role === "owner") { gotBotMsg = true; emit("reply", { role: m.role, content: m.content, created_at: m.created_at }); }
           }
           saveCache();
           renderMessages();
@@ -324,10 +394,11 @@ export const WIDGET_SCRIPT_JS = `(function () {
     state.typing = true;
     state.typingSince = Date.now();
     updateTyping();
+    emit("message", { content: text, created_at: Date.now() });
     fetch(API_BASE + "/widget/message", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ botId: botId, key: key, sessionId: sessionId, text: text })
+      body: JSON.stringify({ botId: botId, key: key, sessionId: sessionId, text: text, displayName: state.displayName || undefined })
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -358,24 +429,146 @@ export const WIDGET_SCRIPT_JS = `(function () {
     sendMessage(input.value);
   });
 
+  /** Texto oscuro o claro sobre el color principal, según su luminancia. */
+  function onAccent(hex) {
+    var m = /^#([0-9a-f]{6})$/i.exec(hex || "");
+    if (!m) return "#1a1a1a";
+    var n = parseInt(m[1], 16);
+    var r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    var lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+    return lum > 0.6 ? "#1a1a1a" : "#ffffff";
+  }
+
   function applyConfig(cfg) {
-    state.config.businessName = cfg.businessName || state.config.businessName;
-    state.config.bubbleColor = cfg.bubbleColor || state.config.bubbleColor;
-    state.config.position = cfg.position === "bottom-left" ? "bottom-left" : "bottom-right";
-    state.config.greeting = cfg.greeting || "";
-    titleEl.textContent = state.config.businessName;
-    root.setAttribute("data-position", state.config.position);
-    root.style.setProperty("--nw-accent", state.config.bubbleColor);
+    var c = state.config;
+    for (var k in c) { if (Object.prototype.hasOwnProperty.call(cfg, k) && cfg[k] !== undefined && cfg[k] !== null) c[k] = cfg[k]; }
+    c.position = c.position === "bottom-left" ? "bottom-left" : "bottom-right";
+    titleEl.textContent = c.title || c.businessName;
+    subtitleEl.textContent = c.subtitle || "";
+    subtitleEl.hidden = !c.subtitle;
+    if (c.avatarUrl) { avatarEl.src = c.avatarUrl; avatarEl.hidden = false; } else { avatarEl.hidden = true; }
+    input.placeholder = c.placeholder || "Escribe un mensaje…";
+    launcherLabel.textContent = c.launcherLabel || "";
+    footerEl.hidden = !c.showPoweredBy;
+    root.setAttribute("data-position", c.position);
+    root.setAttribute("data-theme", c.theme === "dark" ? "dark" : "light");
+    root.setAttribute("data-size", c.size || "regular");
+    root.setAttribute("data-hide-mobile", c.hideOnMobile ? "true" : "false");
+    root.style.setProperty("--nw-accent", c.bubbleColor);
+    root.style.setProperty("--nw-on-accent", onAccent(c.bubbleColor));
+    root.style.setProperty("--nw-radius", (c.radius === 0 ? 0 : c.radius || 16) + "px");
+    root.style.setProperty("--nw-offset-x", (c.offsetX === 0 ? 0 : c.offsetX || 20) + "px");
+    root.style.setProperty("--nw-offset-y", (c.offsetY === 0 ? 0 : c.offsetY || 20) + "px");
+    showLauncherIcon();
     renderMessages();
   }
 
+  function maybeOpenOnLoad() {
+    var mode = state.config.openOnLoad;
+    if (mode !== "always" && mode !== "first-visit") return;
+    if (state.open) return;
+    if (mode === "first-visit") {
+      try { if (localStorage.getItem(OPENED_ONCE_KEY)) return; } catch (e) {}
+    }
+    var delay = Math.max(0, Number(state.config.openDelaySec) || 0) * 1000;
+    setTimeout(function () { if (!state.open) setOpen(true); }, delay);
+  }
+
+  // ── API pública: window.nodia ──────────────────────────────────────────
+  // Deja que la página anfitriona abra el chat desde sus propios botones,
+  // opcionalmente mandando un primer mensaje con contexto ("quiero
+  // personalizar mi cuenta"). El snippet que se pega en el sitio incluye un
+  // stub que encola llamadas hechas antes de que este script cargue; aquí se
+  // reemplaza por el objeto real y se reproduce la cola.
+  function openWith(opts) {
+    opts = opts || {};
+    if (typeof opts === "string") opts = { message: opts };
+    setOpen(true);
+    if (opts.prefill) {
+      input.value = String(opts.prefill);
+      setTimeout(function () { try { input.focus(); } catch (e) {} }, 60);
+    }
+    if (opts.message) {
+      var text = String(opts.message);
+      // El mismo botón pulsado dos veces seguidas no debe duplicar el
+      // mensaje si el último que se mandó es idéntico y aún no hay respuesta.
+      var last = state.messages[state.messages.length - 1];
+      if (last && last.role === "user" && last.content === text && state.typing) return;
+      var attempt = function (n) {
+        if (!state.sending) { sendMessage(text); return; }
+        if (n < 20) setTimeout(function () { attempt(n + 1); }, 250);
+      };
+      attempt(0);
+    }
+  }
+
+  var api = function () {
+    var args = Array.prototype.slice.call(arguments);
+    var cmd = args.shift();
+    if (typeof api[cmd] === "function") return api[cmd].apply(null, args);
+    console.warn("[nodia-widget] comando desconocido:", cmd);
+  };
+  api.open = openWith;
+  api.close = function () { setOpen(false); };
+  api.toggle = function () { setOpen(!state.open); };
+  api.send = function (text) { setOpen(true); sendMessage(String(text || "")); };
+  api.isOpen = function () { return state.open; };
+  api.identify = function (info) {
+    info = info || {};
+    var name = typeof info === "string" ? info : info.name;
+    state.displayName = String(name || "").trim().slice(0, 120);
+    try { localStorage.setItem(DISPLAY_NAME_KEY, state.displayName); } catch (e) {}
+  };
+  api.on = function (event, fn) {
+    if (typeof fn !== "function") return function () {};
+    (state.listeners[event] = state.listeners[event] || []).push(fn);
+    if (event === "ready" && state.ready) fn({});
+    return function () {
+      var list = state.listeners[event] || [];
+      var i = list.indexOf(fn);
+      if (i >= 0) list.splice(i, 1);
+    };
+  };
+  api.ready = function (fn) { return api.on("ready", fn); };
+  api.q = [];
+
+  function installApi() {
+    var previous = window.nodia;
+    var queued = previous && previous.q ? previous.q.slice() : [];
+    window.nodia = api;
+    for (var i = 0; i < queued.length; i++) {
+      try { api.apply(null, Array.prototype.slice.call(queued[i])); } catch (e) { console.error("[nodia-widget] llamada encolada", e); }
+    }
+  }
+
+  // Botones declarativos: <a data-nodia-open> abre; data-nodia-message="…"
+  // abre y manda ese texto; data-nodia-prefill="…" lo deja escrito.
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    while (t && t !== document) {
+      if (t.hasAttribute && (t.hasAttribute("data-nodia-open") || t.hasAttribute("data-nodia-message") || t.hasAttribute("data-nodia-prefill"))) {
+        e.preventDefault();
+        openWith({ message: t.getAttribute("data-nodia-message") || "", prefill: t.getAttribute("data-nodia-prefill") || "" });
+        return;
+      }
+      t = t.parentNode;
+    }
+  }, true);
+
   function init() {
     document.body.appendChild(host);
+    showLauncherIcon();
     renderMessages();
     fetch(API_BASE + "/widget/config?bot=" + encodeURIComponent(botId) + "&key=" + encodeURIComponent(key))
       .then(function (r) { return r.json(); })
       .then(function (data) { if (data && data.ok) applyConfig(data); })
-      .catch(function (e) { console.error("[nodia-widget] no se pudo cargar la configuración", e); });
+      .catch(function (e) { console.error("[nodia-widget] no se pudo cargar la configuración", e); })
+      .then(function () {
+        installApi();
+        emit("ready", {});
+        state.ready = true;
+        maybeOpenOnLoad();
+      });
   }
 
   if (document.body) init();

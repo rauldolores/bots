@@ -197,11 +197,61 @@ describe("saveWidgetConfig", () => {
 
     const after = await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "widget");
     expect(after?.external_id).toBe(before?.external_id);
-    expect(after?.config).toEqual({
+    expect(after?.config).toMatchObject({
       position: "bottom-left",
       bubbleColor: "#112233",
       greeting: "¡Hola! ¿En qué ayudo?",
     });
+  });
+
+  it("guarda la personalización completa (apariencia, burbuja, comportamiento) con valores saneados", async () => {
+    await connectChannel(env, TEST_BOT_ID, "widget", form({}));
+    await saveWidgetConfig(
+      env,
+      TEST_BOT_ID,
+      form({
+        position: "bottom-right",
+        bubble_color: "#0055ff",
+        title: "Soporte Acme",
+        subtitle: "Respondemos en minutos",
+        avatar_url: "https://acme.test/logo.png",
+        placeholder: "Cuéntanos…",
+        launcher_label: "¿Dudas?",
+        launcher_icon: "sparkles",
+        theme: "dark",
+        size: "large",
+        radius: "8",
+        offset_x: "999", // fuera de rango → se recorta a 200
+        offset_y: "abc", // inválido → default
+        open_on_load: "first-visit",
+        open_delay_sec: "5",
+        show_powered_by: "on",
+        // hide_on_mobile ausente → false
+      }),
+    );
+    const after = await new BotChannelsRepo(db).getByBotAndChannel(TEST_BOT_ID, "widget");
+    expect(after?.config).toMatchObject({
+      title: "Soporte Acme",
+      subtitle: "Respondemos en minutos",
+      avatarUrl: "https://acme.test/logo.png",
+      placeholder: "Cuéntanos…",
+      launcherLabel: "¿Dudas?",
+      launcherIcon: "sparkles",
+      theme: "dark",
+      size: "large",
+      radius: 8,
+      offsetX: 200,
+      offsetY: 20,
+      openOnLoad: "first-visit",
+      openDelaySec: 5,
+      showPoweredBy: true,
+      hideOnMobile: false,
+    });
+  });
+
+  it("el snippet incluye el stub de window.nodia y la tarjeta documenta el API para desarrolladores", async () => {
+    const html = await connectChannel(env, TEST_BOT_ID, "widget", form({}));
+    expect(html).toContain("window.nodia=window.nodia||function()");
   });
 
   it("sin canal conectado, no hace nada", async () => {

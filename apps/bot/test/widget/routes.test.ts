@@ -53,6 +53,8 @@ describe("GET /widget/config", () => {
     expect(body.businessName).toBe("Test Business");
     expect(body.position).toBe("bottom-left");
     expect(body.greeting).toBe("¡Hola!");
+    // Campos nuevos: siempre presentes, con defaults cuando nunca se configuraron.
+    expect(body).toMatchObject({ theme: "light", size: "regular", launcherIcon: "chat", showPoweredBy: true, hideOnMobile: false, radius: 16 });
   });
 
   it("401 con una llave equivocada", async () => {

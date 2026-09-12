@@ -16,9 +16,26 @@ export interface BotChannelConfig {
   // de voiceGreeting.ts. Acepta {{negocio}} y {{nombre}} igual que el saludo.
   transferFallbackGreeting?: string;
   // widget (channel "widget"): la llave pública va en external_id, no aquí.
+  // La lista completa de campos, defaults y validación vive en
+  // widget/config.ts (WidgetConfig); aquí solo se declaran para el tipo.
   bubbleColor?: string;
   position?: "bottom-right" | "bottom-left";
   greeting?: string;
+  title?: string;
+  subtitle?: string;
+  avatarUrl?: string;
+  placeholder?: string;
+  launcherLabel?: string;
+  launcherIcon?: "chat" | "message" | "help" | "sparkles";
+  theme?: "light" | "dark";
+  size?: "compact" | "regular" | "large";
+  radius?: number;
+  offsetX?: number;
+  offsetY?: number;
+  openOnLoad?: "never" | "first-visit" | "always";
+  openDelaySec?: number;
+  showPoweredBy?: boolean;
+  hideOnMobile?: boolean;
   // canal "email" (F9): cuál de los dos proveedores está activo hoy — "una u
   // otra" (conectar el segundo reemplaza al primero, misma fila). Resend
   // necesita secret_ref (API key, para pedir el cuerpo completo del correo)

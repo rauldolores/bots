@@ -43,6 +43,7 @@ import {
   type ConnectorFieldSpec,
 } from "../../connectors/registry";
 import { layout } from "./layout";
+import { WIDGET_DEFAULTS, widgetConfigFromForm } from "../../widget/config";
 
 function esc(s: string): string {
   return s.replace(
@@ -204,7 +205,7 @@ const CHANNEL_META: Record<ConnectableChannel, ChannelMeta> = {
     steps: [
       "Haz clic en <b>Conectar</b> — generamos una llave para tu sitio, sin que tengas que pegar nada.",
       "Copia el código que te damos y pégalo justo antes de <span class=\"font-mono\">&lt;/body&gt;</span> en tu sitio web.",
-      "Listo — la burbuja aparece sola. Puedes ajustar posición, color y saludo desde esta pantalla cuando quieras.",
+      "Listo — la burbuja aparece sola. Desde esta pantalla ajustas colores, textos, tamaño y comportamiento, y encuentras cómo abrir el chat desde tus propios botones.",
     ],
     fields: [],
     webhookNote: "Copia el código y pégalo en tu sitio.",
@@ -450,7 +451,11 @@ function copyBlock(label: string, value: string): string {
 
 function widgetSnippet(env: Env, botId: string, key: string): string {
   const base = (env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
-  return `<script src="${base}/widget.js" data-bot="${botId}" data-key="${key}" async></script>`;
+  // La segunda línea es el "stub": deja llamar a nodia.open(...) desde
+  // cualquier botón aunque el script (async) todavía no haya cargado — las
+  // llamadas se encolan y el widget las ejecuta al arrancar.
+  return `<script src="${base}/widget.js" data-bot="${botId}" data-key="${key}" async></script>
+<script>window.nodia=window.nodia||function(){(window.nodia.q=window.nodia.q||[]).push(arguments)};</script>`;
 }
 
 function modalShell(icon: string, title: string, inner: string): string {
@@ -670,7 +675,7 @@ function renderWidgetConnectedModal(env: Env, botId: string, key: string): strin
     `<div class="text-[13px]" style="color:var(--ok);font-weight:600;margin-bottom:12px">✓ Widget conectado a este bot</div>
      <p class="text-[12.5px]" style="color:var(--muted);margin:0 0 12px">Pega este código justo antes de <span class="font-mono">&lt;/body&gt;</span> en tu sitio web:</p>
      ${copyBlock("Código para tu sitio", widgetSnippet(env, botId, key))}
-     <p class="text-[11.5px]" style="color:var(--dim);margin-top:10px">Puedes ajustar posición, color y saludo desde la tarjeta de esta pantalla en cualquier momento.</p>
+     <p class="text-[11.5px]" style="color:var(--dim);margin-top:10px">Desde la tarjeta de esta pantalla ajustas apariencia y comportamiento en cualquier momento, y ahí mismo está cómo abrir el chat desde los botones de tu sitio con un mensaje inicial.</p>
      <button type="button" class="ghostbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;margin-top:14px;background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:9px"
              onclick="document.getElementById('modal-root').innerHTML=''">Listo</button>`,
   );
@@ -890,10 +895,7 @@ export async function saveWidgetConfig(env: Env, botId: string, form: FormData):
   const repo = new BotChannelsRepo(db);
   const row = await repo.getByBotAndChannel(botId, "widget");
   if (!row) return;
-  const position = String(form.get("position") ?? "") === "bottom-left" ? "bottom-left" : "bottom-right";
-  const bubbleColor = String(form.get("bubble_color") ?? "").trim() || row.config.bubbleColor || "#F5C518";
-  const greeting = String(form.get("greeting") ?? "").trim();
-  await repo.updateConfig(botId, "widget", { ...row.config, position, bubbleColor, greeting });
+  await repo.updateConfig(botId, "widget", { ...row.config, ...widgetConfigFromForm(form, row.config) });
 }
 
 // ── Conectores salientes: CRM / Tickets / Calendario / MCP ────────────────
@@ -1957,6 +1959,121 @@ export async function renderConnectorsGrid(env: Env, botId: string, category: Co
     </div>`;
 }
 
+const WIDGET_FIELD_STYLE = "background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:7px 9px;font-size:12px;font-family:inherit;width:100%";
+const WIDGET_LABEL_STYLE = "color:var(--dim);display:flex;flex-direction:column;gap:4px";
+
+function widgetSelect(name: string, current: string, options: { value: string; label: string }[]): string {
+  return `<select name="${name}" style="${WIDGET_FIELD_STYLE}">${options
+    .map((o) => `<option value="${o.value}" ${o.value === current ? "selected" : ""}>${esc(o.label)}</option>`)
+    .join("")}</select>`;
+}
+
+function widgetText(name: string, value: string | undefined, placeholder: string, type = "text"): string {
+  return `<input type="${type}" name="${name}" value="${esc(value ?? "")}" placeholder="${esc(placeholder)}" style="${WIDGET_FIELD_STYLE}">`;
+}
+
+/** Personalización del widget — cada campo es opcional; vacío = el aspecto original. Definición y validación en widget/config.ts. */
+function renderWidgetConfigForm(row: BotChannel): string {
+  const c = row.config;
+  const d = WIDGET_DEFAULTS;
+  const grid = `display:grid;grid-template-columns:1fr 1fr;gap:8px 10px`;
+  const section = (t: string) => `<div class="text-[10px]" style="letter-spacing:.12em;color:var(--dim);font-weight:700;margin-top:4px">${t}</div>`;
+  const field = (label: string, inner: string) => `<label class="text-[10.5px]" style="${WIDGET_LABEL_STYLE}">${label}${inner}</label>`;
+  return `<form method="POST" action="/admin/conexiones/widget/config" style="display:flex;flex-direction:column;gap:10px;margin-top:2px">
+    ${section("APARIENCIA")}
+    <div style="${grid}">
+      ${field("Título del panel", widgetText("title", c.title, "Nombre de tu negocio"))}
+      ${field("Subtítulo", widgetText("subtitle", c.subtitle, "Respondemos en minutos"))}
+      ${field("Logo / avatar (URL https)", widgetText("avatar_url", c.avatarUrl, "https://…/logo.png", "url"))}
+      ${field("Texto del campo de escritura", widgetText("placeholder", c.placeholder, d.placeholder))}
+      ${field(
+        "Color principal",
+        `<input type="color" name="bubble_color" value="${esc(c.bubbleColor ?? d.bubbleColor)}" style="width:100%;height:32px;border:1px solid var(--line);background:none;cursor:pointer;padding:0">`,
+      )}
+      ${field(
+        "Tema",
+        widgetSelect("theme", c.theme ?? d.theme, [
+          { value: "light", label: "Claro" },
+          { value: "dark", label: "Oscuro" },
+        ]),
+      )}
+      ${field(
+        "Tamaño del panel",
+        widgetSelect("size", c.size ?? d.size, [
+          { value: "compact", label: "Compacto" },
+          { value: "regular", label: "Normal" },
+          { value: "large", label: "Grande" },
+        ]),
+      )}
+      ${field("Esquinas (px)", widgetText("radius", String(c.radius ?? d.radius), String(d.radius), "number"))}
+    </div>
+    ${section("BURBUJA")}
+    <div style="${grid}">
+      ${field(
+        "Ícono",
+        widgetSelect("launcher_icon", c.launcherIcon ?? d.launcherIcon, [
+          { value: "chat", label: "Globo de chat" },
+          { value: "message", label: "Sobre / mensaje" },
+          { value: "help", label: "Signo de ayuda" },
+          { value: "sparkles", label: "Destellos (IA)" },
+        ]),
+      )}
+      ${field("Texto junto a la burbuja", widgetText("launcher_label", c.launcherLabel, "¿Dudas? Escríbenos"))}
+      ${field(
+        "Posición",
+        widgetSelect("position", c.position ?? d.position, [
+          { value: "bottom-right", label: "Abajo a la derecha" },
+          { value: "bottom-left", label: "Abajo a la izquierda" },
+        ]),
+      )}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        ${field("Margen lateral (px)", widgetText("offset_x", String(c.offsetX ?? d.offsetX), String(d.offsetX), "number"))}
+        ${field("Margen inferior (px)", widgetText("offset_y", String(c.offsetY ?? d.offsetY), String(d.offsetY), "number"))}
+      </div>
+    </div>
+    ${section("COMPORTAMIENTO")}
+    ${field("Mensaje de bienvenida", widgetText("greeting", c.greeting, "¡Hola! ¿En qué puedo ayudarte?"))}
+    <div style="${grid}">
+      ${field(
+        "Abrir solo al cargar la página",
+        widgetSelect("open_on_load", c.openOnLoad ?? d.openOnLoad, [
+          { value: "never", label: "Nunca (el visitante hace clic)" },
+          { value: "first-visit", label: "Solo la primera visita" },
+          { value: "always", label: "Siempre" },
+        ]),
+      )}
+      ${field("…después de (segundos)", widgetText("open_delay_sec", String(c.openDelaySec ?? d.openDelaySec), String(d.openDelaySec), "number"))}
+    </div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap">
+      <label class="text-[10.5px]" style="color:var(--dim);display:flex;align-items:center;gap:6px"><input type="checkbox" name="show_powered_by" ${(c.showPoweredBy ?? d.showPoweredBy) ? "checked" : ""}> Mostrar "Powered by Nodia Agents"</label>
+      <label class="text-[10.5px]" style="color:var(--dim);display:flex;align-items:center;gap:6px"><input type="checkbox" name="hide_on_mobile" ${c.hideOnMobile ? "checked" : ""}> Ocultar en celulares</label>
+    </div>
+    <button type="submit" class="text-[11px]" style="align-self:flex-start;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:5px 12px;cursor:pointer;font-weight:600">Guardar</button>
+  </form>`;
+}
+
+/** Cómo abrir el chat desde los botones del propio sitio (window.nodia) — para el desarrollador del cliente. */
+function renderWidgetApiDocs(): string {
+  const declarative = `<button data-nodia-message="Estoy interesado en personalizar mi cuenta">Quiero personalizar mi cuenta</button>`;
+  const js = [
+    'nodia.open({ message: "Necesito ayuda con mi pedido #1234" }); // abre y manda el mensaje',
+    'nodia.open({ prefill: "Hola, quisiera cotizar…" });          // abre con el texto listo para editar',
+    "nodia.open(); nodia.close(); nodia.toggle();",
+    'nodia.identify({ name: "Ana Pérez" });                        // nombre con el que aparece en tus conversaciones',
+    'nodia.on("reply", (m) => console.log("el bot respondió:", m.content));',
+  ].join("\n");
+  return `<details style="margin-top:6px">
+    <summary class="text-[11px]" style="cursor:pointer;color:var(--accent-2);font-weight:600">Abrir el chat desde tus propios botones (API para desarrolladores)</summary>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+      <p class="text-[11.5px]" style="color:var(--muted);margin:0">Cualquier elemento de tu página con <span class="font-mono">data-nodia-open</span> abre el chat; con <span class="font-mono">data-nodia-message="…"</span> lo abre y manda ese texto como primer mensaje del visitante — útil para botones tipo "Cotizar", "Reportar un problema" o "Personalizar mi cuenta", con el contexto ya puesto.</p>
+      ${copyBlock("Sin escribir JavaScript", declarative)}
+      <p class="text-[11.5px]" style="color:var(--muted);margin:0">O desde JavaScript con el objeto global <span class="font-mono">window.nodia</span> (funciona aunque lo llames antes de que cargue el script — se encola):</p>
+      ${copyBlock("Desde JavaScript", js)}
+      <p class="text-[11px]" style="color:var(--dim);margin:0">Eventos para <span class="font-mono">nodia.on(evento, fn)</span>: <span class="font-mono">ready</span>, <span class="font-mono">open</span>, <span class="font-mono">close</span>, <span class="font-mono">message</span> (el visitante envió), <span class="font-mono">reply</span> (el bot respondió).</p>
+    </div>
+  </details>`;
+}
+
 async function renderConnectableCard(env: Env, db: Db, botId: string, meta: ChannelMeta): Promise<string> {
   const row = await connectedRow(db, botId, meta.id);
   const ok = Boolean(row);
@@ -1975,25 +2092,8 @@ async function renderConnectableCard(env: Env, db: Db, botId: string, meta: Chan
     ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>`
     : `<span style="font-size:10px;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);padding:3px 10px;font-weight:600">○ SIN CONECTAR</span>`;
 
-  const widgetConfigForm =
-    ok && meta.id === "widget" && row
-      ? `<form method="POST" action="/admin/conexiones/widget/config" style="display:flex;flex-direction:column;gap:8px;margin-top:2px">
-           <label class="text-[10.5px]" style="color:var(--dim);display:flex;flex-direction:column;gap:4px">Posición
-             <select name="position" style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:7px 9px;font-size:12px;font-family:inherit">
-               <option value="bottom-right" ${row.config.position !== "bottom-left" ? "selected" : ""}>Abajo a la derecha</option>
-               <option value="bottom-left" ${row.config.position === "bottom-left" ? "selected" : ""}>Abajo a la izquierda</option>
-             </select>
-           </label>
-           <label class="text-[10.5px]" style="color:var(--dim);display:flex;align-items:center;gap:8px">Color de la burbuja
-             <input type="color" name="bubble_color" value="${esc(row.config.bubbleColor ?? "#F5C518")}" style="width:44px;height:26px;border:1px solid var(--line);background:none;cursor:pointer;padding:0">
-           </label>
-           <label class="text-[10.5px]" style="color:var(--dim);display:flex;flex-direction:column;gap:4px">Mensaje de bienvenida
-             <input type="text" name="greeting" value="${esc(row.config.greeting ?? "")}" placeholder="¡Hola! ¿En qué puedo ayudarte?"
-                    style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:7px 9px;font-size:12px;font-family:inherit">
-           </label>
-           <button type="submit" class="text-[11px]" style="align-self:flex-start;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:5px 12px;cursor:pointer;font-weight:600">Guardar</button>
-         </form>`
-      : "";
+  const widgetConfigForm = ok && meta.id === "widget" && row ? renderWidgetConfigForm(row) : "";
+  const widgetApiDocs = ok && meta.id === "widget" && row ? renderWidgetApiDocs() : "";
 
   // F7 fase 8: desde aquí se descubre el flujo de "conserva tu número
   // existente" — solo tiene sentido una vez que YA hay un número de Twilio
@@ -2018,6 +2118,7 @@ async function renderConnectableCard(env: Env, db: Db, botId: string, meta: Chan
        </div>
        ${codigoDeVerificacion}
        ${widgetConfigForm}
+       ${widgetApiDocs}
        ${voiceOnboardingLink}
        ${vieneDelDespliegue}
        <form method="POST" action="/admin/conexiones/${meta.id}/disconnect" style="margin-top:4px" onsubmit="return confirm('¿Desconectar ${esc(meta.name)}? El bot dejará de recibir mensajes por aquí.')">

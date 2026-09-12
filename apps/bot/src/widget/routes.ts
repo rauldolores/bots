@@ -15,6 +15,7 @@ import { wakeTickAfter } from "../queue/wake";
 import { ctxOpcional } from "../hono-utils";
 import { resolveWidgetAuth } from "./auth";
 import { WIDGET_SCRIPT_JS } from "./script";
+import { toPublicWidgetConfig } from "./config";
 
 export const WIDGET_NEW_CONV_HOURLY_CAP = 30;
 const MAX_TEXT_LEN = 4000;
@@ -47,13 +48,7 @@ widgetApp.get("/config", async (c) => {
   const row = await resolveWidgetAuth(db, botId, key);
   if (!row) return c.json({ ok: false, error: "unauthorized" }, 401);
   const bot = await new BotsRepo(db).getById(botId);
-  return c.json({
-    ok: true,
-    businessName: bot?.business_name ?? "Chat",
-    bubbleColor: row.config.bubbleColor ?? "#F5C518",
-    position: row.config.position ?? "bottom-right",
-    greeting: row.config.greeting ?? "",
-  });
+  return c.json({ ok: true, ...toPublicWidgetConfig(row.config, bot?.business_name ?? "Chat") });
 });
 
 widgetApp.post("/message", async (c) => {
