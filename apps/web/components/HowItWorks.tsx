@@ -5,7 +5,7 @@ const steps = [
   {
     icon: Inbox,
     title: "El cliente escribe o llama",
-    desc: "Llega un mensaje por WhatsApp, Instagram, Messenger o Telegram — o una llamada a tu número.",
+    desc: "Llega un mensaje por WhatsApp, Instagram, Messenger, Telegram, correo o el chat de tu web — o una llamada a tu número.",
   },
   {
     icon: Timer,

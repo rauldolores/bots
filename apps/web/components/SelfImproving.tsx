@@ -5,10 +5,16 @@ import {
   Megaphone,
   TrendingUp,
   MessageSquareText,
+  FlaskConical,
 } from "lucide-react";
 import { Container, SectionHeading } from "./ui";
 
 const items = [
+  {
+    icon: FlaskConical,
+    title: "Sandbox de entrenamiento",
+    desc: "Conversa con tu propio bot como si fueras un cliente y corrígelo ahí mismo. Nada es real — no crea leads, tickets ni citas — salvo lo que sabe.",
+  },
   {
     icon: ScanEye,
     title: "Analista de conversaciones",

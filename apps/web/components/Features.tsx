@@ -11,6 +11,11 @@ import {
   PhoneCall,
   AudioLines,
   PhoneForwarded,
+  Mail,
+  Globe,
+  Ticket,
+  Workflow,
+  FlaskConical,
 } from "lucide-react";
 import { Container, SectionHeading } from "./ui";
 
@@ -33,7 +38,17 @@ const features = [
   {
     icon: MessagesSquare,
     title: "Multicanal, un solo cerebro",
-    desc: "WhatsApp, Instagram, Messenger y Telegram respondidos por el mismo agente, con la misma voz de tu negocio.",
+    desc: "WhatsApp, Instagram, Messenger, Telegram, correo y el chat de tu web respondidos por el mismo agente, con la misma voz de tu negocio.",
+  },
+  {
+    icon: Mail,
+    title: "Contesta el correo de soporte",
+    desc: "Sigues usando tu buzón de siempre: solo configuras un reenvío. El agente responde en el mismo hilo, con un solo correo completo — nunca en pedacitos.",
+  },
+  {
+    icon: Globe,
+    title: "Chat en tu sitio web",
+    desc: "Un widget con tus colores y tu texto, en una línea de código. Se abre desde cualquier botón de tu página y recuerda al visitante que vuelve.",
   },
   {
     icon: BookOpen,
@@ -47,8 +62,13 @@ const features = [
   },
   {
     icon: UserPlus,
-    title: "Captura leads solo",
-    desc: "Detecta intención de compra y guarda el prospecto, con alta automática en tu CRM (HubSpot, Pipedrive).",
+    title: "Deja tu CRM al día, solo",
+    desc: "Detecta intención de compra y da de alta el prospecto en HubSpot, Pipedrive, Salesforce o Vinqulia. Cada conversación queda registrada como nota, llamada, WhatsApp o correo — según por dónde llegó.",
+  },
+  {
+    icon: Ticket,
+    title: "Tickets donde trabaja tu equipo",
+    desc: "Cuando escala, el caso se abre en Zendesk, Jira o Vinqulia con el contexto completo. Nadie tiene que releer la conversación.",
   },
   {
     icon: LifeBuoy,
@@ -62,8 +82,18 @@ const features = [
   },
   {
     icon: CalendarClock,
-    title: "Agenda citas",
-    desc: "Consulta disponibilidad real y reserva en tu calendario de Cal.com, sin salir del chat ni de la llamada.",
+    title: "Agenda, reagenda y cancela citas",
+    desc: "Consulta disponibilidad real y reserva en Cal.com, Google Calendar o como tarea en tu CRM, sin salir del chat ni de la llamada.",
+  },
+  {
+    icon: Workflow,
+    title: "Conecta cualquier sistema (MCP)",
+    desc: "Tu ERP, tu inventario o tu sistema interno: si expone un servidor MCP, el agente usa sus herramientas. Tú eliges cuáles desde el panel.",
+  },
+  {
+    icon: FlaskConical,
+    title: "Tu agente como API",
+    desc: "Define una habilidad en español simple y qué campos debe devolver. Tus otros sistemas la llaman con una llave y reciben JSON limpio.",
   },
   {
     icon: PackageSearch,

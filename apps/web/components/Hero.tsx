@@ -14,6 +14,9 @@ const channels = [
   { name: "Telegram", color: "#38bdf8" },
   { name: "Instagram", color: "#f472b6" },
   { name: "Messenger", color: "#818cf8" },
+  { name: "Correo", color: "#f59e0b" },
+  { name: "Chat en tu web", color: "#a78bfa" },
+  { name: "Teléfono", color: "#ef4444" },
 ];
 
 export default function Hero() {
@@ -52,11 +55,12 @@ export default function Hero() {
           </h1>
 
           <p className="mt-6 max-w-xl text-base leading-relaxed text-stone-700 sm:text-lg">
-            Responde por WhatsApp, Instagram, Messenger y Telegram desde{" "}
+            Responde por WhatsApp, Instagram, Messenger, Telegram,{" "}
+            <strong className="text-stone-900">correo</strong> y el chat de tu web desde{" "}
             <strong className="text-stone-900">tu base de conocimiento</strong> — y
             también contesta las llamadas que llegan a{" "}
             <strong className="text-stone-900">tu propio número</strong>. Captura
-            leads, agenda citas y transfiere a un humano cuando algo lo necesita,{" "}
+            leads, agenda citas, deja tu CRM al día y transfiere a un humano cuando algo lo necesita,{" "}
             <strong className="text-stone-900">sin que toques una línea de código</strong>.
           </p>
 

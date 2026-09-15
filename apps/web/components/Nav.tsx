@@ -7,6 +7,7 @@ import { useDemoDialog } from "./DemoDialog";
 
 const links = [
   { href: "#caracteristicas", label: "Características" },
+  { href: "#integraciones", label: "Integraciones" },
   { href: "#voz", label: "Llamadas" },
   { href: "#como-funciona", label: "Cómo funciona" },
   { href: "#panel", label: "Panel" },
