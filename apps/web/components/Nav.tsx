@@ -15,10 +15,11 @@ import { iconFor } from "./industrias/icons";
  */
 const links = [
   { href: "/#caracteristicas", label: "Características" },
-  { href: "/#integraciones", label: "Integraciones" },
+  { href: "/#precios", label: "Precios" },
   { href: "/#voz", label: "Llamadas" },
   { href: "/#como-funciona", label: "Cómo funciona" },
-  { href: "/#panel", label: "Panel" },
+  { href: "/#integraciones", label: "Integraciones", secondary: true },
+  { href: "/#panel", label: "Panel", secondary: true },
   { href: "/#ecosistema", label: "Ecosistema", secondary: true },
   { href: "/#afiliados", label: "Afiliados", isAffiliate: true, secondary: true },
 ];

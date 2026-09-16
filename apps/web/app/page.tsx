@@ -3,6 +3,7 @@ import Features from "@/components/Features";
 import Integrations from "@/components/Integrations";
 import HowItWorks from "@/components/HowItWorks";
 import Voice from "@/components/Voice";
+import Pricing from "@/components/Pricing";
 import Industries from "@/components/Industries";
 import Panel from "@/components/Panel";
 import SelfImproving from "@/components/SelfImproving";
@@ -22,6 +23,7 @@ export default function Home() {
       <Integrations />
       <HowItWorks />
       <Voice />
+      <Pricing />
       <Industries />
       <Panel />
       <SelfImproving />
