@@ -169,6 +169,13 @@ export interface Env {
   // client_id que devolvió panel.kontrolia.io → Clientes OAuth al registrar
   // esta app. No es secreto (cliente público, PKCE, sin client_secret).
   OAUTH_CLIENT_ID?: string;
+  // Dominio público del auth-server de KontrolIA (NO el de Supabase): ahí
+  // viven el alta de cuentas por app (/register?app=…) y la API de
+  // administración (roles, invitaciones). Vacío = https://auth.kontrolia.io.
+  KONTROLIA_AUTH_SERVER_URL?: string;
+  // Slug con el que esta app está registrada en KontrolIA Auth. Vacío =
+  // "nodia-agents" (el catálogo de permisos usa el mismo, ver admin/permissions.ts).
+  KONTROLIA_APP_SLUG?: string;
 
   // Token guarding POST /kb/reindex (header: X-Reindex-Token). Secret.
   KB_REINDEX_TOKEN: string;

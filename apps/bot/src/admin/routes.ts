@@ -66,6 +66,7 @@ import { renderLeads, exportLeadsCsv } from "./views/leads";
 import { renderTickets, updateTicketPriority } from "./views/tickets";
 import { renderCalendario, cancelAppointment } from "./views/calendario";
 import { renderTelefono } from "./views/telefono";
+import { renderUsuarios } from "./views/usuarios";
 import { startOnboarding, activateOnboarding, disableOnboarding, retryOnboarding } from "../channels/voice/onboarding/service";
 import { renderConfig } from "./views/config";
 import {
@@ -129,6 +130,11 @@ import {
   verifyAccessToken,
   listMemberships,
   switchActiveOrganization,
+  registerUrl,
+  listRoles,
+  listInvitations,
+  createInvitation,
+  deleteInvitation,
   SESSION_COOKIE,
   VERIFIER_COOKIE,
   type KontroliaSession,
@@ -153,7 +159,7 @@ export const adminApp = new Hono<AdminBindings>();
 // /admin cuando adminApp corre montada bajo la app principal (producción),
 // pero NO cuando se prueba adminApp.fetch() directo (así corren los tests de
 // este archivo) — el sufijo es correcto en los dos casos.
-const AUTH_EXEMPT_SUFFIXES = ["/login", "/oauth/callback", "/logout"];
+const AUTH_EXEMPT_SUFFIXES = ["/login", "/oauth/callback", "/logout", "/registro"];
 function isAuthExempt(path: string): boolean {
   return AUTH_EXEMPT_SUFFIXES.some((s) => path.endsWith(s));
 }
@@ -196,8 +202,11 @@ function redirectUri(env: Env): string {
 type HonoContext = Context<AdminBindings>;
 
 type GuardResult =
-  // ya autenticado con KontrolIA — claims.organization_id manda cuál bot ve
-  | { kind: "pass"; claims: KontroliaTokenClaims }
+  // ya autenticado con KontrolIA — claims.organization_id manda cuál bot ve.
+  // El accessToken viaja junto: /usuarios llama a la API del auth-server a
+  // nombre de esta persona, y volver a leer la cookie ahí sería repetir el
+  // refresh que ya se hizo aquí.
+  | { kind: "pass"; claims: KontroliaTokenClaims; accessToken: string }
   | { kind: "pass-public" } // DASHBOARD_PUBLIC=1 — sin sesión, sin organización
   | { kind: "check-basic" } // sin sesión de KontrolIA — que decida el Basic Auth clásico
   | { kind: "redirect"; to: string };
@@ -231,7 +240,7 @@ async function guardAdmin(c: HonoContext): Promise<GuardResult> {
       }
       if (accessToken) {
         const verified = await verifyAccessToken(cfg, accessToken);
-        if (verified) return { kind: "pass", claims: verified.claims };
+        if (verified) return { kind: "pass", claims: verified.claims, accessToken };
       }
     }
   }
@@ -266,6 +275,7 @@ adminApp.use("*", async (c, next) => {
   }
   if (result.kind === "pass") {
     c.set("kontroliaClaims", result.claims);
+    c.set("kontroliaAccessToken", result.accessToken);
     if (isTenantExempt(c.req.path)) {
       // switch-org/switch-bot: no necesitan botId resuelto (de eso se trata
       // la ruta), pero switch-bot SÍ necesita saber la organización activa
@@ -351,6 +361,20 @@ adminApp.get("/oauth/callback", async (c) => {
   });
   const next = c.req.query("state") || "/admin/overview";
   return c.redirect(next, 302);
+});
+
+/**
+ * "Crear cuenta": el alta por app del auth-server
+ * (auth.kontrolia.io/public-signup.md §2.1). Vive como ruta propia, y no
+ * como URL escrita en la web pública, para que el sitio enlace a UN lugar
+ * (panel.nodiagents.com/admin/registro) y el auth-server, el slug y el
+ * redirect_to salgan de la configuración de este despliegue.
+ *
+ * Exenta de auth a propósito: quien llega aquí todavía no tiene cuenta.
+ */
+adminApp.get("/registro", (c) => {
+  if (!kontroliaConfig(c.env)) return c.text("KontrolIA Auth no está configurado en este despliegue.", 501);
+  return c.redirect(registerUrl(c.env), 302);
 });
 
 adminApp.post("/logout", async (c) => {
@@ -1348,6 +1372,58 @@ adminApp.post("/telefono/transfer-number", async (c) => {
     transferFallbackGreeting: transferFallbackGreeting || undefined,
   });
   return c.redirect("/admin/telefono?ok=1", 302);
+});
+
+// Equipo: invitar gente a la organización de KontrolIA desde el panel
+// (auth.kontrolia.io/public-signup.md §2.2). Las tres rutas hablan con el
+// auth-server a nombre del usuario (kontroliaAccessToken); con Basic Auth no
+// hay token ni organización, y la pantalla lo explica en vez de romperse.
+async function datosDeUsuarios(c: HonoContext) {
+  const token = c.get("kontroliaAccessToken");
+  const orgId = c.get("kontroliaOrgId");
+  if (!token || !orgId) return { kind: "sin-kontrolia" as const };
+  const [roles, invitations] = await Promise.all([
+    listRoles(c.env, token, orgId),
+    listInvitations(c.env, token, orgId),
+  ]);
+  if (!roles.ok) return { kind: "error" as const, error: roles.error };
+  if (!invitations.ok) return { kind: "error" as const, error: invitations.error };
+  return { kind: "ok" as const, roles: roles.roles, invitations: invitations.invitations };
+}
+
+adminApp.get("/usuarios", async (c) =>
+  c.html(
+    renderUsuarios(
+      c.env,
+      await datosDeUsuarios(c),
+      { ok: c.req.query("ok") ?? undefined, err: c.req.query("err") ?? undefined },
+      visibleNavIds(c.get("kontroliaClaims")),
+    ),
+  ),
+);
+
+adminApp.post("/usuarios/invitar", async (c) => {
+  const token = c.get("kontroliaAccessToken");
+  const orgId = c.get("kontroliaOrgId");
+  if (!token || !orgId) return c.redirect("/admin/usuarios?err=Entra con tu cuenta de KontrolIA para invitar.", 302);
+  const form = await c.req.formData();
+  const email = String(form.get("email") ?? "").trim().toLowerCase();
+  const roleId = String(form.get("role_id") ?? "").trim();
+  if (!email || !roleId) return c.redirect("/admin/usuarios?err=Falta el correo o el rol.", 302);
+  const r = await createInvitation(c.env, token, { organizationId: orgId, email, roleId });
+  if (!r.ok) return c.redirect(`/admin/usuarios?err=${encodeURIComponent(r.error)}`, 302);
+  const msg = r.emailSent
+    ? `Invitación enviada a ${email}.`
+    : `Invitación creada para ${email}, pero el auth-server no mandó el correo (sin Resend configurado allá).`;
+  return c.redirect(`/admin/usuarios?ok=${encodeURIComponent(msg)}`, 302);
+});
+
+adminApp.post("/usuarios/:id/cancelar", async (c) => {
+  const token = c.get("kontroliaAccessToken");
+  if (!token) return c.redirect("/admin/usuarios?err=Entra con tu cuenta de KontrolIA.", 302);
+  const r = await deleteInvitation(c.env, token, c.req.param("id"));
+  if (!r.ok) return c.redirect(`/admin/usuarios?err=${encodeURIComponent(r.error)}`, 302);
+  return c.redirect("/admin/usuarios?ok=Invitación cancelada.", 302);
 });
 
 // Conexiones: mapa de canales con estado verde/gris (paso 4 del onboarding),

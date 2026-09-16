@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowRight, Sparkles } from "lucide-react";
-import { Container, PANEL_URL } from "./ui";
+import { Container, REGISTER_URL } from "./ui";
 import { useAffiliateRedirect } from "./AffiliateRedirect";
 import { useDemoDialog } from "./DemoDialog";
 
@@ -51,7 +51,7 @@ export default function Cta() {
 
             <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
               <a
-                href={PANEL_URL}
+                href={REGISTER_URL}
                 className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-7 py-3.5 text-[15px] font-bold text-stone-900 shadow-glow transition-all hover:-translate-y-0.5 hover:bg-amber-400"
               >
                 Regístrate gratis

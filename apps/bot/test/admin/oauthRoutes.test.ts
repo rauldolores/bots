@@ -14,6 +14,9 @@ const refreshSessionMock = vi.fn();
 const listMembershipsMock = vi.fn();
 const switchActiveOrganizationMock = vi.fn();
 const revokeSessionMock = vi.fn();
+const listRolesMock = vi.fn();
+const listInvitationsMock = vi.fn();
+const createInvitationMock = vi.fn();
 
 vi.mock("../../src/admin/kontroliaAuth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/admin/kontroliaAuth")>();
@@ -25,6 +28,9 @@ vi.mock("../../src/admin/kontroliaAuth", async (importOriginal) => {
     listMemberships: (...args: unknown[]) => listMembershipsMock(...args),
     switchActiveOrganization: (...args: unknown[]) => switchActiveOrganizationMock(...args),
     revokeSession: (...args: unknown[]) => revokeSessionMock(...args),
+    listRoles: (...args: unknown[]) => listRolesMock(...args),
+    listInvitations: (...args: unknown[]) => listInvitationsMock(...args),
+    createInvitation: (...args: unknown[]) => createInvitationMock(...args),
   };
 });
 
@@ -345,6 +351,82 @@ describe("POST /admin/logout", () => {
     );
     expect(res.status).toBe(302);
     expect(res.headers.get("set-cookie") ?? "").toMatch(new RegExp(`${SESSION_COOKIE}=;`));
+  });
+});
+
+describe("GET /admin/registro — 'Crear cuenta' (public-signup.md §2.1)", () => {
+  it("sin sesión: redirige al alta por app del auth-server con redirect_to al panel", async () => {
+    const res = await adminApp.fetch(req("/registro"), KONTROLIA_ENV);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(
+      "https://auth.kontrolia.io/register?app=nodia-agents&redirect_to=https%3A%2F%2Fbot.test%2Fadmin",
+    );
+  });
+
+  it("sin KontrolIA configurado: 501, no un redirect a ningún lado", async () => {
+    const res = await adminApp.fetch(req("/registro"), { ...KONTROLIA_ENV, OAUTH_CLIENT_ID: undefined } as any);
+    expect(res.status).toBe(501);
+  });
+});
+
+describe("/admin/usuarios — invitar al equipo (public-signup.md §2.2)", () => {
+  // En el fixture, la organización del bot de prueba lleva el mismo id que el bot.
+  const ORG = TEST_BOT_ID;
+  const conSesion = (path: string, init?: RequestInit) =>
+    req(path, { ...init, headers: { ...(init?.headers as Record<string, string>), cookie: `${SESSION_COOKIE}=${encodeURIComponent(SESSION)}` } });
+
+  beforeEach(() => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(ORG), user: { id: "u1" } });
+    listRolesMock.mockReset().mockResolvedValue({ ok: true, roles: [{ id: "r-usr", name: "Usuario de Nodia Agents", slug: "u", application_id: "a" }] });
+    listInvitationsMock.mockReset().mockResolvedValue({ ok: true, invitations: [] });
+    createInvitationMock.mockReset();
+  });
+
+  it("con sesión: pide roles e invitaciones con el TOKEN DEL USUARIO y SU organización, y dibuja el formulario", async () => {
+    const res = await adminApp.fetch(conSesion("/usuarios"), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('action="/admin/usuarios/invitar"');
+    expect(html).toContain("Usuario de Nodia Agents");
+    expect(listRolesMock).toHaveBeenCalledWith(expect.anything(), "at", ORG);
+    expect(listInvitationsMock).toHaveBeenCalledWith(expect.anything(), "at", ORG);
+  });
+
+  it("POST /usuarios/invitar: manda { organizationId, email, roleId } y confirma", async () => {
+    createInvitationMock.mockResolvedValue({ ok: true, emailSent: true });
+    const res = await adminApp.fetch(
+      conSesion("/usuarios/invitar", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "email=Ana%40x.com&role_id=r-usr",
+      }),
+      KONTROLIA_ENV,
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("/admin/usuarios?ok=");
+    expect(createInvitationMock).toHaveBeenCalledWith(expect.anything(), "at", { organizationId: ORG, email: "ana@x.com", roleId: "r-usr" });
+  });
+
+  it("si el auth-server rechaza (RLS: no es Owner/Admin), el motivo llega a la pantalla", async () => {
+    createInvitationMock.mockResolvedValue({ ok: false, error: "row-level security", status: 403 });
+    const res = await adminApp.fetch(
+      conSesion("/usuarios/invitar", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "email=a%40x.com&role_id=r-usr",
+      }),
+      KONTROLIA_ENV,
+    );
+    expect(res.status).toBe(302);
+    expect(decodeURIComponent(res.headers.get("location") ?? "")).toContain("err=row-level security");
+  });
+
+  it("con Basic Auth (sin sesión de KontrolIA) la pantalla lo dice, y no llama al auth-server", async () => {
+    const basic = "Basic " + Buffer.from(`admin:${KONTROLIA_ENV.DASHBOARD_PASSWORD}`).toString("base64");
+    const res = await adminApp.fetch(req("/usuarios", { headers: { authorization: basic } }), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("necesita una sesión de KontrolIA");
+    expect(listRolesMock).not.toHaveBeenCalled();
   });
 });
 

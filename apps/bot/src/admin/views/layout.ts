@@ -61,6 +61,7 @@ const NAV: Section[] = [
       { id: "conexiones", label: "Conexiones", href: "/admin/conexiones", icon: "plug-zap" },
       { id: "telefono", label: "Tu número", href: "/admin/telefono", icon: "phone-forwarded" },
       { id: "config", label: "Configuración", href: "/admin/config", icon: "sliders-horizontal" },
+      { id: "usuarios", label: "Equipo", href: "/admin/usuarios", icon: "users" },
     ],
   },
   {

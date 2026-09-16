@@ -238,3 +238,107 @@ export async function switchActiveOrganization(
   });
   return res.ok;
 }
+
+// ── Alta de cuentas e invitaciones (auth.kontrolia.io/public-signup.md) ──────
+//
+// Todo esto va contra el AUTH-SERVER (auth.kontrolia.io), no contra GoTrue:
+// el alta por app y la API de administración viven ahí. Y las llamadas de
+// administración van con el token DEL USUARIO en sesión, nunca con una API
+// key — es el RLS del auth-server quien decide si esa persona es Owner/Admin
+// de su organización.
+
+export const DEFAULT_AUTH_SERVER_URL = "https://auth.kontrolia.io";
+export const DEFAULT_APP_SLUG = "nodia-agents";
+
+export function authServerUrl(env: Pick<Env, "KONTROLIA_AUTH_SERVER_URL">): string {
+  return (env.KONTROLIA_AUTH_SERVER_URL ?? "").trim().replace(/\/$/, "") || DEFAULT_AUTH_SERVER_URL;
+}
+
+export function appSlug(env: Pick<Env, "KONTROLIA_APP_SLUG">): string {
+  return (env.KONTROLIA_APP_SLUG ?? "").trim() || DEFAULT_APP_SLUG;
+}
+
+/**
+ * A dónde manda "Crear cuenta": el alta por app del auth-server. Cada alta
+ * crea SU PROPIA organización con solo esta app y deja a la persona como
+ * Owner. `redirect_to` es a dónde vuelve tras confirmar el correo — ya con
+ * sesión de GoTrue, así que el login OAuth de /admin/login completa solo.
+ */
+export function registerUrl(env: Pick<Env, "KONTROLIA_AUTH_SERVER_URL" | "KONTROLIA_APP_SLUG" | "DASHBOARD_BASE_URL">): string {
+  const base = (env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
+  const params = new URLSearchParams({ app: appSlug(env), redirect_to: `${base}/admin` });
+  return `${authServerUrl(env)}/register?${params.toString()}`;
+}
+
+export interface KontroliaRole {
+  id: string;
+  name: string;
+  slug: string;
+  application_id: string | null;
+}
+
+export interface KontroliaInvitation {
+  id: string;
+  email: string;
+  created_at: string;
+  expires_at: string;
+  accepted_at: string | null;
+  role: { name: string } | null;
+}
+
+async function authApi<T>(
+  env: Pick<Env, "KONTROLIA_AUTH_SERVER_URL">,
+  accessToken: string,
+  path: string,
+  init?: { method?: string; body?: unknown },
+): Promise<{ ok: true; data: T } | { ok: false; error: string; status: number }> {
+  try {
+    const res = await fetch(`${authServerUrl(env)}${path}`, {
+      method: init?.method ?? "GET",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        ...(init?.body !== undefined ? { "content-type": "application/json" } : {}),
+      },
+      body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
+    });
+    if (res.status === 204) return { ok: true, data: undefined as T };
+    const json = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
+    if (!res.ok) return { ok: false, error: json?.error ?? `El auth-server respondió ${res.status}`, status: res.status };
+    return { ok: true, data: json as T };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e), status: 0 };
+  }
+}
+
+/** Roles asignables en esta organización: los de la app ("Usuario de …", "Administrador de …") y los globales. */
+export async function listRoles(env: Pick<Env, "KONTROLIA_AUTH_SERVER_URL">, accessToken: string, organizationId: string) {
+  const r = await authApi<{ roles: KontroliaRole[] }>(env, accessToken, `/api/roles?organizationId=${encodeURIComponent(organizationId)}`);
+  return r.ok ? { ok: true as const, roles: r.data.roles ?? [] } : r;
+}
+
+export async function listInvitations(env: Pick<Env, "KONTROLIA_AUTH_SERVER_URL">, accessToken: string, organizationId: string) {
+  const r = await authApi<{ invitations: KontroliaInvitation[] }>(
+    env,
+    accessToken,
+    `/api/invitations?organizationId=${encodeURIComponent(organizationId)}`,
+  );
+  return r.ok ? { ok: true as const, invitations: r.data.invitations ?? [] } : r;
+}
+
+/** Invita por correo con un rol. Si el auth-server tiene Resend, el correo sale solo (`emailSent`). */
+export async function createInvitation(
+  env: Pick<Env, "KONTROLIA_AUTH_SERVER_URL">,
+  accessToken: string,
+  input: { organizationId: string; email: string; roleId: string },
+) {
+  const r = await authApi<{ invitation: { id: string; token: string }; emailSent?: boolean }>(env, accessToken, "/api/invitations", {
+    method: "POST",
+    body: input,
+  });
+  return r.ok ? { ok: true as const, emailSent: r.data.emailSent === true } : r;
+}
+
+export async function deleteInvitation(env: Pick<Env, "KONTROLIA_AUTH_SERVER_URL">, accessToken: string, id: string) {
+  const r = await authApi<void>(env, accessToken, `/api/invitations/${encodeURIComponent(id)}`, { method: "DELETE" });
+  return r.ok ? { ok: true as const } : r;
+}

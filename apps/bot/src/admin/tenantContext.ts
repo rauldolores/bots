@@ -44,7 +44,13 @@ export class NoBotsInOrganizationError extends Error {
 /** Compartido con routes.ts — el mismo tipo, no uno estructuralmente igual, para que Context<> encaje. */
 export type AdminBindings = {
   Bindings: Env;
-  Variables: { botId: string; kontroliaOrgId: string | null; kontroliaClaims?: KontroliaTokenClaims };
+  Variables: {
+    botId: string;
+    kontroliaOrgId: string | null;
+    kontroliaClaims?: KontroliaTokenClaims;
+    /** El access_token de la sesión de KontrolIA, ya verificado — para llamar a la API del auth-server EN NOMBRE del usuario (invitaciones, roles). Ausente con Basic Auth. */
+    kontroliaAccessToken?: string;
+  };
 };
 
 type HonoContext = Context<AdminBindings>;

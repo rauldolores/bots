@@ -6,7 +6,7 @@ import {
   PhoneForwarded,
   Waves,
 } from "lucide-react";
-import { Container, PANEL_URL } from "./ui";
+import { Container, REGISTER_URL } from "./ui";
 import VoiceCallSimulator from "./VoiceCallSimulator";
 import { DemoRequestButton } from "./DemoDialog";
 
@@ -83,7 +83,7 @@ export default function Voice() {
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <a
-                href={PANEL_URL}
+                href={REGISTER_URL}
                 className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-6 py-3.5 text-[15px] font-bold text-stone-900 shadow-glow transition-all hover:-translate-y-0.5 hover:bg-amber-400"
               >
                 Regístrate gratis

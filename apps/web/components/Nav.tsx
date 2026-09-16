@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Menu, X, ArrowRight } from "lucide-react";
 import { useAffiliateRedirect } from "./AffiliateRedirect";
-import { PANEL_URL } from "./ui";
+import { LOGIN_URL, REGISTER_URL } from "./ui";
 
 const links = [
   { href: "#caracteristicas", label: "Características" },
@@ -68,13 +68,13 @@ export default function Nav() {
 
         <div className="hidden items-center gap-4 lg:flex">
           <a
-            href={PANEL_URL}
+            href={LOGIN_URL}
             className="whitespace-nowrap text-[13px] font-medium text-stone-600 transition-colors hover:text-stone-900"
           >
             Entrar
           </a>
           <a
-            href={PANEL_URL}
+            href={REGISTER_URL}
             className="inline-flex whitespace-nowrap items-center gap-1.5 rounded-lg bg-amber-500 px-4 py-2 text-[13px] font-bold text-stone-900 transition-colors hover:bg-amber-400"
           >
             Regístrate gratis
@@ -116,13 +116,13 @@ export default function Nav() {
               ),
             )}
             <a
-              href={PANEL_URL}
+              href={LOGIN_URL}
               className="py-1 text-[14px] font-medium text-stone-700"
             >
               Entrar
             </a>
             <a
-              href={PANEL_URL}
+              href={REGISTER_URL}
               className="mt-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-bold text-stone-900"
             >
               Regístrate gratis

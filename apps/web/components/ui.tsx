@@ -7,6 +7,15 @@ import type { ReactNode } from "react";
  * (ya pasó: agentes.kontrolia.io → panel.nodiagents.com).
  */
 export const PANEL_URL = "https://panel.nodiagents.com";
+/** "Entrar": el panel arranca el login OAuth de KontrolIA por sí solo. */
+export const LOGIN_URL = `${PANEL_URL}/admin`;
+/**
+ * "Regístrate gratis": una ruta DEL PANEL que redirige al alta por app del
+ * auth-server (auth.kontrolia.io/register?app=nodia-agents&redirect_to=…).
+ * Se enlaza al panel y no al auth-server directo para que el slug, el
+ * servidor y el redirect_to salgan de la configuración del bot, no de aquí.
+ */
+export const REGISTER_URL = `${PANEL_URL}/admin/registro`;
 
 export function Container({
   children,
