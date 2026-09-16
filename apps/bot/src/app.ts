@@ -29,6 +29,7 @@ import { saveCapture, isLearnMode } from "./learn/mapping";
 import { tokensMatch } from "./http-auth";
 import { apiApp } from "./api";
 import { widgetApp, widgetScriptHandler } from "./widget/routes";
+import { planesPublicos } from "./billing/planesPublicos";
 import { serveFavicon, serveIcon } from "./brand";
 import { skillsApp } from "./skills/routes";
 import { ingestMessage } from "./agent/runner";
@@ -477,6 +478,26 @@ app.route("/api", apiApp);
 // sub-app porque un <script src> no está sujeto a CORS, a diferencia de los
 // fetch() que ese script hace después contra /widget/*.
 app.get("/widget.js", widgetScriptHandler);
+
+// La lista de precios, pública y sin llave, para la landing (nodiagents.com).
+// Sale de los planes de KontrolIA Auth de esta app — ver
+// billing/planesPublicos.ts para por qué se leen de la base y no de
+// /api/plans. CORS abierto a propósito: es la misma información que
+// cualquiera ve en la página de precios. Cache-Control para que el CDN de
+// Vercel y la landing no la pidan en cada visita.
+app.get("/public/plans", async (c) => {
+  try {
+    const plans = await planesPublicos(new Db(c.env.DB), c.env);
+    return c.json(
+      { plans },
+      200,
+      { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300, s-maxage=300, stale-while-revalidate=3600" },
+    );
+  } catch (e) {
+    console.error("[public/plans]", e);
+    return c.json({ plans: [], error: "No se pudieron leer los planes." }, 503, { "Access-Control-Allow-Origin": "*" });
+  }
+});
 
 // Marca (favicon + logo del panel). Públicas a propósito: el navegador pide el
 // favicon ANTES de que exista sesión, así que ponerlas detrás del login las
