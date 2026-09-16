@@ -1,21 +1,21 @@
 import type { ReactNode } from "react";
 
 /**
- * A dónde manda "Regístrate gratis" y "Entrar": el panel del producto.
- * Mismo patrón que vinqulia.com → panel.vinqulia.com. Vive aquí y no
- * repetido en cada botón para que un cambio de dominio sea un solo lugar
- * (ya pasó: agentes.kontrolia.io → panel.nodiagents.com).
+ * A dónde manda "Regístrate gratis" y "Entrar": el panel del producto, a
+ * secas — nunca una ruta interna suya (ni /admin ni /admin/registro). El
+ * panel ya resuelve solo login-vs-registro en la puerta: sin sesión, manda
+ * al login de KontrolIA Auth, y ese login es de donde sale "¿no tienes
+ * cuenta? Regístrate". Enlazar rutas internas del panel desde aquí duplicaba
+ * esa decisión en dos lugares y se desincronizaba (llegaron a apuntar a
+ * /admin/registro directo, saltándose el login).
+ *
+ * Vive aquí y no repetido en cada botón para que un cambio de dominio sea un
+ * solo lugar (ya pasó: agentes.kontrolia.io → panel.nodiagents.com).
  */
 export const PANEL_URL = "https://panel.nodiagents.com";
-/** "Entrar": el panel arranca el login OAuth de KontrolIA por sí solo. */
-export const LOGIN_URL = `${PANEL_URL}/admin`;
-/**
- * "Regístrate gratis": una ruta DEL PANEL que redirige al alta por app del
- * auth-server (auth.kontrolia.io/register?app=nodia-agents&redirect_to=…).
- * Se enlaza al panel y no al auth-server directo para que el slug, el
- * servidor y el redirect_to salgan de la configuración del bot, no de aquí.
- */
-export const REGISTER_URL = `${PANEL_URL}/admin/registro`;
+/** "Entrar" y "Regístrate gratis" — el MISMO destino a propósito, ver arriba. */
+export const LOGIN_URL = PANEL_URL;
+export const REGISTER_URL = PANEL_URL;
 
 export function Container({
   children,
