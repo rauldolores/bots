@@ -146,7 +146,13 @@ export function renderPlan(
         } else if (!data.esOwnerOAdmin) {
           accion = `<span class="text-[11.5px]" style="color:var(--dim)">Solo el dueño o un administrador puede contratarlo.</span>`;
         } else {
-          accion = `<form method="POST" action="/admin/plan/checkout" style="margin:0"><input type="hidden" name="plan" value="${esc(p.slug)}"><button type="submit" class="text-[12px]" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;font-weight:700;padding:9px 16px;cursor:pointer;width:100%">${sub ? "Cambiar a este plan" : "Elegir este plan"}</button></form>`;
+          // Sin suscripción y con días de prueba, lo que la persona va a
+          // hacer es EMPEZAR la prueba (Stripe pide tarjeta y no cobra hasta
+          // que termine) — el botón lo dice así, no "elegir".
+          const etiqueta = sub ? "Cambiar a este plan" : p.trialDays > 0 ? `Empezar prueba de ${p.trialDays} días` : "Elegir este plan";
+          accion = `<form method="POST" action="/admin/plan/checkout" style="margin:0"><input type="hidden" name="plan" value="${esc(p.slug)}"><button type="submit" class="text-[12px]" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;font-weight:700;padding:9px 16px;cursor:pointer;width:100%">${etiqueta}</button></form>${
+            !sub && p.trialDays > 0 ? `<p class="text-[11px]" style="color:var(--dim);margin:6px 0 0">Se pide tarjeta, pero no se cobra nada hasta que termine la prueba. Puedes cancelar antes desde el portal.</p>` : ""
+          }`;
         }
         return `<div style="border:1px solid ${actual ? "var(--accent)" : "var(--line)"};background:var(--panel);padding:18px 20px;display:flex;flex-direction:column;gap:12px">
           <div>
