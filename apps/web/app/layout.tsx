@@ -2,8 +2,13 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { AffiliateRedirectProvider } from "@/components/AffiliateRedirect";
 import { DemoDialogProvider } from "@/components/DemoDialog";
+import Nav from "@/components/Nav";
+import Footer from "@/components/Footer";
+import { industryNavItems } from "@/content/industrias";
+import { SITE_URL } from "@/lib/site";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "Nodia Agents — Agentes de IA que atienden llamadas y chats 24/7 | Kontrolia",
   description:
     "Agentes de IA multicanal que contestan las llamadas de tu número y atienden WhatsApp, Instagram y Telegram 24/7: capturan leads, resuelven desde tu base de conocimiento y transfieren a un humano. Un proyecto de Kontrolia. Solicita una demo.",
@@ -62,7 +67,15 @@ export default function RootLayout({
       </head>
       <body className="font-sans antialiased">
         <AffiliateRedirectProvider>
-          <DemoDialogProvider>{children}</DemoDialogProvider>
+          <DemoDialogProvider>
+            {/* El encabezado y el pie viven aquí para que TODA página del sitio
+                (industrias, y las futuras soluciones/blog/guías) comparta el
+                mismo logo, menú y botón de registro. Los datos del menú se
+                arman en el servidor. */}
+            <Nav industries={industryNavItems()} />
+            {children}
+            <Footer />
+          </DemoDialogProvider>
         </AffiliateRedirectProvider>
       </body>
     </html>

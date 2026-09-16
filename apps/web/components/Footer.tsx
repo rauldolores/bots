@@ -1,9 +1,18 @@
 import { Container } from "./ui";
+import { industries } from "@/content/industrias";
 
 const links = [
   { name: "Kontrolia", href: "https://www.kontrolia.io" },
   { name: "Faqturia", href: "https://www.faqturia.com" },
   { name: "Yocoia", href: "https://www.yocoia.com" },
+];
+
+const siteLinks = [
+  { name: "Características", href: "/#caracteristicas" },
+  { name: "Llamadas con IA", href: "/#voz" },
+  { name: "Integraciones", href: "/#integraciones" },
+  { name: "Panel", href: "/#panel" },
+  { name: "Todas las industrias", href: "/industrias" },
 ];
 
 export default function Footer() {
@@ -31,6 +40,34 @@ export default function Footer() {
             </a>
             , parte de un ecosistema de aplicaciones de IA.
           </p>
+
+          {/* Enlazado interno: hub de industrias + una página por vertical publicada. */}
+          <nav aria-label="Navegación del sitio" className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+            {siteLinks.map((l) => (
+              <a
+                key={l.name}
+                href={l.href}
+                className="text-[12.5px] font-medium text-stone-600 transition-colors hover:text-stone-900"
+              >
+                {l.name}
+              </a>
+            ))}
+          </nav>
+
+          <nav aria-label="Industrias" className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-stone-400">
+              Industrias
+            </span>
+            {industries.map((i) => (
+              <a
+                key={i.slug}
+                href={`/industrias/${i.slug}`}
+                className="text-[12.5px] font-medium text-stone-600 transition-colors hover:text-amber-700"
+              >
+                {i.shortName}
+              </a>
+            ))}
+          </nav>
 
           <div className="flex flex-wrap items-center justify-center gap-3">
             {links.map((l) => (
