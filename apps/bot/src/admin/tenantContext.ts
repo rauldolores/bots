@@ -24,7 +24,7 @@ import type { Env } from "../env";
 import type { Db } from "../db/client";
 import { BotsRepo } from "../db/bots";
 import { resolveBotId } from "../tenant";
-import type { KontroliaTokenClaims } from "@kontrolia/shared";
+import type { KontroliaTokenClaims, KontroliaEntitlements } from "@kontrolia/shared";
 
 export const BOT_COOKIE = "nodia_current_bot";
 
@@ -50,6 +50,8 @@ export type AdminBindings = {
     kontroliaClaims?: KontroliaTokenClaims;
     /** El access_token de la sesión de KontrolIA, ya verificado — para llamar a la API del auth-server EN NOMBRE del usuario (invitaciones, roles). Ausente con Basic Auth. */
     kontroliaAccessToken?: string;
+    /** Plan, estado y consumo de la organización activa en esta app (billing.md B2). null = no se pudo consultar; ausente = sin sesión de KontrolIA. */
+    kontroliaEntitlements?: KontroliaEntitlements | null;
   };
 };
 

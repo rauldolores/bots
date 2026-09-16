@@ -29,11 +29,24 @@ export class ConversationsRepo {
     channelUserId: string,
     displayName?: string,
   ): Promise<Conversation> {
+    return (await this.getOrCreateConRegistro(channel, channelUserId, displayName)).conversation;
+  }
+
+  /**
+   * Igual que getOrCreate, pero dice si la fila NACIÓ en esta llamada. Lo
+   * necesita el límite "conversaciones" del plan (billing/kontrolia.ts): se
+   * cuenta una conversación nueva, no cada mensaje de una que ya existía.
+   */
+  async getOrCreateConRegistro(
+    channel: string,
+    channelUserId: string,
+    displayName?: string,
+  ): Promise<{ conversation: Conversation; created: boolean }> {
     const existing = await this.db.first<Conversation>(
       "SELECT * FROM conversations WHERE bot_id = ? AND channel = ? AND channel_user_id = ?",
       [this.botId, channel, channelUserId],
     );
-    if (existing) return existing;
+    if (existing) return { conversation: existing, created: false };
 
     const id = crypto.randomUUID();
     const now = Date.now();
@@ -46,10 +59,12 @@ export class ConversationsRepo {
     // ON CONFLICT DO NOTHING: dos webhooks simultáneos del mismo cliente
     // pueden perder la carrera del INSERT contra el índice único; el ganador
     // ya escribió la fila, así que se relee en vez de asumir que `id` quedó.
-    return (await this.db.first<Conversation>(
+    const conversation = (await this.db.first<Conversation>(
       "SELECT * FROM conversations WHERE bot_id = ? AND channel = ? AND channel_user_id = ?",
       [this.botId, channel, channelUserId],
     ))!;
+    // Si perdió la carrera, la fila es del otro webhook: no la "creó" éste.
+    return { conversation, created: conversation.id === id };
   }
 
   /**

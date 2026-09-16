@@ -147,6 +147,11 @@ export function visibleNavIds(claims: KontroliaTokenClaims | undefined): Set<str
   for (const [id, permission] of Object.entries(NAV_PERMISSIONS)) {
     if (hasPermission(claims, permission)) ids.add(id);
   }
+  // Plan y facturación no depende de ningún permiso de la app: es la
+  // pantalla a la que se manda a quien NO tiene permisos porque su
+  // organización no tiene plan (billing.md B2). Sin esto quedaría
+  // inalcanzable justo para quien más la necesita.
+  ids.add("plan");
   return ids;
 }
 

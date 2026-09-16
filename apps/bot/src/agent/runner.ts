@@ -13,6 +13,7 @@ import { Db } from "../db/client";
 import { ConversationsRepo } from "../db/conversations";
 import { MessagesRepo } from "../db/messages";
 import { BotsRepo } from "../db/bots";
+import { hayCupo, contarUso, LIMITES } from "../billing/kontrolia";
 import { resolveAgentConfig } from "../settings-loader";
 import type { WarmTarget } from "../customer/warm";
 import { chunkReplyForChannel } from "../replies/chunker";
@@ -85,11 +86,29 @@ export async function ingestMessage(
   const state = new AgentStateRepo(db);
   const key = conversationKeyOf(botId, payload.channel, payload.channelUserId);
 
-  const conv = await convs.getOrCreate(
+  // Límite "conversaciones" del plan (billing/kontrolia.ts): se exige ANTES
+  // de crear una conversación nueva y se cuenta DESPUÉS, con su id. Una que
+  // ya existía no toca el límite — el plan cuenta conversaciones, no
+  // mensajes. El canal "training" (sandbox del dueño) no cuenta: no es un
+  // cliente. Sin cupo, el mensaje se reconoce al canal pero no se atiende;
+  // el panel muestra el límite agotado en Plan y facturación.
+  const esNueva = payload.channel !== "training" && !(await convs.findByChannelUserId(payload.channel, payload.channelUserId));
+  if (esNueva && bot?.organization_id) {
+    const cupo = await hayCupo(env, bot.organization_id, LIMITES.conversaciones);
+    if (!cupo.ok) {
+      console.warn(`[billing] conversaciones agotadas para la organización ${bot.organization_id}: ${cupo.usage.used}/${cupo.usage.limit} — mensaje de ${payload.channel} sin atender`);
+      return { acknowledged: true, scheduledInMs: null };
+    }
+  }
+
+  const { conversation: conv, created } = await convs.getOrCreateConRegistro(
     payload.channel,
     payload.channelUserId,
     payload.displayName,
   );
+  if (created && esNueva && bot?.organization_id) {
+    void contarUso(env, bot.organization_id, LIMITES.conversaciones, conv.id);
+  }
   await state.upsertIdentity(key, {
     conversationId: conv.id,
     channel: payload.channel,

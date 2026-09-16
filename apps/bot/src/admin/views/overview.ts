@@ -2,6 +2,8 @@ import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { calcularPrimerosPasos, renderPrimerosPasos, renderYaOpera } from "./primerosPasos";
 import { layout } from "./layout";
+import { tiraDeUso } from "./plan";
+import type { KontroliaEntitlements } from "@kontrolia/shared";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { resolveAgentConfig, type AgentConfig } from "../../settings-loader";
 import { buildTools } from "../../tools";
@@ -51,7 +53,13 @@ function agentModelLabel(env: Env, cfg: AgentConfig): string {
 // Single-letter Spanish day-of-week labels, indexed like Date#getUTCDay() (0 = Dom).
 const DOW_LETTER = ["D", "L", "M", "M", "J", "V", "S"];
 
-export async function renderOverview(env: Env, botId: string, visibleNavIds: Set<string> | null = null): Promise<string> {
+export async function renderOverview(
+  env: Env,
+  botId: string,
+  visibleNavIds: Set<string> | null = null,
+  /** Plan y consumo de la organización (billing.md, e.usage) — solo con sesión de KontrolIA. */
+  plan: KontroliaEntitlements | null = null,
+): Promise<string> {
   const db = new Db(env.DB);
   const bot = await new BotsRepo(db).getById(botId);
   const niche = getNiche(bot?.niche);
@@ -269,9 +277,26 @@ export async function renderOverview(env: Env, botId: string, visibleNavIds: Set
   const estadoPasos = await calcularPrimerosPasos(env, botId, bot?.config);
   const guia = renderPrimerosPasos(estadoPasos, bot?.name ?? "tu bot") + renderYaOpera(estadoPasos, bot?.name ?? "tu bot");
 
+  // El consumo del plan, donde el dueño lo ve sin buscarlo (billing.md,
+  // punto 6): solo si la organización tiene plan o límites que mostrar.
+  const planCard =
+    plan && (plan.subscription || plan.usage.length)
+      ? `<section class="card bg-panel border border-line p-4" style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px">
+          <div style="display:flex;flex-direction:column;gap:2px;margin-right:auto">
+            <div class="text-[9.5px] tracking-[.2em] text-dim uppercase">Tu plan</div>
+            <div class="font-display font-semibold text-[13.5px] text-cream">${esc(plan.subscription?.planName ?? "Sin plan")}${
+              plan.subscription && !plan.subscription.isLive ? ` <span style="color:var(--bad)">· sin acceso</span>` : ""
+            }</div>
+          </div>
+          ${tiraDeUso(plan)}
+          <a href="/admin/plan" class="text-[11.5px]" style="color:var(--accent);white-space:nowrap">Ver plan →</a>
+        </section>`
+      : "";
+
   const body = `
     <div class="flex flex-col gap-[22px]">
       ${guia}
+      ${planCard}
       <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[14px]">
         <div class="card bg-panel border border-line p-4 relative overflow-hidden" style="animation-delay:.02s">
           <div class="absolute top-3 right-3 text-[9.5px] tracking-[.2em] text-dim uppercase">01</div>

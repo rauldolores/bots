@@ -40,6 +40,8 @@ import { recordCallEvent } from "./events";
 import { estimateElevenLabsCost, estimateTelephonyCost, resolveTelephonyCostPerMinute } from "./callCost";
 import { VoiceSessionsRepo, type VoiceTranscriptTurn } from "../../db/voiceSessions";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
+import { contarUso, LIMITES } from "../../billing/kontrolia";
+import { BotsRepo } from "../../db/bots";
 import type { CallBridge, CallBridgeDeps } from "./callBridge";
 
 /**
@@ -181,12 +183,19 @@ export class ElevenLabsCallBridge implements CallBridge {
     // detrás de la otra, con el cliente escuchando silencio. Sale la más lenta
     // en vez de la suma. (buildAgentContext sí depende de conv.id, así que esa
     // se queda después — ver abajo.)
-    const [conv, ajustes, canal] = await Promise.all([
-      new ConversationsRepo(db, botId).getOrCreate(VOICE_CHANNEL, callerId),
+    const [{ conversation: conv, created }, ajustes, canal, bot] = await Promise.all([
+      new ConversationsRepo(db, botId).getOrCreateConRegistro(VOICE_CHANNEL, callerId),
       new SettingsRepo(db, botId).all(),
       new BotChannelsRepo(db).getByBotAndChannel(botId, VOICE_CHANNEL),
+      new BotsRepo(db).getById(botId),
     ]);
     this.conversationId = conv.id;
+    // Límite "conversaciones" del plan: una llamada de alguien nuevo cuenta
+    // igual que un chat nuevo. Aquí SOLO se cuenta, no se bloquea: una
+    // llamada ya contestada no se puede rechazar sin dejar a la persona en
+    // silencio, y no hay con qué explicárselo. El bloqueo real está en los
+    // canales de texto (agent/runner.ts) y en el panel.
+    if (created && bot?.organization_id) void contarUso(env, bot.organization_id, LIMITES.conversaciones, conv.id);
     const conversationKey = conversationKeyOf(botId, VOICE_CHANNEL, callerId);
 
     // Guardar la transcripción es decisión del dueño (datos de sus clientes),

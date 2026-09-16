@@ -18,6 +18,28 @@ const listRolesMock = vi.fn();
 const listInvitationsMock = vi.fn();
 const createInvitationMock = vi.fn();
 
+// billing/kontrolia.ts entero simulado: aquí se prueba el GATE y las rutas
+// del panel, no el contrato con el auth-server (eso vive en
+// test/billing/kontrolia.test.ts).
+const entitlementsDeMock = vi.fn();
+const planesDeMock = vi.fn();
+const iniciarCheckoutMock = vi.fn();
+const abrirPortalMock = vi.fn();
+const hayCupoMock = vi.fn();
+const contarUsoMock = vi.fn();
+vi.mock("../../src/billing/kontrolia", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/billing/kontrolia")>();
+  return {
+    ...actual,
+    entitlementsDe: (...args: unknown[]) => entitlementsDeMock(...args),
+    planesDe: (...args: unknown[]) => planesDeMock(...args),
+    iniciarCheckout: (...args: unknown[]) => iniciarCheckoutMock(...args),
+    abrirPortal: (...args: unknown[]) => abrirPortalMock(...args),
+    hayCupo: (...args: unknown[]) => hayCupoMock(...args),
+    contarUso: (...args: unknown[]) => contarUsoMock(...args),
+  };
+});
+
 vi.mock("../../src/admin/kontroliaAuth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/admin/kontroliaAuth")>();
   return {
@@ -68,6 +90,12 @@ function claimsFor(organizationId: string | null) {
 const SESSION = JSON.stringify({ accessToken: "at", refreshToken: "rt", expiresAt: Date.now() + 3600_000 });
 
 beforeEach(async () => {
+  entitlementsDeMock.mockReset().mockResolvedValue(null);
+  planesDeMock.mockReset().mockResolvedValue({ ok: true, plans: [] });
+  iniciarCheckoutMock.mockReset();
+  abrirPortalMock.mockReset();
+  hayCupoMock.mockReset().mockResolvedValue({ ok: true, usage: null });
+  contarUsoMock.mockReset().mockResolvedValue(null);
   const db = await createTestDb();
   KONTROLIA_ENV = {
     DASHBOARD_PASSWORD: "secret123",
@@ -427,6 +455,207 @@ describe("/admin/usuarios — invitar al equipo (public-signup.md §2.2)", () =>
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("necesita una sesión de KontrolIA");
     expect(listRolesMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("bloqueo por plan (billing.md B2)", () => {
+  const conSesion = (path: string, init?: RequestInit) =>
+    req(path, { ...init, headers: { ...(init?.headers as Record<string, string>), cookie: `${SESSION_COOKIE}=${encodeURIComponent(SESSION)}` } });
+  const ENT = (over: Record<string, unknown>) => ({
+    applicationId: "a", applicationSlug: "nodia-agents", plansRequired: true, subscription: null, access: "no_subscription", permissions: [], usage: [], ...over,
+  });
+
+  beforeEach(() => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: { ...claimsFor(TEST_BOT_ID), is_platform_admin: undefined, permissions: [] }, user: { id: "u1" } });
+  });
+
+  it("plansRequired=false: la app funciona igual que antes aunque no haya suscripción (checklist B8.1)", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    entitlementsDeMock.mockResolvedValue(ENT({ plansRequired: false }));
+    const res = await adminApp.fetch(conSesion("/overview"), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+  });
+
+  it("plansRequired=true y access=no_subscription: cualquier pantalla manda a /admin/plan con el motivo (B8.3)", async () => {
+    entitlementsDeMock.mockResolvedValue(ENT({ access: "no_subscription" }));
+    const res = await adminApp.fetch(conSesion("/overview"), KONTROLIA_ENV);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/admin/plan?motivo=no_subscription");
+  });
+
+  it("sin plan, /admin/plan SÍ abre (sin bucle con access-denied) y explica el motivo", async () => {
+    entitlementsDeMock.mockResolvedValue(ENT({ access: "past_due" }));
+    const res = await adminApp.fetch(conSesion("/plan?motivo=past_due"), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Actualiza tu método de pago");
+  });
+
+  it("sin plan, switch-org y /projects siguen abiertos — para irse a una organización que sí tenga plan", async () => {
+    entitlementsDeMock.mockResolvedValue(ENT({ access: "canceled" }));
+    const res = await adminApp.fetch(conSesion("/projects"), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+  });
+
+  it("access=ok: pasa, y el overview muestra el consumo (e.usage)", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    entitlementsDeMock.mockResolvedValue(ENT({
+      access: "ok",
+      subscription: { planSlug: "free", planName: "Gratis", status: "active", isLive: true, provider: "manual", currentPeriodEnd: null, cancelAtPeriodEnd: false },
+      usage: [{ key: "conversaciones", used: 37, limit: 100, remaining: 63, period: "month", periodStart: "", description: null }],
+    }));
+    const res = await adminApp.fetch(conSesion("/overview"), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("37 de 100 este mes");
+    expect(html).toContain("Gratis");
+  });
+
+  it("si el auth-server no contesta (null): se deja pasar — un cobro caído no cierra el panel", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    entitlementsDeMock.mockResolvedValue(null);
+    const res = await adminApp.fetch(conSesion("/overview"), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("/admin/plan — precios, compra y portal (B3/B4/B6)", () => {
+  const conSesion = (path: string, init?: RequestInit) =>
+    req(path, { ...init, headers: { ...(init?.headers as Record<string, string>), cookie: `${SESSION_COOKIE}=${encodeURIComponent(SESSION)}` } });
+  const PLAN_PRO = { id: "p", slug: "pro", name: "Pro", description: null, priceAmount: 49900, currency: "mxn", billingInterval: "month", trialDays: 14, features: ["Todo"], isDefault: false, isActive: true, sortOrder: 1, permissions: [], limits: [{ key: "bots", limit: 3, period: "lifetime", description: "Bots" }] };
+  const OK = { applicationId: "a", applicationSlug: "nodia-agents", plansRequired: true, access: "ok", permissions: [], usage: [],
+    subscription: { planSlug: "free", planName: "Gratis", status: "active", isLive: true, provider: "stripe", currentPeriodEnd: null, cancelAtPeriodEnd: false } };
+
+  it("owner: ve el botón de contratar y el portal", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: { ...claimsFor(TEST_BOT_ID), roles: ["owner"] }, user: { id: "u1" } });
+    entitlementsDeMock.mockResolvedValue(OK);
+    planesDeMock.mockResolvedValue({ ok: true, plans: [PLAN_PRO] });
+    const html = await (await adminApp.fetch(conSesion("/plan"), KONTROLIA_ENV)).text();
+    expect(html).toContain('action="/admin/plan/checkout"');
+    expect(html).toContain('name="plan" value="pro"');
+    expect(html).toContain('action="/admin/plan/portal"');
+    expect(html).toContain("14 días de prueba");
+  });
+
+  it("miembro sin owner/admin: NO ve comprar ni portal, solo la explicación", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: { ...claimsFor(TEST_BOT_ID), roles: ["member"] }, user: { id: "u1" } });
+    entitlementsDeMock.mockResolvedValue(OK);
+    planesDeMock.mockResolvedValue({ ok: true, plans: [PLAN_PRO] });
+    const html = await (await adminApp.fetch(conSesion("/plan"), KONTROLIA_ENV)).text();
+    expect(html).not.toContain('action="/admin/plan/checkout"');
+    expect(html).not.toContain('action="/admin/plan/portal"');
+    expect(html).toContain("Solo el dueño o un administrador");
+  });
+
+  it("POST /plan/checkout: pide la URL a KontrolIA con successUrl=/admin/billing/ok y redirige a Stripe", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: { ...claimsFor(TEST_BOT_ID), roles: ["owner"] }, user: { id: "u1" } });
+    entitlementsDeMock.mockResolvedValue(OK);
+    iniciarCheckoutMock.mockResolvedValue({ ok: true, url: "https://checkout.stripe.com/s" });
+    const res = await adminApp.fetch(
+      conSesion("/plan/checkout", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "plan=pro" }),
+      KONTROLIA_ENV,
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("https://checkout.stripe.com/s");
+    expect(iniciarCheckoutMock).toHaveBeenCalledWith(expect.anything(), "at", {
+      planSlug: "pro",
+      successUrl: "https://bot.test/admin/billing/ok",
+      cancelUrl: "https://bot.test/admin/plan",
+    });
+  });
+
+  it("checkout 400 (URL de retorno no autorizada): el error dice qué falta configurar", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: { ...claimsFor(TEST_BOT_ID), roles: ["owner"] }, user: { id: "u1" } });
+    entitlementsDeMock.mockResolvedValue(OK);
+    iniciarCheckoutMock.mockResolvedValue({ ok: false, status: 400, error: "return url" });
+    const res = await adminApp.fetch(
+      conSesion("/plan/checkout", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "plan=pro" }),
+      KONTROLIA_ENV,
+    );
+    expect(decodeURIComponent(res.headers.get("location") ?? "")).toContain("homepage de la app");
+  });
+
+  it("POST /plan/portal: redirige al portal de Stripe con returnUrl=/admin/plan", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: { ...claimsFor(TEST_BOT_ID), roles: ["admin"] }, user: { id: "u1" } });
+    entitlementsDeMock.mockResolvedValue(OK);
+    abrirPortalMock.mockResolvedValue({ ok: true, url: "https://billing.stripe.com/p" });
+    const res = await adminApp.fetch(conSesion("/plan/portal", { method: "POST" }), KONTROLIA_ENV);
+    expect(res.headers.get("location")).toBe("https://billing.stripe.com/p");
+    expect(abrirPortalMock).toHaveBeenCalledWith(expect.anything(), "at", "https://bot.test/admin/plan");
+  });
+
+  it("GET /billing/ok (B5): refresca la sesión, reintenta hasta ver access=ok y confirma", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    refreshSessionMock.mockResolvedValue({ accessToken: "at2", refreshToken: "rt2", expiresAt: Date.now() + 3600_000 });
+    entitlementsDeMock
+      .mockResolvedValueOnce(OK) // el gate del middleware
+      .mockResolvedValueOnce({ ...OK, access: "no_subscription" }) // primera lectura: el webhook no ha llegado
+      .mockResolvedValue({ ...OK, subscription: { ...OK.subscription, planName: "Pro" } }); // ya llegó
+    const res = await adminApp.fetch(conSesion("/billing/ok"), KONTROLIA_ENV);
+    expect(res.status).toBe(302);
+    expect(decodeURIComponent(res.headers.get("location") ?? "")).toBe("/admin/plan?ok=Tu plan Pro ya está activo.");
+    expect(refreshSessionMock).toHaveBeenCalled();
+    expect(res.headers.get("set-cookie") ?? "").toContain("at2");
+  }, 20_000);
+});
+
+describe("límites de consumo (B7): bots y canales", () => {
+  const conSesion = (path: string, init?: RequestInit) =>
+    req(path, { ...init, headers: { ...(init?.headers as Record<string, string>), cookie: `${SESSION_COOKIE}=${encodeURIComponent(SESSION)}` } });
+  const USO = { key: "bots", used: 1, limit: 1, remaining: 0, period: "lifetime", periodStart: "", exceeded: true, planSlug: "free" };
+
+  beforeEach(() => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+  });
+
+  it("POST /bots sin cupo: no crea y explica el límite con los números reales", async () => {
+    hayCupoMock.mockResolvedValue({ ok: false, usage: USO });
+    const res = await adminApp.fetch(
+      conSesion("/bots", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "name=Otro&business_name=Neg" }),
+      KONTROLIA_ENV,
+    );
+    expect(res.status).toBe(302);
+    expect(decodeURIComponent(res.headers.get("location") ?? "")).toContain("Tu plan permite 1 bots y ya llevas 1");
+    expect(hayCupoMock).toHaveBeenCalledWith(expect.anything(), TEST_BOT_ID, "bots");
+    expect(contarUsoMock).not.toHaveBeenCalled();
+  });
+
+  it("POST /bots con cupo: crea y cuenta con el id del bot como idempotencyKey", async () => {
+    const res = await adminApp.fetch(
+      conSesion("/bots", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "name=Otro&business_name=Neg" }),
+      KONTROLIA_ENV,
+    );
+    expect(res.headers.get("location")).toBe("/admin/overview");
+    expect(contarUsoMock).toHaveBeenCalledTimes(1);
+    const [, org, clave, id] = contarUsoMock.mock.calls[0] as unknown as [unknown, string, string, string];
+    expect(org).toBe(TEST_BOT_ID);
+    expect(clave).toBe("bots");
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("conectar un canal NUEVO sin cupo: el modal muestra el límite y no guarda nada", async () => {
+    hayCupoMock.mockResolvedValue({ ok: false, usage: { ...USO, key: "canales", limit: 2, used: 2 } });
+    const res = await adminApp.fetch(
+      conSesion("/conexiones/widget/connect", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "" }),
+      KONTROLIA_ENV,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("Tu plan permite 2 canales conectados");
+    expect(contarUsoMock).not.toHaveBeenCalled();
+  });
+
+  it("conectar un canal nuevo con cupo: guarda y cuenta con el id de la fila; reconectarlo NO vuelve a pedir cupo", async () => {
+    const conectar = () =>
+      adminApp.fetch(
+        conSesion("/conexiones/widget/connect", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "" }),
+        KONTROLIA_ENV,
+      );
+    expect((await conectar()).status).toBe(200);
+    expect(hayCupoMock).toHaveBeenCalledWith(expect.anything(), TEST_BOT_ID, "canales");
+    expect(contarUsoMock).toHaveBeenCalledTimes(1);
+    hayCupoMock.mockClear();
+    expect((await conectar()).status).toBe(200);
+    expect(hayCupoMock).not.toHaveBeenCalled();
   });
 });
 

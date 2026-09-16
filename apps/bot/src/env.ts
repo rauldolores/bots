@@ -176,6 +176,10 @@ export interface Env {
   // Slug con el que esta app está registrada en KontrolIA Auth. Vacío =
   // "nodia-agents" (el catálogo de permisos usa el mismo, ver admin/permissions.ts).
   KONTROLIA_APP_SLUG?: string;
+  // La API Key de la app en KontrolIA Auth (kapp_…). SOLO servidor, nunca al
+  // navegador: es con lo que se reporta consumo de los límites del plan
+  // (billing.md B7). Sin ella, los límites no se cuentan ni se exigen.
+  KONTROLIA_APPLICATION_API_KEY?: string;
 
   // Token guarding POST /kb/reindex (header: X-Reindex-Token). Secret.
   KB_REINDEX_TOKEN: string;

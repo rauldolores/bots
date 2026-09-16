@@ -67,6 +67,18 @@ import { renderTickets, updateTicketPriority } from "./views/tickets";
 import { renderCalendario, cancelAppointment } from "./views/calendario";
 import { renderTelefono } from "./views/telefono";
 import { renderUsuarios } from "./views/usuarios";
+import { renderPlan } from "./views/plan";
+import {
+  entitlementsDe,
+  invalidarEntitlements,
+  planesDe,
+  iniciarCheckout,
+  abrirPortal,
+  hayCupo,
+  contarUso,
+  mensajeDeLimite,
+  LIMITES,
+} from "../billing/kontrolia";
 import { startOnboarding, activateOnboarding, disableOnboarding, retryOnboarding } from "../channels/voice/onboarding/service";
 import { renderConfig } from "./views/config";
 import {
@@ -180,6 +192,14 @@ function isAuthExempt(path: string): boolean {
 // de que este guard alcance a redirigirlo a /access-denied, o directamente
 // no podría renderizar la página que le explica por qué no tiene acceso.
 const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots", "/access-denied"];
+
+// Lo que sigue abierto cuando la organización NO tiene plan vivo (billing.md
+// B2): la pantalla de planes y su compra, la vuelta del pago, cambiarse de
+// organización (la otra sí puede tener plan) y el selector del header.
+const BILLING_EXEMPT_PATTERNS = [/\/plan(\/|$)/, /\/billing\/ok$/, /\/switch-org$/, /\/projects$/, /\/logout$/];
+function isBillingExempt(path: string): boolean {
+  return BILLING_EXEMPT_PATTERNS.some((re) => re.test(path));
+}
 function isTenantExempt(path: string): boolean {
   return TENANT_EXEMPT_SUFFIXES.some((s) => path.endsWith(s));
 }
@@ -276,6 +296,30 @@ adminApp.use("*", async (c, next) => {
   if (result.kind === "pass") {
     c.set("kontroliaClaims", result.claims);
     c.set("kontroliaAccessToken", result.accessToken);
+
+    // Bloqueo por plan (billing.md B2): en cada carga se consultan los
+    // entitlements de la organización activa. Si la app EXIGE plan y esta
+    // organización no tiene uno vivo, todo el panel manda a "elige tu plan".
+    // Va ANTES del guard de permisos de abajo a propósito: sin plan, el
+    // token llega con cero permisos de esta app, y sin este paso el usuario
+    // caería en "acceso restringido" sin forma de comprar nada. Si el
+    // auth-server no contesta (null) se deja pasar — un cobro caído no puede
+    // cerrar el panel.
+    const entitlements = await entitlementsDe(c.env, result.accessToken);
+    c.set("kontroliaEntitlements", entitlements);
+    if (entitlements?.plansRequired && entitlements.access !== "ok") {
+      if (!isBillingExempt(c.req.path)) {
+        return c.redirect(`/admin/plan?motivo=${encodeURIComponent(entitlements.access)}`, 302);
+      }
+      // Bloqueado por plan, en una de las pocas rutas que siguen abiertas:
+      // NO pasa por el guard de permisos (sin plan el token trae cero
+      // permisos de la app y lo mandaría a access-denied, que a su vez
+      // rebotaría aquí: un bucle) ni resuelve bot (comprar un plan no
+      // necesita uno; /projects tolera botId sin resolver).
+      c.set("kontroliaOrgId", result.claims.organization_id);
+      return next();
+    }
+
     if (isTenantExempt(c.req.path)) {
       // switch-org/switch-bot: no necesitan botId resuelto (de eso se trata
       // la ruta), pero switch-bot SÍ necesita saber la organización activa
@@ -633,8 +677,13 @@ adminApp.post("/bots", async (c) => {
   if (!name || !businessName) {
     return c.redirect(`/admin/bots/new?err=${encodeURIComponent("Faltan el nombre del bot y del negocio.")}`, 302);
   }
+  // Límite "bots" del plan (billing.md B7): se exige antes y se cuenta
+  // después con el id del bot, para que un reintento no cuente doble.
+  const cupo = await hayCupo(c.env, orgId, LIMITES.bots);
+  if (!cupo.ok) return c.redirect(`/admin/bots/new?err=${encodeURIComponent(mensajeDeLimite(LIMITES.bots, cupo.usage))}`, 302);
   const db = new Db(c.env.DB);
   const bot = await new BotsRepo(db).create(orgId, { name, businessName });
+  void contarUso(c.env, orgId, LIMITES.bots, bot.id);
   setCookie(c, BOT_COOKIE, bot.id, {
     httpOnly: true,
     secure: true,
@@ -646,7 +695,9 @@ adminApp.post("/bots", async (c) => {
 
 // --- Read-only tabs ---------------------------------------------------------
 
-adminApp.get("/overview", async (c) => c.html(await renderOverview(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")))));
+adminApp.get("/overview", async (c) =>
+  c.html(await renderOverview(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")), c.get("kontroliaEntitlements") ?? null)),
+);
 
 adminApp.get("/stats", async (c) => c.html(await renderStats(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")))));
 
@@ -1374,6 +1425,144 @@ adminApp.post("/telefono/transfer-number", async (c) => {
   return c.redirect("/admin/telefono?ok=1", 302);
 });
 
+// Límite "canales" del plan (billing.md B7). Solo cuenta un canal NUEVO:
+// reconectar (rotar el token, cambiar de proveedor de correo) reutiliza la
+// misma fila de bot_channels y no toca el límite. Se exige antes de guardar
+// y se cuenta después, con el id de la fila — un reintento no cuenta doble.
+async function canalNuevoConCupo(
+  c: HonoContext,
+  channel: string,
+): Promise<{ ok: true; contar: () => Promise<void> } | { ok: false; error: string }> {
+  const botId = c.get("botId");
+  const db = new Db(c.env.DB);
+  const repo = new BotChannelsRepo(db);
+  const existente = await repo.getByBotAndChannel(botId, channel);
+  const nada = async () => {};
+  if (existente) return { ok: true, contar: nada };
+  const orgId = c.get("kontroliaOrgId") ?? (await new BotsRepo(db).getById(botId))?.organization_id;
+  if (!orgId) return { ok: true, contar: nada };
+  const cupo = await hayCupo(c.env, orgId, LIMITES.canales);
+  if (!cupo.ok) return { ok: false, error: mensajeDeLimite(LIMITES.canales, cupo.usage) };
+  return {
+    ok: true,
+    contar: async () => {
+      const fila = await repo.getByBotAndChannel(botId, channel);
+      if (fila) await contarUso(c.env, orgId, LIMITES.canales, fila.id);
+    },
+  };
+}
+
+// Plan y facturación (billing.md B2–B6). Nada de esto cobra: las URLs de
+// pago y del portal las devuelve KontrolIA y apuntan a Stripe.
+function esOwnerOAdmin(c: HonoContext): boolean {
+  const roles = c.get("kontroliaClaims")?.roles ?? [];
+  return roles.includes("owner") || roles.includes("admin");
+}
+
+adminApp.get("/plan", async (c) => {
+  const token = c.get("kontroliaAccessToken");
+  const visible = visibleNavIds(c.get("kontroliaClaims"));
+  const notice = {
+    ok: c.req.query("ok") ?? undefined,
+    err: c.req.query("err") ?? undefined,
+    motivo: c.req.query("motivo") ?? undefined,
+    pendiente: c.req.query("pendiente") === "1",
+  };
+  if (!token) return c.html(renderPlan(c.env, { kind: "sin-kontrolia" }, notice, visible));
+  const [entitlements, planes] = await Promise.all([entitlementsDe(c.env, token), planesDe(c.env, token)]);
+  return c.html(
+    renderPlan(
+      c.env,
+      {
+        kind: "ok",
+        entitlements,
+        plans: planes.ok ? planes.plans : [],
+        plansError: planes.ok ? undefined : planes.error,
+        esOwnerOAdmin: esOwnerOAdmin(c),
+      },
+      notice,
+      visible,
+    ),
+  );
+});
+
+/** billing.md B4 — manda a Stripe Checkout. Los errores del auth-server se traducen a algo que el dueño pueda resolver. */
+adminApp.post("/plan/checkout", async (c) => {
+  const token = c.get("kontroliaAccessToken");
+  if (!token) return c.redirect("/admin/plan?err=Entra con tu cuenta de KontrolIA para contratar un plan.", 302);
+  const form = await c.req.formData();
+  const plan = String(form.get("plan") ?? "").trim();
+  if (!plan) return c.redirect("/admin/plan?err=Falta el plan.", 302);
+  const base = (c.env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
+  const r = await iniciarCheckout(c.env, token, {
+    planSlug: plan,
+    successUrl: `${base}/admin/billing/ok`,
+    cancelUrl: `${base}/admin/plan`,
+  });
+  if (r.ok) return c.redirect(r.url, 302);
+  const err =
+    r.status === 403
+      ? "Solo el dueño o un administrador de tu organización puede contratar un plan."
+      : r.status === 400
+        ? `KontrolIA rechazó la URL de retorno (${base}). Falta registrar este dominio como homepage de la app en panel.kontrolia.io.`
+        : r.status === 409
+          ? "Ya tienes ese plan. Para cambiarlo usa el portal de facturación."
+          : r.status === 503
+            ? "La instancia de KontrolIA no tiene Stripe configurado: los planes de pago se asignan desde panel.kontrolia.io."
+            : r.error;
+  return c.redirect(`/admin/plan?err=${encodeURIComponent(err)}`, 302);
+});
+
+/** billing.md B6 — el portal de Stripe. Solo suscripciones de Stripe; las manuales las cambia un admin en panel.kontrolia.io. */
+adminApp.post("/plan/portal", async (c) => {
+  const token = c.get("kontroliaAccessToken");
+  if (!token) return c.redirect("/admin/plan?err=Entra con tu cuenta de KontrolIA.", 302);
+  const base = (c.env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
+  const r = await abrirPortal(c.env, token, `${base}/admin/plan`);
+  if (r.ok) return c.redirect(r.url, 302);
+  const err = r.status === 403 ? "Solo el dueño o un administrador puede abrir el portal." : r.error;
+  return c.redirect(`/admin/plan?err=${encodeURIComponent(err)}`, 302);
+});
+
+/**
+ * billing.md B5 — la vuelta de Stripe. Volver aquí NO prueba el pago: la
+ * suscripción llega por webhook un instante después. Se refresca la sesión
+ * (token con los permisos del plan nuevo) y se consulta hasta 5 veces con
+ * 1.5 s entre cada una. Si aun así no llega, se muestra el plan con aviso y
+ * un enlace para volver a comprobar — nunca un "listo" en falso.
+ */
+adminApp.get("/billing/ok", async (c) => {
+  const cfg = kontroliaConfig(c.env);
+  const raw = getCookie(c, SESSION_COOKIE);
+  if (!cfg || !raw) return c.redirect("/admin/plan", 302);
+  let session: KontroliaSession;
+  try {
+    session = JSON.parse(raw) as KontroliaSession;
+  } catch {
+    return c.redirect("/admin/plan", 302);
+  }
+  const refrescar = async () => {
+    const nueva = await refreshSession(cfg, session.refreshToken);
+    if (!nueva) return;
+    session = nueva;
+    setCookie(c, SESSION_COOKIE, JSON.stringify(nueva), { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 60 * 60 * 24 * 30 });
+  };
+  await refrescar();
+  invalidarEntitlements(session.accessToken);
+  let e = await entitlementsDe(c.env, session.accessToken);
+  for (let i = 0; i < 5 && (!e || e.access !== "ok"); i++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    await refrescar();
+    invalidarEntitlements(session.accessToken);
+    e = await entitlementsDe(c.env, session.accessToken);
+  }
+  if (e?.access === "ok") {
+    const nombre = e.subscription?.planName ? ` ${e.subscription.planName}` : "";
+    return c.redirect(`/admin/plan?ok=${encodeURIComponent(`Tu plan${nombre} ya está activo.`)}`, 302);
+  }
+  return c.redirect("/admin/plan?pendiente=1", 302);
+});
+
 // Equipo: invitar gente a la organización de KontrolIA desde el panel
 // (auth.kontrolia.io/public-signup.md §2.2). Las tres rutas hablan con el
 // auth-server a nombre del usuario (kontroliaAccessToken); con Basic Auth no
@@ -1459,7 +1648,10 @@ adminApp.post("/conexiones/:channel/connect", async (c) => {
     return c.text("Canal desconocido", 404);
   }
   const form = await c.req.formData();
+  const canal = await canalNuevoConCupo(c, channel);
+  if (!canal.ok) return c.html(renderConnectModal(channel, { error: canal.error }));
   const modalHtml = await connectChannel(c.env, c.get("botId"), channel, form);
+  await canal.contar();
   // El modal de éxito viaja junto con un refresh OOB de la grilla de tarjetas
   // de atrás — así se ve verde de inmediato, sin recargar la página.
   const gridHtml = await renderConexionesGrid(c.env, c.get("botId"));
@@ -1491,7 +1683,10 @@ adminApp.post("/conexiones/email/:provider/connect", async (c) => {
   const provider = c.req.param("provider");
   if (provider !== "resend" && provider !== "mailgun") return c.text("Proveedor desconocido", 404);
   const form = await c.req.formData();
+  const canal = await canalNuevoConCupo(c, "email");
+  if (!canal.ok) return c.html(renderEmailConnectModal(c.env, c.get("botId"), provider, { error: canal.error }));
   const modalHtml = await connectEmailChannel(c.env, c.get("botId"), provider, form);
+  await canal.contar();
   const gridHtml = await renderConexionesGrid(c.env, c.get("botId"));
   return c.html(modalHtml + gridHtml);
 });
