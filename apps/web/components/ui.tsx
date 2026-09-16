@@ -1,5 +1,13 @@
 import type { ReactNode } from "react";
 
+/**
+ * A dónde manda "Regístrate gratis" y "Entrar": el panel del producto.
+ * Mismo patrón que vinqulia.com → panel.vinqulia.com. Vive aquí y no
+ * repetido en cada botón para que un cambio de dominio sea un solo lugar
+ * (ya pasó: agentes.kontrolia.io → panel.nodiagents.com).
+ */
+export const PANEL_URL = "https://panel.nodiagents.com";
+
 export function Container({
   children,
   className = "",

@@ -1,15 +1,15 @@
 "use client";
 
 import { ArrowRight, Sparkles } from "lucide-react";
-import { Container } from "./ui";
+import { Container, PANEL_URL } from "./ui";
 import { useAffiliateRedirect } from "./AffiliateRedirect";
 import { useDemoDialog } from "./DemoDialog";
 
 const items = [
-  "Una llamada de prueba real a tu número, contestada por el agente",
-  "Una conversación de prueba real en WhatsApp o Telegram",
-  "Un recorrido en vivo por el panel de administración",
-  "Una propuesta a la medida de tu negocio",
+  "Crea tu cuenta y tu primer agente en minutos, sin código",
+  "Conecta WhatsApp, Telegram, correo, tu web o tu teléfono desde el panel",
+  "Sube tus documentos y pruébalo en el sandbox antes de encenderlo",
+  "¿Prefieres que te lo mostremos? Pide una demo con tu propio negocio",
 ];
 
 export default function Cta() {
@@ -26,15 +26,15 @@ export default function Cta() {
           />
           <div className="relative">
             <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3.5 py-1.5 text-xs font-medium text-amber-700">
-              <Sparkles size={13} /> Solicita una demo
+              <Sparkles size={13} /> Empieza hoy
             </span>
 
             <h2 className="mx-auto mt-5 max-w-2xl font-display text-3xl font-extrabold leading-tight tracking-tight text-stone-900 sm:text-4xl">
-              Mira a Nodia Agents trabajar con tu propio negocio
+              Tu agente puede estar atendiendo hoy mismo
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-stone-600">
-              Cuéntanos de tu negocio y te mostramos el agente en acción, con tu
-              información y en tus canales.
+              Regístrate, conecta un canal y súbele lo que tu negocio sabe. Si
+              prefieres verlo primero, te damos una demo con tu propia información.
             </p>
 
             <div className="mx-auto mt-8 max-w-xl space-y-2.5 text-left">
@@ -50,22 +50,31 @@ export default function Cta() {
             </div>
 
             <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
+              <a
+                href={PANEL_URL}
+                className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-7 py-3.5 text-[15px] font-bold text-stone-900 shadow-glow transition-all hover:-translate-y-0.5 hover:bg-amber-400"
+              >
+                Regístrate gratis
+                <ArrowRight size={17} strokeWidth={2.5} />
+              </a>
               <button
                 type="button"
                 onClick={openDemo}
-                className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-amber-500 px-7 py-3.5 text-[15px] font-bold text-stone-900 shadow-glow transition-all hover:-translate-y-0.5 hover:bg-amber-400"
+                className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-line px-7 py-3.5 text-[15px] font-semibold text-stone-800 transition-colors hover:border-line2 hover:text-stone-900"
               >
                 Solicitar una demo
-                <ArrowRight size={17} strokeWidth={2.5} />
               </button>
+            </div>
+            <p className="mt-5 text-[13px] text-stone-500">
+              ¿Quieres vender bots?{" "}
               <button
                 type="button"
                 onClick={openAffiliate}
-                className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-line px-7 py-3.5 text-[15px] font-semibold text-stone-800 transition-colors hover:border-line2 hover:text-stone-900"
+                className="cursor-pointer font-semibold text-amber-700 underline-offset-2 hover:underline"
               >
-                Quiero vender bots
+                Conoce el programa de afiliados
               </button>
-            </div>
+            </p>
           </div>
         </div>
       </Container>

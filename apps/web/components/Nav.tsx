@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Menu, X, ArrowRight } from "lucide-react";
 import { useAffiliateRedirect } from "./AffiliateRedirect";
-import { useDemoDialog } from "./DemoDialog";
+import { PANEL_URL } from "./ui";
 
 const links = [
   { href: "#caracteristicas", label: "Características" },
@@ -18,16 +18,10 @@ const links = [
 export default function Nav() {
   const [open, setOpen] = useState(false);
   const openAffiliate = useAffiliateRedirect();
-  const openDemo = useDemoDialog();
 
   const handleAffiliate = () => {
     setOpen(false);
     openAffiliate();
-  };
-
-  const handleDemo = () => {
-    setOpen(false);
-    openDemo();
   };
 
   return (
@@ -49,14 +43,14 @@ export default function Nav() {
           </span>
         </a>
 
-        <div className="hidden items-center gap-7 md:flex">
+        <div className="hidden items-center gap-5 lg:flex">
           {links.map((l) =>
             l.isAffiliate ? (
               <button
                 key={l.href}
                 type="button"
                 onClick={handleAffiliate}
-                className="cursor-pointer text-[13px] font-medium text-stone-600 transition-colors hover:text-stone-900"
+                className="cursor-pointer whitespace-nowrap text-[13px] font-medium text-stone-600 transition-colors hover:text-stone-900"
               >
                 {l.label}
               </button>
@@ -64,7 +58,7 @@ export default function Nav() {
               <a
                 key={l.href}
                 href={l.href}
-                className="text-[13px] font-medium text-stone-600 transition-colors hover:text-stone-900"
+                className="whitespace-nowrap text-[13px] font-medium text-stone-600 transition-colors hover:text-stone-900"
               >
                 {l.label}
               </a>
@@ -72,19 +66,24 @@ export default function Nav() {
           )}
         </div>
 
-        <div className="hidden items-center gap-3 md:flex">
-          <button
-            type="button"
-            onClick={handleDemo}
-            className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-amber-500 px-4 py-2 text-[13px] font-bold text-stone-900 transition-colors hover:bg-amber-400"
+        <div className="hidden items-center gap-4 lg:flex">
+          <a
+            href={PANEL_URL}
+            className="whitespace-nowrap text-[13px] font-medium text-stone-600 transition-colors hover:text-stone-900"
           >
-            Solicitar demo
+            Entrar
+          </a>
+          <a
+            href={PANEL_URL}
+            className="inline-flex whitespace-nowrap items-center gap-1.5 rounded-lg bg-amber-500 px-4 py-2 text-[13px] font-bold text-stone-900 transition-colors hover:bg-amber-400"
+          >
+            Regístrate gratis
             <ArrowRight size={15} strokeWidth={2.5} />
-          </button>
+          </a>
         </div>
 
         <button
-          className="flex h-9 w-9 items-center justify-center rounded-lg border border-line text-stone-700 md:hidden"
+          className="flex h-9 w-9 items-center justify-center rounded-lg border border-line text-stone-700 lg:hidden"
           onClick={() => setOpen((v) => !v)}
           aria-label="Abrir menú"
         >
@@ -93,7 +92,7 @@ export default function Nav() {
       </nav>
 
       {open && (
-        <div className="border-t border-line bg-bg px-6 py-4 md:hidden">
+        <div className="border-t border-line bg-bg px-6 py-4 lg:hidden">
           <div className="flex flex-col gap-3">
             {links.map((l) =>
               l.isAffiliate ? (
@@ -116,14 +115,19 @@ export default function Nav() {
                 </a>
               ),
             )}
-            <button
-              type="button"
-              onClick={handleDemo}
-              className="mt-1 inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-bold text-stone-900"
+            <a
+              href={PANEL_URL}
+              className="py-1 text-[14px] font-medium text-stone-700"
             >
-              Solicitar demo
+              Entrar
+            </a>
+            <a
+              href={PANEL_URL}
+              className="mt-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-bold text-stone-900"
+            >
+              Regístrate gratis
               <ArrowRight size={15} strokeWidth={2.5} />
-            </button>
+            </a>
           </div>
         </div>
       )}

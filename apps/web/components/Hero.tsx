@@ -5,7 +5,7 @@ import {
   PhoneCall,
   Plug,
 } from "lucide-react";
-import { Container } from "./ui";
+import { Container, PANEL_URL } from "./ui";
 import ChatSimulator from "./ChatSimulator";
 import { DemoRequestButton } from "./DemoDialog";
 
@@ -65,20 +65,23 @@ export default function Hero() {
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            <DemoRequestButton
-              className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-amber-500 px-6 py-3.5 text-[15px] font-bold text-stone-900 shadow-glow transition-all hover:-translate-y-0.5 hover:bg-amber-400"
-              label="Solicitar una demo"
-            >
-              Solicitar una demo
-              <ArrowRight size={17} strokeWidth={2.5} />
-            </DemoRequestButton>
             <a
-              href="#como-funciona"
-              className="inline-flex items-center gap-2 rounded-xl border border-line px-6 py-3.5 text-[15px] font-semibold text-stone-800 transition-colors hover:border-line2 hover:text-stone-900"
+              href={PANEL_URL}
+              className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-6 py-3.5 text-[15px] font-bold text-stone-900 shadow-glow transition-all hover:-translate-y-0.5 hover:bg-amber-400"
             >
-              Ver cómo funciona
+              Regístrate gratis
+              <ArrowRight size={17} strokeWidth={2.5} />
             </a>
+            <DemoRequestButton
+              className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-line px-6 py-3.5 text-[15px] font-semibold text-stone-800 transition-colors hover:border-line2 hover:text-stone-900"
+              label="Ver una demo"
+            >
+              Ver una demo
+            </DemoRequestButton>
           </div>
+          <p className="mt-3 text-[12.5px] text-stone-500">
+            Crea tu cuenta en un minuto · Sin tarjeta
+          </p>
 
           <div className="mt-10 flex flex-wrap items-center gap-x-7 gap-y-3 text-[13px] text-stone-600">
             <span className="inline-flex items-center gap-2">
