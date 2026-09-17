@@ -183,7 +183,10 @@ export function renderPlan(
     const precios = data.plansError
       ? `<p class="text-[12.5px]" style="color:var(--bad);margin:0">No se pudieron cargar los planes: ${esc(data.plansError)}</p>`
       : data.plans.length
-        ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px">${tarjetas}</div>${enterprise}`
+        // Las tarjetas y Enterprise comparten ancho y van centradas: en
+        // pantallas anchas tres tarjetas de 240px pegadas a la izquierda
+        // y un Enterprise a todo lo ancho se veían descompensados.
+        ? `<div style="max-width:960px;margin:0 auto"><div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:10px">Planes</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">${tarjetas}</div>${enterprise}</div>`
         : `<p class="text-[12.5px]" style="color:var(--dim);margin:0">Todavía no hay planes publicados para esta aplicación.</p>`;
 
     content = `<div style="display:flex;flex-direction:column;gap:16px">
@@ -192,10 +195,11 @@ export function renderPlan(
         ${portal ? `<div>${portal}</div>` : ""}
       </div>
       ${uso}
-      <div>
-        <div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:10px">Planes</div>
-        ${precios}
-      </div>
+      ${
+        data.plansError || !data.plans.length
+          ? `<div><div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:10px">Planes</div>${precios}</div>`
+          : precios
+      }
       <p class="text-[11px]" style="color:var(--dim);margin:0">El pago se hace en la página segura de Stripe a través de KontrolIA. Nodia Agents nunca ve ni guarda tu tarjeta.</p>
     </div>`;
   }
