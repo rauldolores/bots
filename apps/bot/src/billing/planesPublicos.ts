@@ -23,6 +23,8 @@ export interface PlanPublico {
   description: string | null;
   /** Centavos, igual que KontroliaPlan.priceAmount. */
   priceAmount: number;
+  /** Centavos; null = el plan no tiene opción anual (igual que KontroliaPlan.yearlyPriceAmount). */
+  yearlyPriceAmount: number | null;
   currency: string;
   billingInterval: "month" | "year" | "one_time";
   trialDays: number;
@@ -38,6 +40,7 @@ interface FilaPlan {
   name: string;
   description: string | null;
   price_amount: number;
+  yearly_price_amount: number | null;
   currency: string;
   billing_interval: PlanPublico["billingInterval"];
   trial_days: number;
@@ -63,7 +66,7 @@ export async function planesPublicos(db: Db, env: Pick<Env, "KONTROLIA_APP_SLUG"
   if (cache && cache.slug === slug && Date.now() - cache.at < CACHE_TTL_MS) return cache.value;
 
   const planes = await db.all<FilaPlan>(
-    `SELECT p.id, p.slug, p.name, p.description, p.price_amount, p.currency, p.billing_interval,
+    `SELECT p.id, p.slug, p.name, p.description, p.price_amount, p.yearly_price_amount, p.currency, p.billing_interval,
             p.trial_days, p.features, p.is_default, p.sort_order
        FROM kontrolia_auth.plans p
        JOIN kontrolia_auth.applications a ON a.id = p.application_id
@@ -94,6 +97,7 @@ export async function planesPublicos(db: Db, env: Pick<Env, "KONTROLIA_APP_SLUG"
     name: p.name,
     description: p.description,
     priceAmount: p.price_amount,
+    yearlyPriceAmount: p.yearly_price_amount ?? null,
     currency: p.currency,
     billingInterval: p.billing_interval,
     trialDays: p.trial_days,

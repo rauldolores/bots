@@ -1498,20 +1498,31 @@ adminApp.post("/plan/checkout", async (c) => {
   const form = await c.req.formData();
   const plan = String(form.get("plan") ?? "").trim();
   if (!plan) return c.redirect("/admin/plan?err=Falta el plan.", 302);
+  const interval = String(form.get("interval") ?? "month") === "year" ? "year" : "month";
   const base = (c.env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
   const r = await iniciarCheckout(c.env, token, {
     planSlug: plan,
+    interval,
     successUrl: `${base}/admin/billing/ok`,
     cancelUrl: `${base}/admin/plan`,
   });
   if (r.ok) return c.redirect(r.url, 302);
+  // 409 = ya tiene ese plan en ese intervalo: lo que quiere hacer (cambiar
+  // tarjeta, cancelar, ver facturas) vive en el portal — se le manda directo.
+  if (r.status === 409) {
+    const portal = await abrirPortal(c.env, token, `${base}/admin/plan`);
+    if (portal.ok) return c.redirect(portal.url, 302);
+    return c.redirect(`/admin/plan?err=${encodeURIComponent("Ya tienes ese plan con ese periodo de pago. Para cambiarlo usa el portal de facturación.")}`, 302);
+  }
+  // 400 tiene dos causas distintas y el mensaje del auth-server las separa.
+  const esAnualSinPrecio = r.status === 400 && interval === "year" && /anual|annual|year/i.test(r.error);
   const err =
     r.status === 403
       ? "Solo el dueño o un administrador de tu organización puede contratar un plan."
-      : r.status === 400
-        ? `KontrolIA rechazó la URL de retorno (${base}). Falta registrar este dominio como homepage de la app en panel.kontrolia.io.`
-        : r.status === 409
-          ? "Ya tienes ese plan. Para cambiarlo usa el portal de facturación."
+      : esAnualSinPrecio
+        ? "Ese plan no tiene precio anual. Elige el pago mensual."
+        : r.status === 400
+          ? `KontrolIA rechazó la URL de retorno (${base}). Falta registrar este dominio como homepage de la app en panel.kontrolia.io.`
           : r.status === 503
             ? "La instancia de KontrolIA no tiene Stripe configurado: los planes de pago se asignan desde panel.kontrolia.io."
             : r.error;
@@ -1562,7 +1573,7 @@ adminApp.get("/billing/ok", async (c) => {
     e = await entitlementsDe(c.env, session.accessToken);
   }
   if (e?.access === "ok") {
-    const nombre = e.subscription?.planName ? ` ${e.subscription.planName}` : "";
+    const nombre = e.subscription?.planName ? ` ${e.subscription.planName}${e.subscription.billingInterval === "year" ? " (anual)" : ""}` : "";
     return c.redirect(`/admin/plan?ok=${encodeURIComponent(`Tu plan${nombre} ya está activo.`)}`, 302);
   }
   return c.redirect("/admin/plan?pendiente=1", 302);

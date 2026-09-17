@@ -569,9 +569,47 @@ describe("/admin/plan — precios, compra y portal (B3/B4/B6)", () => {
     expect(res.headers.get("location")).toBe("https://checkout.stripe.com/s");
     expect(iniciarCheckoutMock).toHaveBeenCalledWith(expect.anything(), "at", {
       planSlug: "pro",
+      interval: "month",
       successUrl: "https://bot.test/admin/billing/ok",
       cancelUrl: "https://bot.test/admin/plan",
     });
+  });
+
+  it("POST /plan/checkout con interval=year: pide el precio anual del mismo plan", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: { ...claimsFor(TEST_BOT_ID), roles: ["owner"] }, user: { id: "u1" } });
+    entitlementsDeMock.mockResolvedValue(OK);
+    iniciarCheckoutMock.mockResolvedValue({ ok: true, url: "https://checkout.stripe.com/y" });
+    const res = await adminApp.fetch(
+      conSesion("/plan/checkout", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "plan=pro&interval=year" }),
+      KONTROLIA_ENV,
+    );
+    expect(res.headers.get("location")).toBe("https://checkout.stripe.com/y");
+    expect(iniciarCheckoutMock).toHaveBeenCalledWith(expect.anything(), "at", expect.objectContaining({ planSlug: "pro", interval: "year" }));
+  });
+
+  it("checkout 400 con interval=year y mensaje de 'anual': el plan no tiene precio anual", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: { ...claimsFor(TEST_BOT_ID), roles: ["owner"] }, user: { id: "u1" } });
+    entitlementsDeMock.mockResolvedValue(OK);
+    iniciarCheckoutMock.mockResolvedValue({ ok: false, status: 400, error: "El plan no tiene precio anual" });
+    const res = await adminApp.fetch(
+      conSesion("/plan/checkout", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "plan=pro&interval=year" }),
+      KONTROLIA_ENV,
+    );
+    expect(decodeURIComponent(res.headers.get("location") ?? "")).toContain("no tiene precio anual");
+  });
+
+  it("checkout 409 (ya tiene ese plan en ese intervalo): manda directo al portal de facturación", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: { ...claimsFor(TEST_BOT_ID), roles: ["owner"] }, user: { id: "u1" } });
+    entitlementsDeMock.mockResolvedValue(OK);
+    iniciarCheckoutMock.mockResolvedValue({ ok: false, status: 409, error: "already subscribed" });
+    abrirPortalMock.mockResolvedValue({ ok: true, url: "https://billing.stripe.com/p" });
+    const res = await adminApp.fetch(
+      conSesion("/plan/checkout", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "plan=pro" }),
+      KONTROLIA_ENV,
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("https://billing.stripe.com/p");
+    expect(abrirPortalMock).toHaveBeenCalledWith(expect.anything(), "at", "https://bot.test/admin/plan");
   });
 
   it("checkout 400 (URL de retorno no autorizada): el error dice qué falta configurar", async () => {

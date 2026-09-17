@@ -13,12 +13,26 @@ function esc(s: string): string {
   return s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]!));
 }
 
-/** billing.md B3: priceAmount viene en centavos. */
+/** billing.md B3: los montos vienen en centavos; se formatean con la currency del plan. */
+function monto(centavos: number, currency: string): string {
+  return new Intl.NumberFormat("es-MX", { style: "currency", currency: currency.toUpperCase(), maximumFractionDigits: 0 }).format(centavos / 100);
+}
+
 export function precio(plan: Pick<KontroliaPlan, "priceAmount" | "currency" | "billingInterval">): string {
   if (plan.priceAmount === 0) return "Gratis";
-  const monto = new Intl.NumberFormat("es-MX", { style: "currency", currency: plan.currency.toUpperCase(), maximumFractionDigits: 0 }).format(plan.priceAmount / 100);
   const periodo = plan.billingInterval === "month" ? "/mes" : plan.billingInterval === "year" ? "/año" : "";
-  return `${monto}${periodo}`;
+  return `${monto(plan.priceAmount, plan.currency)}${periodo}`;
+}
+
+/** ¿Este plan se puede pagar anual? Solo si el servidor le puso yearlyPriceAmount (billing.md B3). */
+function tieneAnual(plan: Pick<KontroliaPlan, "yearlyPriceAmount" | "priceAmount">): plan is KontroliaPlan & { yearlyPriceAmount: number } {
+  return typeof plan.yearlyPriceAmount === "number" && plan.yearlyPriceAmount > 0 && plan.priceAmount > 0;
+}
+
+/** El ahorro lo calcula el cliente con los dos precios que da el servidor — billing.md B3. */
+export function ahorroAnual(plan: Pick<KontroliaPlan, "yearlyPriceAmount" | "priceAmount">): number {
+  if (!tieneAnual(plan)) return 0;
+  return Math.max(0, Math.round((1 - plan.yearlyPriceAmount / (plan.priceAmount * 12)) * 100));
 }
 
 const ESTADO: Record<string, { text: string; color: string }> = {
@@ -89,7 +103,7 @@ export function renderPlan(
         ${
           sub
             ? `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap" class="text-[12.5px]">
-                <span>Plan actual: <b class="text-cream">${esc(sub.planName)}</b></span>
+                <span>Plan actual: <b class="text-cream">${esc(sub.planName)}</b>${sub.billingInterval === "year" ? " (anual)" : ""}</span>
                 ${st ? `<span style="color:${st.color}">● ${st.text}</span>` : ""}
                 ${sub.currentPeriodEnd ? `<span style="color:var(--dim)">${sub.cancelAtPeriodEnd ? "Termina" : "Se renueva"} el ${esc(fmtDate(sub.currentPeriodEnd))}</span>` : ""}
                 ${sub.provider === "stripe" ? `<span style="color:var(--dim)">· Stripe</span>` : `<span style="color:var(--dim)">· asignado por KontrolIA</span>`}
@@ -131,6 +145,45 @@ export function renderPlan(
       : "";
 
     // Precios (B3) + comprar (B4)
+    // Mensual / Anual (billing.md B3). Solo aparece si algún plan trae
+    // yearlyPriceAmount. La tarjeta se pinta con AMBOS precios y ambos
+    // botones en el HTML, y el interruptor solo cambia data-interval en el
+    // contenedor: sin JS se ve el mensual, que es el estado por defecto.
+    const hayAnual = data.plans.some(tieneAnual);
+    const mejorAhorro = Math.max(0, ...data.plans.map(ahorroAnual));
+
+    // Qué hace el botón para ESTE plan en ESTE intervalo. "Plan actual" solo
+    // si coinciden plan e intervalo; el mismo plan en el otro intervalo se
+    // cambia pasando por checkout (409 solo cuando ya es ese mismo periodo).
+    const accionPara = (p: KontroliaPlan, interval: "month" | "year"): string => {
+      const mismoPlan = sub?.planSlug === p.slug && sub.isLive;
+      const mismoIntervalo = mismoPlan && (sub.billingInterval ?? "month") === interval;
+      if (mismoIntervalo) {
+        return `<button type="button" disabled class="text-[12px]" style="background:none;border:1px solid var(--ok);color:var(--ok);font-weight:700;padding:9px 16px;width:100%;cursor:default">Plan actual</button>`;
+      }
+      if (p.priceAmount === 0) {
+        return `<span class="text-[11.5px]" style="color:var(--dim)">Se asigna desde KontrolIA (plan gratis).</span>`;
+      }
+      if (!data.esOwnerOAdmin) {
+        return `<span class="text-[11.5px]" style="color:var(--dim)">Solo el dueño o un administrador puede contratarlo.</span>`;
+      }
+      // Sin suscripción y con días de prueba, lo que la persona va a
+      // hacer es EMPEZAR la prueba (Stripe pide tarjeta y no cobra hasta
+      // que termine) — el botón lo dice así, no "elegir".
+      const etiqueta = mismoPlan
+        ? interval === "year"
+          ? "Cambiar a anual"
+          : "Cambiar a mensual"
+        : sub
+          ? "Cambiar a este plan"
+          : p.trialDays > 0
+            ? `Empezar prueba de ${p.trialDays} días`
+            : "Elegir este plan";
+      return `<form method="POST" action="/admin/plan/checkout" style="margin:0"><input type="hidden" name="plan" value="${esc(p.slug)}"><input type="hidden" name="interval" value="${interval}"><button type="submit" class="text-[12px]" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;font-weight:700;padding:9px 16px;cursor:pointer;width:100%">${etiqueta}</button></form>${
+        !sub && p.trialDays > 0 ? `<p class="text-[11px]" style="color:var(--dim);margin:6px 0 0">Se pide tarjeta, pero no se cobra nada hasta que termine la prueba. Puedes cancelar antes desde el portal.</p>` : ""
+      }`;
+    };
+
     const tarjetas = data.plans
       .map((p) => {
         const actual = sub?.planSlug === p.slug && sub.isLive;
@@ -138,28 +191,33 @@ export function renderPlan(
         const limites = p.limits
           .map((l) => `<li class="text-[11.5px]" style="color:var(--dim)">${esc(l.description ?? l.key)}: <span class="font-mono">${l.limit === null ? "sin límite" : l.limit}</span>${l.period === "month" ? "/mes" : ""}</li>`)
           .join("");
+
+        let precioHtml: string;
         let accion: string;
-        if (actual) {
-          accion = `<span class="text-[12px]" style="color:var(--ok)">Tu plan actual</span>`;
-        } else if (p.priceAmount === 0) {
-          accion = `<span class="text-[11.5px]" style="color:var(--dim)">Se asigna desde KontrolIA (plan gratis).</span>`;
-        } else if (!data.esOwnerOAdmin) {
-          accion = `<span class="text-[11.5px]" style="color:var(--dim)">Solo el dueño o un administrador puede contratarlo.</span>`;
+        if (tieneAnual(p)) {
+          const ahorro = ahorroAnual(p);
+          precioHtml = `<div data-intervalo="month"><div class="font-display font-bold text-[22px] text-cream">${esc(precio(p))}</div></div>
+            <div data-intervalo="year">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span class="font-display font-bold text-[22px] text-cream">${esc(monto(p.yearlyPriceAmount, p.currency))}/año</span>
+                ${ahorro > 0 ? `<span class="text-[11px]" style="background:var(--ok-soft);color:var(--ok);font-weight:700;padding:3px 8px;border-radius:999px">Ahorra ${ahorro}%</span>` : ""}
+              </div>
+              <div class="text-[11.5px]" style="color:var(--dim);margin-top:2px">equivale a ${esc(monto(Math.round(p.yearlyPriceAmount / 12), p.currency))}/mes</div>
+            </div>`;
+          accion = `<div data-intervalo="month">${accionPara(p, "month")}</div><div data-intervalo="year">${accionPara(p, "year")}</div>`;
         } else {
-          // Sin suscripción y con días de prueba, lo que la persona va a
-          // hacer es EMPEZAR la prueba (Stripe pide tarjeta y no cobra hasta
-          // que termine) — el botón lo dice así, no "elegir".
-          const etiqueta = sub ? "Cambiar a este plan" : p.trialDays > 0 ? `Empezar prueba de ${p.trialDays} días` : "Elegir este plan";
-          accion = `<form method="POST" action="/admin/plan/checkout" style="margin:0"><input type="hidden" name="plan" value="${esc(p.slug)}"><button type="submit" class="text-[12px]" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;font-weight:700;padding:9px 16px;cursor:pointer;width:100%">${etiqueta}</button></form>${
-            !sub && p.trialDays > 0 ? `<p class="text-[11px]" style="color:var(--dim);margin:6px 0 0">Se pide tarjeta, pero no se cobra nada hasta que termine la prueba. Puedes cancelar antes desde el portal.</p>` : ""
+          precioHtml = `<div class="font-display font-bold text-[22px] text-cream">${esc(precio(p))}</div>${
+            hayAnual && p.priceAmount > 0 ? `<div data-intervalo="year" class="text-[11px]" style="color:var(--dim)">Solo con pago mensual</div>` : ""
           }`;
+          accion = accionPara(p, "month");
         }
+
         return `<div style="border:1px solid ${actual ? "var(--accent)" : "var(--line)"};background:var(--panel);padding:18px 20px;display:flex;flex-direction:column;gap:12px">
           <div>
             <div class="font-display font-semibold text-[14px] text-cream">${esc(p.name)}</div>
             ${p.description ? `<p class="text-[12px]" style="color:var(--muted);margin:4px 0 0">${esc(p.description)}</p>` : ""}
           </div>
-          <div class="font-display font-bold text-[22px] text-cream">${esc(precio(p))}</div>
+          <div>${precioHtml}</div>
           ${p.trialDays > 0 && !actual ? `<div class="text-[11.5px]" style="color:var(--accent)">${p.trialDays} días de prueba</div>` : ""}
           ${features ? `<ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:5px">${features}</ul>` : ""}
           ${limites ? `<ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:3px;border-top:1px solid var(--line);padding-top:10px">${limites}</ul>` : ""}
@@ -167,6 +225,30 @@ export function renderPlan(
         </div>`;
       })
       .join("");
+
+    const interruptor = hayAnual
+      ? `<style>
+          #plan-cards[data-interval="month"] [data-intervalo="year"]{display:none}
+          #plan-cards[data-interval="year"] [data-intervalo="month"]{display:none}
+          .plan-int{background:none;border:0;padding:7px 14px;font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;border-radius:8px;font-family:inherit}
+          .plan-int[aria-pressed="true"]{background:var(--cream);color:#fff}
+        </style>
+        <div role="group" aria-label="Periodo de pago" style="display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line);background:var(--panel);padding:3px;border-radius:10px">
+          <button type="button" class="plan-int" data-interval="month" aria-pressed="true">Mensual</button>
+          <button type="button" class="plan-int" data-interval="year" aria-pressed="false">Anual${mejorAhorro > 0 ? ` <span style="color:var(--ok);font-weight:700">−${mejorAhorro}%</span>` : ""}</button>
+        </div>
+        <script>
+          (function(){
+            // #plan-cards viene DESPUÉS de este script en el HTML: se busca al hacer clic, no al cargar.
+            var btns=document.querySelectorAll(".plan-int");
+            btns.forEach(function(b){b.addEventListener("click",function(){
+              var cards=document.getElementById("plan-cards");
+              if(cards) cards.setAttribute("data-interval",b.getAttribute("data-interval"));
+              btns.forEach(function(x){x.setAttribute("aria-pressed",String(x===b));});
+            });});
+          })();
+        </script>`
+      : "";
 
     // Enterprise no es un plan de KontrolIA: no se compra aquí, se conversa.
     // El "desde" se repite como texto porque el sitio (apps/web) y el panel
@@ -186,7 +268,12 @@ export function renderPlan(
         // Las tarjetas y Enterprise comparten ancho y van centradas: en
         // pantallas anchas tres tarjetas de 240px pegadas a la izquierda
         // y un Enterprise a todo lo ancho se veían descompensados.
-        ? `<div style="max-width:960px;margin:0 auto"><div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:10px">Planes</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">${tarjetas}</div>${enterprise}</div>`
+        ? `<div style="max-width:960px;margin:0 auto">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+              <div class="font-display font-semibold text-[13.5px] text-cream">Planes</div>
+              ${interruptor}
+            </div>
+            <div id="plan-cards" data-interval="month" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">${tarjetas}</div>${enterprise}</div>`
         : `<p class="text-[12.5px]" style="color:var(--dim);margin:0">Todavía no hay planes publicados para esta aplicación.</p>`;
 
     content = `<div style="display:flex;flex-direction:column;gap:16px">

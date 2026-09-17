@@ -285,6 +285,8 @@ export async function renderOverview(
           <div style="display:flex;flex-direction:column;gap:2px;margin-right:auto">
             <div class="text-[9.5px] tracking-[.2em] text-dim uppercase">Tu plan</div>
             <div class="font-display font-semibold text-[13.5px] text-cream">${esc(plan.subscription?.planName ?? "Sin plan")}${
+              plan.subscription?.billingInterval === "year" ? " (anual)" : ""
+            }${
               plan.subscription && !plan.subscription.isLive ? ` <span style="color:var(--bad)">· sin acceso</span>` : ""
             }</div>
           </div>

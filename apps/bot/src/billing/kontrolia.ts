@@ -105,11 +105,22 @@ async function pedirUrl(env: Env, accessToken: string, path: string, body: Recor
   }
 }
 
-/** billing.md B4 — la URL de Stripe Checkout. Errores que hay que explicar: 403 no es owner/admin · 400 URL de retorno no autorizada · 409 ya tiene ese plan · 503 sin Stripe. */
-export function iniciarCheckout(env: Env, accessToken: string, input: { planSlug: string; successUrl: string; cancelUrl: string }): Promise<UrlResult> {
+/**
+ * billing.md B4 — la URL de Stripe Checkout. `interval: "year"` cobra el
+ * precio anual del MISMO plan (solo si trae yearlyPriceAmount). Errores que
+ * hay que explicar: 403 no es owner/admin · 400 URL de retorno no autorizada
+ * o "year" en un plan sin precio anual · 409 ya tiene ese plan en ese
+ * intervalo (cambiar de mensual a anual sí pasa por aquí) · 503 sin Stripe.
+ */
+export function iniciarCheckout(
+  env: Env,
+  accessToken: string,
+  input: { planSlug: string; interval: "month" | "year"; successUrl: string; cancelUrl: string },
+): Promise<UrlResult> {
   return pedirUrl(env, accessToken, "/api/billing/checkout", {
     application: appSlug(env),
     plan: input.planSlug,
+    interval: input.interval,
     successUrl: input.successUrl,
     cancelUrl: input.cancelUrl,
   });

@@ -120,20 +120,28 @@ describe("planes, checkout y portal — el contrato de B3/B4/B6", () => {
     expect(r.ok && r.plans.map((p) => p.slug)).toEqual(["free", "pro"]);
   });
 
-  it("iniciarCheckout: POST /api/billing/checkout con { application, plan, successUrl, cancelUrl } → url de Stripe", async () => {
+  it("iniciarCheckout: POST /api/billing/checkout con { application, plan, interval, successUrl, cancelUrl } → url de Stripe", async () => {
     const fetchMock = vi.fn(async () => Response.json({ url: "https://checkout.stripe.com/x", sessionId: "cs_1" }));
     vi.stubGlobal("fetch", fetchMock);
-    const r = await iniciarCheckout(ENV, "tok", { planSlug: "pro", successUrl: "https://p/admin/billing/ok", cancelUrl: "https://p/admin/plan" });
+    const r = await iniciarCheckout(ENV, "tok", { planSlug: "pro", interval: "month", successUrl: "https://p/admin/billing/ok", cancelUrl: "https://p/admin/plan" });
     expect(r).toEqual({ ok: true, url: "https://checkout.stripe.com/x" });
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://auth.kontrolia.io/api/billing/checkout");
-    expect(JSON.parse(String(init.body))).toEqual({ application: "nodia-agents", plan: "pro", successUrl: "https://p/admin/billing/ok", cancelUrl: "https://p/admin/plan" });
+    expect(JSON.parse(String(init.body))).toEqual({ application: "nodia-agents", plan: "pro", interval: "month", successUrl: "https://p/admin/billing/ok", cancelUrl: "https://p/admin/plan" });
+  });
+
+  it("iniciarCheckout con interval 'year' manda el intervalo tal cual (cobra el precio anual del mismo plan)", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ url: "https://checkout.stripe.com/y" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await iniciarCheckout(ENV, "tok", { planSlug: "pro", interval: "year", successUrl: "a", cancelUrl: "b" });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).interval).toBe("year");
   });
 
   it("los errores traen el status para explicarlos (403 no es owner, 400 URL, 409 ya lo tiene, 503 sin Stripe)", async () => {
     for (const status of [403, 400, 409, 503]) {
       vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: `e${status}` }, { status })));
-      const r = await iniciarCheckout(ENV, "tok", { planSlug: "pro", successUrl: "a", cancelUrl: "b" });
+      const r = await iniciarCheckout(ENV, "tok", { planSlug: "pro", interval: "month", successUrl: "a", cancelUrl: "b" });
       expect(r).toEqual({ ok: false, status, error: `e${status}` });
     }
   });
