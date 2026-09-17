@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Menu, X, ArrowRight } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Menu, X, ArrowRight, ChevronDown } from "lucide-react";
 import { useAffiliateRedirect } from "./AffiliateRedirect";
 import { LOGIN_URL, REGISTER_URL } from "./ui";
 import IndustriesDropdown, { type IndustryNavItem } from "./industrias/IndustriesDropdown";
@@ -10,8 +10,10 @@ import { iconFor } from "./industrias/icons";
 /**
  * Enlaces del nav. Rutas ABSOLUTAS (/#seccion) a propósito: el encabezado se
  * comparte con las páginas de industria, donde una ancla relativa no existiría.
- * `secondary: true` son los de menor intención comercial: se muestran de xl en
- * adelante y siempre en el menú móvil, para que el nav principal no se sature.
+ * `secondary: true` son los de menor intención comercial: en escritorio viven
+ * en el desplegable "Más" (no como texto suelto — 9 elementos inline nunca caben
+ * en el `max-w-6xl` del header, y ese límite no crece aunque la pantalla sea más
+ * ancha) y siempre aparecen planos en el menú móvil.
  */
 const links = [
   { href: "/#caracteristicas", label: "Características" },
@@ -23,6 +25,89 @@ const links = [
   { href: "/#ecosistema", label: "Ecosistema", secondary: true },
   { href: "/#afiliados", label: "Afiliados", isAffiliate: true, secondary: true },
 ];
+
+function MoreMenu({
+  items,
+  onAffiliateClick,
+}: {
+  items: typeof links;
+  onAffiliateClick: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    const onClick = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onClick);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onClick);
+    };
+  }, [open]);
+
+  return (
+    <div
+      ref={wrapRef}
+      className="relative"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="true"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex cursor-pointer items-center gap-1 whitespace-nowrap text-[13px] font-medium text-stone-600 transition-colors hover:text-stone-900"
+      >
+        Más
+        <ChevronDown
+          size={14}
+          className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      <div
+        className={`absolute right-0 top-full z-50 w-52 pt-3 transition-all duration-150 ${
+          open ? "visible opacity-100" : "invisible -translate-y-1 opacity-0"
+        }`}
+      >
+        <div className="overflow-hidden rounded-2xl border border-line bg-surface p-1.5 shadow-card">
+          {items.map((l) =>
+            l.isAffiliate ? (
+              <button
+                key={l.href}
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  onAffiliateClick();
+                }}
+                className="block w-full cursor-pointer rounded-xl px-3 py-2 text-left text-[13px] font-medium text-stone-700 transition-colors hover:bg-surface2"
+              >
+                {l.label}
+              </button>
+            ) : (
+              <a
+                key={l.href}
+                href={l.href}
+                onClick={() => setOpen(false)}
+                className="block rounded-xl px-3 py-2 text-[13px] font-medium text-stone-700 transition-colors hover:bg-surface2"
+              >
+                {l.label}
+              </a>
+            ),
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Nav({ industries = [] }: { industries?: IndustryNavItem[] }) {
   const [open, setOpen] = useState(false);
@@ -52,32 +137,20 @@ export default function Nav({ industries = [] }: { industries?: IndustryNavItem[
           </span>
         </a>
 
-        <div className="hidden items-center gap-3.5 lg:flex xl:gap-5">
+        <div className="hidden items-center gap-5 lg:flex">
           {industries.length > 0 && <IndustriesDropdown items={industries} />}
-          {links.map((l) =>
-            l.isAffiliate ? (
-              <button
-                key={l.href}
-                type="button"
-                onClick={handleAffiliate}
-                className={`cursor-pointer whitespace-nowrap text-[13px] font-medium text-stone-600 transition-colors hover:text-stone-900 ${
-                  l.secondary ? "hidden xl:inline-block" : ""
-                }`}
-              >
-                {l.label}
-              </button>
-            ) : (
+          {links
+            .filter((l) => !l.secondary)
+            .map((l) => (
               <a
                 key={l.href}
                 href={l.href}
-                className={`whitespace-nowrap text-[13px] font-medium text-stone-600 transition-colors hover:text-stone-900 ${
-                  l.secondary ? "hidden xl:inline-block" : ""
-                }`}
+                className="whitespace-nowrap text-[13px] font-medium text-stone-600 transition-colors hover:text-stone-900"
               >
                 {l.label}
               </a>
-            ),
-          )}
+            ))}
+          <MoreMenu items={links.filter((l) => l.secondary)} onAffiliateClick={handleAffiliate} />
         </div>
 
         <div className="hidden items-center gap-4 lg:flex">
