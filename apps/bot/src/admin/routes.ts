@@ -1461,15 +1461,20 @@ function esOwnerOAdmin(c: HonoContext): boolean {
 
 adminApp.get("/plan", async (c) => {
   const token = c.get("kontroliaAccessToken");
-  const visible = visibleNavIds(c.get("kontroliaClaims"));
   const notice = {
     ok: c.req.query("ok") ?? undefined,
     err: c.req.query("err") ?? undefined,
     motivo: c.req.query("motivo") ?? undefined,
     pendiente: c.req.query("pendiente") === "1",
   };
-  if (!token) return c.html(renderPlan(c.env, { kind: "sin-kontrolia" }, notice, visible));
+  if (!token) return c.html(renderPlan(c.env, { kind: "sin-kontrolia" }, notice, visibleNavIds(c.get("kontroliaClaims"))));
   const [entitlements, planes] = await Promise.all([entitlementsDe(c.env, token), planesDe(c.env, token)]);
+  // Sin plan vivo, el sidebar muestra SOLO esta pantalla. No basta con
+  // filtrar por permisos: un platform admin los tiene todos aunque su
+  // organización no tenga plan, y veía el menú completo con cada entrada
+  // rebotando aquí. El criterio es el plan, no el rol.
+  const bloqueado = entitlements?.plansRequired === true && entitlements.access !== "ok";
+  const visible = bloqueado ? new Set(["plan"]) : visibleNavIds(c.get("kontroliaClaims"));
   return c.html(
     renderPlan(
       c.env,

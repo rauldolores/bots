@@ -491,6 +491,16 @@ describe("bloqueo por plan (billing.md B2)", () => {
     expect(html).toContain("Actualiza tu método de pago");
   });
 
+  it("sin plan, el sidebar muestra SOLO Plan y facturación — aunque la cuenta sea platform admin", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } }); // is_platform_admin: true
+    entitlementsDeMock.mockResolvedValue(ENT({ access: "no_subscription" }));
+    const html = await (await adminApp.fetch(conSesion("/plan?motivo=no_subscription"), KONTROLIA_ENV)).text();
+    expect(html).toContain('href="/admin/plan"');
+    for (const href of ["/admin/overview", "/admin/conversations", "/admin/conexiones", "/admin/config", "/admin/usuarios"]) {
+      expect(html).not.toContain(`href="${href}"`);
+    }
+  });
+
   it("sin plan, switch-org y /projects siguen abiertos — para irse a una organización que sí tenga plan", async () => {
     entitlementsDeMock.mockResolvedValue(ENT({ access: "canceled" }));
     const res = await adminApp.fetch(conSesion("/projects"), KONTROLIA_ENV);

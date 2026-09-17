@@ -91,13 +91,16 @@ describe("visibleNavIds()", () => {
     expect(visibleNavIds(undefined)).toBeNull();
   });
 
-  it("solo incluye los ids de NAV_PERMISSIONS cuyo permiso SÍ está en claims.permissions", () => {
+  // "overview" y "plan" van siempre: no dependen de ningún permiso de la app,
+  // y desde que el sidebar es estricto (solo lo que está en el conjunto) hay
+  // que ponerlos aquí en vez de colarlos por no estar en NAV_PERMISSIONS.
+  it("incluye los ids de NAV_PERMISSIONS cuyo permiso SÍ está en claims.permissions, más Resumen y Plan", () => {
     const ids = visibleNavIds(claims({ permissions: [NAV_PERMISSIONS.leads, NAV_PERMISSIONS.tickets] }));
-    expect(ids).toEqual(new Set(["leads", "tickets"]));
+    expect(ids).toEqual(new Set(["leads", "tickets", "overview", "plan"]));
   });
 
-  it("is_platform_admin: incluye TODOS los ids gateados", () => {
+  it("is_platform_admin: incluye TODOS los ids gateados, más Resumen y Plan", () => {
     const ids = visibleNavIds(claims({ is_platform_admin: true }));
-    expect(ids).toEqual(new Set(Object.keys(NAV_PERMISSIONS)));
+    expect(ids).toEqual(new Set([...Object.keys(NAV_PERMISSIONS), "overview", "plan"]));
   });
 });

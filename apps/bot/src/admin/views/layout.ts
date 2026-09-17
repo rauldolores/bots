@@ -12,12 +12,9 @@
 // breadcrumb and page title are derived here.
 
 import type { NichePack } from "../../niches";
-import { NAV_PERMISSIONS } from "../permissions";
-
-// Ids de NAV que SÍ requieren un permiso — "overview" (Resumen) a propósito
-// no está en NAV_PERMISSIONS (es el destino del guard de acceso base cuando
-// una cuenta no tiene ningún permiso todavía) y por eso nunca se oculta.
-const GATED_NAV_IDS = new Set(Object.keys(NAV_PERMISSIONS));
+// Qué entradas del NAV se ven lo decide visibleNavIds() en admin/permissions.ts
+// (permisos del token + Resumen + Plan), o la ruta que renderiza cuando el
+// criterio no son los permisos (sin plan vivo: solo Plan). Aquí no se opina.
 
 
 interface Item {
@@ -301,7 +298,11 @@ function sidebar(activeTab: string, niche: NichePack | null, visibleIds: Set<str
   // no tiene sentido invitar a un clic que sabemos que va a rebotar a
   // /admin/access-denied. Este es el ÚNICO criterio para esconder algo del
   // nav — el gate de planes (candado + "PRO") se quitó, ver src/config.ts.
-  const visible = (id: string) => visibleIds === null || !GATED_NAV_IDS.has(id) || visibleIds.has(id);
+  // Regla estricta: con sesión de KontrolIA se ve lo que está en el
+  // conjunto y nada más. Antes las entradas sin permiso propio (Resumen,
+  // Plan) se colaban siempre — y con la organización bloqueada por plan,
+  // "Resumen" era un enlace que rebotaba a Plan y facturación.
+  const visible = (id: string) => visibleIds === null || visibleIds.has(id);
   const sections = NAV.map((sec) => {
     const shown = sec.items.filter((i) => visible(i.id));
     if (shown.length === 0) return "";
