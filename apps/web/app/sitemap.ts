@@ -25,6 +25,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "weekly",
       priority: 0.9,
     },
+    {
+      url: absoluteUrl("/enterprise"),
+      lastModified,
+      changeFrequency: "monthly",
+      priority: 0.9,
+    },
   ];
 
   const industryPages: MetadataRoute.Sitemap = industries.map((i) => ({

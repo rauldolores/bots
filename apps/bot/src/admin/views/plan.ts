@@ -168,10 +168,22 @@ export function renderPlan(
       })
       .join("");
 
+    // Enterprise no es un plan de KontrolIA: no se compra aquí, se conversa.
+    // El "desde" se repite como texto porque el sitio (apps/web) y el panel
+    // son dos apps sin paquete compartido — la fuente de verdad es
+    // apps/web/content/enterprise.ts; si cambia ahí, cambia aquí.
+    const enterprise = `<div style="margin-top:14px;border:1px solid var(--line);background:var(--panel);padding:18px 20px;display:flex;flex-wrap:wrap;gap:14px 24px;align-items:center">
+      <div style="flex:1 1 260px">
+        <div class="font-display font-semibold text-[14px] text-cream">Enterprise</div>
+        <p class="text-[12px]" style="color:var(--muted);margin:4px 0 0">Instancia dedicada o en tus servidores, bots y canales ilimitados, SLA y gerente de cuenta. Licencia anual desde <span class="font-mono text-cream">$189,000 MXN</span> (nube dedicada) o <span class="font-mono text-cream">$249,000</span> (tus servidores).</p>
+      </div>
+      <a href="https://nodiagents.com/enterprise" target="_blank" rel="noopener" class="ghostbtn text-[12px]" style="border:1px solid var(--line);color:var(--cream);font-weight:700;padding:9px 16px;white-space:nowrap">Ver qué incluye y estimar tu inversión →</a>
+    </div>`;
+
     const precios = data.plansError
       ? `<p class="text-[12.5px]" style="color:var(--bad);margin:0">No se pudieron cargar los planes: ${esc(data.plansError)}</p>`
       : data.plans.length
-        ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px">${tarjetas}</div>`
+        ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px">${tarjetas}</div>${enterprise}`
         : `<p class="text-[12.5px]" style="color:var(--dim);margin:0">Todavía no hay planes publicados para esta aplicación.</p>`;
 
     content = `<div style="display:flex;flex-direction:column;gap:16px">

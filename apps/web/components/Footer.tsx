@@ -10,6 +10,8 @@ const links = [
 const siteLinks = [
   { name: "Características", href: "/#caracteristicas" },
   { name: "Llamadas con IA", href: "/#voz" },
+  { name: "Precios", href: "/#precios" },
+  { name: "Enterprise", href: "/enterprise" },
   { name: "Integraciones", href: "/#integraciones" },
   { name: "Panel", href: "/#panel" },
   { name: "Todas las industrias", href: "/industrias" },
