@@ -117,13 +117,15 @@ function renderSendSummary(counts: FilterCounts, blockers: string[]): string {
   const btnStyle = disabled
     ? "background:#3a382f;color:#8b8578;cursor:not-allowed"
     : "background:var(--accent);color:#1b1a16;cursor:pointer";
+  // Tarjeta oscura a propósito (el único bloque oscuro del panel): sus colores
+  // van fijos y no salen de los tokens --sb-*, que ahora son claros.
   return `
-    <div id="send-summary" style="background:var(--sb-bg);border-radius:13px;padding:18px;display:flex;flex-direction:column;gap:12px">
-      <span class="font-mono" style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--sb-dim)">Resumen del envío</span>
+    <div id="send-summary" style="background:#1b1a16;border-radius:13px;padding:18px;display:flex;flex-direction:column;gap:12px">
+      <span class="font-mono" style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8b8578">Resumen del envío</span>
       <div style="display:flex;flex-direction:column;gap:9px">
-        <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:var(--sb-text)">Audiencia</span><span style="color:#f7f5ef;font-weight:600">${counts.total}</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:var(--sb-text)">Free-form</span><span style="color:var(--ok);font-weight:600">${counts.inWindow}</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:var(--sb-text)">Con plantilla</span><span style="color:${counts.outWindow > 0 ? "#f0a88a" : "#f7f5ef"};font-weight:600">${counts.outWindow}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:#c3beb2">Audiencia</span><span style="color:#f7f5ef;font-weight:600">${counts.total}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:#c3beb2">Free-form</span><span style="color:var(--ok);font-weight:600">${counts.inWindow}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:#c3beb2">Con plantilla</span><span style="color:${counts.outWindow > 0 ? "#f0a88a" : "#f7f5ef"};font-weight:600">${counts.outWindow}</span></div>
       </div>
       ${
         blockers.length
@@ -134,7 +136,7 @@ function renderSendSummary(counts: FilterCounts, blockers: string[]): string {
       }
       <button type="submit" form="campaign-form" ${disabled ? "disabled" : ""} class="font-display font-bold text-[13.5px]"
               style="border:0;border-radius:10px;padding:12px;white-space:nowrap;${btnStyle}">⚡ Enviar campaña</button>
-      <span style="font-size:11px;color:var(--sb-dim);text-align:center">Puede tardar ~1 min con audiencias grandes.</span>
+      <span style="font-size:11px;color:#8b8578;text-align:center">Puede tardar ~1 min con audiencias grandes.</span>
     </div>`;
 }
 

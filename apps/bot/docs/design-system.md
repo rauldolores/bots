@@ -58,9 +58,12 @@ Sombras y radios (nuevos, para inline styles):
 | `--radius` (14px) | tarjetas y paneles |
 | `--radius-sm` (10px) | botones, inputs, chips cuadrados |
 
-La sidebar es OSCURA y tiene su propia mini-paleta (`--sb-bg`, `--sb-panel`,
-`--sb-line`, `--sb-text`, `--sb-dim`) — solo `layout.ts` la usa; las vistas
-nunca deberían necesitarla.
+La sidebar es CLARA (una hoja blanca sobre el escritorio crema — en las otras
+apps del ecosistema va oscura; aquí es decisión de producto) y tiene su propia
+mini-paleta (`--sb-bg`, `--sb-panel`, `--sb-line`, `--sb-text`, `--sb-dim`) —
+solo `layout.ts` la usa; las vistas nunca deberían necesitarla. En particular,
+**no la uses para pintar un bloque oscuro**: ya no lo es. Si necesitas una
+tarjeta oscura (Campañas → "Resumen del envío"), fija sus colores en la vista.
 
 Legacy aliases (`--border`, `--border-lit`, `--green`, `--blue`, `--red`) are
 still defined so pasted mockup snippets don't break, but **prefer the names in

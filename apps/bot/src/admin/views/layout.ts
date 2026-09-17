@@ -1,12 +1,13 @@
 // Dashboard shell: a fixed 248px sidebar (grouped navigation) + a topbar,
 // wrapping each tab's server-rendered body.
 //
-// Tema "Kontrolia": el mismo lenguaje visual del resto del ecosistema (sidebar
-// oscura, contenido claro, tarjetas blancas redondeadas con sombra suave) con
-// el acento en AMBAR en lugar del verde de las otras apps. Los token NAMES no
-// cambiaron con el rediseño — solo sus valores — así que las 15 vistas se
-// re-tematizaron sin tocarlas. Ver docs/design-system.md, el contrato que
-// toda vista sigue.
+// Tema "Kontrolia" en clave papel: contenido crema con tarjetas blancas
+// redondeadas de sombra suave, y la sidebar como una hoja blanca apoyada sobre
+// ese escritorio (las otras apps del ecosistema la llevan oscura; aquí se
+// decidió clara a propósito). El acento es ÁMBAR en lugar del verde de las
+// otras apps. Los token NAMES no cambian con cada rediseño — solo sus valores —
+// así que las 15 vistas se re-tematizan sin tocarlas. Ver docs/design-system.md,
+// el contrato que toda vista sigue.
 //
 // The layout() API is unchanged: views keep their own activeTab id; the group,
 // breadcrumb and page title are derived here.
@@ -130,9 +131,11 @@ const GLOBAL_STYLE = `
     --shadow-md:0 2px 8px rgba(28,25,23,.06),0 1px 2px rgba(28,25,23,.05);
     --shadow-lg:0 24px 52px -14px rgba(28,27,24,.30);
     --radius:13px; --radius-sm:10px;
-    /* la sidebar es oscura aunque el contenido sea claro (firma del ecosistema) */
-    --sb-bg:#1b1a16; --sb-panel:#26241e; --sb-line:rgba(255,255,255,.07);
-    --sb-text:#c3beb2; --sb-dim:#8b8578;
+    /* sidebar clara: hoja blanca sobre el escritorio crema. Los valores son los
+       mismos --panel/--panel2/--line/--muted del contenido; siguen siendo tokens
+       aparte para poder volver a separarla del contenido sin tocar las vistas. */
+    --sb-bg:#ffffff; --sb-panel:#f5f3ee; --sb-line:#e4e0d6;
+    --sb-text:#4a463d; --sb-dim:#8b8578;
     /* legacy aliases kept so mockup-derived snippets keep working */
     --border:#e4e0d6; --border-lit:#dcd8cd; --green:#1f9d55; --blue:#2563eb; --red:#dc2626;
   }
@@ -179,10 +182,10 @@ const GLOBAL_STYLE = `
   @keyframes toastIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
   @keyframes toastOut{to{opacity:0;transform:translateY(8px);visibility:hidden}}
 
-  /* sidebar nav (fondo oscuro: hover claro translúcido) */
+  /* sidebar nav (fondo blanco: hover en el crema del contenido) */
   .navlink{border-radius:var(--radius-sm)}
-  .navlink:hover{background:rgba(255,255,255,.06);color:#fff}
-  .navlink:hover [data-lucide]{color:var(--accent)}
+  .navlink:hover{background:var(--sb-panel);color:var(--cream)}
+  .navlink:hover [data-lucide]{color:var(--accent-2)}
 
   /* entrance + botones (estilo Kontrolia: relieve suave, nada brutalista) */
   .card{animation:rise .4s cubic-bezier(.16,1,.3,1) both}
@@ -227,10 +230,11 @@ const GLOBAL_STYLE = `
 
   /* app shell */
   .shell{min-height:100vh;display:grid;grid-template-columns:248px 1fr;background:var(--bg)}
-  .sb{background:var(--sb-bg);color:var(--sb-text);display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+  .sb{background:var(--sb-bg);color:var(--sb-text);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;
+    z-index:1;box-shadow:1px 0 0 var(--sb-line),2px 0 8px rgba(28,25,23,.05)}
   .sb-nav{padding:14px 12px;display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto}
   .sb-nav::-webkit-scrollbar-track{background:var(--sb-bg)}
-  .sb-nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14)}
+  .sb-nav::-webkit-scrollbar-thumb{background:var(--linelit)}
   .sb-sec{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;padding:16px 12px 6px}
   .live-pill{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:7px 14px;box-shadow:var(--shadow-sm)}
 
@@ -273,12 +277,13 @@ const GLOBAL_SCRIPT = `
 function navItem(item: Item, active: boolean): string {
   const base =
     "display:flex;align-items:center;gap:11px;padding:9px 12px;font-size:13px;";
-  // Activo = píldora ámbar con texto oscuro, la firma del ecosistema (en las
-  // otras apps es verde). Inactivo = texto tenue sobre la sidebar oscura.
+  // Activo = tinte ámbar suave con texto tinta e ícono ámbar oscuro: sobre la
+  // sidebar blanca, la píldora ámbar sólida de las otras apps gritaba más que
+  // el contenido. Inactivo = texto tenue.
   const style = active
-    ? base + "color:#231d05;background:var(--accent);font-weight:700"
+    ? base + "color:var(--cream);background:var(--accent-soft);font-weight:700"
     : base + "color:var(--sb-text);font-weight:500";
-  const iconColor = active ? "#231d05" : "var(--sb-dim)";
+  const iconColor = active ? "var(--accent-2)" : "var(--sb-dim)";
   return `<a href="${item.href}" class="navlink" style="${style}">
     <i data-lucide="${item.icon}" width="17" height="17" style="color:${iconColor}"></i> ${item.label}
   </a>`;
@@ -307,7 +312,8 @@ function sidebar(activeTab: string, niche: NichePack | null, visibleIds: Set<str
     const shown = sec.items.filter((i) => visible(i.id));
     if (shown.length === 0) return "";
     const hasActive = shown.some((i) => i.id === activeTab);
-    const labelColor = hasActive ? "var(--accent)" : "var(--sb-dim)";
+    // El ámbar vivo no se lee como texto sobre blanco (ver .text-accent).
+    const labelColor = hasActive ? "var(--accent-2)" : "var(--sb-dim)";
     const items = shown
       .map((raw) => {
         const i = applyNiche(raw, niche);
@@ -322,7 +328,7 @@ function sidebar(activeTab: string, niche: NichePack | null, visibleIds: Set<str
       <div style="display:flex;align-items:center;gap:11px">
         <img src="/nodia-icon.png" alt="" width="36" height="36" style="width:36px;height:36px;flex:none;border-radius:12px;display:block">
         <div style="line-height:1.1">
-          <div style="font-family:'Archivo';font-weight:800;font-size:15px;letter-spacing:-.01em;color:#fff">nodia<span style="color:var(--accent)">.</span>agents</div>
+          <div style="font-family:'Archivo';font-weight:800;font-size:15px;letter-spacing:-.01em;color:var(--cream)">nodia<span style="color:var(--accent)">.</span>agents</div>
           <div style="font-size:9px;letter-spacing:.24em;color:var(--accent);text-transform:uppercase;font-weight:600">by Kontrolia</div>
         </div>
       </div>
@@ -334,7 +340,7 @@ function sidebar(activeTab: string, niche: NichePack | null, visibleIds: Set<str
           <i data-lucide="bot" width="16" height="16"></i>
         </div>
         <div style="line-height:1.25;overflow:hidden">
-          <div style="font-size:12px;font-weight:600;color:#e9e6dd;white-space:nowrap;text-overflow:ellipsis;overflow:hidden">Panel del bot</div>
+          <div style="font-size:12px;font-weight:600;color:var(--cream);white-space:nowrap;text-overflow:ellipsis;overflow:hidden">Panel del bot</div>
         </div>
       </div>
     </div>
@@ -476,7 +482,7 @@ export function layout(opts: {
 
           function renderTrigger() {
             return '<button type="button" id="ctx-trigger" style="display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:6px 10px 6px 6px;cursor:pointer;font-family:inherit;box-shadow:var(--shadow-sm)">' +
-              '<span style="width:30px;height:30px;border-radius:8px;background:var(--sb-bg);color:var(--accent);font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none">' + esc(activeOrg.initials) + '</span>' +
+              '<span style="width:30px;height:30px;border-radius:8px;background:var(--cream);color:var(--accent);font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none">' + esc(activeOrg.initials) + '</span>' +
               '<span style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2">' +
                 '<span style="font-family:\\'JetBrains Mono\\';font-size:9.5px;letter-spacing:.13em;color:var(--dim);text-transform:uppercase">' + esc(activeOrg.name) + '</span>' +
                 '<span style="font-size:13.5px;font-weight:600;color:var(--cream);display:flex;align-items:center;gap:6px">' +
