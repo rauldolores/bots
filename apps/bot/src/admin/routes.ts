@@ -67,6 +67,7 @@ import { renderTickets, updateTicketPriority } from "./views/tickets";
 import { renderCalendario, cancelAppointment } from "./views/calendario";
 import { renderTelefono } from "./views/telefono";
 import { renderUsuarios } from "./views/usuarios";
+import { renderOrganizaciones } from "./views/organizaciones";
 import { renderPlan } from "./views/plan";
 import {
   entitlementsDe,
@@ -147,6 +148,9 @@ import {
   listInvitations,
   createInvitation,
   deleteInvitation,
+  listMembers,
+  removeMember,
+  createOrganization,
   SESSION_COOKIE,
   VERIFIER_COOKIE,
   type KontroliaSession,
@@ -196,12 +200,20 @@ const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bot
 // Lo que sigue abierto cuando la organización NO tiene plan vivo (billing.md
 // B2): la pantalla de planes y su compra, la vuelta del pago, cambiarse de
 // organización (la otra sí puede tener plan) y el selector del header.
-const BILLING_EXEMPT_PATTERNS = [/\/plan(\/|$)/, /\/billing\/ok$/, /\/switch-org$/, /\/projects$/, /\/logout$/];
+// Organizaciones y Equipo también: sin plan, lo que la persona puede hacer es
+// crear OTRA organización (y contratarle su plan) o invitar a quien sí vaya a
+// pagar — cerrarle eso sería dejarla sin salida.
+const BILLING_EXEMPT_PATTERNS = [/\/plan(\/|$)/, /\/billing\/ok$/, /\/switch-org$/, /\/projects$/, /\/logout$/, /\/organizaciones(\/|$)/, /\/usuarios(\/|$)/];
 function isBillingExempt(path: string): boolean {
   return BILLING_EXEMPT_PATTERNS.some((re) => re.test(path));
 }
+// Organizaciones y Equipo (con sus acciones) tampoco necesitan bot: son de
+// la organización de KontrolIA, y una organización recién creada no tiene
+// ninguno todavía — sin esto, setTenantContext la mandaría a /bots/new antes
+// de dejarla invitar a nadie o cambiarse de organización.
+const TENANT_EXEMPT_PATTERNS = [/\/organizaciones(\/|$)/, /\/usuarios(\/|$)/];
 function isTenantExempt(path: string): boolean {
-  return TENANT_EXEMPT_SUFFIXES.some((s) => path.endsWith(s));
+  return TENANT_EXEMPT_SUFFIXES.some((s) => path.endsWith(s)) || TENANT_EXEMPT_PATTERNS.some((re) => re.test(path));
 }
 
 function redirectUri(env: Env): string {
@@ -1452,8 +1464,71 @@ async function canalNuevoConCupo(
   };
 }
 
+adminApp.post("/usuarios/miembros/:membershipId/quitar", async (c) => {
+  const token = c.get("kontroliaAccessToken");
+  if (!token) return c.redirect("/admin/usuarios?err=Entra con tu cuenta de KontrolIA.", 302);
+  const r = await removeMember(c.env, token, c.req.param("membershipId"));
+  if (!r.ok) return c.redirect(`/admin/usuarios?err=${encodeURIComponent(r.error)}`, 302);
+  return c.redirect("/admin/usuarios?ok=Miembro quitado de la organización.", 302);
+});
+
+// Organizaciones: las de la cuenta, cambiarse, y crear una nueva (con esta
+// app habilitada y quien la crea como dueño + administrador — ver
+// createOrganization en kontroliaAuth.ts). Abierta sin plan a propósito.
+adminApp.get("/organizaciones", async (c) => {
+  const cfg = kontroliaConfig(c.env);
+  const token = c.get("kontroliaAccessToken");
+  const notice = { ok: c.req.query("ok") ?? undefined, err: c.req.query("err") ?? undefined };
+  const visible = navVisible(c);
+  if (!cfg || !token) return c.html(renderOrganizaciones({ kind: "sin-kontrolia" }, notice, visible));
+  const memberships = await listMemberships(cfg, token);
+  return c.html(renderOrganizaciones({ kind: "ok", memberships, activeOrgId: c.get("kontroliaOrgId") ?? null }, notice, visible));
+});
+
+adminApp.post("/organizaciones", async (c) => {
+  const cfg = kontroliaConfig(c.env);
+  const token = c.get("kontroliaAccessToken");
+  const claims = c.get("kontroliaClaims");
+  const raw = getCookie(c, SESSION_COOKIE);
+  if (!cfg || !token || !claims || !raw) return c.redirect("/admin/organizaciones?err=Entra con tu cuenta de KontrolIA.", 302);
+  const form = await c.req.formData();
+  const nombre = String(form.get("nombre") ?? "").trim().slice(0, 80);
+  if (!nombre) return c.redirect("/admin/organizaciones?err=Falta el nombre.", 302);
+
+  const r = await createOrganization(c.env, token, claims.sub, nombre);
+  if (!r.ok) return c.redirect(`/admin/organizaciones?err=${encodeURIComponent(r.error)}`, 302);
+
+  // Cambiarse a la nueva: igual que /switch-org — contexto de sesión en
+  // KontrolIA, token nuevo (ya trae la organización y sus roles), y el bot
+  // de la organización anterior deja de tener sentido.
+  const session = JSON.parse(raw) as KontroliaSession;
+  const cambiada = await switchActiveOrganization(cfg, session.accessToken, claims.sub, r.organizationId);
+  if (cambiada) {
+    const refreshed = await refreshSession(cfg, session.refreshToken);
+    if (refreshed) {
+      setCookie(c, SESSION_COOKIE, JSON.stringify(refreshed), { httpOnly: true, secure: true, sameSite: "Lax", maxAge: 60 * 60 * 24 * 30 });
+    }
+    deleteCookie(c, BOT_COOKIE);
+  }
+  const msg = r.aviso ? `Organización "${nombre}" creada. ${r.aviso}` : `Organización "${nombre}" creada. Ahora estás en ella — elige su plan para empezar.`;
+  // Aterriza en Plan: una organización nueva no tiene suscripción, y con
+  // "Exigir plan" cualquier otra pantalla la mandaría ahí de todos modos.
+  return c.redirect(`/admin/plan?ok=${encodeURIComponent(msg)}`, 302);
+});
+
 // Plan y facturación (billing.md B2–B6). Nada de esto cobra: las URLs de
 // pago y del portal las devuelve KontrolIA y apuntan a Stripe.
+/**
+ * Qué muestra el sidebar en las pantallas que siguen abiertas sin plan: si
+ * la organización está bloqueada por plan, solo Plan, Organizaciones y
+ * Equipo (lo que sirve para salir de ese estado); si no, lo de siempre.
+ */
+function navVisible(c: HonoContext): Set<string> | null {
+  const e = c.get("kontroliaEntitlements");
+  const bloqueado = e?.plansRequired === true && e.access !== "ok";
+  return bloqueado ? new Set(["plan", "organizaciones", "usuarios"]) : visibleNavIds(c.get("kontroliaClaims"));
+}
+
 function esOwnerOAdmin(c: HonoContext): boolean {
   const roles = c.get("kontroliaClaims")?.roles ?? [];
   return roles.includes("owner") || roles.includes("admin");
@@ -1473,8 +1548,7 @@ adminApp.get("/plan", async (c) => {
   // filtrar por permisos: un platform admin los tiene todos aunque su
   // organización no tenga plan, y veía el menú completo con cada entrada
   // rebotando aquí. El criterio es el plan, no el rol.
-  const bloqueado = entitlements?.plansRequired === true && entitlements.access !== "ok";
-  const visible = bloqueado ? new Set(["plan"]) : visibleNavIds(c.get("kontroliaClaims"));
+  const visible = navVisible(c);
   return c.html(
     renderPlan(
       c.env,
@@ -1587,13 +1661,21 @@ async function datosDeUsuarios(c: HonoContext) {
   const token = c.get("kontroliaAccessToken");
   const orgId = c.get("kontroliaOrgId");
   if (!token || !orgId) return { kind: "sin-kontrolia" as const };
-  const [roles, invitations] = await Promise.all([
+  const [roles, invitations, members] = await Promise.all([
     listRoles(c.env, token, orgId),
     listInvitations(c.env, token, orgId),
+    listMembers(c.env, token, orgId),
   ]);
   if (!roles.ok) return { kind: "error" as const, error: roles.error };
   if (!invitations.ok) return { kind: "error" as const, error: invitations.error };
-  return { kind: "ok" as const, roles: roles.roles, invitations: invitations.invitations };
+  if (!members.ok) return { kind: "error" as const, error: members.error };
+  return {
+    kind: "ok" as const,
+    roles: roles.roles,
+    invitations: invitations.invitations,
+    members: members.members,
+    miUserId: c.get("kontroliaClaims")?.sub ?? null,
+  };
 }
 
 adminApp.get("/usuarios", async (c) =>
@@ -1602,7 +1684,7 @@ adminApp.get("/usuarios", async (c) =>
       c.env,
       await datosDeUsuarios(c),
       { ok: c.req.query("ok") ?? undefined, err: c.req.query("err") ?? undefined },
-      visibleNavIds(c.get("kontroliaClaims")),
+      navVisible(c),
     ),
   ),
 );

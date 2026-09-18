@@ -342,3 +342,109 @@ export async function deleteInvitation(env: Pick<Env, "KONTROLIA_AUTH_SERVER_URL
   const r = await authApi<void>(env, accessToken, `/api/invitations/${encodeURIComponent(id)}`, { method: "DELETE" });
   return r.ok ? { ok: true as const } : r;
 }
+
+// ── Organizaciones y miembros (la API de administración del auth-server) ─────
+
+export interface KontroliaMember {
+  membershipId: string;
+  userId: string;
+  email: string;
+  name: string | null;
+  status: "active" | "invited" | "suspended";
+  createdAt: string;
+  roles: Array<{ id: string; name: string; slug: string; application_id: string | null }>;
+}
+
+export async function listMembers(env: Pick<Env, "KONTROLIA_AUTH_SERVER_URL">, accessToken: string, organizationId: string) {
+  const r = await authApi<{ members: KontroliaMember[] }>(
+    env,
+    accessToken,
+    `/api/organization-members?organizationId=${encodeURIComponent(organizationId)}`,
+  );
+  return r.ok ? { ok: true as const, members: r.data.members ?? [] } : r;
+}
+
+/** Quita a alguien de la organización. El auth-server rechaza quitar al último Owner. */
+export async function removeMember(env: Pick<Env, "KONTROLIA_AUTH_SERVER_URL">, accessToken: string, membershipId: string) {
+  const r = await authApi<void>(env, accessToken, `/api/organization-members?membershipId=${encodeURIComponent(membershipId)}`, { method: "DELETE" });
+  return r.ok ? { ok: true as const } : r;
+}
+
+export async function assignRole(env: Pick<Env, "KONTROLIA_AUTH_SERVER_URL">, accessToken: string, input: { membershipId: string; roleId: string }) {
+  const r = await authApi<unknown>(env, accessToken, "/api/organization-members/roles", { method: "POST", body: input });
+  return r.ok ? { ok: true as const } : r;
+}
+
+/** El id de esta app en KontrolIA (para habilitarla en una organización nueva). Se busca por slug en el catálogo. */
+export async function findApplicationId(
+  env: Pick<Env, "KONTROLIA_AUTH_SERVER_URL" | "KONTROLIA_APP_SLUG">,
+  accessToken: string,
+): Promise<string | null> {
+  const r = await authApi<{ applications: Array<{ id: string; slug: string }> }>(env, accessToken, "/api/applications");
+  if (!r.ok) return null;
+  return r.data.applications?.find((a) => a.slug === appSlug(env))?.id ?? null;
+}
+
+function slugDe(nombre: string): string {
+  const base = nombre
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "org";
+  // Los slugs de organización son únicos en TODA la instancia: mismo sufijo
+  // aleatorio que usa el alta pública para que dos "Mi negocio" no choquen.
+  return `${base}-${crypto.randomUUID().replace(/-/g, "").slice(0, 6)}`;
+}
+
+/**
+ * Crea una organización nueva con esta app habilitada y a quien la crea como
+ * Owner + "Administrador de <app>" — lo mismo que deja el alta pública
+ * (provision_self_service_tenant), pero para alguien que YA tiene cuenta y
+ * quiere un segundo espacio: otra empresa, otro cliente de su agencia.
+ *
+ * Son cuatro llamadas porque el auth-server no expone ese aprovisionamiento
+ * como un endpoint para usuarios existentes:
+ *   1. POST /api/organizations           → la org; el trigger enrola al creador como Owner.
+ *   2. POST /api/organizations/:id/applications → habilita la app; el trigger crea
+ *      el rol "Administrador de <app>" (grants_all_permissions).
+ *   3. GET roles + GET miembros           → encontrar ese rol y mi membresía.
+ *   4. POST /api/organization-members/roles → asignármelo. Sin esto tendría
+ *      autoridad de organización (invitar, comprar) pero cero permisos DEL
+ *      PANEL al entrar, aun con plan.
+ * Si 2–4 fallan, la org ya existe: se devuelve con aviso, no se deja a medias
+ * sin decirlo.
+ */
+export async function createOrganization(
+  env: Pick<Env, "KONTROLIA_AUTH_SERVER_URL" | "KONTROLIA_APP_SLUG">,
+  accessToken: string,
+  userId: string,
+  nombre: string,
+): Promise<{ ok: true; organizationId: string; aviso?: string } | { ok: false; error: string }> {
+  const creada = await authApi<{ organization: { id: string; name: string; slug: string } }>(env, accessToken, "/api/organizations", {
+    method: "POST",
+    body: { name: nombre.trim(), slug: slugDe(nombre) },
+  });
+  if (!creada.ok) return { ok: false, error: creada.error };
+  const organizationId = creada.data.organization.id;
+
+  const applicationId = await findApplicationId(env, accessToken);
+  if (!applicationId) return { ok: true, organizationId, aviso: "La organización se creó, pero no se pudo habilitar Nodia Agents en ella." };
+
+  const habilitada = await authApi<unknown>(env, accessToken, `/api/organizations/${encodeURIComponent(organizationId)}/applications`, {
+    method: "POST",
+    body: { applicationId },
+  });
+  if (!habilitada.ok) return { ok: true, organizationId, aviso: `La organización se creó, pero no se pudo habilitar Nodia Agents: ${habilitada.error}` };
+
+  const [roles, miembros] = await Promise.all([listRoles(env, accessToken, organizationId), listMembers(env, accessToken, organizationId)]);
+  const rolAdmin = roles.ok ? roles.roles.find((r) => r.application_id === applicationId && /^administrador de /i.test(r.name)) : undefined;
+  const miMembresia = miembros.ok ? miembros.members.find((m) => m.userId === userId) : undefined;
+  if (!rolAdmin || !miMembresia) {
+    return { ok: true, organizationId, aviso: "La organización se creó, pero no se te pudo asignar el rol de administrador de Nodia Agents. Asígnalo desde panel.kontrolia.io." };
+  }
+  const asignado = await assignRole(env, accessToken, { membershipId: miMembresia.membershipId, roleId: rolAdmin.id });
+  if (!asignado.ok) return { ok: true, organizationId, aviso: `La organización se creó, pero no se te pudo asignar el rol de administrador: ${asignado.error}` };
+  return { ok: true, organizationId };
+}

@@ -17,6 +17,9 @@ const revokeSessionMock = vi.fn();
 const listRolesMock = vi.fn();
 const listInvitationsMock = vi.fn();
 const createInvitationMock = vi.fn();
+const listMembersMock = vi.fn();
+const removeMemberMock = vi.fn();
+const createOrganizationMock = vi.fn();
 
 // billing/kontrolia.ts entero simulado: aquí se prueba el GATE y las rutas
 // del panel, no el contrato con el auth-server (eso vive en
@@ -53,6 +56,9 @@ vi.mock("../../src/admin/kontroliaAuth", async (importOriginal) => {
     listRoles: (...args: unknown[]) => listRolesMock(...args),
     listInvitations: (...args: unknown[]) => listInvitationsMock(...args),
     createInvitation: (...args: unknown[]) => createInvitationMock(...args),
+    listMembers: (...args: unknown[]) => listMembersMock(...args),
+    removeMember: (...args: unknown[]) => removeMemberMock(...args),
+    createOrganization: (...args: unknown[]) => createOrganizationMock(...args),
   };
 });
 
@@ -408,6 +414,33 @@ describe("/admin/usuarios — invitar al equipo (public-signup.md §2.2)", () =>
     listRolesMock.mockReset().mockResolvedValue({ ok: true, roles: [{ id: "r-usr", name: "Usuario de Nodia Agents", slug: "u", application_id: "a" }] });
     listInvitationsMock.mockReset().mockResolvedValue({ ok: true, invitations: [] });
     createInvitationMock.mockReset();
+    listMembersMock.mockReset().mockResolvedValue({ ok: true, members: [
+      { membershipId: "m-yo", userId: "u1", email: "yo@x.com", name: "Yo", status: "active", createdAt: "", roles: [{ id: "r", name: "Owner", slug: "owner", application_id: null }] },
+      { membershipId: "m-ana", userId: "u2", email: "ana@x.com", name: null, status: "active", createdAt: "", roles: [] },
+    ] });
+    removeMemberMock.mockReset();
+  });
+
+  it("lista a los miembros; a uno mismo no le ofrece 'Quitar', a los demás sí", async () => {
+    const html = await (await adminApp.fetch(conSesion("/usuarios"), KONTROLIA_ENV)).text();
+    expect(html).toContain("ana@x.com");
+    expect(html).toContain('action="/admin/usuarios/miembros/m-ana/quitar"');
+    expect(html).not.toContain('action="/admin/usuarios/miembros/m-yo/quitar"');
+    expect(listMembersMock).toHaveBeenCalledWith(expect.anything(), "at", ORG);
+  });
+
+  it("POST /usuarios/miembros/:id/quitar: DELETE en el auth-server con el token del usuario", async () => {
+    removeMemberMock.mockResolvedValue({ ok: true });
+    const res = await adminApp.fetch(conSesion("/usuarios/miembros/m-ana/quitar", { method: "POST" }), KONTROLIA_ENV);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("/admin/usuarios?ok=");
+    expect(removeMemberMock).toHaveBeenCalledWith(expect.anything(), "at", "m-ana");
+  });
+
+  it("si el auth-server no deja quitar (último dueño), el motivo llega a la pantalla", async () => {
+    removeMemberMock.mockResolvedValue({ ok: false, error: "No puedes quitar al último Owner", status: 400 });
+    const res = await adminApp.fetch(conSesion("/usuarios/miembros/m-yo/quitar", { method: "POST" }), KONTROLIA_ENV);
+    expect(decodeURIComponent(res.headers.get("location") ?? "")).toContain("último Owner");
   });
 
   it("con sesión: pide roles e invitaciones con el TOKEN DEL USUARIO y SU organización, y dibuja el formulario", async () => {
@@ -491,12 +524,14 @@ describe("bloqueo por plan (billing.md B2)", () => {
     expect(html).toContain("Actualiza tu método de pago");
   });
 
-  it("sin plan, el sidebar muestra SOLO Plan y facturación — aunque la cuenta sea platform admin", async () => {
+  it("sin plan, el sidebar muestra SOLO Plan, Organizaciones y Equipo — aunque la cuenta sea platform admin", async () => {
     verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } }); // is_platform_admin: true
     entitlementsDeMock.mockResolvedValue(ENT({ access: "no_subscription" }));
     const html = await (await adminApp.fetch(conSesion("/plan?motivo=no_subscription"), KONTROLIA_ENV)).text();
     expect(html).toContain('href="/admin/plan"');
-    for (const href of ["/admin/overview", "/admin/conversations", "/admin/conexiones", "/admin/config", "/admin/usuarios"]) {
+    expect(html).toContain('href="/admin/organizaciones"');
+    expect(html).toContain('href="/admin/usuarios"');
+    for (const href of ["/admin/overview", "/admin/conversations", "/admin/conexiones", "/admin/config"]) {
       expect(html).not.toContain(`href="${href}"`);
     }
   });
@@ -704,6 +739,66 @@ describe("límites de consumo (B7): bots y canales", () => {
     hayCupoMock.mockClear();
     expect((await conectar()).status).toBe(200);
     expect(hayCupoMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("/admin/organizaciones — las de la cuenta, cambiarse y crear una nueva", () => {
+  const conSesion = (path: string, init?: RequestInit) =>
+    req(path, { ...init, headers: { ...(init?.headers as Record<string, string>), cookie: `${SESSION_COOKIE}=${encodeURIComponent(SESSION)}` } });
+  const ENT_BLOQUEADO = { applicationId: "a", applicationSlug: "nodia-agents", plansRequired: true, subscription: null, access: "no_subscription", permissions: [], usage: [] };
+
+  beforeEach(() => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    listMembershipsMock.mockReset().mockResolvedValue([
+      { id: "m1", organizationId: TEST_BOT_ID, status: "active", roles: ["owner"], organization: { id: TEST_BOT_ID, name: "Mi negocio", slug: "mi-negocio", settings: {} } },
+      { id: "m2", organizationId: "org-2", status: "active", roles: ["member"], organization: { id: "org-2", name: "Otra", slug: "otra", settings: {} } },
+    ]);
+    createOrganizationMock.mockReset();
+    switchActiveOrganizationMock.mockReset().mockResolvedValue(true);
+    refreshSessionMock.mockReset().mockResolvedValue({ accessToken: "at2", refreshToken: "rt2", expiresAt: Date.now() + 3600_000 });
+  });
+
+  it("lista las organizaciones con la activa marcada, 'Cambiar' en las demás y el alta", async () => {
+    const html = await (await adminApp.fetch(conSesion("/organizaciones"), KONTROLIA_ENV)).text();
+    expect(html).toContain("Mi negocio");
+    expect(html).toContain("● Activa");
+    expect(html).toContain('value="org-2"');
+    expect(html).toContain('action="/admin/organizaciones"');
+  });
+
+  it("se ve aunque la organización activa NO tenga plan, con el sidebar reducido a Plan/Organizaciones/Equipo", async () => {
+    entitlementsDeMock.mockResolvedValue(ENT_BLOQUEADO);
+    const res = await adminApp.fetch(conSesion("/organizaciones"), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('href="/admin/organizaciones"');
+    expect(html).toContain('href="/admin/usuarios"');
+    expect(html).toContain('href="/admin/plan"');
+    expect(html).not.toContain('href="/admin/conversations"');
+  });
+
+  it("POST: crea la organización a nombre del usuario, se cambia a ella (token nuevo, sin bot) y aterriza en Plan", async () => {
+    createOrganizationMock.mockResolvedValue({ ok: true, organizationId: "org-nueva" });
+    const res = await adminApp.fetch(
+      conSesion("/organizaciones", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "nombre=Taquer%C3%ADa" }),
+      KONTROLIA_ENV,
+    );
+    expect(res.status).toBe(302);
+    expect(decodeURIComponent(res.headers.get("location") ?? "")).toContain("/admin/plan?ok=Organización \"Taquería\" creada");
+    expect(createOrganizationMock).toHaveBeenCalledWith(expect.anything(), "at", "u1", "Taquería");
+    expect(switchActiveOrganizationMock).toHaveBeenCalledWith(expect.anything(), "at", "u1", "org-nueva");
+    const cookies = res.headers.get("set-cookie") ?? "";
+    expect(cookies).toContain("at2");
+    expect(cookies).toMatch(new RegExp(`${BOT_COOKIE}=;`));
+  });
+
+  it("POST sin nombre: no crea nada", async () => {
+    const res = await adminApp.fetch(
+      conSesion("/organizaciones", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "nombre=" }),
+      KONTROLIA_ENV,
+    );
+    expect(decodeURIComponent(res.headers.get("location") ?? "")).toContain("Falta el nombre");
+    expect(createOrganizationMock).not.toHaveBeenCalled();
   });
 });
 

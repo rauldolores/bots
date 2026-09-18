@@ -80,11 +80,6 @@ export const NAV_PERMISSIONS: Record<string, string> = {
   conexiones: "nodia-agents.conexiones.administrar",
   telefono: "nodia-agents.telefono.administrar",
   config: "nodia-agents.configuracion.editar",
-  // Equipo (invitar gente) reusa el permiso de Configuración por la misma
-  // razón que Entrenamiento reusa el de Mejoras: uno nuevo no existiría en
-  // KontrolIA Auth y la pantalla nacería inaccesible. Quién puede invitar de
-  // verdad lo decide el RLS del auth-server (Owner/Admin de la organización).
-  usuarios: "nodia-agents.configuracion.editar",
   insights: "nodia-agents.insights.ver",
   stats: "nodia-agents.estadisticas.ver",
   costs: "nodia-agents.costos.ver",
@@ -117,7 +112,6 @@ export const PERMISSION_GATE: Array<[string, string, string]> = [
   ["/conexiones", NAV_PERMISSIONS.conexiones, "Conexiones"],
   ["/telefono", NAV_PERMISSIONS.telefono, "Tu número"],
   ["/config", NAV_PERMISSIONS.config, "Configuración"],
-  ["/usuarios", NAV_PERMISSIONS.usuarios, "Equipo"],
   ["/insights", NAV_PERMISSIONS.insights, "Insights"],
   ["/stats", NAV_PERMISSIONS.stats, "Estadísticas"],
   ["/costs", NAV_PERMISSIONS.costs, "Costos"],
@@ -153,6 +147,12 @@ export function visibleNavIds(claims: KontroliaTokenClaims | undefined): Set<str
   // inalcanzable justo para quien más la necesita.
   ids.add("overview");
   ids.add("plan");
+  // Organizaciones y Equipo son de la ORGANIZACIÓN, no de la app: quién
+  // puede crear organizaciones, invitar o quitar gente lo decide el RLS del
+  // auth-server (Owner/Admin), no un permiso del catálogo de Nodia. Por eso
+  // no están en NAV_PERMISSIONS y se ven con cualquier sesión de KontrolIA.
+  ids.add("organizaciones");
+  ids.add("usuarios");
   return ids;
 }
 

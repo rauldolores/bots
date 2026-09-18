@@ -11,7 +11,7 @@
 // Solo existe con sesión de KontrolIA. Con Basic Auth no hay organización ni
 // token que mandar, y se dice claro en vez de mostrar una pantalla vacía.
 import type { Env } from "../../env";
-import type { KontroliaRole, KontroliaInvitation } from "../kontroliaAuth";
+import type { KontroliaRole, KontroliaInvitation, KontroliaMember } from "../kontroliaAuth";
 import { authServerUrl, appSlug } from "../kontroliaAuth";
 import { layout } from "./layout";
 
@@ -37,6 +37,35 @@ export function ordenarRoles(roles: KontroliaRole[]): KontroliaRole[] {
 
 const inputStyle = "background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;outline:none";
 
+const ESTADO_MIEMBRO: Record<string, { text: string; color: string }> = {
+  active: { text: "Activo", color: "var(--ok)" },
+  invited: { text: "Invitado", color: "var(--accent)" },
+  suspended: { text: "Suspendido", color: "var(--bad)" },
+};
+
+/** Los miembros de la organización; a uno mismo no se le ofrece "Quitar" (para eso está Cerrar sesión, y el auth-server además protege al último dueño). */
+function filasMiembros(members: KontroliaMember[], miUserId: string | null): string {
+  if (!members.length) return `<tr style="border-top:1px solid var(--line)"><td colspan="4" style="padding:14px 12px" class="text-[12.5px]"><span style="color:var(--dim)">Sin miembros.</span></td></tr>`;
+  return members
+    .map((m) => {
+      const st = ESTADO_MIEMBRO[m.status] ?? { text: m.status, color: "var(--muted)" };
+      const soyYo = m.userId === miUserId;
+      const roles = m.roles.map((r) => r.name).join(", ") || "—";
+      const quitar = soyYo
+        ? `<span class="text-[11px]" style="color:var(--dim)">Tú</span>`
+        : `<form method="POST" action="/admin/usuarios/miembros/${encodeURIComponent(m.membershipId)}/quitar" onsubmit="return confirm('¿Quitar a ${esc(m.email)} de la organización? Perderá el acceso a todos los bots.')" style="margin:0">
+             <button type="submit" class="text-[11px]" style="background:none;border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer">Quitar</button>
+           </form>`;
+      return `<tr style="border-top:1px solid var(--line)">
+        <td style="padding:10px 12px"><div class="text-[12.5px] text-cream">${esc(m.name ?? m.email)}</div>${m.name ? `<div class="text-[11px]" style="color:var(--dim)">${esc(m.email)}</div>` : ""}</td>
+        <td style="padding:10px 12px" class="text-[12px]">${esc(roles)}</td>
+        <td style="padding:10px 12px" class="text-[12px]"><span style="color:${st.color}">${st.text}</span></td>
+        <td style="padding:6px 12px;text-align:right">${quitar}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
 function estadoInvitacion(inv: KontroliaInvitation): { text: string; color: string } {
   if (inv.accepted_at) return { text: "Aceptada", color: "var(--ok)" };
   if (new Date(inv.expires_at).getTime() < Date.now()) return { text: "Expirada", color: "var(--bad)" };
@@ -48,7 +77,7 @@ export function renderUsuarios(
   data:
     | { kind: "sin-kontrolia" }
     | { kind: "error"; error: string }
-    | { kind: "ok"; roles: KontroliaRole[]; invitations: KontroliaInvitation[] },
+    | { kind: "ok"; roles: KontroliaRole[]; invitations: KontroliaInvitation[]; members: KontroliaMember[]; miUserId: string | null },
   notice: { ok?: string; err?: string },
   visibleNavIds: Set<string> | null,
 ): string {
@@ -115,6 +144,24 @@ export function renderUsuarios(
           <button type="submit" class="text-[12px]" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;font-weight:700;padding:9px 16px;cursor:pointer">Enviar invitación</button>
         </form>
         ${roles.length === 0 ? `<p class="text-[11px]" style="color:var(--bad);margin:0">KontrolIA no devolvió ningún rol para tu organización — no hay con qué invitar.</p>` : ""}
+      </div>
+
+      <div style="border:1px solid var(--line);background:var(--panel)">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--line)">
+          <div class="font-display font-semibold text-[13.5px] text-cream">Miembros</div>
+          <p class="text-[12px]" style="color:var(--muted);margin:4px 0 0">Quien ya entra a esta organización. Quitar a alguien le cierra el acceso a todos sus bots; KontrolIA no deja quitar al último dueño.</p>
+        </div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr class="text-[11px]" style="color:var(--dim);text-align:left">
+              <th style="padding:8px 12px;font-weight:500">Persona</th>
+              <th style="padding:8px 12px;font-weight:500">Roles</th>
+              <th style="padding:8px 12px;font-weight:500">Estado</th>
+              <th></th>
+            </tr></thead>
+            <tbody>${filasMiembros(data.members, data.miUserId)}</tbody>
+          </table>
+        </div>
       </div>
 
       <div style="border:1px solid var(--line);background:var(--panel)">

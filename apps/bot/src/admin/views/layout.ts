@@ -59,6 +59,12 @@ const NAV: Section[] = [
       { id: "conexiones", label: "Conexiones", href: "/admin/conexiones", icon: "plug-zap" },
       { id: "telefono", label: "Tu número", href: "/admin/telefono", icon: "phone-forwarded" },
       { id: "config", label: "Configuración", href: "/admin/config", icon: "sliders-horizontal" },
+    ],
+  },
+  {
+    label: "Organización",
+    items: [
+      { id: "organizaciones", label: "Organizaciones", href: "/admin/organizaciones", icon: "building-2" },
       { id: "usuarios", label: "Equipo", href: "/admin/usuarios", icon: "users" },
     ],
   },
@@ -468,6 +474,9 @@ export function layout(opts: {
                     '<input id="ctx-search" value="' + esc(state.q) + '" placeholder="Buscar organización…" style="width:100%;background:var(--bg);border:1px solid var(--line);color:var(--cream);border-radius:9px;padding:7px 10px;font-size:12.5px;font-family:inherit;outline:none" />' +
                   '</div>' +
                   '<div style="padding:0 8px 8px;display:flex;flex-direction:column;gap:2px;max-height:250px;overflow:auto">' + orgRows + '</div>' +
+                  '<div style="border-top:1px solid var(--line);padding:9px;margin-top:auto">' +
+                    '<a href="/admin/organizaciones" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;font-size:12.5px;color:var(--accent);text-decoration:none"><i data-lucide="building-2" width="14" height="14"></i> Gestionar organizaciones</a>' +
+                  '</div>' +
                 '</div>' +
                 '<div style="display:flex;flex-direction:column">' +
                   '<div style="padding:12px 12px 9px;font-family:\\'JetBrains Mono\\';font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)">Bots de ' + esc(previewOrg.name) + '</div>' +

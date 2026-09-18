@@ -91,16 +91,19 @@ describe("visibleNavIds()", () => {
     expect(visibleNavIds(undefined)).toBeNull();
   });
 
-  // "overview" y "plan" van siempre: no dependen de ningún permiso de la app,
-  // y desde que el sidebar es estricto (solo lo que está en el conjunto) hay
-  // que ponerlos aquí en vez de colarlos por no estar en NAV_PERMISSIONS.
-  it("incluye los ids de NAV_PERMISSIONS cuyo permiso SÍ está en claims.permissions, más Resumen y Plan", () => {
+  // Resumen, Plan, Organizaciones y Equipo van siempre: no dependen de ningún
+  // permiso de la app (los dos últimos son de la organización — el RLS del
+  // auth-server decide), y desde que el sidebar es estricto (solo lo que
+  // está en el conjunto) hay que ponerlos aquí explícitamente.
+  const SIEMPRE = ["overview", "plan", "organizaciones", "usuarios"];
+
+  it("incluye los ids de NAV_PERMISSIONS cuyo permiso SÍ está en claims.permissions, más los de siempre", () => {
     const ids = visibleNavIds(claims({ permissions: [NAV_PERMISSIONS.leads, NAV_PERMISSIONS.tickets] }));
-    expect(ids).toEqual(new Set(["leads", "tickets", "overview", "plan"]));
+    expect(ids).toEqual(new Set(["leads", "tickets", ...SIEMPRE]));
   });
 
-  it("is_platform_admin: incluye TODOS los ids gateados, más Resumen y Plan", () => {
+  it("is_platform_admin: incluye TODOS los ids gateados, más los de siempre", () => {
     const ids = visibleNavIds(claims({ is_platform_admin: true }));
-    expect(ids).toEqual(new Set([...Object.keys(NAV_PERMISSIONS), "overview", "plan"]));
+    expect(ids).toEqual(new Set([...Object.keys(NAV_PERMISSIONS), ...SIEMPRE]));
   });
 });
