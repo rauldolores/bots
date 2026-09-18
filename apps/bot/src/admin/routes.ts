@@ -69,6 +69,8 @@ import { renderTelefono } from "./views/telefono";
 import { renderUsuarios } from "./views/usuarios";
 import { renderOrganizaciones } from "./views/organizaciones";
 import { renderPlan } from "./views/plan";
+import { renderAyuda } from "./views/ayuda";
+import { correoSoporte, enviarSoporte } from "./help/soporte";
 import {
   entitlementsDe,
   invalidarEntitlements,
@@ -195,7 +197,9 @@ function isAuthExempt(path: string): boolean {
 // organización sin bots (o sin acceso a ninguno) rebotaría a /bots/new antes
 // de que este guard alcance a redirigirlo a /access-denied, o directamente
 // no podría renderizar la página que le explica por qué no tiene acceso.
-const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots", "/access-denied"];
+// /ayuda también: una organización recién creada, sin bots, tiene que poder
+// leer la guía y pedir soporte antes de crear el primero.
+const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots", "/access-denied", "/ayuda", "/ayuda/soporte"];
 
 // Lo que sigue abierto cuando la organización NO tiene plan vivo (billing.md
 // B2): la pantalla de planes y su compra, la vuelta del pago, cambiarse de
@@ -203,7 +207,9 @@ const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bot
 // Organizaciones y Equipo también: sin plan, lo que la persona puede hacer es
 // crear OTRA organización (y contratarle su plan) o invitar a quien sí vaya a
 // pagar — cerrarle eso sería dejarla sin salida.
-const BILLING_EXEMPT_PATTERNS = [/\/plan(\/|$)/, /\/billing\/ok$/, /\/switch-org$/, /\/projects$/, /\/logout$/, /\/organizaciones(\/|$)/, /\/usuarios(\/|$)/];
+// Ayuda sigue abierta sin plan: quien no puede pagar o no entiende cómo,
+// necesita justamente la guía y el formulario de soporte.
+const BILLING_EXEMPT_PATTERNS = [/\/plan(\/|$)/, /\/billing\/ok$/, /\/switch-org$/, /\/projects$/, /\/logout$/, /\/organizaciones(\/|$)/, /\/usuarios(\/|$)/, /\/ayuda(\/|$)/];
 function isBillingExempt(path: string): boolean {
   return BILLING_EXEMPT_PATTERNS.some((re) => re.test(path));
 }
@@ -1526,7 +1532,7 @@ adminApp.post("/organizaciones", async (c) => {
 function navVisible(c: HonoContext): Set<string> | null {
   const e = c.get("kontroliaEntitlements");
   const bloqueado = e?.plansRequired === true && e.access !== "ok";
-  return bloqueado ? new Set(["plan", "organizaciones", "usuarios"]) : visibleNavIds(c.get("kontroliaClaims"));
+  return bloqueado ? new Set(["plan", "organizaciones", "usuarios", "ayuda"]) : visibleNavIds(c.get("kontroliaClaims"));
 }
 
 function esOwnerOAdmin(c: HonoContext): boolean {
@@ -1604,6 +1610,69 @@ adminApp.post("/plan/checkout", async (c) => {
 });
 
 /** billing.md B6 — el portal de Stripe. Solo suscripciones de Stripe; las manuales las cambia un admin en panel.kontrolia.io. */
+// Ayuda: guía, preguntas frecuentes, glosario y soporte. Abierta a toda
+// sesión (sin permiso de la app, sin plan, sin bot): quien más la necesita
+// es quien todavía no tiene nada configurado. Con sesión de KontrolIA se
+// exige al menos acceso a la app, como el resto del panel.
+function accesoAyudaDenegado(c: HonoContext): Response | null {
+  const claims = c.get("kontroliaClaims");
+  if (claims && !hasAnyAppAccess(claims)) return c.redirect("/admin/access-denied", 302);
+  return null;
+}
+
+function navDeAyuda(c: HonoContext): Set<string> | null {
+  const e = c.get("kontroliaEntitlements");
+  const bloqueado = e?.plansRequired === true && e.access !== "ok";
+  return bloqueado ? new Set(["plan", "organizaciones", "usuarios", "ayuda"]) : visibleNavIds(c.get("kontroliaClaims"));
+}
+
+adminApp.get("/ayuda", async (c) => {
+  const denied = accesoAyudaDenegado(c);
+  if (denied) return denied;
+  return c.html(
+    renderAyuda({
+      email: c.get("kontroliaClaims")?.email ?? null,
+      correoSoporte: correoSoporte(c.env),
+      notice: { ok: c.req.query("ok") ?? undefined, err: c.req.query("err") ?? undefined },
+      visibleNavIds: navDeAyuda(c),
+    }),
+  );
+});
+
+adminApp.post("/ayuda/soporte", async (c) => {
+  const denied = accesoAyudaDenegado(c);
+  if (denied) return denied;
+  const form = await c.req.formData();
+  const tema = String(form.get("tema") ?? "").trim().slice(0, 120);
+  const mensaje = String(form.get("mensaje") ?? "").trim().slice(0, 3000);
+  const correo = String(form.get("correo") ?? "").trim().slice(0, 200);
+  const telefono = String(form.get("telefono") ?? "").trim().slice(0, 40);
+  if (!tema || mensaje.length < 10 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
+    return c.redirect(`/admin/ayuda?err=${encodeURIComponent("Falta el tema, el mensaje (al menos 10 letras) o un correo válido.")}#soporte`, 302);
+  }
+  const claims = c.get("kontroliaClaims");
+  const botId = c.get("botId") ?? null;
+  const bot = botId ? await new BotsRepo(new Db(c.env.DB)).getById(botId).catch(() => null) : null;
+  const sub = c.get("kontroliaEntitlements")?.subscription ?? null;
+  const r = await enviarSoporte(c.env, {
+    tema,
+    mensaje,
+    correo,
+    telefono,
+    contexto: {
+      email: claims?.email ?? null,
+      organizationId: claims?.organization_id ?? c.get("kontroliaOrgId") ?? null,
+      botId,
+      botName: bot?.name ?? null,
+      plan: sub ? `${sub.planName} (${sub.status}${sub.billingInterval === "year" ? ", anual" : ""})` : null,
+      baseUrl: (c.env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, ""),
+    },
+  });
+  return r.ok
+    ? c.redirect(`/admin/ayuda?ok=${encodeURIComponent(`Recibimos tu mensaje. Te respondemos a ${correo}, normalmente en menos de un día hábil.`)}#soporte`, 302)
+    : c.redirect(`/admin/ayuda?err=${encodeURIComponent(r.error)}#soporte`, 302);
+});
+
 adminApp.post("/plan/portal", async (c) => {
   const token = c.get("kontroliaAccessToken");
   if (!token) return c.redirect("/admin/plan?err=Entra con tu cuenta de KontrolIA.", 302);

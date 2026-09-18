@@ -53,6 +53,11 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   OPENAI_API_KEY?: string;  // proveedor LLM alterno (ver src/llm/provider.ts)
   RESEND_API_KEY?: string;
+  // Soporte (/admin/ayuda): a dónde llega el formulario y con qué remitente
+  // sale por Resend. Sin SUPPORT_EMAIL va a asesor@kontrolia.io.
+  SUPPORT_EMAIL?: string;
+  SUPPORT_EMAIL_FROM?: string;
+  SUPPORT_EMAIL_FROM_NAME?: string;
   // Canal "email" — SOLO para responder (sendReply); nunca se leen de
   // despliegue, resolveChannelEnv() los mete aquí desde settings.email_*
   // (/admin/config → Correo saliente) para el bot de cada turno. Distinto

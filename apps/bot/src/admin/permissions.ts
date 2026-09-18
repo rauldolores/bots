@@ -153,6 +153,8 @@ export function visibleNavIds(claims: KontroliaTokenClaims | undefined): Set<str
   // no están en NAV_PERMISSIONS y se ven con cualquier sesión de KontrolIA.
   ids.add("organizaciones");
   ids.add("usuarios");
+  // Ayuda es para todos: la guía y el soporte no son un permiso de la app.
+  ids.add("ayuda");
   return ids;
 }
 

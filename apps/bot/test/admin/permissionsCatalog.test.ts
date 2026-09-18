@@ -95,7 +95,8 @@ describe("visibleNavIds()", () => {
   // permiso de la app (los dos últimos son de la organización — el RLS del
   // auth-server decide), y desde que el sidebar es estricto (solo lo que
   // está en el conjunto) hay que ponerlos aquí explícitamente.
-  const SIEMPRE = ["overview", "plan", "organizaciones", "usuarios"];
+  // Ayuda también: la guía y el soporte no son un permiso de la app.
+  const SIEMPRE = ["overview", "plan", "organizaciones", "usuarios", "ayuda"];
 
   it("incluye los ids de NAV_PERMISSIONS cuyo permiso SÍ está en claims.permissions, más los de siempre", () => {
     const ids = visibleNavIds(claims({ permissions: [NAV_PERMISSIONS.leads, NAV_PERMISSIONS.tickets] }));

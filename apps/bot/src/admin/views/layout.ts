@@ -77,6 +77,10 @@ const NAV: Section[] = [
       { id: "plan", label: "Plan y facturación", href: "/admin/plan", icon: "credit-card" },
     ],
   },
+  {
+    label: "Soporte",
+    items: [{ id: "ayuda", label: "Ayuda", href: "/admin/ayuda", icon: "circle-help" }],
+  },
 ];
 
 // <head> assets: fonts, Tailwind CDN + token config, lucide, htmx.
@@ -392,6 +396,9 @@ export function layout(opts: {
           <div id="account-divider" style="display:none;width:1px;height:28px;background:var(--line)"></div>
           <div id="account-switcher" style="position:relative"></div>
         </div>
+        <a href="/admin/ayuda" title="Ayuda y soporte" aria-label="Ayuda y soporte" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--muted);box-shadow:var(--shadow-sm)">
+          <i data-lucide="circle-help" width="17" height="17"></i>
+        </a>
         <div class="live-pill">
           <span style="width:8px;height:8px;border-radius:50%;background:var(--ok);animation:pulse 1.8s ease-in-out infinite,ring 2s infinite"></span>
           <span style="font-size:11.5px;font-weight:700">Bot en línea</span>
