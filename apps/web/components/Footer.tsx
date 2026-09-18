@@ -7,6 +7,15 @@ const links = [
   { name: "Yocoia", href: "https://www.yocoia.com" },
 ];
 
+// Los tres documentos legales. Van en su propia fila y no mezclados con la
+// navegación: Meta y Stripe buscan "Privacidad" y "Términos" en el pie, y
+// tienen que encontrarse a la primera.
+const legalLinks = [
+  { name: "Aviso de Privacidad", href: "/privacidad" },
+  { name: "Términos de Servicio", href: "/terminos" },
+  { name: "Si hablas con un agente", href: "/privacidad/usuarios" },
+];
+
 const siteLinks = [
   { name: "Características", href: "/#caracteristicas" },
   { name: "Llamadas con IA", href: "/#voz" },
@@ -85,8 +94,20 @@ export default function Footer() {
             ))}
           </div>
 
+          <nav aria-label="Legal" className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+            {legalLinks.map((l) => (
+              <a
+                key={l.href}
+                href={l.href}
+                className="text-[12px] text-stone-500 underline-offset-2 transition-colors hover:text-stone-800 hover:underline"
+              >
+                {l.name}
+              </a>
+            ))}
+          </nav>
+
           <p className="text-[11.5px] text-stone-500">
-            © {new Date().getFullYear()} Kontrolia · Nodia Agents
+            © {new Date().getFullYear()} Kontrolia S.A. de C.V. · Nodia Agents
           </p>
         </div>
       </Container>

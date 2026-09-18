@@ -33,6 +33,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
     },
   ];
 
+  const legal: MetadataRoute.Sitemap = ["/privacidad", "/terminos", "/privacidad/usuarios"].map((path) => ({
+    url: absoluteUrl(path),
+    lastModified,
+    changeFrequency: "yearly",
+    priority: 0.3,
+  }));
+
   const industryPages: MetadataRoute.Sitemap = industries.map((i) => ({
     url: absoluteUrl(`/industrias/${i.slug}`),
     lastModified,
@@ -40,5 +47,5 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.8,
   }));
 
-  return [...home, ...hub, ...industryPages];
+  return [...home, ...hub, ...industryPages, ...legal];
 }
