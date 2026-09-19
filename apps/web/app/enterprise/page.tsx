@@ -124,7 +124,7 @@ const faqs = [
   },
   {
     q: "¿Cuál es la diferencia con el plan Max?",
-    a: "Max es una instancia dedicada autoservicio: base de datos propia, pero sin SLA, sin implementación ni gerente de cuenta, y con los límites de Pro. Enterprise es para quien necesita volumen, un acuerdo de servicio, acompañamiento, o instalarlo en su propia infraestructura.",
+    a: "Max es el plan de volumen en autoservicio: 10 bots, 10,000 conversaciones y 1,000 minutos de voz al mes, en la misma plataforma compartida y sin SLA. Enterprise es para quien necesita una instancia propia —en nube dedicada o en sus servidores—, un acuerdo de servicio, implementación con nuestro equipo y un gerente de cuenta.",
   },
   {
     q: "¿Cómo funciona el piloto?",
@@ -220,7 +220,7 @@ export default function EnterprisePage() {
                 <span className="text-gradient">un acuerdo de servicio y alguien del otro lado</span>
               </h1>
               <p className="mt-6 max-w-2xl text-[15.5px] leading-relaxed text-stone-700 sm:text-base">
-                Para operaciones que ya pasan de 5,000 conversaciones al mes, o que necesitan que los datos vivan
+                Para operaciones que ya rondan las 10,000 conversaciones al mes, o que necesitan que los datos vivan
                 aislados — en una nube dedicada o dentro de sus servidores. Bots y canales sin límite, SLA de 99.5 %,
                 implementación con nuestro equipo y un piloto de {PILOTO.dias} días para decidir con datos.
               </p>
