@@ -28,6 +28,8 @@ export const LIMITES = {
   bots: "bots",
   canales: "canales",
   conversaciones: "conversaciones",
+  /** Minutos de llamadas de voz al mes. Se cuentan al colgar, redondeando hacia arriba. */
+  llamadas: "llamadas",
 } as const;
 export type ClaveDeLimite = (typeof LIMITES)[keyof typeof LIMITES];
 
@@ -180,11 +182,18 @@ export async function hayCupo(env: Env, organizationId: string, clave: ClaveDeLi
  * doble. Nunca lanza — perder una cuenta es tolerable, tumbar la operación
  * que la disparó no.
  */
-export async function contarUso(env: Env, organizationId: string, clave: ClaveDeLimite, idempotencyKey: string): Promise<UsageReport | null> {
+export async function contarUso(
+  env: Env,
+  organizationId: string,
+  clave: ClaveDeLimite,
+  idempotencyKey: string,
+  /** Cuánto cuenta. 1 por defecto (una conversación); los minutos de una llamada son varios. */
+  amount = 1,
+): Promise<UsageReport | null> {
   const cfg = usageConfig(env);
   if (!cfg) return null;
   try {
-    return await reportUsage(cfg, { organizationId, limitKey: clave, idempotencyKey });
+    return await reportUsage(cfg, { organizationId, limitKey: clave, idempotencyKey, amount });
   } catch (e) {
     console.warn(`[billing] reportUsage(${clave}, ${idempotencyKey}):`, e instanceof Error ? e.message : e);
     return null;
@@ -200,6 +209,6 @@ export function textoDeUso(u: { used: number; limit: number | null; period: stri
 
 /** Cómo se le dice al dueño que se topó con el límite, con el número real y a dónde ir. */
 export function mensajeDeLimite(clave: ClaveDeLimite, usage: UsageReport): string {
-  const nombre = { bots: "bots", canales: "canales conectados", conversaciones: "conversaciones" }[clave];
+  const nombre = { bots: "bots", canales: "canales conectados", conversaciones: "conversaciones", llamadas: "minutos de llamadas" }[clave];
   return `Tu plan permite ${usage.limit} ${nombre}${usage.period === "month" ? " al mes" : ""} y ya llevas ${usage.used}. Cambia de plan en Plan y facturación.`;
 }

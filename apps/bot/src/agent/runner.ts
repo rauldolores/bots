@@ -86,29 +86,11 @@ export async function ingestMessage(
   const state = new AgentStateRepo(db);
   const key = conversationKeyOf(botId, payload.channel, payload.channelUserId);
 
-  // Límite "conversaciones" del plan (billing/kontrolia.ts): se exige ANTES
-  // de crear una conversación nueva y se cuenta DESPUÉS, con su id. Una que
-  // ya existía no toca el límite — el plan cuenta conversaciones, no
-  // mensajes. El canal "training" (sandbox del dueño) no cuenta: no es un
-  // cliente. Sin cupo, el mensaje se reconoce al canal pero no se atiende;
-  // el panel muestra el límite agotado en Plan y facturación.
-  const esNueva = payload.channel !== "training" && !(await convs.findByChannelUserId(payload.channel, payload.channelUserId));
-  if (esNueva && bot?.organization_id) {
-    const cupo = await hayCupo(env, bot.organization_id, LIMITES.conversaciones);
-    if (!cupo.ok) {
-      console.warn(`[billing] conversaciones agotadas para la organización ${bot.organization_id}: ${cupo.usage.used}/${cupo.usage.limit} — mensaje de ${payload.channel} sin atender`);
-      return { acknowledged: true, scheduledInMs: null };
-    }
-  }
-
   const { conversation: conv, created } = await convs.getOrCreateConRegistro(
     payload.channel,
     payload.channelUserId,
     payload.displayName,
   );
-  if (created && esNueva && bot?.organization_id) {
-    void contarUso(env, bot.organization_id, LIMITES.conversaciones, conv.id);
-  }
   await state.upsertIdentity(key, {
     conversationId: conv.id,
     channel: payload.channel,
@@ -169,6 +151,53 @@ export async function ingestMessage(
   // Pausada → el bot se queda callado.
   if (await convs.isPaused(conv.id)) {
     return { acknowledged: true, scheduledInMs: null };
+  }
+
+  // Límite "conversaciones" del plan (billing/kontrolia.ts). El plan cuenta
+  // conversaciones, no mensajes: una que ya se atendía sigue de largo aunque
+  // el cupo se haya agotado — cortarle a alguien a media conversación es
+  // peor que dejar entrar a uno nuevo. Se revisa en dos casos:
+  //
+  //   - `created`: acaba de llegar alguien nuevo.
+  //   - `sin_cupo_at`: llegó sin cupo antes y sigue sin ser atendida. Hay que
+  //     volver a preguntar, porque el dueño pudo haber subido de plan.
+  //
+  // Sin cupo, ANTES se descartaba el mensaje en silencio: el cliente del
+  // negocio escribía y nadie le contestaba. Ahora se le contesta una vez, se
+  // pausa un día, y al dueño se le avisa (una vez al día) cuántas personas
+  // está perdiendo. La conversación se cuenta igual en el uso, para que el
+  // panel diga "1,047 de 1,000" y no esconda lo que está pasando.
+  //
+  // El canal "training" (sandbox del dueño) no cuenta: no es un cliente.
+  if (payload.channel !== "training" && bot?.organization_id && (created || conv.sin_cupo_at)) {
+    const cupo = await hayCupo(env, bot.organization_id, LIMITES.conversaciones);
+    if (cupo.ok) {
+      if (created) void contarUso(env, bot.organization_id, LIMITES.conversaciones, conv.id);
+      if (conv.sin_cupo_at) await convs.admitir(conv.id).catch(() => {});
+    } else {
+      console.warn(`[billing] conversaciones agotadas para la organización ${bot.organization_id}: ${cupo.usage.used}/${cupo.usage.limit} — ${payload.channel} en espera`);
+      const { MENSAJE_SIN_CUPO_CHAT, PAUSA_SIN_CUPO_MS, registrarSinCupo } = await import("../billing/sinCupo");
+      if (created) {
+        // Se cuenta aunque no haya cupo: el uso real es el que se ve, no el
+        // que el plan permite. Y se contesta UNA vez — las demás veces
+        // (sin_cupo_at ya puesto) solo se renueva la pausa, en silencio.
+        void contarUso(env, bot.organization_id, LIMITES.conversaciones, conv.id);
+        await convs.marcarSinCupo(conv.id).catch(() => {});
+        try {
+          await new MessagesRepo(db, botId).append(conv.id, "assistant", MENSAJE_SIN_CUPO_CHAT);
+          const channel = payload.channel as ChannelId;
+          await pickAdapter(channel).sendReply(
+            { channel, channelUserId: payload.channelUserId, chunks: [MENSAJE_SIN_CUPO_CHAT] },
+            env,
+          );
+        } catch (e) {
+          console.error("[billing] no se pudo contestar al cliente sin cupo:", e);
+        }
+        void registrarSinCupo(env, botId, LIMITES.conversaciones, cupo.usage);
+      }
+      await convs.setPausedUntil(conv.id, Date.now() + PAUSA_SIN_CUPO_MS).catch(() => {});
+      return { acknowledged: true, scheduledInMs: null };
+    }
   }
 
   // Baja ("STOP", "no me escriban"): se registra y se contesta UNA vez, sin

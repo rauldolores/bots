@@ -1,0 +1,20 @@
+-- Conversaciones que llegaron cuando el plan ya no tenía cupo.
+--
+-- Hasta ahora, al agotarse las conversaciones del plan, el mensaje se
+-- reconocía al canal y NO se atendía: el cliente del negocio escribía por
+-- WhatsApp y nadie le contestaba, sin explicación. Y la conversación ni
+-- siquiera se creaba, así que el dueño tampoco veía en su bandeja a la gente
+-- que estaba perdiendo.
+--
+-- Ahora la conversación SE CREA, se le contesta una vez con un mensaje
+-- amable, se pausa, y se marca aquí. La marca sirve para dos cosas:
+--
+--   1. Saber que esa persona todavía no ha sido atendida de verdad: cuando
+--      vuelva a escribir, hay que volver a preguntar si ya hay cupo (porque
+--      el dueño pudo haber subido de plan) en vez de tratarla como una
+--      conversación existente que sigue de largo.
+--   2. Que el panel pueda mostrar cuántas personas se quedaron sin atender
+--      por el límite — que es el mejor argumento para el plan siguiente.
+--
+-- Se limpia (vuelve a NULL) en cuanto la conversación se admite.
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS sin_cupo_at BIGINT;

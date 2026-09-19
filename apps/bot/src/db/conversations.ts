@@ -11,6 +11,8 @@ export interface Conversation {
   paused_until: number | null;
   open_ticket_id: string | null;
   metadata: string | null;
+  /** Llegó sin cupo en el plan y aún no ha sido atendida. Ver migración 20260918120000. */
+  sin_cupo_at: number | null;
 }
 
 export class ConversationsRepo {
@@ -150,6 +152,25 @@ export class ConversationsRepo {
     } catch {
       return {};
     }
+  }
+
+  /** La conversación llegó sin cupo: queda marcada hasta que se admita. */
+  async marcarSinCupo(id: string, at: number = Date.now()): Promise<void> {
+    await this.db.run("UPDATE conversations SET sin_cupo_at = ? WHERE id = ? AND bot_id = ?", [at, id, this.botId]);
+  }
+
+  /** Ya hay cupo (o el dueño subió de plan): se admite y se borra la marca. */
+  async admitir(id: string): Promise<void> {
+    await this.db.run("UPDATE conversations SET sin_cupo_at = NULL WHERE id = ? AND bot_id = ?", [id, this.botId]);
+  }
+
+  /** Cuántas personas se quedaron sin atender por el límite — para el panel y el aviso al dueño. */
+  async contarSinCupo(): Promise<number> {
+    const row = await this.db.first<{ n: number }>(
+      "SELECT count(*)::int AS n FROM conversations WHERE bot_id = ? AND sin_cupo_at IS NOT NULL",
+      [this.botId],
+    );
+    return row?.n ?? 0;
   }
 
   async setPausedUntil(id: string, until: number | null): Promise<void> {

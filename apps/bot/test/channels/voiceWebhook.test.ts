@@ -19,6 +19,21 @@ import { BotChannelsRepo } from "../../src/db/botChannels";
 import { VoiceNumbersRepo, DuplicateVoiceNumberError } from "../../src/db/voiceNumbers";
 import { createSecret } from "../../src/db/vault";
 import type { Db } from "../../src/db/client";
+import { vi } from "vitest";
+
+// El límite "llamadas" del plan (minutos de voz al mes). Mockeado: lo que se
+// prueba es que el webhook pregunta ANTES de conectar el stream y qué le
+// contesta a quien llama; el protocolo con KontrolIA ya lo prueba
+// billing/kontrolia.test.ts.
+const hayCupoMock = vi.fn();
+vi.mock("../../src/billing/kontrolia", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/billing/kontrolia")>();
+  return { ...actual, hayCupo: (...a: unknown[]) => hayCupoMock(...a) };
+});
+vi.mock("../../src/tools/handoffHuman", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/tools/handoffHuman")>();
+  return { ...actual, notifyOwner: vi.fn().mockResolvedValue(undefined) };
+});
 
 let db: Db;
 let env: any;
@@ -44,6 +59,7 @@ function callRequest(botId: string, params: Record<string, string>, signature: s
 beforeEach(async () => {
   db = await createTestDb();
   env = { DB: db.driver, DASHBOARD_BASE_URL: BASE_URL, TWILIO_ACCOUNT_SID: "ACxxxx" };
+  hayCupoMock.mockReset().mockResolvedValue({ ok: true, usage: null });
   // Conexión "real" del canal — mismo camino que /admin/conexiones (Vault +
   // bot_channels), no una variable de entorno suelta. Sin `name`: vault.secrets
   // vive en su propio schema y NO se trunca entre tests (no es del schema de
@@ -224,5 +240,46 @@ describe("VoiceNumbersRepo — la entidad de asociación (F7 fase 7)", () => {
     await new VoiceNumbersRepo(db).register({ botId: otherBotId, phoneNumber: "+19995559999" });
     const numbers = await new VoiceNumbersRepo(db).listByBot(TEST_BOT_ID);
     expect(numbers.map((n) => n.phone_number)).not.toContain("+19995559999");
+  });
+});
+
+/**
+ * Sin minutos en el plan, la llamada no se conecta al agente.
+ *
+ * Conectar ya cuesta —ElevenLabs cobra desde que contesta—, así que se
+ * pregunta ANTES. Y a quien llama no se le deja en silencio ni con tono de
+ * ocupado: se le dice con la voz de Twilio y se cuelga.
+ */
+describe("handleIncomingVoiceCall — sin minutos en el plan", () => {
+  const canonicalUrl = `${BASE_URL}/webhooks/voice/${TEST_BOT_ID}`;
+
+  it("le dice a quien llama que no puede atender, y cuelga — sin <Connect>", async () => {
+    hayCupoMock.mockResolvedValue({
+      ok: false,
+      usage: { used: 200, limit: 200, remaining: 0, period: "month", exceeded: true },
+    });
+    const sig = twilioSignatureFor(canonicalUrl, PARAMS);
+    const res = await handleIncomingVoiceCall(callRequest(TEST_BOT_ID, PARAMS, sig), env, TEST_BOT_ID);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/xml");
+    const body = await res.text();
+    expect(body).toContain('<Say language="es-MX">');
+    expect(body).toContain("<Hangup/>");
+    expect(body).not.toContain("<Connect>");
+    // Lo que oye el cliente no menciona el plan: es asunto del negocio.
+    expect(body.toLowerCase()).not.toMatch(/plan|límite|limite|minutos/);
+  });
+
+  it("pregunta por el límite 'llamadas', no por 'conversaciones'", async () => {
+    const sig = twilioSignatureFor(canonicalUrl, PARAMS);
+    await handleIncomingVoiceCall(callRequest(TEST_BOT_ID, PARAMS, sig), env, TEST_BOT_ID);
+    expect(hayCupoMock).toHaveBeenCalledWith(expect.anything(), expect.any(String), "llamadas");
+  });
+
+  it("con minutos, conecta el stream como siempre", async () => {
+    const sig = twilioSignatureFor(canonicalUrl, PARAMS);
+    const res = await handleIncomingVoiceCall(callRequest(TEST_BOT_ID, PARAMS, sig), env, TEST_BOT_ID);
+    expect(await res.text()).toContain("<Connect><Stream");
   });
 });

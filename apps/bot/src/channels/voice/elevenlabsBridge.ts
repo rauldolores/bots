@@ -679,6 +679,13 @@ export class ElevenLabsCallBridge implements CallBridge {
     void this.close("transferred");
   }
 
+  private async contarMinutos(db: Db, minutos: number): Promise<void> {
+    const bot = await new BotsRepo(db).getById(this.deps.botId);
+    if (!bot?.organization_id) return;
+    const { contarUso, LIMITES } = await import("../../billing/kontrolia");
+    await contarUso(this.deps.env, bot.organization_id, LIMITES.llamadas, this.callRowId, minutos);
+  }
+
   private async registrarCostos(): Promise<void> {
     if (!this.callRowId) return;
     const db = this.db();
@@ -693,6 +700,17 @@ export class ElevenLabsCallBridge implements CallBridge {
       estimatedAiCostUsd: estimateElevenLabsCost(durationMs),
       estimatedTelephonyCostUsd: estimateTelephonyCost(durationMs, tarifaTelefonia),
     });
+
+    // Los minutos de esta llamada, contra el límite "llamadas" del plan.
+    // Redondeados hacia arriba y mínimo uno, igual que cobra la telefonía:
+    // una llamada de 20 segundos es un minuto. La clave de idempotencia es
+    // la propia llamada, así que un cierre repetido nunca cuenta doble.
+    if (durationMs > 0) {
+      const minutos = Math.max(1, Math.ceil(durationMs / 60_000));
+      void this.contarMinutos(db, minutos).catch((e) =>
+        console.warn("[voice-elevenlabs] no se pudieron contar los minutos:", e),
+      );
+    }
     if (this.guardarTranscripcion && this.transcripcion.length > 0) {
       await repo.setTranscript(this.callRowId, this.transcripcion).catch((e) =>
         console.error("[voice-elevenlabs] no se pudo guardar la transcripción:", e),

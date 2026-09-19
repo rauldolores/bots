@@ -157,7 +157,43 @@ export async function handleIncomingVoiceCall(request: Request, rawEnv: Env, bot
   // esa llamada. No-op silencioso si no hay ninguno en curso.
   await recordOnboardingMilestones(env, botId, ["number_detected", "call_received"], { callSid });
 
+  // Límite "llamadas" del plan: minutos de voz al mes (billing/kontrolia.ts).
+  // Se pregunta ANTES de conectar el stream, porque conectar ya cuesta
+  // (ElevenLabs cobra desde que contesta). Sin minutos, se le dice a quien
+  // llama con la voz de Twilio y se cuelga — un mensaje de unos segundos, no
+  // silencio ni tono de ocupado. El dueño recibe su aviso diario igual que
+  // con las conversaciones. Los minutos se cuentan al colgar, en el puente.
+  //
+  // Fallo abierto, como todo el billing: si el auth-server no contesta, la
+  // llamada se atiende.
+  if (bot.organization_id) {
+    const { hayCupo, LIMITES } = await import("../../billing/kontrolia");
+    const cupo = await hayCupo(rawEnv, bot.organization_id, LIMITES.llamadas);
+    if (!cupo.ok) {
+      logVoiceEvent("webhook_reject", { botId, callSid: maskId(callSid), reason: "sin_minutos" });
+      const { MENSAJE_SIN_CUPO_VOZ, registrarSinCupo } = await import("../../billing/sinCupo");
+      void registrarSinCupo(rawEnv, botId, LIMITES.llamadas, cupo.usage);
+      return buildSinMinutosResponse(MENSAJE_SIN_CUPO_VOZ);
+    }
+  }
+
   logVoiceEvent("webhook_call", { botId, callSid: maskId(callSid), from: maskId(from) });
 
   return buildStreamConnectResponse(rawEnv, authToken, { botId, callSid, from, to });
+}
+
+/**
+ * TwiML para una llamada que no se puede atender: lo dice y cuelga.
+ *
+ * `language="es-MX"` para que Twilio elija una voz en español de México; sin
+ * eso lee el texto con acento de otro lado. Sin `<Connect>`: esta llamada
+ * nunca llega al gateway ni a ElevenLabs, así que no gasta minutos de nadie.
+ */
+function buildSinMinutosResponse(mensaje: string): Response {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><Response><Say language="es-MX">${escaparXml(mensaje)}</Say><Hangup/></Response>`;
+  return new Response(xml, { status: 200, headers: { "Content-Type": "text/xml; charset=utf-8" } });
+}
+
+function escaparXml(texto: string): string {
+  return texto.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
