@@ -11,6 +11,7 @@ import { getBufferMs } from "./config";
 import { getNiche } from "./niches";
 import { AGENT_MODES, isAgentModeSlug } from "./agentModes";
 import type { LlmOverrides } from "./llm/provider";
+import { politicaDeIa, aplicarPolitica, type PoliticaDeIa } from "./billing/llaveDeIa";
 import { resolveTimezone } from "./datetime";
 
 export type ModelOverride = "auto" | "haiku" | "sonnet";
@@ -41,6 +42,8 @@ export interface AgentConfig {
   monthlyBudgetUsd?: number;
   /** BYO-LLM del dashboard (proveedor / API key / modelo). */
   llm: LlmOverrides;
+  /** De quién es la llave con la que piensa (billing/llaveDeIa.ts) — el panel lo muestra y el runner lo respeta. */
+  ia: PoliticaDeIa;
   /** Respaldo de otro proveedor si el principal falla — ver otherTierModel/fallbackModel en llm/provider.ts. */
   llmBackup?: { provider?: string; apiKey?: string };
   /** Voz de OpenAI Realtime para llamadas — undefined = default de realtimeClient.ts ("marin"). */
@@ -86,8 +89,14 @@ export function llmBackupFrom(settings: Record<string, string>): { provider?: st
 export async function loadLlmOverrides(env: Env, botId?: string): Promise<LlmOverrides> {
   try {
     const db = new Db(env.DB);
-    const settings = await new SettingsRepo(db, botId ?? (await resolveBotId(db))).allWithSecrets();
-    return llmOverridesFrom(settings);
+    const id = botId ?? (await resolveBotId(db));
+    const settings = await new SettingsRepo(db, id).allWithSecrets();
+    // La política del plan (llave propia / incluida / sin llave) se aplica
+    // AQUÍ, en la puerta por la que entran todos los que piensan fuera del
+    // turno (análisis del CRM, seguimientos, insights, sugerencias). Si se
+    // aplicara solo en el turno, esos caminos seguirían cayendo a la llave
+    // del entorno.
+    return aplicarPolitica(env, llmOverridesFrom(settings), await politicaDeIa(env, db, id, settings));
   } catch {
     return {};
   }
@@ -142,6 +151,7 @@ export async function resolveAgentConfig(
   // vacío deja el prompt sin esa sección en vez de tronar.
   const bot = await new BotsRepo(db).getById(botId);
   const botConfig = bot?.config ?? {};
+  const ia = await politicaDeIa(env, db, botId, settings);
 
   const get = (key: string): string | undefined => {
     const v = settings[key];
@@ -305,8 +315,12 @@ export async function resolveAgentConfig(
     disabledToolNames,
     temperature,
     monthlyBudgetUsd,
-    llm: llmOverridesFrom(settings),
-    llmBackup: llmBackupFrom(settings),
+    llm: aplicarPolitica(env, llmOverridesFrom(settings), ia),
+    // Con la IA incluida no hay respaldo del dueño que aplicar: la incluida
+    // es la única llave en juego (y si falla, turn.ts ya prueba otro modelo
+    // del mismo proveedor).
+    llmBackup: ia.modo === "incluida" || ia.modo === "sin_llave" ? {} : llmBackupFrom(settings),
+    ia,
     voiceGreeting,
   };
 }

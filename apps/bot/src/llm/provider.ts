@@ -48,6 +48,20 @@ export interface LlmOverrides {
   provider?: string;
   apiKey?: string;
   model?: string;
+  /**
+   * El plan no permite usar ninguna llave (billing/llaveDeIa.ts). createModel
+   * LANZA en vez de caer a la llave del entorno: en el SaaS esa llave es de
+   * Kontrolia, y "sin llave" tiene que significar sin llave.
+   */
+  bloqueo?: "trial" | "sin_plan" | "sin_llave_del_sistema";
+}
+
+/** No hay con qué pensar. Quien la atrapa decide cómo decírselo al dueño. */
+export class SinLlaveDeIaError extends Error {
+  constructor(readonly motivo: NonNullable<LlmOverrides["bloqueo"]>) {
+    super(`El bot no tiene llave de IA (${motivo})`);
+    this.name = "SinLlaveDeIaError";
+  }
 }
 
 /** Models offered in the dashboard picker. */
@@ -112,6 +126,7 @@ function envKeyFor(env: Env, provider: LlmProvider): string | undefined {
  * el bot nunca se queda mudo por una config incompleta.
  */
 export function createModel(env: Env, tier: Tier, ov?: LlmOverrides): ResolvedModel {
+  if (ov?.bloqueo) throw new SinLlaveDeIaError(ov.bloqueo);
   const ovModel = (ov?.model ?? "").trim();
   const ovProviderRaw = (ov?.provider ?? "").trim().toLowerCase();
 

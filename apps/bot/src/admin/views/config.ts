@@ -7,6 +7,7 @@ import { SETTING_KEYS } from "../../db/settings";
 import type { BotConfig, BotCatalogItem } from "../../db/bots";
 import { renderBusinessContext } from "../../businessContext";
 import { CURATED_MODELS } from "../../llm/provider";
+import { explicacionDeIa, type PoliticaDeIa } from "../../billing/llaveDeIa";
 import { TIMEZONE_OPTIONS, resolveTimezone } from "../../datetime";
 import { DEFAULT_VOICE_GREETING_TEMPLATE } from "../../channels/voice/voiceGreeting";
 import { DEFAULT_VAD_SILENCE_MS } from "../../channels/voice/vad";
@@ -145,7 +146,7 @@ function renderObjetivoField(settings: Record<string, string>): string {
 }
 
 /** Sección "Modelo de IA": proveedor + API key propia + modelo concreto. */
-function renderLlmSection(settings: Record<string, string>, llmTest?: string): string {
+function renderLlmSection(settings: Record<string, string>, llmTest?: string, ia?: PoliticaDeIa): string {
   const provider = settings[SETTING_KEYS.llmProvider] ?? "";
   const model = settings[SETTING_KEYS.llmModel] ?? "";
   const hasKey = (settings[SETTING_KEYS.llmApiKey] ?? "").trim() !== "";
@@ -237,15 +238,35 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
     }
   }
 
+  // De quién es la llave con la que piensa el bot (billing/llaveDeIa.ts). En
+  // el SaaS es lo primero que hay que ver: si está en prueba sin llave, el
+  // bot NO responde y esta pantalla es donde se arregla. En una instalación
+  // propia (sin política) queda la explicación genérica de siempre.
+  const estadoDeIa = (() => {
+    if (!ia || ia.modo === "libre") {
+      return `<div style="display:flex;align-items:flex-start;gap:9px;background:var(--accent-soft);border:1px solid rgba(245,197,24,.35);border-radius:var(--radius-sm);padding:13px 15px">
+        <span style="color:var(--accent-2);flex:none;line-height:1">◆</span>
+        <p class="text-[12px]" style="color:var(--muted);margin:0">Elige qué inteligencia artificial usa tu bot. Puedes usar tu propia API key para pagar tú el consumo directamente. Si lo dejas en automático, el bot usa la configuración incluida (rápido para lo simple, inteligente para lo difícil).</p>
+      </div>`;
+    }
+    const { titulo, detalle, alerta } = explicacionDeIa(ia);
+    const color = alerta ? "var(--bad)" : "var(--ok)";
+    const fondo = alerta ? "rgba(220,38,38,.08)" : "rgba(127,183,126,.08)";
+    return `<div data-testid="estado-ia" data-modo="${esc(ia.modo)}" style="display:flex;align-items:flex-start;gap:10px;background:${fondo};border:1px solid ${color};border-radius:var(--radius-sm);padding:13px 15px">
+        <span style="width:8px;height:8px;border-radius:50%;background:${color};margin-top:5px;flex:none"></span>
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <div class="font-display font-semibold text-[13px] text-cream">${esc(titulo)}</div>
+          <p class="text-[12px]" style="color:var(--muted);margin:0">${esc(detalle)}</p>
+        </div>
+      </div>`;
+  })();
+
   return `
     <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:18px">
       <div style="display:flex;flex-direction:column;gap:2px">
         <h3 class="font-display font-semibold text-[13.5px] text-cream">🧠 Modelo de IA</h3>
       </div>
-      <div style="display:flex;align-items:flex-start;gap:9px;background:var(--accent-soft);border:1px solid rgba(245,197,24,.35);border-radius:var(--radius-sm);padding:13px 15px">
-        <span style="color:var(--accent-2);flex:none;line-height:1">◆</span>
-        <p class="text-[12px]" style="color:var(--muted);margin:0">Elige qué inteligencia artificial usa tu bot. Puedes usar tu propia API key para pagar tú el consumo directamente. Si lo dejas en automático, el bot usa la configuración incluida (rápido para lo simple, inteligente para lo difícil).</p>
-      </div>
+      ${estadoDeIa}
       ${degradedBanner}
       ${testBanner}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
@@ -266,10 +287,18 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string): s
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
         ${labelConBadge("Tu API key (opcional)", keyBadge(hasKey, keyTail))}
-        <p class="text-dim text-[11px]">${hasKey ? "Ya está guardada y en uso. Déjala en blanco para conservarla, escribe una nueva para reemplazarla, o marca la casilla de abajo para quitarla." : "Pégala aquí para que el consumo se cobre a tu cuenta. Vacío = usar la key incluida del sistema."}</p>
+        <p class="text-dim text-[11px]">${
+          hasKey
+            ? "Ya está guardada y en uso. Déjala en blanco para conservarla, escribe una nueva para reemplazarla, o marca la casilla de abajo para quitarla."
+            : ia?.modo === "incluida"
+              ? "Solo si quieres otro modelo: pégala aquí, elige proveedor y modelo arriba, y el consumo se cobra a tu cuenta."
+              : ia?.modo === "sin_llave"
+                ? "Pégala aquí y guarda: tu bot empieza a responder de inmediato. El consumo se cobra a tu cuenta con el proveedor."
+                : "Pégala aquí para que el consumo se cobre a tu cuenta. Vacío = usar la key incluida del sistema."
+        }</p>
         <input type="password" name="${SETTING_KEYS.llmApiKey}" value="" autocomplete="off"
                placeholder="${hasKey ? "Déjalo vacío para conservar la que ya guardaste" : "sk-ant-… o sk-…"}" style="${INPUT_STYLE}">
-        ${hasKey ? `<label class="text-dim text-[11.5px]" style="display:flex;align-items:center;gap:7px;cursor:pointer"><input type="checkbox" name="llm_api_key_clear" value="1"> Quitar mi API key y volver a la del sistema</label>` : ""}
+        ${hasKey ? `<label class="text-dim text-[11.5px]" style="display:flex;align-items:center;gap:7px;cursor:pointer"><input type="checkbox" name="llm_api_key_clear" value="1"> ${ia?.modo === "propia" ? "Quitar mi API key y usar la IA incluida en mi plan" : "Quitar mi API key y volver a la del sistema"}</label>` : ""}
       </div>
       <a href="/admin/config/llm-test" class="text-[12px] font-display font-semibold"
          style="width:fit-content;border:1px solid var(--line);color:var(--cream);padding:9px 14px;text-decoration:none">⚡ Probar mi configuración (guarda primero)</a>
@@ -649,6 +678,8 @@ export function renderConfig(
   elevenError?: string,
   /** ¿Ya conectó Telegram como canal? El código de vínculo de "Aviso al dueño" lo necesita — sin canal, no hay a qué bot escribirle el código. */
   telegramChannelConnected = false,
+  /** De quién es la llave de IA (billing/llaveDeIa.ts). Sin esto, la sección de modelo se explica en genérico. */
+  ia?: PoliticaDeIa,
 ): string {
   const personalidadCards = CONTROL_LIST.filter((c) => c.key !== SETTING_KEYS.modelOverride)
     .map((c) => renderCardGroup(c, settings))
@@ -724,7 +755,7 @@ export function renderConfig(
             <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:22px">
               ${modelTierCards}
             </div>
-            ${renderLlmSection(settings, llmTest)}
+            ${renderLlmSection(settings, llmTest, ia)}
             ${renderVoiceSection(settings, hasEnvOpenAiKey, elevenError)}
           </div>
 

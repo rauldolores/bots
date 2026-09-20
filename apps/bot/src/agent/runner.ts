@@ -15,6 +15,7 @@ import { MessagesRepo } from "../db/messages";
 import { BotsRepo } from "../db/bots";
 import { hayCupo, contarUso, LIMITES } from "../billing/kontrolia";
 import { VENTANA_DE_CONVERSACION_MS } from "../billing/conversacion";
+import { politicaDeIa, avisarSinLlave } from "../billing/llaveDeIa";
 import { resolveAgentConfig } from "../settings-loader";
 import type { WarmTarget } from "../customer/warm";
 import { chunkReplyForChannel } from "../replies/chunker";
@@ -208,6 +209,24 @@ export async function ingestMessage(
         await convs.setPausedUntil(conv.id, Date.now() + PAUSA_SIN_CUPO_MS).catch(() => {});
         return { acknowledged: true, scheduledInMs: null };
       }
+    }
+  }
+
+  // ¿Hay con qué pensar? (billing/llaveDeIa.ts). En prueba gratis sin llave
+  // propia, o sin plan, el bot no responde: no se programa turno (que
+  // tronaría en createModel) y al dueño se le avisa una vez al día. Al
+  // cliente no se le dice nada — es el negocio el que tiene que actuar, y
+  // un "no tengo IA" al cliente lo deja peor que el silencio de un negocio
+  // que todavía no abre.
+  //
+  // Va DESPUÉS del cupo a propósito: la conversación se cuenta igual (llegó),
+  // y el aviso de cupo tiene prioridad si se dieron los dos.
+  if (payload.channel !== "training") {
+    const ia = await politicaDeIa(env, db, botId);
+    if (ia.modo === "sin_llave") {
+      console.warn(`[llm] bot ${botId} sin llave de IA (${ia.motivo}) — ${payload.channel} sin atender`);
+      void avisarSinLlave(env, botId, ia.motivo);
+      return { acknowledged: true, scheduledInMs: null };
     }
   }
 

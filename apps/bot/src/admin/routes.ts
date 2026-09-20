@@ -1188,6 +1188,18 @@ adminApp.post("/entrenamiento/mensaje", async (c) => {
     channelUserId: TRAINING_USER,
   });
 
+  // Sin llave de IA (prueba gratis sin llave propia, o sin plan) el turno
+  // tronaría en createModel y el dueño vería su mensaje sin respuesta, sin
+  // saber por qué. Aquí sí se le dice: es él quien tiene que ponerla.
+  const { politicaDeIa, mensajeDeSandboxSinLlave } = await import("../billing/llaveDeIa");
+  const ia = await politicaDeIa(c.env, new Db(c.env.DB), botId);
+  if (ia.modo === "sin_llave") {
+    const msgs = new MessagesRepo(new Db(c.env.DB), botId);
+    await msgs.append(convId, "user", texto);
+    await msgs.append(convId, "assistant", mensajeDeSandboxSinLlave(ia.motivo));
+    return c.html(await renderTrainingThread(c.env, botId));
+  }
+
   try {
     await runAgentTurnCore({
       env: c.env,
@@ -2194,6 +2206,7 @@ adminApp.get("/config", async (c) => {
       visibleNavIds(c.get("kontroliaClaims")),
       c.req.query("eleven_error") ?? undefined,
       Boolean(telegramChannel),
+      await (await import("../billing/llaveDeIa")).politicaDeIa(c.env, configDb, configBotId, settings),
     ),
   );
 });

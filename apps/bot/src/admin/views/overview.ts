@@ -8,6 +8,7 @@ import { costOfUsage, type ModelId } from "../../pricing";
 import { resolveAgentConfig, type AgentConfig } from "../../settings-loader";
 import { buildTools } from "../../tools";
 import { resolveProvider, modelIdFor } from "../../llm/provider";
+import { explicacionDeIa } from "../../billing/llaveDeIa";
 import { handoffNotifyStatus } from "../../tools/handoffHuman";
 import { SettingsRepo } from "../../db/settings";
 import { connectionsSummary } from "./conexiones";
@@ -45,6 +46,11 @@ function initialsOf(label: string): string {
 
 /** "auto" or the concrete model id the agent is pinned to. */
 function agentModelLabel(env: Env, cfg: AgentConfig): string {
+  // Con la IA incluida el modelo va fijo por el plan; con llave propia y
+  // modelo elegido, ese. "auto" solo cuando de verdad alterna por tier.
+  if (cfg.ia.modo === "incluida") return `${cfg.ia.modelo} · incluido`;
+  if (cfg.ia.modo === "sin_llave") return "sin IA";
+  if (cfg.llm.model?.trim()) return cfg.llm.model.trim();
   if (cfg.modelOverride === "auto") return "auto";
   const provider = resolveProvider(env);
   return modelIdFor(env, provider, cfg.modelOverride === "haiku" ? "fast" : "smart");
@@ -351,6 +357,21 @@ export async function renderOverview(
             ver tickets <i data-lucide="arrow-right" width="13" height="13"></i>
           </a>
         </div>
+        ${(() => {
+          // Sin llave de IA el bot NO contesta a nadie (billing/llaveDeIa.ts):
+          // es la alerta más grave que puede haber aquí, por encima del handoff.
+          if (agentCfg.ia.modo !== "sin_llave") return "";
+          const { titulo, detalle } = explicacionDeIa(agentCfg.ia);
+          return `
+          <div class="mt-3" data-testid="alerta-sin-ia" style="display:flex;align-items:flex-start;gap:10px;background:#fdf4f3;border:1px solid #f0cfc9;border-radius:10px;padding:11px 13px">
+            <span style="width:7px;height:7px;border-radius:50%;background:#c2410c;margin-top:5px;flex:none"></span>
+            <div class="flex flex-col gap-0.5" style="flex:1;min-width:0">
+              <div class="text-[13px] font-semibold" style="color:#7c2d12">${esc(titulo)}</div>
+              <div class="text-[12px]" style="color:#8a5a44;line-height:1.45">${esc(detalle)}</div>
+            </div>
+            <a href="/admin/config?section=modelo" class="flex-none text-[11.5px]" style="background:var(--panel);border:1px solid #e5c9c2;border-radius:8px;padding:6px 10px;color:#7c2d12;white-space:nowrap">Configurar</a>
+          </div>`;
+        })()}
         ${(() => {
           // Cuando el bot escala a humano, ¿alguien se entera? Antes esto
           // fallaba en silencio; ahora es la alerta principal de esta tarjeta

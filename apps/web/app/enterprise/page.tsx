@@ -120,7 +120,7 @@ const faqs = [
   },
   {
     q: "¿La IA está incluida?",
-    a: "No, y es a propósito: el agente usa tu propia llave de Claude, ChatGPT o Grok, así pagas al proveedor el precio real sin intermediarios y eliges el modelo. En una operación de 10,000 conversaciones al mes suele costar entre $2,000 y $6,000 MXN, según el modelo.",
+    a: "En Enterprise no, y es a propósito: a ese volumen conviene que el agente use tu propia llave de Claude, ChatGPT o Grok — pagas al proveedor el precio real sin intermediarios y eliges el modelo. En una operación de 10,000 conversaciones al mes suele costar entre $2,000 y $6,000 MXN, según el modelo. (En los planes de autoservicio la IA sí va incluida, con GPT-4.1 mini.)",
   },
   {
     q: "¿Cuál es la diferencia con el plan Max?",
