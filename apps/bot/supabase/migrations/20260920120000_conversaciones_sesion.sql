@@ -1,0 +1,18 @@
+-- Cuándo empezó la sesión actual de una conversación.
+--
+-- Hasta ahora una "conversación" era una FILA: una persona por (bot, canal,
+-- id), creada la primera vez que escribió y contada una sola vez, de por
+-- vida. Un cliente que escribe cada semana durante un año pesaba lo mismo
+-- que uno que escribió una vez. Con eso, el límite "conversaciones / mes"
+-- del plan no medía nada.
+--
+-- Ahora una conversación es una SESIÓN de 24 horas (la misma definición que
+-- usa Meta para cobrar WhatsApp): si la persona vuelve a escribir después de
+-- un día sin mensajes, es una conversación nueva para el plan. La fila NO se
+-- parte —historial, memoria y seguimiento siguen siendo los mismos—; solo se
+-- anota aquí cuándo arrancó la sesión vigente, y el contador del plan se
+-- dispara cada vez que este valor cambia.
+--
+-- NULL en filas viejas: la siguiente vez que escriban, se abre (y se cuenta)
+-- una sesión — que es exactamente lo que dice la definición.
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS sesion_iniciada_at BIGINT;

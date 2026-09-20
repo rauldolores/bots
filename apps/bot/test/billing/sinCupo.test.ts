@@ -44,6 +44,7 @@ vi.mock("../../src/tools/handoffHuman", async (importOriginal) => {
 const { ingestMessage } = await import("../../src/agent/runner");
 const { registrarSinCupo, MENSAJE_SIN_CUPO_CHAT } = await import("../../src/billing/sinCupo");
 const { LIMITES } = await import("../../src/billing/kontrolia");
+const { VENTANA_DE_CONVERSACION_MS } = await import("../../src/billing/conversacion");
 
 import type { UsageReport } from "@kontrolia/auth/server";
 
@@ -82,6 +83,109 @@ beforeEach(async () => {
 
 const entra = (text: string, channelUserId = "+5215512345678") =>
   ingestMessage(env, { channel: "twilio", channelUserId, text }, TEST_BOT_ID);
+
+/** Simula que la sesión vigente lleva `ms` sin mensajes. */
+async function envejecer(convId: string, ms: number) {
+  const hace = Date.now() - ms;
+  await db.run("UPDATE conversations SET last_message_at = ?, sesion_iniciada_at = ? WHERE id = ?", [hace, hace, convId]);
+}
+
+describe("una conversación es una sesión de 24 h (billing/conversacion.ts)", () => {
+  it("la primera vez que alguien escribe se cuenta una conversación", async () => {
+    await entra("Hola");
+    expect(contarUsoMock).toHaveBeenCalledTimes(1);
+    const conv = (await new ConversationsRepo(db, TEST_BOT_ID).findByChannelUserId("twilio", "+5215512345678"))!;
+    expect(conv.sesion_iniciada_at).toBeGreaterThan(0);
+  });
+
+  it("varios mensajes seguidos (dentro del buffer) son UNA conversación", async () => {
+    await entra("Hola");
+    await entra("quiero información");
+    await entra("de los precios");
+    expect(contarUsoMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("la misma persona al día siguiente (más de 24 h en silencio) es OTRA conversación", async () => {
+    await entra("Hola");
+    const conv = (await new ConversationsRepo(db, TEST_BOT_ID).findByChannelUserId("twilio", "+5215512345678"))!;
+    await envejecer(conv.id, VENTANA_DE_CONVERSACION_MS + 60_000);
+
+    await entra("Hola otra vez");
+
+    expect(contarUsoMock).toHaveBeenCalledTimes(2);
+    // Con clave de idempotencia distinta: es otra sesión, no un reintento.
+    const claves = contarUsoMock.mock.calls.map((c) => c[3] as string);
+    expect(new Set(claves).size).toBe(2);
+    expect(claves.every((k) => k.startsWith(`${conv.id}:`))).toBe(true);
+  });
+
+  it("si vuelve dentro de las 24 h, sigue siendo la misma conversación", async () => {
+    await entra("Hola");
+    const conv = (await new ConversationsRepo(db, TEST_BOT_ID).findByChannelUserId("twilio", "+5215512345678"))!;
+    await envejecer(conv.id, VENTANA_DE_CONVERSACION_MS - 60_000);
+
+    await entra("¿Sigues ahí?");
+
+    expect(contarUsoMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("una plática que se alarga más de 24 h en total NO se parte mientras no haya silencio", async () => {
+    await entra("Hola");
+    const convs = new ConversationsRepo(db, TEST_BOT_ID);
+    const conv = (await convs.findByChannelUserId("twilio", "+5215512345678"))!;
+    // La sesión abrió hace 30 h, pero el último mensaje fue hace 2 h.
+    await db.run("UPDATE conversations SET sesion_iniciada_at = ?, last_message_at = ? WHERE id = ?", [
+      Date.now() - 30 * 3600_000,
+      Date.now() - 2 * 3600_000,
+      conv.id,
+    ]);
+
+    await entra("¿Entonces qué precio me das?");
+
+    expect(contarUsoMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("filas de antes de esta regla (sin sesión) cuentan al siguiente mensaje", async () => {
+    await entra("Hola");
+    const conv = (await new ConversationsRepo(db, TEST_BOT_ID).findByChannelUserId("twilio", "+5215512345678"))!;
+    await db.run("UPDATE conversations SET sesion_iniciada_at = NULL WHERE id = ?", [conv.id]);
+    contarUsoMock.mockClear();
+
+    await entra("Hola");
+    expect(contarUsoMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("dos webhooks del mismo cliente al mismo tiempo abren UNA sola sesión", async () => {
+    const convs = new ConversationsRepo(db, TEST_BOT_ID);
+    const conv = await convs.getOrCreate("twilio", "+5215599999999");
+    const resultados = await Promise.all(
+      Array.from({ length: 5 }, () => convs.abrirSesionSiVencio(conv.id, VENTANA_DE_CONVERSACION_MS)),
+    );
+    expect(resultados.filter((r) => r !== null)).toHaveLength(1);
+  });
+
+  it("quien llegó sin cupo NO abre otra sesión al insistir; al admitirse, su sesión arranca ahí", async () => {
+    hayCupoMock.mockResolvedValue(AGOTADO);
+    await entra("Hola");
+    const convs = new ConversationsRepo(db, TEST_BOT_ID);
+    let conv = (await convs.findByChannelUserId("twilio", "+5215512345678"))!;
+    // Pasan dos días: se le venció la pausa y también la "sesión".
+    await convs.setPausedUntil(conv.id, null);
+    await envejecer(conv.id, 2 * VENTANA_DE_CONVERSACION_MS);
+
+    await entra("¿Hola?");
+    expect(contarUsoMock).toHaveBeenCalledTimes(1); // solo la de cuando llegó
+
+    await convs.setPausedUntil(conv.id, null);
+    hayCupoMock.mockResolvedValue(CON_CUPO);
+    const antes = Date.now();
+    await entra("¿Ya?");
+    conv = (await convs.findByChannelUserId("twilio", "+5215512345678"))!;
+    expect(conv.sin_cupo_at).toBeNull();
+    expect(conv.sesion_iniciada_at).toBeGreaterThanOrEqual(antes);
+    expect(contarUsoMock).toHaveBeenCalledTimes(1); // y no se cuenta otra vez
+  });
+});
 
 describe("sin cupo de conversaciones — al cliente final", () => {
   it("se le contesta UNA vez con un mensaje que no menciona el plan, y se pausa", async () => {

@@ -13,6 +13,8 @@ export interface Conversation {
   metadata: string | null;
   /** Llegó sin cupo en el plan y aún no ha sido atendida. Ver migración 20260918120000. */
   sin_cupo_at: number | null;
+  /** Cuándo arrancó la sesión vigente — la "conversación" que cuenta el plan. Ver billing/conversacion.ts. */
+  sesion_iniciada_at: number | null;
 }
 
 export class ConversationsRepo {
@@ -159,9 +161,42 @@ export class ConversationsRepo {
     await this.db.run("UPDATE conversations SET sin_cupo_at = ? WHERE id = ? AND bot_id = ?", [at, id, this.botId]);
   }
 
-  /** Ya hay cupo (o el dueño subió de plan): se admite y se borra la marca. */
-  async admitir(id: string): Promise<void> {
-    await this.db.run("UPDATE conversations SET sin_cupo_at = NULL WHERE id = ? AND bot_id = ?", [id, this.botId]);
+  /**
+   * Ya hay cupo (o el dueño subió de plan): se admite y se borra la marca. La
+   * sesión arranca AHORA — la que abrió cuando llegó sin cupo nunca se
+   * atendió, y no se vuelve a contar: ya se contó al llegar.
+   */
+  async admitir(id: string, at: number = Date.now()): Promise<void> {
+    await this.db.run("UPDATE conversations SET sin_cupo_at = NULL, sesion_iniciada_at = ? WHERE id = ? AND bot_id = ?", [
+      at,
+      id,
+      this.botId,
+    ]);
+  }
+
+  /**
+   * Abre una sesión nueva si la anterior ya venció (ventana sin mensajes) o
+   * si nunca hubo una. Devuelve cuándo arrancó la sesión nueva, o null si la
+   * vigente sigue viva. Ver billing/conversacion.ts para la definición.
+   *
+   * Es UN solo UPDATE condicional, no leer-y-decidir, por dos carreras reales:
+   *
+   *   - Dos webhooks del mismo cliente al mismo tiempo: los dos leerían
+   *     "sesión vencida" y los dos contarían. Aquí solo el primero cambia la
+   *     fila; el segundo ya la ve abierta.
+   *   - Varios mensajes dentro del buffer (segundos): `last_message_at` no
+   *     se toca hasta que el bot contesta, así que sin `sesion_iniciada_at`
+   *     en el GREATEST cada mensaje del buffer vería la misma sesión vieja.
+   */
+  async abrirSesionSiVencio(id: string, ventanaMs: number, now: number = Date.now()): Promise<number | null> {
+    const row = await this.db.first<{ sesion_iniciada_at: number }>(
+      `UPDATE conversations SET sesion_iniciada_at = ?
+        WHERE id = ? AND bot_id = ?
+          AND (sesion_iniciada_at IS NULL OR ? - GREATEST(last_message_at, sesion_iniciada_at) > ?)
+        RETURNING sesion_iniciada_at`,
+      [now, id, this.botId, now, ventanaMs],
+    );
+    return row ? Number(row.sesion_iniciada_at) : null;
   }
 
   /** Cuántas personas se quedaron sin atender por el límite — para el panel y el aviso al dueño. */

@@ -100,7 +100,7 @@ export const GUIA: Seccion[] = [
           ] },
           { tipo: "h", texto: "Los avisos que importan" },
           { tipo: "p", texto: "Si aparece **Handoff sin aviso** en rojo, significa que el bot puede crear tickets pero nadie se entera. Presiona **Configurar** y elige cómo quieres que te avise (Telegram es lo más rápido). Ver [Aviso al dueño](/admin/ayuda#config-aviso)." },
-          { tipo: "p", texto: "Con sesión de KontrolIA verás también la tarjeta **Tu plan** con el consumo (bots, canales y conversaciones del mes) y el enlace **Ver plan →**." },
+          { tipo: "p", texto: "Con sesión de KontrolIA verás también la tarjeta **Tu plan** con el consumo (bots, canales, conversaciones y minutos de voz del mes) y el enlace **Ver plan →**. Una **conversación** es una sesión de 24 horas con la misma persona: si te vuelve a escribir después de un día sin mensajes, cuenta como una nueva." },
         ],
       },
       {

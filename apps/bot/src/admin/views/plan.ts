@@ -7,6 +7,7 @@
 import type { KontroliaEntitlements, KontroliaPlan } from "@kontrolia/shared";
 import type { Env } from "../../env";
 import { motivoDeAcceso, textoDeUso } from "../../billing/kontrolia";
+import { DEFINICION_DE_CONVERSACION } from "../../billing/conversacion";
 import { layout } from "./layout";
 
 function esc(s: string): string {
@@ -141,6 +142,7 @@ export function renderPlan(
               })
               .join("")}</tbody>
           </table></div>
+          <p class="text-[11.5px]" style="color:var(--dim);margin:0">${esc(DEFINICION_DE_CONVERSACION)}</p>
         </div>`
       : "";
 

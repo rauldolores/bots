@@ -96,6 +96,8 @@ export default async function Pricing() {
         <p className="mx-auto mt-8 max-w-2xl text-center text-[12.5px] text-stone-500">
           Precios en pesos mexicanos. El pago se procesa en Stripe; nunca vemos tu tarjeta.
           El uso de IA (Claude, ChatGPT o Grok) va con tu propia llave y se paga directo al proveedor.
+          Una conversación es una sesión de 24 horas con la misma persona: si te vuelve a escribir después de un día
+          sin mensajes, cuenta como una nueva.
         </p>
       </Container>
     </section>
