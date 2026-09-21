@@ -502,18 +502,56 @@ function renderAvisoAlDuenoSection(
     </div>`;
 }
 
-/** Sección "Voz": la llave de ElevenLabs, la voz (con su muestra) y cómo contesta el bot. */
+export interface EstadoDeVoz {
+  /** false = el plan no trae minutos (Impulso). */
+  incluida: boolean;
+  /** Minutos al mes del plan; null = sin tope o sin dato. */
+  minutos: number | null;
+  /** Con qué llave se atenderían las llamadas; null = ninguna (ni del bot ni del entorno). */
+  llave: "propia" | "kontrolia" | null;
+}
+
+/** Sección "Voz": la voz (con su muestra) y cómo contesta el bot. La llave ya no se pide: va con el plan. */
 function renderVoiceSection(
   settings: Record<string, string>,
   hasEnvOpenAiKey: boolean,
   elevenError?: string,
+  voz?: EstadoDeVoz,
 ): string {
+  // Plan sin voz (Impulso): no se ofrece nada que configurar. El teléfono no
+  // va a contestar (webhook.ts cuelga sin minutos), así que la única acción
+  // honesta aquí es subir de plan.
+  if (voz && !voz.incluida) {
+    return `
+    <div class="bg-panel border border-line" data-testid="voz-sin-plan" style="padding:20px;display:flex;flex-direction:column;gap:12px">
+      <h3 class="font-display font-semibold text-[13.5px] text-cream">🎙️ Voz — llamadas telefónicas en tiempo real</h3>
+      <p class="text-[12.5px]" style="color:var(--muted);margin:0">Tu plan no incluye minutos de voz. Con <b>Pro</b> tu bot contesta el teléfono con una voz natural, agenda y registra igual que por chat — con minutos incluidos cada mes.</p>
+      <a href="/admin/plan" class="text-[12px] font-display font-semibold" style="width:fit-content;border:1px solid var(--line);color:var(--cream);padding:9px 14px;text-decoration:none">Ver planes →</a>
+    </div>`;
+  }
+
+  const llavePropia = (settings[SETTING_KEYS.voiceElevenLabsApiKey] ?? "").trim();
+  // Qué llave atiende. Con la de Kontrolia no hay nada que pedir; con la
+  // propia se dice y se deja quitar; sin ninguna es un hueco NUESTRO (falta
+  // ELEVENLABS_API_KEY en el entorno), no del dueño.
+  const llaveAviso = llavePropia
+    ? `<div class="text-[11.5px]" style="color:var(--muted);border:1px solid var(--line);padding:9px 12px;display:flex;flex-direction:column;gap:6px">
+         <span>Las llamadas usan <b>tu propia cuenta de ElevenLabs</b> (llave guardada ····${esc(llavePropia.slice(-4))}).</span>
+         <label style="display:flex;align-items:center;gap:7px;cursor:pointer"><input type="checkbox" name="voice_elevenlabs_api_key_clear" value="1"> Quitar mi llave y usar los minutos incluidos en mi plan</label>
+       </div>`
+    : voz?.llave === "kontrolia"
+      ? `<p class="text-[11.5px]" style="color:var(--ok);margin:0" data-testid="voz-incluida">● Voz incluida en tu plan${voz.minutos !== null ? ` · ${voz.minutos.toLocaleString("es-MX")} minutos al mes` : ""}. No necesitas ninguna llave.</p>`
+      : voz
+        ? `<p class="text-[11.5px]" style="color:var(--bad);margin:0">La voz no está disponible en esta instalación (falta la llave de ElevenLabs en el entorno). Es de nuestro lado; ya estamos avisados.</p>`
+        : "";
+
   return `
     <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:18px">
       <div style="display:flex;flex-direction:column;gap:2px">
         <h3 class="font-display font-semibold text-[13.5px] text-cream">🎙️ Voz — llamadas telefónicas en tiempo real</h3>
       </div>
       <div style="border-top:1px solid var(--line);padding-top:18px;display:flex;flex-direction:column;gap:14px">
+        ${llaveAviso}
         ${
           elevenError
             ? `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px">
@@ -525,17 +563,21 @@ function renderVoiceSection(
         <div>
           <label class="font-display font-semibold text-[12.5px] text-cream">Voz de las llamadas</label>
           <p class="text-dim text-[11px]" style="margin-top:2px">
-            Tus llamadas las atiende <b>ElevenLabs</b>. Necesita su propia llave: es un proveedor
-            distinto al de "Modelo de IA" de arriba, así que va aparte aunque tu bot piense con
-            Claude u otro modelo. Sin llave, el teléfono no puede contestar.
+            Tus llamadas las atiende una voz natural en tiempo real. Elige cuál y cómo saluda; lo que
+            sabe y cómo piensa es lo mismo que por chat.
           </p>
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px">
+        ${
+          // Solo en instalación propia (sin política de plan) se sigue pidiendo la llave.
+          voz
+            ? ""
+            : `<div style="display:flex;flex-direction:column;gap:6px">
           <label class="text-dim text-[11.5px]">Llave de ElevenLabs</label>
           <p class="text-dim text-[11px]">La consigues en <span class="font-mono">elevenlabs.io</span> → tu perfil → API Keys.</p>
           <input type="password" name="${SETTING_KEYS.voiceElevenLabsApiKey}" value="" autocomplete="off"
                  placeholder="${settings[SETTING_KEYS.voiceElevenLabsApiKey]?.trim() ? "••••••••••••" : "sk_…"}" style="${INPUT_STYLE}">
-        </div>
+        </div>`
+        }
         <div style="display:flex;flex-direction:column;gap:6px">
           <label class="text-dim text-[11.5px]">Voz</label>
           <p class="text-dim text-[11px]">Todas son mexicanas y de hablantes nativos. Elige una y dale a <b>Escuchar</b> — se reproduce aquí mismo, sin entrar a ElevenLabs.</p>
@@ -680,6 +722,8 @@ export function renderConfig(
   telegramChannelConnected = false,
   /** De quién es la llave de IA (billing/llaveDeIa.ts). Sin esto, la sección de modelo se explica en genérico. */
   ia?: PoliticaDeIa,
+  /** ¿El plan trae voz, con cuántos minutos, y con qué llave (channels/voice/elevenlabsKey.ts)? */
+  voz?: EstadoDeVoz,
 ): string {
   const personalidadCards = CONTROL_LIST.filter((c) => c.key !== SETTING_KEYS.modelOverride)
     .map((c) => renderCardGroup(c, settings))
@@ -756,7 +800,7 @@ export function renderConfig(
               ${modelTierCards}
             </div>
             ${renderLlmSection(settings, llmTest, ia)}
-            ${renderVoiceSection(settings, hasEnvOpenAiKey, elevenError)}
+            ${renderVoiceSection(settings, hasEnvOpenAiKey, elevenError, voz)}
           </div>
 
           <div class="cfg-pane" data-pane="negocio" style="display:none;flex-direction:column;gap:24px">

@@ -730,8 +730,10 @@ adminApp.get("/config/voz/:voiceId/muestra", async (c) => {
   const { VOCES_ELEVENLABS, urlDeMuestra } = await import("../channels/voice/elevenlabsSetup");
   if (!VOCES_ELEVENLABS.some((v) => v.value === voiceId)) return c.text("Voz desconocida", 404);
 
-  const apiKey = (await (await settingsFor(c)).getSecret(SETTING_KEYS.voiceElevenLabsApiKey))?.trim();
-  if (!apiKey) return c.text("Todavía no has guardado tu llave de ElevenLabs", 409);
+  const { llaveDeElevenLabs } = await import("../channels/voice/elevenlabsKey");
+  const llave = llaveDeElevenLabs(c.env, await (await settingsFor(c)).allWithSecrets());
+  if (!llave) return c.text("La voz no está disponible en esta instalación (falta ELEVENLABS_API_KEY)", 409);
+  const apiKey = llave.apiKey;
 
   const url = await urlDeMuestra(apiKey, voiceId);
   if (!url) return c.text("Esa voz no tiene muestra disponible", 404);
@@ -2207,6 +2209,11 @@ adminApp.get("/config", async (c) => {
       c.req.query("eleven_error") ?? undefined,
       Boolean(telegramChannel),
       await (await import("../billing/llaveDeIa")).politicaDeIa(c.env, configDb, configBotId, settings),
+      await (async () => {
+        const { llaveDeElevenLabs, vozIncluidaEnElPlan } = await import("../channels/voice/elevenlabsKey");
+        const plan = await vozIncluidaEnElPlan(c.env, bot?.organization_id);
+        return { incluida: plan.incluida, minutos: plan.minutos, llave: llaveDeElevenLabs(c.env, settings)?.origen ?? null };
+      })(),
     ),
   );
 });
@@ -2492,9 +2499,19 @@ adminApp.post("/config", async (c) => {
   // actualiza) el agente contra su API, así el dueño se entera AQUÍ si la
   // llave está mal o la voz no está en su cuenta — y no con un cliente al
   // teléfono. Ver channels/voice/elevenlabsSetup.ts.
-  const elevenKeyRaw = form.get(SETTING_KEYS.voiceElevenLabsApiKey);
-  if (elevenKeyRaw !== null && String(elevenKeyRaw).trim() !== "") {
-    await repo.setSecret(SETTING_KEYS.voiceElevenLabsApiKey, String(elevenKeyRaw).trim());
+  if (form.get("voice_elevenlabs_api_key_clear") === "1") {
+    await repo.setSecret(SETTING_KEYS.voiceElevenLabsApiKey, "");
+    // El agente y sus tools viven en la CUENTA de la llave que los creó. Al
+    // cambiar de llave (la suya → la de Kontrolia) se olvidan, para que se
+    // creen de nuevo en la cuenta correcta en vez de fallar con 404.
+    await repo.set(SETTING_KEYS.voiceElevenLabsAgentId, "");
+    await repo.set(SETTING_KEYS.voiceElevenLabsConfigHash, "");
+    await repo.set(SETTING_KEYS.voiceElevenLabsToolIds, "");
+  } else {
+    const elevenKeyRaw = form.get(SETTING_KEYS.voiceElevenLabsApiKey);
+    if (elevenKeyRaw !== null && String(elevenKeyRaw).trim() !== "") {
+      await repo.setSecret(SETTING_KEYS.voiceElevenLabsApiKey, String(elevenKeyRaw).trim());
+    }
   }
   const vozEleven = String(form.get(SETTING_KEYS.voiceElevenLabsVoiceId) ?? "").trim();
   if (vozEleven) await repo.set(SETTING_KEYS.voiceElevenLabsVoiceId, vozEleven);
@@ -2536,7 +2553,14 @@ adminApp.post("/config", async (c) => {
   //
   // Va al FINAL y después de guardar: aunque esto falle, lo que el dueño
   // escribió no se pierde — solo se le avisa, con el motivo.
-  const elevenApiKey = (await repo.getSecret(SETTING_KEYS.voiceElevenLabsApiKey))?.trim();
+  //
+  // La llave es la del bot si la tiene, o la de Kontrolia (ELEVENLABS_API_KEY)
+  // — ver channels/voice/elevenlabsKey.ts. Y solo si el plan trae voz: a un
+  // Impulso no se le crea agente en nuestra cuenta de ElevenLabs.
+  const { llaveDeElevenLabs, vozIncluidaEnElPlan } = await import("../channels/voice/elevenlabsKey");
+  const llaveEleven = llaveDeElevenLabs(c.env, await repo.allWithSecrets());
+  const vozDelPlan = await vozIncluidaEnElPlan(c.env, (await new BotsRepo(new Db(c.env.DB)).getById(c.get("botId")))?.organization_id);
+  const elevenApiKey = llaveEleven && vozDelPlan.incluida ? llaveEleven.apiKey : undefined;
   if (elevenApiKey) {
     const { prepararAgenteElevenLabs, VOZ_POR_DEFECTO } = await import("../channels/voice/elevenlabsSetup");
     const voz = (await repo.get(SETTING_KEYS.voiceElevenLabsVoiceId))?.trim() || VOZ_POR_DEFECTO;

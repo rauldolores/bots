@@ -339,7 +339,7 @@ export const GUIA: Seccion[] = [
             "**Tu API key**: pégala y guarda. Verás «● GUARDADA ····» con los últimos caracteres. Para quitarla, marca **Quitar mi API key y volver a la del sistema**.",
             "**⚡ Probar mi configuración**: guarda primero y luego presiónalo; te dice «✓ Conexión exitosa» o qué falló.",
             "**Respaldo si el proveedor falla**: un segundo proveedor con su llave. Si el principal se cae, el bot sigue atendiendo con este.",
-            "**🎙️ Voz — llamadas telefónicas**: la **Llave de ElevenLabs**, la **Voz** (con **▶ Escuchar** para probarla), el **Saludo al contestar** y cuánto espera antes de hablar.",
+            "**🎙️ Voz — llamadas telefónicas**: la **Voz** (con **▶ Escuchar** para probarla), el **Saludo al contestar** y cuánto espera antes de hablar. Los minutos de voz van incluidos en los planes Pro y Max; no necesitas ninguna llave.",
           ] },
           { tipo: "nota", tono: "aviso", texto: "Si ves «⚠ Tu modelo elegido dejó de responder», el bot ya cambió solo al respaldo o al automático. Revisa que tu llave siga vigente y con saldo en el sitio del proveedor." },
         ],
@@ -513,7 +513,7 @@ export const GUIA: Seccion[] = [
         ruta: "/admin/telefono",
         cuerpo: [
           { tipo: "h", texto: "1. Conectar un número que pueda recibir llamadas" },
-          { tipo: "p", texto: "En **Conexiones → Llamadas telefónicas (Twilio Voice) → Conectar**: pide **Account SID**, **Auth Token** y un **Número de teléfono** comprado en Twilio. Después, copia el **Webhook** y pégalo en Twilio, en ese número, en «A CALL COMES IN» (método POST). También necesitas la **Llave de ElevenLabs** y una voz en Configuración → Modelo de IA (es el servicio que le pone voz al bot)." },
+          { tipo: "p", texto: "En **Conexiones → Llamadas telefónicas (Twilio Voice) → Conectar**: pide **Account SID**, **Auth Token** y un **Número de teléfono** comprado en Twilio. Después, copia el **Webhook** y pégalo en Twilio, en ese número, en «A CALL COMES IN» (método POST). La voz viene incluida en los planes Pro y Max (elige cuál en Configuración → Voz); en Impulso el teléfono no contesta." },
           { tipo: "h", texto: "2. Conservar tu número actual (desvío)" },
           { tipo: "p", texto: "No hace falta cambiar el número que tus clientes ya conocen. En [Tu número](/admin/telefono) eliges **Conservar mi número (desvío de llamadas)**:" },
           { tipo: "pasos", items: [
@@ -632,7 +632,7 @@ export const GUIA: Seccion[] = [
         resumen: "Cuánto gasta el bot en IA, en WhatsApp y en llamadas, en pesos, con un tope mensual para no llevarte sorpresas.",
         ruta: "/admin/costs",
         cuerpo: [
-          { tipo: "p", texto: "Aquí NO está lo que le pagas a Nodia Agents (eso es tu plan): es lo que consumes en los proveedores con tus propias cuentas: la IA (tu llave), Twilio (mensajes y llamadas) y ElevenLabs (voz). Todo convertido a pesos." },
+          { tipo: "p", texto: "Aquí NO está lo que le pagas a Nodia Agents (eso es tu plan): es lo que consumes en los proveedores con tus propias cuentas: la IA (solo si usas tu propia llave) y Twilio (mensajes y llamadas). La IA incluida y los minutos de voz del plan ya van en tu plan. Todo convertido a pesos." },
           { tipo: "lista", items: [
             "**🧠 IA**: exacto, calculado con los tokens reales de cada respuesta.",
             "**💬 WhatsApp / Twilio**: real, tomado de tu factura de Twilio.",
@@ -758,7 +758,7 @@ export const FAQ: Pregunta[] = [
     { tipo: "p", texto: "Un hilo con la misma persona dentro de 24 horas, en cualquier canal. Si un cliente manda 15 mensajes en una tarde, es una conversación. Si vuelve a escribir tres días después, es otra." },
   ] },
   { id: "faq-que-pago", categoria: "Plan y pagos", pregunta: "¿Qué pago a Nodia Agents y qué pago a otros?", articulo: "costos", respuesta: [
-    { tipo: "p", texto: "A Nodia Agents: tu plan (mensual o anual), que incluye el software, el panel y el soporte. A otros, con tus propias cuentas: la IA (tu llave), Twilio por los mensajes de WhatsApp y las llamadas, y ElevenLabs por la voz. Costos te muestra estos últimos; Plan y facturación, el primero." },
+    { tipo: "p", texto: "A Nodia Agents: tu plan (mensual o anual), que incluye el software, el panel y el soporte. A otros, con tus propias cuentas: Twilio por los mensajes de WhatsApp y las llamadas, y la IA solo si decides usar tu propia llave. La IA (GPT-4.1 mini) y los minutos de voz vienen incluidos en tu plan. Costos te muestra lo de terceros; Plan y facturación, tu plan." },
   ] },
   { id: "faq-tope", categoria: "Plan y pagos", pregunta: "¿Cómo evito una sorpresa en el gasto de IA?", articulo: "costos", respuesta: [
     { tipo: "p", texto: "Pon un **Presupuesto mensual de IA** en Costos. Al alcanzarlo el bot no se apaga: cambia solo al modelo económico. Además, la proyección «Al ritmo actual…» te avisa con anticipación." },

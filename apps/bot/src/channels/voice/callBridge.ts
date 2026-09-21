@@ -10,6 +10,7 @@
 import type { Env } from "../../env";
 import type { Db } from "../../db/client";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
+import { llaveDeElevenLabs } from "./elevenlabsKey";
 import type { VoiceSession } from "./session";
 
 export interface CallBridgeDeps {
@@ -59,8 +60,9 @@ export async function credencialesElevenLabs(
   env: Env,
 ): Promise<{ apiKey: string; agentId: string } | null> {
   const settings = await new SettingsRepo(db, botId).allWithSecrets();
-  const apiKey = settings[SETTING_KEYS.voiceElevenLabsApiKey]?.trim();
-  if (!apiKey) return null;
+  const llave = llaveDeElevenLabs(env, settings);
+  if (!llave) return null;
+  const apiKey = llave.apiKey;
 
   // El agente en ElevenLabs se actualiza SOLO si el código cambió algo suyo
   // desde la última vez (voz, modelo, formato de audio). En el caso normal
@@ -71,7 +73,10 @@ export async function credencialesElevenLabs(
   // configuración vieja — porque solo se actualizaba al guardar la pantalla, y
   // nadie le dijo que tenía que volver a guardarla. Estuvo probando llamadas
   // contra un arreglo que ya existía pero no había llegado a su agente.
-  const voiceId = settings[SETTING_KEYS.voiceElevenLabsVoiceId]?.trim();
+  // Sin voz elegida, la de la casa: con la llave de Kontrolia un bot Pro
+  // recién estrenado tiene que contestar aunque el dueño nunca haya abierto
+  // la pestaña de voz.
+  const voiceId = settings[SETTING_KEYS.voiceElevenLabsVoiceId]?.trim() || (await import("./elevenlabsSetup")).VOZ_POR_DEFECTO;
   // Ya lo trae el all() de arriba — leerlo otra vez era una consulta de más en
   // el camino crítico.
   const agenteExistente = settings[SETTING_KEYS.voiceElevenLabsAgentId]?.trim();

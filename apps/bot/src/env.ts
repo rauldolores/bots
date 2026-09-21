@@ -89,6 +89,10 @@ export interface Env {
   // que WhatsApp — Twilio firma todos sus webhooks con el mismo Auth Token sin
   // importar el producto.
   TWILIO_VOICE_NUMBER?: string;
+  // Voz con ElevenLabs: la llave de Kontrolia, para los minutos incluidos en
+  // el plan. La del bot (settings voice_elevenlabs_api_key), si existe, gana —
+  // ver channels/voice/elevenlabsKey.ts.
+  ELEVENLABS_API_KEY?: string;
   // Canal Voice (F7 fase 3): OpenAI Realtime — el modelo de audio en tiempo
   // real. La API key NO vive aquí (se resuelve por bot desde /admin/config →
   // Voz, con fallback a OPENAI_API_KEY — ver channels/voice/openaiKey.ts);
