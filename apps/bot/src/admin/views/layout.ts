@@ -246,6 +246,19 @@ const GLOBAL_STYLE = `
   .sb-nav::-webkit-scrollbar-track{background:var(--sb-bg)}
   .sb-nav::-webkit-scrollbar-thumb{background:var(--linelit)}
   .sb-sec{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;padding:16px 12px 6px}
+  /* consumo del plan en el sidebar (se pinta con /admin/plan/uso) */
+  #sb-uso[hidden]{display:none !important}
+  .sb-uso-plan{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--sb-dim);padding:0 2px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sb-uso-row{display:flex;flex-direction:column;gap:4px;padding:5px 2px}
+  .sb-uso-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:11.5px}
+  .sb-uso-label{color:var(--sb-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .sb-uso-val{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:var(--cream);white-space:nowrap;flex:none}
+  .sb-uso-bar{height:4px;border-radius:999px;background:var(--sb-panel);overflow:hidden}
+  .sb-uso-bar>i{display:block;height:100%;border-radius:999px;background:var(--accent);transition:width .3s ease}
+  .sb-uso-row.alto .sb-uso-bar>i{background:#d97706}
+  .sb-uso-row.agotado .sb-uso-val{color:var(--bad)}
+  .sb-uso-row.agotado .sb-uso-bar>i{background:var(--bad)}
+  #sb-uso:hover .sb-uso-plan{color:var(--accent-2)}
   .live-pill{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:7px 14px;box-shadow:var(--shadow-sm)}
 
   @media (max-width:767px){
@@ -345,6 +358,7 @@ function sidebar(activeTab: string, niche: NichePack | null, visibleIds: Set<str
     </div>
     <nav class="sb-nav">${sections}</nav>
     <div class="sb-foot" style="padding:14px;border-top:1px solid var(--sb-line)">
+      <a id="sb-uso" href="/admin/plan" hidden style="display:block;margin-bottom:12px;color:inherit"></a>
       <div style="display:flex;align-items:center;gap:10px;padding:9px 10px;border:1px solid var(--sb-line);border-radius:12px;background:var(--sb-panel)">
         <div style="width:30px;height:30px;flex:none;border-radius:9px;background:rgba(234,179,8,.16);display:flex;align-items:center;justify-content:center;color:var(--accent)">
           <i data-lucide="bot" width="16" height="16"></i>
@@ -431,6 +445,23 @@ export function layout(opts: {
       return 'display:flex;align-items:center;gap:10px;width:100%;padding:7px 8px;border:0;border-radius:9px;' +
         'cursor:pointer;font-family:inherit;text-align:left;background:' + (active ? 'var(--accent-soft)' : 'transparent');
     }
+
+    // Consumo del plan bajo el menú: plan actual y cada límite con su barra.
+    // Rojo al agotarse, ámbar desde 80 %. Sin plan (Basic Auth) no aparece.
+    fetch('/admin/plan/uso').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      var box = document.getElementById('sb-uso');
+      if (!box || !d || !d.plan) return;
+      var rows = (d.limites || []).map(function (l) {
+        var pct = l.limit === null ? 0 : Math.min(100, Math.round((l.used / Math.max(l.limit, 1)) * 100));
+        var cls = l.agotado ? ' agotado' : (l.limit !== null && pct >= 80 ? ' alto' : '');
+        return '<div class="sb-uso-row' + cls + '" title="' + esc(l.label) + ': ' + esc(l.texto) + '">' +
+          '<div class="sb-uso-top"><span class="sb-uso-label">' + esc(l.label) + '</span><span class="sb-uso-val">' + esc(l.texto) + '</span></div>' +
+          (l.limit === null ? '' : '<div class="sb-uso-bar"><i style="width:' + pct + '%"></i></div>') +
+        '</div>';
+      }).join('');
+      box.innerHTML = '<div class="sb-uso-plan" title="Ver plan y facturación">' + esc(d.plan) + (d.isLive ? '' : ' · sin acceso') + '</div>' + rows;
+      box.hidden = false;
+    }).catch(function () {});
 
     fetch('/admin/projects').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
       if (!d) return;

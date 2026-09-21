@@ -80,6 +80,7 @@ import {
   hayCupo,
   contarUso,
   mensajeDeLimite,
+  textoDeUso,
   LIMITES,
 } from "../billing/kontrolia";
 import { startOnboarding, activateOnboarding, disableOnboarding, retryOnboarding } from "../channels/voice/onboarding/service";
@@ -199,7 +200,7 @@ function isAuthExempt(path: string): boolean {
 // no podría renderizar la página que le explica por qué no tiene acceso.
 // /ayuda también: una organización recién creada, sin bots, tiene que poder
 // leer la guía y pedir soporte antes de crear el primero.
-const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots", "/access-denied", "/ayuda", "/ayuda/soporte"];
+const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots", "/access-denied", "/ayuda", "/ayuda/soporte", "/plan/uso"];
 
 // Lo que sigue abierto cuando la organización NO tiene plan vivo (billing.md
 // B2): la pantalla de planes y su compra, la vuelta del pago, cambiarse de
@@ -1685,6 +1686,32 @@ adminApp.post("/ayuda/soporte", async (c) => {
   return r.ok
     ? c.redirect(`/admin/ayuda?ok=${encodeURIComponent(`Recibimos tu mensaje. Te respondemos a ${correo}, normalmente en menos de un día hábil.`)}#soporte`, 302)
     : c.redirect(`/admin/ayuda?err=${encodeURIComponent(r.error)}#soporte`, 302);
+});
+
+/**
+ * Lo que el sidebar pinta debajo del menú: el plan y cada límite con su
+ * consumo (billing.md B2, e.usage). Es JSON y lo pide el navegador en cada
+ * carga —igual que /projects para el selector— para no pasar los
+ * entitlements por las 20+ vistas que llaman a layout(). Sin sesión de
+ * KontrolIA (Basic Auth) no hay plan: {plan:null} y el bloque no aparece.
+ * Sin bot resuelto (organización nueva) también responde: solo lee claims.
+ */
+adminApp.get("/plan/uso", (c) => {
+  const e = c.get("kontroliaEntitlements") ?? null;
+  const sub = e?.subscription ?? null;
+  if (!e || (!sub && !e.usage.length)) return c.json({ plan: null });
+  return c.json({
+    plan: sub ? `${sub.planName}${sub.billingInterval === "year" ? " · anual" : ""}` : "Sin plan",
+    isLive: sub?.isLive ?? false,
+    limites: e.usage.map((u) => ({
+      key: u.key,
+      label: u.description ?? u.key,
+      used: u.used,
+      limit: u.limit,
+      texto: textoDeUso(u),
+      agotado: u.limit !== null && u.used >= u.limit,
+    })),
+  });
 });
 
 adminApp.post("/plan/portal", async (c) => {

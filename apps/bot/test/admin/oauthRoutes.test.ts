@@ -658,6 +658,35 @@ describe("/admin/plan — precios, compra y portal (B3/B4/B6)", () => {
     expect(decodeURIComponent(res.headers.get("location") ?? "")).toContain("homepage de la app");
   });
 
+  it("GET /plan/uso: el JSON que pinta el sidebar — plan, intervalo y cada límite con su consumo", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    entitlementsDeMock.mockResolvedValue({
+      ...OK,
+      subscription: { ...OK.subscription, planName: "Plan Pro", billingInterval: "year" },
+      usage: [
+        { key: "conversaciones", used: 37, limit: 100, remaining: 63, period: "month", periodStart: "", description: "Conversaciones" },
+        { key: "canales", used: 2, limit: 2, remaining: 0, period: "lifetime", periodStart: "", description: null },
+        { key: "bots", used: 1, limit: null, remaining: null, period: "lifetime", periodStart: "", description: "Bots" },
+      ],
+    });
+    const res = await adminApp.fetch(conSesion("/plan/uso"), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.plan).toBe("Plan Pro · anual");
+    expect(body.isLive).toBe(true);
+    expect(body.limites).toEqual([
+      { key: "conversaciones", label: "Conversaciones", used: 37, limit: 100, texto: "37 de 100 este mes", agotado: false },
+      { key: "canales", label: "canales", used: 2, limit: 2, texto: "2 de 2", agotado: true },
+      { key: "bots", label: "Bots", used: 1, limit: null, texto: "1 (sin límite)", agotado: false },
+    ]);
+  });
+
+  it("GET /plan/uso sin sesión de KontrolIA: {plan:null} y el sidebar no pinta nada", async () => {
+    const res = await adminApp.request("/plan/uso", { headers: { Authorization: `Basic ${Buffer.from("admin:pw").toString("base64")}` } }, { ...KONTROLIA_ENV, KONTROLIA_AUTH_SERVER_URL: undefined, DASHBOARD_PASSWORD: "pw" } as any);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ plan: null });
+  });
+
   it("POST /plan/portal: redirige al portal de Stripe con returnUrl=/admin/plan", async () => {
     verifyAccessTokenMock.mockResolvedValue({ claims: { ...claimsFor(TEST_BOT_ID), roles: ["admin"] }, user: { id: "u1" } });
     entitlementsDeMock.mockResolvedValue(OK);
