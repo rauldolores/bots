@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest";
 import type { KontroliaEntitlements, KontroliaPlan } from "@kontrolia/shared";
 import { ahorroAnual, renderPlan } from "../../src/admin/views/plan";
 
-const ENV = { DASHBOARD_BASE_URL: "https://panel.nodiagents.com" } as any;
+const ENV = { DASHBOARD_BASE_URL: "https://app.nodiagents.com" } as any;
 
 function plan(p: Partial<KontroliaPlan> & Pick<KontroliaPlan, "slug" | "priceAmount">): KontroliaPlan {
   return {

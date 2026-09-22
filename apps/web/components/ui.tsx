@@ -10,9 +10,10 @@ import type { ReactNode } from "react";
  * /admin/registro directo, saltándose el login).
  *
  * Vive aquí y no repetido en cada botón para que un cambio de dominio sea un
- * solo lugar (ya pasó: agentes.kontrolia.io → panel.nodiagents.com).
+ * solo lugar (ya pasó dos veces: agentes.kontrolia.io → panel.nodiagents.com
+ * → app.nodiagents.com).
  */
-export const PANEL_URL = "https://panel.nodiagents.com";
+export const PANEL_URL = "https://app.nodiagents.com";
 /** "Entrar" y "Regístrate gratis" — el MISMO destino a propósito, ver arriba. */
 export const LOGIN_URL = PANEL_URL;
 export const REGISTER_URL = PANEL_URL;

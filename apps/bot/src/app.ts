@@ -52,6 +52,30 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.get("/health", (c) => c.text("ok", 200));
 
+// Cambio de dominio del panel (panel.nodiagents.com → app.nodiagents.com).
+// El host viejo sigue sirviendo TODO lo que no es navegación de personas:
+// webhooks de Meta/Twilio/Telegram configurados con la URL anterior, el
+// widget que los clientes ya pegaron en su web y su API. Solo la navegación
+// del panel (GET a / o /admin…) salta al dominio canónico, y solo cuando el
+// host es un dominio hermano del canónico — un despliegue de vista previa
+// (*.vercel.app) o el local no se redirigen a producción.
+app.use("*", async (c, next) => {
+  if (c.req.method !== "GET") return next();
+  const canonico = (c.env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
+  if (!canonico) return next();
+  const url = new URL(c.req.url);
+  if (!(url.pathname === "/" || url.pathname.startsWith("/admin"))) return next();
+  let hostCanonico: string;
+  try {
+    hostCanonico = new URL(canonico).host;
+  } catch {
+    return next();
+  }
+  const raiz = hostCanonico.split(".").slice(-2).join(".");
+  if (url.host === hostCanonico || !url.host.endsWith(`.${raiz}`)) return next();
+  return c.redirect(`${canonico}${url.pathname}${url.search}`, 301);
+});
+
 // Parsea el payload del proveedor con el adaptador del canal y lo mete al
 // buffer del agente, que programa el turno en la cola de Postgres. El webhook
 // responde de inmediato: pensar y contestar ocurre en el tick.

@@ -123,11 +123,18 @@ export async function handleIncomingVoiceCall(request: Request, rawEnv: Env, bot
 
   // La URL para la firma es la CONFIGURADA (DASHBOARD_BASE_URL + path), no
   // request.url — un proxy/balanceador puede reescribirla y descuadrar el
-  // cálculo aunque la llamada sea legítima.
+  // cálculo aunque la llamada sea legítima. Como respaldo, la URL que Twilio
+  // pidió de verdad: un número que sigue apuntando al dominio anterior del
+  // panel (Twilio firma la URL que llama) no se queda fuera tras un cambio
+  // de dominio; la firma sigue exigiendo el Auth Token correcto.
   const base = (rawEnv.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
   const canonicalUrl = `${base}/webhooks/voice/${botId}`;
   const signature = request.headers.get("X-Twilio-Signature");
-  const validSig = await validateTwilioSignature(authToken, canonicalUrl, params, signature);
+  const requestedUrl = `${new URL(request.url).origin}/webhooks/voice/${botId}`;
+  const validSig =
+    (await validateTwilioSignature(authToken, canonicalUrl, params, signature)) ||
+    (requestedUrl !== canonicalUrl &&
+      (await validateTwilioSignature(authToken, requestedUrl, params, signature)));
   if (!validSig) {
     logVoiceEvent("webhook_reject", { botId, callSid: maskId(callSid), reason: "bad_signature" });
     return new Response("forbidden", { status: 403 });

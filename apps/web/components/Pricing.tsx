@@ -15,7 +15,7 @@ const enterpriseBullets = [
 
 /**
  * Precios. NO están escritos aquí: se leen del panel
- * (panel.nodiagents.com/public/plans), que a su vez los saca de los planes
+ * (app.nodiagents.com/public/plans), que a su vez los saca de los planes
  * que el admin configuró en KontrolIA Auth. Así la landing y la pantalla
  * "Plan y facturación" del panel muestran exactamente lo mismo, y cambiar
  * un precio es un solo lugar.

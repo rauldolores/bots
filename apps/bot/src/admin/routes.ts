@@ -430,7 +430,7 @@ adminApp.get("/oauth/callback", async (c) => {
  * "Crear cuenta": el alta por app del auth-server
  * (auth.kontrolia.io/public-signup.md §2.1). Vive como ruta propia, y no
  * como URL escrita en la web pública, para que el sitio enlace a UN lugar
- * (panel.nodiagents.com/admin/registro) y el auth-server, el slug y el
+ * (app.nodiagents.com/admin/registro) y el auth-server, el slug y el
  * redirect_to salgan de la configuración de este despliegue.
  *
  * Exenta de auth a propósito: quien llega aquí todavía no tiene cuenta.

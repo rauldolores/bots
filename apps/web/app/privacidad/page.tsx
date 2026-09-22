@@ -298,7 +298,7 @@ const secciones: Seccion[] = [
           funcione. No usamos cookies de publicidad ni rastreo entre sitios.
         </P>
         <P>
-          <b>En el panel (panel.nodiagents.com):</b> usamos cookies para mantener tu sesión iniciada y recordar tus
+          <b>En el panel (app.nodiagents.com):</b> usamos cookies para mantener tu sesión iniciada y recordar tus
           preferencias. Son indispensables para que el panel funcione.
         </P>
         <P>

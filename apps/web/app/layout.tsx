@@ -59,7 +59,7 @@ export default function RootLayout({
         />
         {/* Widget de Nodia Agents (chat de la web pública) */}
         <script
-          src="https://panel.nodiagents.com/widget.js"
+          src="https://app.nodiagents.com/widget.js"
           data-bot="534072dd-b853-463f-b33c-eaa41fed9162"
           data-key="61dad282-91c8-4995-9312-115ed742e888"
           async

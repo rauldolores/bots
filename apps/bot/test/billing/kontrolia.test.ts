@@ -21,7 +21,7 @@ import {
 } from "../../src/billing/kontrolia";
 import { precio } from "../../src/admin/views/plan";
 
-const ENV_SIN_KEY = { DASHBOARD_BASE_URL: "https://panel.nodiagents.com" } as any;
+const ENV_SIN_KEY = { DASHBOARD_BASE_URL: "https://app.nodiagents.com" } as any;
 const ENV = { ...ENV_SIN_KEY, KONTROLIA_APPLICATION_API_KEY: "kapp_test" } as any;
 
 const USO = { key: "bots", used: 1, limit: 1, remaining: 0, period: "lifetime", periodStart: "2026-01-01", exceeded: true, planSlug: "free" };

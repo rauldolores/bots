@@ -19,14 +19,14 @@ import {
 } from "../../src/admin/kontroliaAuth";
 import { ordenarRoles } from "../../src/admin/views/usuarios";
 
-const ENV = { DASHBOARD_BASE_URL: "https://panel.nodiagents.com" } as any;
+const ENV = { DASHBOARD_BASE_URL: "https://app.nodiagents.com" } as any;
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("registerUrl — el enlace de 'Crear cuenta'", () => {
   it("por defecto: auth.kontrolia.io/register?app=nodia-agents&redirect_to=<panel>/admin", () => {
     expect(registerUrl(ENV)).toBe(
-      "https://auth.kontrolia.io/register?app=nodia-agents&redirect_to=https%3A%2F%2Fpanel.nodiagents.com%2Fadmin",
+      "https://auth.kontrolia.io/register?app=nodia-agents&redirect_to=https%3A%2F%2Fapp.nodiagents.com%2Fadmin",
     );
   });
 
