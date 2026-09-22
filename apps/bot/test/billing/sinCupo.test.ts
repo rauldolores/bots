@@ -61,6 +61,9 @@ const uso = (used: number, limit: number, key = "conversaciones"): UsageReport =
   overageUnits: 0,
   overageAmount: 0,
   currency: "MXN",
+  billingMode: "prepaid",
+  creditBalance: null,
+  creditUnitsUsed: 0,
 });
 const AGOTADO = { ok: false as const, usage: uso(1000, 1000) };
 const CON_CUPO = { ok: true as const, usage: uso(10, 1000) };

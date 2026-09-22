@@ -110,15 +110,19 @@ export async function avisarExcedente(env: Env, botId: string, limite: ClaveDeLi
     const ultimo = Number((await settings.get(claveExcedenteAvisadoAt(limite))) ?? "0");
     if (Number.isFinite(ultimo) && ultimo > 0 && Date.now() - ultimo < CADA_MS) return false;
     await settings.set(claveExcedenteAvisadoAt(limite), String(Date.now()));
+    const { esPrepago } = await import("./kontrolia");
+    const prepago = esPrepago(usage);
     const acumulado = resumenDeExcedente(limite, usage);
     const { notifyOwner } = await import("../tools/handoffHuman");
     await notifyOwner(
       env,
       {
-        reason: "Tu plan llegó al límite — seguimos atendiendo",
-        summary: `${aviso}${acumulado ? ` Llevas ${acumulado}.` : ""} El extra aparece en tu siguiente factura; si prefieres, sube de plan en Plan y facturación.`,
+        reason: prepago ? "Tu plan llegó al límite — seguimos con tu saldo" : "Tu plan llegó al límite — seguimos atendiendo",
+        summary: prepago
+          ? `${aviso}${acumulado ? ` ${acumulado}.` : ""} Cuando llegue a cero dejaremos de atender: compra un paquete en Plan y facturación.`
+          : `${aviso}${acumulado ? ` Llevas ${acumulado}.` : ""} El extra aparece en tu siguiente factura; si prefieres, sube de plan en Plan y facturación.`,
         ticketId: `excedente-${limite}`,
-        titulo: "Plan al límite: cobrando excedente",
+        titulo: prepago ? "Plan al límite: consumiendo saldo" : "Plan al límite: cobrando excedente",
         ruta: "/admin/plan",
       },
       botId,

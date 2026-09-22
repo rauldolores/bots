@@ -6,7 +6,7 @@
 // manda a la URL de Stripe que devuelve KontrolIA.
 import type { KontroliaEntitlements, KontroliaPlan } from "@kontrolia/shared";
 import type { Env } from "../../env";
-import { avisoDeExcedente, motivoDeAcceso, resumenDeExcedente, textoDePrecioExtra, textoDeUso, tieneExcedente, type ClaveDeLimite } from "../../billing/kontrolia";
+import { avisoDeExcedente, dinero, esPrepago, motivoDeAcceso, resumenDeExcedente, saldoPrepago, textoDePrecioExtra, textoDeUso, tieneExcedente, type ClaveDeLimite } from "../../billing/kontrolia";
 import { DEFINICION_DE_CONVERSACION } from "../../billing/conversacion";
 import { layout } from "./layout";
 
@@ -141,10 +141,18 @@ export function renderPlan(
                 const clave = u.key as ClaveDeLimite;
                 // Excedente (B7b): precio por unidad extra y, si ya se pasó, lo
                 // acumulado del periodo. Sin precio: "—", el límite bloquea.
+                const prepago = esPrepago(u);
+                const saldo = saldoPrepago(u);
+                const sinSaldo = prepago && (saldo ?? 0) <= 0;
                 const extra = conPrecio
-                  ? `${esc(textoDePrecioExtra(u.key, u.overagePriceAmount, u.currency) ?? "")}${resumenDeExcedente(clave, u) ? `<br><span style="color:#b45309">${esc(resumenDeExcedente(clave, u)!)}</span>` : ""}`
+                  ? `${esc(textoDePrecioExtra(u.key, u.overagePriceAmount, u.currency) ?? "")}${
+                      resumenDeExcedente(clave, u)
+                        ? `<br><span style="color:${sinSaldo ? "var(--bad)" : "#b45309"}">${esc(resumenDeExcedente(clave, u)!)}</span>`
+                        : ""
+                    }${prepago ? `<br><span style="color:var(--dim)">prepago</span>` : ""}`
                   : `<span style="color:var(--dim)">—</span>`;
-                const colorUsado = agotado ? (conPrecio ? "#b45309" : "var(--bad)") : "inherit";
+                // Con saldo (o pospago) el agotado es ámbar: se sigue atendiendo. Sin saldo es rojo: ya bloquea.
+                const colorUsado = agotado ? (conPrecio && !sinSaldo ? "#b45309" : "var(--bad)") : "inherit";
                 return `<tr style="border-top:1px solid var(--line)">
                   <td style="padding:8px 10px" class="text-[12.5px] text-cream">${esc(u.description ?? u.key)}</td>
                   <td style="padding:8px 10px;color:${colorUsado}" class="text-[12.5px] font-mono">${esc(textoDeUso(u))}</td>
@@ -157,7 +165,16 @@ export function renderPlan(
           </table></div>
           ${e.usage
             .filter((u) => u.limit !== null && u.used >= u.limit && tieneExcedente(u))
-            .map((u) => `<div class="text-[12px]" style="border:1px solid #b45309;background:rgba(180,83,9,.07);padding:9px 12px;border-radius:var(--radius-sm);color:var(--cream)">${esc(avisoDeExcedente(u.key as ClaveDeLimite, u) ?? "")} Seguimos atendiendo; el extra aparece en tu siguiente factura.</div>`)
+            .map((u) => {
+              const sinSaldo = esPrepago(u) && (saldoPrepago(u) ?? 0) <= 0;
+              const color = sinSaldo ? "var(--bad)" : "#b45309";
+              const cola = esPrepago(u)
+                ? sinSaldo
+                  ? "Mientras no haya saldo, no se atiende."
+                  : "Seguimos atendiendo mientras alcance el saldo."
+                : "Seguimos atendiendo; el extra aparece en tu siguiente factura.";
+              return `<div class="text-[12px]" style="border:1px solid ${color};background:${sinSaldo ? "rgba(220,38,38,.06)" : "rgba(180,83,9,.07)"};padding:9px 12px;border-radius:var(--radius-sm);color:var(--cream)">${esc(avisoDeExcedente(u.key as ClaveDeLimite, u) ?? "")} ${cola}</div>`;
+            })
             .join("")}
           <p class="text-[11.5px]" style="color:var(--dim);margin:0">${esc(DEFINICION_DE_CONVERSACION)}</p>
         </div>`
@@ -272,6 +289,57 @@ export function renderPlan(
         </script>`
       : "";
 
+    // Paquetes prepagados (B7c): los vende KontrolIA para los límites con
+    // precio del plan CONTRATADO. Se pintan cuando la organización es prepago
+    // en ese límite — en pospago no hay nada que comprar, el extra va a la
+    // factura. El precio ya viene calculado (units × precio unitario).
+    const planActual = sub ? data.plans.find((p) => p.slug === sub.planSlug) : undefined;
+    const paquetes = (e?.usage ?? [])
+      .filter((u) => esPrepago(u))
+      .map((u) => {
+        const limite = planActual?.limits.find((l) => l.key === u.key);
+        const packs = (limite?.creditPacks ?? []).filter((pk) => pk.units > 0);
+        if (!packs.length) return "";
+        const clave = u.key as ClaveDeLimite;
+        const saldo = saldoPrepago(u) ?? 0;
+        const nombre = esc(u.description ?? u.key);
+        const botones = packs
+          .map((pk) =>
+            data.esOwnerOAdmin
+              ? `<form method="POST" action="/admin/plan/credits/checkout" style="margin:0">
+                  <input type="hidden" name="limite" value="${esc(u.key)}">
+                  <input type="hidden" name="paquete" value="${esc(pk.id)}">
+                  <button type="submit" class="text-[12px]" style="background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);padding:12px 16px;cursor:pointer;display:flex;flex-direction:column;gap:2px;align-items:flex-start;min-width:150px">
+                    <span class="font-display font-bold text-[15px] text-cream">${pk.units.toLocaleString("es-MX")}</span>
+                    <span style="color:var(--muted)">${esc(dinero(pk.priceAmount, pk.currency))}</span>
+                  </button>
+                </form>`
+              : `<div class="text-[12px]" style="background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);padding:12px 16px;min-width:150px">
+                  <div class="font-display font-bold text-[15px] text-cream">${pk.units.toLocaleString("es-MX")}</div>
+                  <div style="color:var(--muted)">${esc(dinero(pk.priceAmount, pk.currency))}</div>
+                </div>`,
+          )
+          .join("");
+        return `<div style="display:flex;flex-direction:column;gap:10px">
+          <div>
+            <div class="font-display font-semibold text-[13.5px] text-cream">${nombre}: ${saldo.toLocaleString("es-MX")} de saldo</div>
+            <p class="text-[12px]" style="color:var(--muted);margin:3px 0 0">Cuando se acaban los ${esc(nombre.toLowerCase())} de tu plan, se descuentan de este saldo. Se paga por adelantado, no caduca, y si llega a cero el bot deja de atender por ese medio hasta que compres más.</p>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">${botones}</div>
+          ${data.esOwnerOAdmin ? "" : `<p class="text-[11.5px]" style="color:var(--dim);margin:0">Solo el dueño o un administrador puede comprar paquetes.</p>`}
+        </div>`;
+      })
+      .filter(Boolean)
+      .join('<div style="height:1px;background:var(--line);margin:4px 0"></div>');
+
+    const bloquePaquetes = paquetes
+      ? `<div style="border:1px solid var(--line);background:var(--panel2);padding:18px 20px;border-radius:var(--radius);display:flex;flex-direction:column;gap:14px">
+          <div class="font-display font-semibold text-[13.5px] text-cream">Comprar más unidades</div>
+          ${paquetes}
+          <p class="text-[11px]" style="color:var(--dim);margin:0">El pago es único y se hace en la página segura de Stripe. El saldo se acredita en cuanto Stripe confirma.</p>
+        </div>`
+      : "";
+
     // Enterprise no es un plan de KontrolIA: no se compra aquí, se conversa.
     // El "desde" se repite como texto porque el sitio (apps/web) y el panel
     // son dos apps sin paquete compartido — la fuente de verdad es
@@ -304,6 +372,7 @@ export function renderPlan(
         ${portal ? `<div>${portal}</div>` : ""}
       </div>
       ${uso}
+      ${bloquePaquetes}
       ${
         data.plansError || !data.plans.length
           ? `<div><div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:10px">Planes</div>${precios}</div>`

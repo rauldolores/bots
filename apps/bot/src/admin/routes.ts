@@ -83,6 +83,9 @@ import {
   textoDeUso,
   resumenDeExcedente,
   tieneExcedente,
+  comprarPaquete,
+  esPrepago,
+  saldoPrepago,
   LIMITES,
   type ClaveDeLimite,
 } from "../billing/kontrolia";
@@ -1713,11 +1716,45 @@ adminApp.get("/plan/uso", (c) => {
       limit: u.limit,
       texto: textoDeUso(u),
       agotado: u.limit !== null && u.used >= u.limit,
-      // B7b: agotado con precio no bloquea — el sidebar lo pinta ámbar, no rojo, y muestra lo acumulado.
-      conExcedente: tieneExcedente(u),
+      // B7b/B7c: agotado con precio no bloquea mientras haya con qué pagar —
+      // el sidebar lo pinta ámbar, no rojo, con el saldo (prepago) o lo
+      // acumulado (pospago). Sin saldo vuelve a ser rojo: ya bloquea.
+      conExcedente: tieneExcedente(u) && (!esPrepago(u) || (saldoPrepago(u) ?? 0) > 0),
       excedente: resumenDeExcedente(u.key as ClaveDeLimite, u),
     })),
   });
+});
+
+/**
+ * billing.md B7c — comprar un paquete de unidades prepagadas. Mismo patrón
+ * que /plan/checkout: el auth-server verifica que sea owner/admin, aquí solo
+ * se traducen sus errores. Vuelve por /admin/billing/ok, que ya reintenta
+ * hasta que el webhook abona el saldo.
+ */
+adminApp.post("/plan/credits/checkout", async (c) => {
+  const token = c.get("kontroliaAccessToken");
+  if (!token) return c.redirect("/admin/plan?err=Entra con tu cuenta de KontrolIA para comprar un paquete.", 302);
+  const form = await c.req.formData();
+  const limitKey = String(form.get("limite") ?? "").trim();
+  const packId = String(form.get("paquete") ?? "").trim();
+  if (!limitKey || !packId) return c.redirect("/admin/plan?err=Falta el paquete.", 302);
+  const base = (c.env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
+  const r = await comprarPaquete(c.env, token, {
+    limitKey,
+    packId,
+    successUrl: `${base}/admin/billing/ok`,
+    cancelUrl: `${base}/admin/plan`,
+  });
+  if (r.ok) return c.redirect(r.url, 302);
+  const err =
+    r.status === 403
+      ? "Solo el dueño o un administrador de tu organización puede comprar paquetes."
+      : r.status === 400
+        ? `KontrolIA rechazó la compra: ${r.error}`
+        : r.status === 503
+          ? "La instancia de KontrolIA no tiene Stripe configurado: los paquetes se asignan desde panel.kontrolia.io."
+          : r.error;
+  return c.redirect(`/admin/plan?err=${encodeURIComponent(err)}`, 302);
 });
 
 adminApp.post("/plan/portal", async (c) => {

@@ -16,6 +16,9 @@ import {
   avisoDeExcedente,
   resumenDeExcedente,
   textoDePrecioExtra,
+  comprarPaquete,
+  esPrepago,
+  saldoPrepago,
   contarUso,
   textoDeUso,
   mensajeDeLimite,
@@ -74,7 +77,7 @@ describe("hayCupo — requireLimit antes de crear (B7)", () => {
 });
 
 describe("excedentes (B7b) — el límite agotado deja de bloquear cuando el plan cobra la unidad extra", () => {
-  const LLAMADAS_AGOTADAS = { key: "llamadas", used: 400, limit: 400, remaining: 0, period: "month", periodStart: "2026-09-01", exceeded: true, planSlug: "plan-pro", currency: "MXN" };
+  const LLAMADAS_AGOTADAS = { key: "llamadas", used: 400, limit: 400, remaining: 0, period: "month", periodStart: "2026-09-01", exceeded: true, planSlug: "plan-pro", currency: "MXN", billingMode: "postpaid", creditBalance: null, creditUnitsUsed: 0 };
 
   it("(a) agotado SIN precio: 402 → ok:false, exactamente como antes", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ usage: { ...LLAMADAS_AGOTADAS, overagePriceAmount: null, overageUnits: 0, overageAmount: 0 } })));
@@ -90,7 +93,7 @@ describe("excedentes (B7b) — el límite agotado deja de bloquear cuando el pla
     if (r.ok) {
       expect(r.excedido).toBe(true);
       expect(r.usage?.exceeded).toBe(true);
-      expect(avisoDeExcedente(LIMITES.llamadas, r.usage!)).toBe("Tus 400 minutos del mes se agotaron; cada minuto extra cuesta $3.50 MXN.");
+      expect(avisoDeExcedente(LIMITES.llamadas, r.usage!)).toBe("Tus 400 minutos del mes se agotaron; cada minuto extra cuesta $3.50 MXN en tu próxima factura.");
     }
   });
 
@@ -225,5 +228,73 @@ describe("textos para el dueño", () => {
     expect(motivoDeAcceso("past_due").titulo).toMatch(/método de pago/);
     expect(motivoDeAcceso("canceled").titulo).toMatch(/terminó/);
     expect(motivoDeAcceso("expired").titulo).toMatch(/terminó/);
+  });
+});
+
+describe("prepago (B7c) — el saldo manda: con él se sigue, en cero vuelve el 402", () => {
+  const PREPAGO = {
+    key: "llamadas", used: 412, limit: 400, remaining: 0, period: "month", periodStart: "2026-09-01",
+    exceeded: true, planSlug: "plan-pro", overagePriceAmount: 350, overageUnits: 12, overageAmount: 4200,
+    currency: "MXN", billingMode: "prepaid" as const, creditUnitsUsed: 12,
+  };
+
+  it("con saldo: el SDK no lanza, hayCupo deja pasar y avisa cuánto queda", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ usage: { ...PREPAGO, creditBalance: 88 } })));
+    const r = await hayCupo(ENV, "org-1", LIMITES.llamadas);
+    expect(r).toMatchObject({ ok: true, excedido: true });
+    if (r.ok && r.usage) {
+      expect(esPrepago(r.usage)).toBe(true);
+      expect(saldoPrepago(r.usage)).toBe(88);
+      expect(avisoDeExcedente(LIMITES.llamadas, r.usage)).toBe(
+        "Tus 400 minutos del mes se agotaron. Te quedan 88 minutos de tu saldo prepagado, a $3.50 MXN cada minuto.",
+      );
+      expect(resumenDeExcedente(LIMITES.llamadas, r.usage)).toBe("Saldo: 88 minutos");
+    }
+  });
+
+  it("saldo en cero: el SDK lanza el MISMO 402 de un límite sin precio → hayCupo bloquea", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ usage: { ...PREPAGO, creditBalance: 0 } })));
+    const r = await hayCupo(ENV, "org-1", LIMITES.llamadas);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(saldoPrepago(r.usage)).toBe(0);
+  });
+
+  it("el saldo baja exactamente lo que reportUsage contó por encima del límite", async () => {
+    // 398 usados de 400 y una llamada de 5 minutos: 3 por encima → saldo 100 → 97.
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      usage: { ...PREPAGO, used: 403, overageUnits: 3, overageAmount: 1050, creditUnitsUsed: 3, creditBalance: 97 },
+    })));
+    const u = await contarUso(ENV, "org-1", LIMITES.llamadas, "call-1", 5);
+    expect(u?.creditUnitsUsed).toBe(3);
+    expect(saldoPrepago(u!)).toBe(97);
+  });
+
+  it("pospago sigue hablando de la factura, no del saldo", () => {
+    const u = { ...PREPAGO, billingMode: "postpaid" as const, creditBalance: null };
+    expect(esPrepago(u)).toBe(false);
+    expect(saldoPrepago(u)).toBeNull();
+    expect(avisoDeExcedente(LIMITES.llamadas, u)).toContain("en tu próxima factura");
+    expect(resumenDeExcedente(LIMITES.llamadas, u)).toBe("12 minutos extra · $42.00 MXN este mes");
+  });
+
+  it("comprarPaquete: POST /api/billing/credits/checkout con application, limitKey y packId", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ url: "https://checkout.stripe.com/pack" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await comprarPaquete(ENV, "tok", { limitKey: "llamadas", packId: "pk_1", successUrl: "https://p/admin/billing/ok", cancelUrl: "https://p/admin/plan" });
+    expect(r).toEqual({ ok: true, url: "https://checkout.stripe.com/pack" });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://auth.kontrolia.io/api/billing/credits/checkout");
+    expect((init.headers as Record<string, string>).authorization).toBe("Bearer tok");
+    expect(JSON.parse(String(init.body))).toEqual({
+      application: "nodia-agents", limitKey: "llamadas", packId: "pk_1",
+      successUrl: "https://p/admin/billing/ok", cancelUrl: "https://p/admin/plan",
+    });
+  });
+
+  it("errores de la compra traen el status para explicarlos (403 no es owner, 400 paquete inválido, 503 sin Stripe)", async () => {
+    for (const status of [403, 400, 503]) {
+      vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: `e${status}` }, { status })));
+      expect(await comprarPaquete(ENV, "tok", { limitKey: "llamadas", packId: "pk", successUrl: "a", cancelUrl: "b" })).toEqual({ ok: false, status, error: `e${status}` });
+    }
   });
 });

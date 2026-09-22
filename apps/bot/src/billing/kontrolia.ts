@@ -128,6 +128,27 @@ export function iniciarCheckout(
   });
 }
 
+/**
+ * billing.md B7c — la URL de Stripe Checkout (pago único) para comprar un
+ * paquete de unidades prepagadas. Mismos errores que el checkout de planes:
+ * 403 no es owner/admin · 400 URL de retorno no autorizada o paquete que no
+ * existe · 503 sin Stripe. El saldo NO lo abona esta redirección: lo abona
+ * el webhook de KontrolIA un instante después (como en B5).
+ */
+export function comprarPaquete(
+  env: Env,
+  accessToken: string,
+  input: { limitKey: string; packId: string; successUrl: string; cancelUrl: string },
+): Promise<UrlResult> {
+  return pedirUrl(env, accessToken, "/api/billing/credits/checkout", {
+    application: appSlug(env),
+    limitKey: input.limitKey,
+    packId: input.packId,
+    successUrl: input.successUrl,
+    cancelUrl: input.cancelUrl,
+  });
+}
+
 /** billing.md B6 — el portal de Stripe (cambiar plan, tarjeta, cancelar, facturas). Solo suscripciones de Stripe. */
 export function abrirPortal(env: Env, accessToken: string, returnUrl: string): Promise<UrlResult> {
   return pedirUrl(env, accessToken, "/api/billing/portal", { application: appSlug(env), returnUrl });
@@ -233,7 +254,27 @@ export function mensajeDeLimite(clave: ClaveDeLimite, usage: UsageReport): strin
 // e.usage[] (entitlements). Con overagePriceAmount null no hay excedente y
 // no se muestra nada — es el comportamiento de siempre.
 
-type ConExcedente = { limit: number | null; period: string; overagePriceAmount?: number | null; overageUnits?: number; overageAmount?: number; currency?: string };
+type ConExcedente = {
+  limit: number | null;
+  period: string;
+  overagePriceAmount?: number | null;
+  overageUnits?: number;
+  overageAmount?: number;
+  currency?: string;
+  billingMode?: "prepaid" | "postpaid";
+  creditBalance?: number | null;
+  creditUnitsUsed?: number;
+};
+
+/** Prepago (B7b/B7c): el saldo se consume al agotarse el límite y, en cero, vuelve a bloquear. */
+export function esPrepago(u: ConExcedente): boolean {
+  return tieneExcedente(u) && u.billingMode === "prepaid";
+}
+
+/** Unidades prepagadas que quedan. null = no aplica (pospago, o límite sin precio) — distinto de 0. */
+export function saldoPrepago(u: ConExcedente): number | null {
+  return esPrepago(u) ? (u.creditBalance ?? 0) : null;
+}
 
 /** "$3.50 MXN" — centavos → moneda del plan. */
 export function dinero(centavos: number, currency = "MXN"): string {
@@ -251,16 +292,37 @@ function unidad(clave: ClaveDeLimite, n: number): string {
   return n === 1 ? uno : varios;
 }
 
-/** Al agotar un límite con precio: "Tus 400 minutos del mes se agotaron; cada minuto extra cuesta $3.50 MXN". null si el límite no cobra excedente. */
+/**
+ * Al agotar un límite con precio. Cambia según quién paga y cuándo (B7b):
+ *   prepago  → "…se agotaron. Te quedan 120 minutos prepagados…" (o, en cero, que hay que recargar)
+ *   pospago  → "…cada minuto extra cuesta $3.50 MXN en tu próxima factura."
+ * null si el límite no cobra excedente: ahí simplemente bloquea.
+ */
 export function avisoDeExcedente(clave: ClaveDeLimite, u: ConExcedente): string | null {
   if (!tieneExcedente(u) || u.limit === null) return null;
   const periodo = u.period === "month" ? " del mes" : u.period === "day" ? " del día" : u.period === "year" ? " del año" : "";
-  return `Tus ${u.limit} ${unidad(clave, u.limit)}${periodo} se agotaron; cada ${unidad(clave, 1)} extra cuesta ${dinero(u.overagePriceAmount, u.currency)}.`;
+  const agotados = `Tus ${u.limit} ${unidad(clave, u.limit)}${periodo} se agotaron`;
+  if (esPrepago(u)) {
+    const saldo = saldoPrepago(u) ?? 0;
+    return saldo > 0
+      ? `${agotados}. Te ${saldo === 1 ? "queda" : "quedan"} ${saldo} ${unidad(clave, saldo)} de tu saldo prepagado, a ${dinero(u.overagePriceAmount, u.currency)} cada ${unidad(clave, 1)}.`
+      : `${agotados} y tu saldo prepagado está en cero. Compra un paquete para seguir; cada ${unidad(clave, 1)} cuesta ${dinero(u.overagePriceAmount, u.currency)}.`;
+  }
+  return `${agotados}; cada ${unidad(clave, 1)} extra cuesta ${dinero(u.overagePriceAmount, u.currency)} en tu próxima factura.`;
 }
 
-/** Acumulado del periodo: "12 minutos extra · $42.00 MXN este mes". null si no hay excedente acumulado. */
+/**
+ * Acumulado del periodo. En prepago lo que importa es lo que QUEDA ("Saldo:
+ * 120 minutos"); en pospago, lo que se va a cobrar ("12 minutos extra ·
+ * $42.00 MXN este mes"). null cuando no hay nada que decir.
+ */
 export function resumenDeExcedente(clave: ClaveDeLimite, u: ConExcedente): string | null {
-  if (!tieneExcedente(u) || !u.overageUnits || u.overageUnits <= 0) return null;
+  if (!tieneExcedente(u)) return null;
+  if (esPrepago(u)) {
+    const saldo = saldoPrepago(u) ?? 0;
+    return `Saldo: ${saldo} ${unidad(clave, saldo)}`;
+  }
+  if (!u.overageUnits || u.overageUnits <= 0) return null;
   const periodo = u.period === "month" ? " este mes" : u.period === "day" ? " hoy" : u.period === "year" ? " este año" : "";
   return `${u.overageUnits} ${unidad(clave, u.overageUnits)} extra · ${dinero(u.overageAmount ?? u.overageUnits * u.overagePriceAmount, u.currency)}${periodo}`;
 }
