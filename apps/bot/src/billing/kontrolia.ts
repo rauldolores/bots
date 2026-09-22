@@ -152,27 +152,34 @@ export function motivoDeAcceso(access: KontroliaEntitlements["access"]): { titul
 // ── Límites de consumo (con la API key, solo servidor) ───────────────────────
 
 export type ResultadoDeCupo =
-  | { ok: true; usage: UsageReport | null }
+  /** Hay cupo — o el límite está agotado pero el plan cobra el excedente (`excedido`): la operación SIGUE (billing.md B7b). */
+  | { ok: true; usage: UsageReport | null; excedido: boolean }
+  /** Agotado y SIN precio por excedente: 402, la operación se bloquea como siempre. */
   | { ok: false; usage: UsageReport };
 
 /**
  * ¿Queda cupo para crear uno más? billing.md B7: `requireLimit` antes de
  * crear. NO consume (amount 0). Si el auth-server no contesta o no hay API
  * key, deja pasar — ver la regla de fallo de arriba.
+ *
+ * B7b: el SDK ya decide. Si el límite tiene precio por unidad extra,
+ * requireLimit NO lanza y devuelve exceeded=true — aquí eso es ok:true con
+ * excedido:true, y quien llama continúa y avisa. El 402 solo llega cuando
+ * NO hay precio, y ese manejo no cambia.
  */
 export async function hayCupo(env: Env, organizationId: string, clave: ClaveDeLimite): Promise<ResultadoDeCupo> {
   const cfg = usageConfig(env);
-  if (!cfg) return { ok: true, usage: null };
+  if (!cfg) return { ok: true, usage: null, excedido: false };
   try {
     const usage = await requireLimit(cfg, organizationId, clave);
-    return { ok: true, usage };
+    return { ok: true, usage, excedido: usage.exceeded === true && usage.overagePriceAmount !== null };
   } catch (e) {
     if (e instanceof Response && e.status === 402) {
       const body = (await e.json().catch(() => null)) as { limit?: UsageReport } | null;
       if (body?.limit) return { ok: false, usage: body.limit };
     }
     console.warn(`[billing] requireLimit(${clave}): dejando pasar —`, e instanceof Error ? e.message : e);
-    return { ok: true, usage: null };
+    return { ok: true, usage: null, excedido: false };
   }
 }
 
@@ -207,8 +214,60 @@ export function textoDeUso(u: { used: number; limit: number | null; period: stri
   return `${u.used} de ${u.limit}${periodo}`;
 }
 
+const NOMBRE_DE_LIMITE: Record<ClaveDeLimite, string> = {
+  bots: "bots",
+  canales: "canales conectados",
+  conversaciones: "conversaciones",
+  llamadas: "minutos de llamadas",
+};
+
 /** Cómo se le dice al dueño que se topó con el límite, con el número real y a dónde ir. */
 export function mensajeDeLimite(clave: ClaveDeLimite, usage: UsageReport): string {
-  const nombre = { bots: "bots", canales: "canales conectados", conversaciones: "conversaciones", llamadas: "minutos de llamadas" }[clave];
+  const nombre = NOMBRE_DE_LIMITE[clave];
   return `Tu plan permite ${usage.limit} ${nombre}${usage.period === "month" ? " al mes" : ""} y ya llevas ${usage.used}. Cambia de plan en Plan y facturación.`;
+}
+
+// ── Excedentes (billing.md B7b) ──────────────────────────────────────────────
+//
+// Los campos vienen en UsageReport (requireLimit/reportUsage) y en
+// e.usage[] (entitlements). Con overagePriceAmount null no hay excedente y
+// no se muestra nada — es el comportamiento de siempre.
+
+type ConExcedente = { limit: number | null; period: string; overagePriceAmount?: number | null; overageUnits?: number; overageAmount?: number; currency?: string };
+
+/** "$3.50 MXN" — centavos → moneda del plan. */
+export function dinero(centavos: number, currency = "MXN"): string {
+  const cur = (currency || "MXN").toUpperCase();
+  return `${new Intl.NumberFormat("es-MX", { style: "currency", currency: cur, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(centavos / 100)} ${cur}`;
+}
+
+export function tieneExcedente(u: ConExcedente): u is ConExcedente & { overagePriceAmount: number } {
+  return typeof u.overagePriceAmount === "number" && u.overagePriceAmount > 0;
+}
+
+/** Unidad en singular/plural para hablar del excedente: "minuto extra", "3 conversaciones extra". */
+function unidad(clave: ClaveDeLimite, n: number): string {
+  const [uno, varios] = { bots: ["bot", "bots"], canales: ["canal", "canales"], conversaciones: ["conversación", "conversaciones"], llamadas: ["minuto", "minutos"] }[clave];
+  return n === 1 ? uno : varios;
+}
+
+/** Al agotar un límite con precio: "Tus 400 minutos del mes se agotaron; cada minuto extra cuesta $3.50 MXN". null si el límite no cobra excedente. */
+export function avisoDeExcedente(clave: ClaveDeLimite, u: ConExcedente): string | null {
+  if (!tieneExcedente(u) || u.limit === null) return null;
+  const periodo = u.period === "month" ? " del mes" : u.period === "day" ? " del día" : u.period === "year" ? " del año" : "";
+  return `Tus ${u.limit} ${unidad(clave, u.limit)}${periodo} se agotaron; cada ${unidad(clave, 1)} extra cuesta ${dinero(u.overagePriceAmount, u.currency)}.`;
+}
+
+/** Acumulado del periodo: "12 minutos extra · $42.00 MXN este mes". null si no hay excedente acumulado. */
+export function resumenDeExcedente(clave: ClaveDeLimite, u: ConExcedente): string | null {
+  if (!tieneExcedente(u) || !u.overageUnits || u.overageUnits <= 0) return null;
+  const periodo = u.period === "month" ? " este mes" : u.period === "day" ? " hoy" : u.period === "year" ? " este año" : "";
+  return `${u.overageUnits} ${unidad(clave, u.overageUnits)} extra · ${dinero(u.overageAmount ?? u.overageUnits * u.overagePriceAmount, u.currency)}${periodo}`;
+}
+
+/** Para la pantalla de precios: "extra a $3.50/min" (GET /api/plans → limits[].overagePriceAmount). */
+export function textoDePrecioExtra(clave: string, overagePriceAmount: number | null | undefined, currency = "MXN"): string | null {
+  if (typeof overagePriceAmount !== "number" || overagePriceAmount <= 0) return null;
+  const por = { llamadas: "min", conversaciones: "conversación", bots: "bot", canales: "canal" }[clave] ?? "unidad";
+  return `extra a ${dinero(overagePriceAmount, currency)}/${por}`;
 }

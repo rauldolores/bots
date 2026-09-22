@@ -173,6 +173,12 @@ export async function handleIncomingVoiceCall(request: Request, rawEnv: Env, bot
   //
   // Fallo abierto, como todo el billing: si el auth-server no contesta, la
   // llamada se atiende.
+  //
+  // Excedente (billing.md B7b): si el plan cobra el minuto extra, al agotar
+  // los minutos NO se cuelga — hayCupo devuelve ok con `excedido` y la
+  // llamada se atiende igual; KontrolIA cobra solo los minutos por encima
+  // del límite al contarlos al colgar (contarUso en el puente, mismo
+  // idempotencyKey por llamada). Al dueño se le avisa una vez al día.
   if (bot.organization_id) {
     const { hayCupo, LIMITES } = await import("../../billing/kontrolia");
     const cupo = await hayCupo(rawEnv, bot.organization_id, LIMITES.llamadas);
@@ -181,6 +187,11 @@ export async function handleIncomingVoiceCall(request: Request, rawEnv: Env, bot
       const { MENSAJE_SIN_CUPO_VOZ, registrarSinCupo } = await import("../../billing/sinCupo");
       void registrarSinCupo(rawEnv, botId, LIMITES.llamadas, cupo.usage);
       return buildSinMinutosResponse(MENSAJE_SIN_CUPO_VOZ);
+    }
+    if (cupo.excedido && cupo.usage) {
+      logVoiceEvent("webhook_overage", { botId, callSid: maskId(callSid), overageUnits: cupo.usage.overageUnits });
+      const { avisarExcedente } = await import("../../billing/sinCupo");
+      void avisarExcedente(rawEnv, botId, LIMITES.llamadas, cupo.usage);
     }
   }
 

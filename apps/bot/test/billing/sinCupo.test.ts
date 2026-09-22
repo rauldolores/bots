@@ -57,6 +57,10 @@ const uso = (used: number, limit: number, key = "conversaciones"): UsageReport =
   periodStart: "2026-09-01",
   exceeded: used >= limit,
   planSlug: "plan-impulso",
+  overagePriceAmount: null,
+  overageUnits: 0,
+  overageAmount: 0,
+  currency: "MXN",
 });
 const AGOTADO = { ok: false as const, usage: uso(1000, 1000) };
 const CON_CUPO = { ok: true as const, usage: uso(10, 1000) };

@@ -6,7 +6,7 @@
 // manda a la URL de Stripe que devuelve KontrolIA.
 import type { KontroliaEntitlements, KontroliaPlan } from "@kontrolia/shared";
 import type { Env } from "../../env";
-import { motivoDeAcceso, textoDeUso } from "../../billing/kontrolia";
+import { avisoDeExcedente, motivoDeAcceso, resumenDeExcedente, textoDePrecioExtra, textoDeUso, tieneExcedente, type ClaveDeLimite } from "../../billing/kontrolia";
 import { DEFINICION_DE_CONVERSACION } from "../../billing/conversacion";
 import { layout } from "./layout";
 
@@ -56,8 +56,12 @@ export function tiraDeUso(e: KontroliaEntitlements): string {
   return e.usage
     .map((u) => {
       const agotado = u.limit !== null && u.used >= u.limit;
-      return `<span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);padding:5px 10px;font-size:11.5px;${agotado ? "color:var(--bad);border-color:var(--bad)" : "color:var(--muted)"}">
-        <span class="font-mono" style="color:${agotado ? "var(--bad)" : "var(--cream)"}">${esc(u.key)}</span> ${esc(textoDeUso(u))}
+      // Agotado con precio por excedente (B7b): no es rojo — se sigue
+      // atendiendo y se cobra el extra; se muestra lo acumulado.
+      const extra = resumenDeExcedente(u.key as ClaveDeLimite, u);
+      const tono = agotado ? (tieneExcedente(u) ? "#b45309" : "var(--bad)") : null;
+      return `<span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);padding:5px 10px;font-size:11.5px;${tono ? `color:${tono};border-color:${tono}` : "color:var(--muted)"}">
+        <span class="font-mono" style="color:${tono ?? "var(--cream)"}">${esc(u.key)}</span> ${esc(textoDeUso(u))}${extra ? ` · ${esc(extra)}` : ""}
       </span>`;
     })
     .join("");
@@ -128,20 +132,33 @@ export function renderPlan(
       ? `<div style="border:1px solid var(--line);background:var(--panel);padding:18px 20px;display:flex;flex-direction:column;gap:10px">
           <div class="font-display font-semibold text-[13.5px] text-cream">Consumo de tu plan</div>
           <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
-            <thead><tr class="text-[11px]" style="color:var(--dim);text-align:left"><th style="padding:6px 10px;font-weight:500">Límite</th><th style="padding:6px 10px;font-weight:500">Usado</th><th style="padding:6px 10px;font-weight:500">Disponible</th><th style="padding:6px 10px;font-weight:500">Periodo</th></tr></thead>
+            <thead><tr class="text-[11px]" style="color:var(--dim);text-align:left"><th style="padding:6px 10px;font-weight:500">Límite</th><th style="padding:6px 10px;font-weight:500">Usado</th><th style="padding:6px 10px;font-weight:500">Disponible</th><th style="padding:6px 10px;font-weight:500">Periodo</th><th style="padding:6px 10px;font-weight:500">Excedente</th></tr></thead>
             <tbody>${e.usage
               .map((u) => {
                 const agotado = u.limit !== null && u.used >= u.limit;
+                const conPrecio = tieneExcedente(u);
                 const periodo = { month: "mensual", day: "diario", year: "anual", lifetime: "total" }[u.period] ?? u.period;
+                const clave = u.key as ClaveDeLimite;
+                // Excedente (B7b): precio por unidad extra y, si ya se pasó, lo
+                // acumulado del periodo. Sin precio: "—", el límite bloquea.
+                const extra = conPrecio
+                  ? `${esc(textoDePrecioExtra(u.key, u.overagePriceAmount, u.currency) ?? "")}${resumenDeExcedente(clave, u) ? `<br><span style="color:#b45309">${esc(resumenDeExcedente(clave, u)!)}</span>` : ""}`
+                  : `<span style="color:var(--dim)">—</span>`;
+                const colorUsado = agotado ? (conPrecio ? "#b45309" : "var(--bad)") : "inherit";
                 return `<tr style="border-top:1px solid var(--line)">
                   <td style="padding:8px 10px" class="text-[12.5px] text-cream">${esc(u.description ?? u.key)}</td>
-                  <td style="padding:8px 10px" class="text-[12.5px] font-mono" ${agotado ? 'style="color:var(--bad)"' : ""}>${esc(textoDeUso(u))}</td>
+                  <td style="padding:8px 10px;color:${colorUsado}" class="text-[12.5px] font-mono">${esc(textoDeUso(u))}</td>
                   <td style="padding:8px 10px" class="text-[12.5px] font-mono">${u.remaining === null ? "∞" : u.remaining}</td>
-                  <td style="padding:8px 10px" class="text-[12px]" style="color:var(--muted)">${esc(periodo)}</td>
+                  <td style="padding:8px 10px;color:var(--muted)" class="text-[12px]">${esc(periodo)}</td>
+                  <td style="padding:8px 10px" class="text-[12px]">${extra}</td>
                 </tr>`;
               })
               .join("")}</tbody>
           </table></div>
+          ${e.usage
+            .filter((u) => u.limit !== null && u.used >= u.limit && tieneExcedente(u))
+            .map((u) => `<div class="text-[12px]" style="border:1px solid #b45309;background:rgba(180,83,9,.07);padding:9px 12px;border-radius:var(--radius-sm);color:var(--cream)">${esc(avisoDeExcedente(u.key as ClaveDeLimite, u) ?? "")} Seguimos atendiendo; el extra aparece en tu siguiente factura.</div>`)
+            .join("")}
           <p class="text-[11.5px]" style="color:var(--dim);margin:0">${esc(DEFINICION_DE_CONVERSACION)}</p>
         </div>`
       : "";
@@ -191,7 +208,10 @@ export function renderPlan(
         const actual = sub?.planSlug === p.slug && sub.isLive;
         const features = p.features.map((f) => `<li style="display:flex;gap:8px;align-items:flex-start" class="text-[12.5px]"><span style="color:var(--ok)">✓</span><span>${esc(f)}</span></li>`).join("");
         const limites = p.limits
-          .map((l) => `<li class="text-[11.5px]" style="color:var(--dim)">${esc(l.description ?? l.key)}: <span class="font-mono">${l.limit === null ? "sin límite" : l.limit}</span>${l.period === "month" ? "/mes" : ""}</li>`)
+          .map((l) => {
+            const extra = textoDePrecioExtra(l.key, l.overagePriceAmount, p.currency);
+            return `<li class="text-[11.5px]" style="color:var(--dim)">${esc(l.description ?? l.key)}: <span class="font-mono">${l.limit === null ? "sin límite" : l.limit}</span>${l.period === "month" ? "/mes" : ""}${extra ? `, ${esc(extra)}` : ""}</li>`;
+          })
           .join("");
 
         let precioHtml: string;

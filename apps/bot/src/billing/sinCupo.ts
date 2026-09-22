@@ -44,6 +44,7 @@ const CADA_MS = 24 * 60 * 60_000;
 /** Claves de settings. Se arman por límite para que "conversaciones" y "llamadas" lleven cuentas separadas. */
 const claveAvisadoAt = (limite: ClaveDeLimite) => `sin_cupo_avisado_at:${limite}`;
 const claveAfectados = (limite: ClaveDeLimite) => `sin_cupo_afectados:${limite}`;
+const claveExcedenteAvisadoAt = (limite: ClaveDeLimite) => `excedente_avisado_at:${limite}`;
 
 /**
  * Registra a una persona más que se quedó sin atender y, si toca, avisa al
@@ -88,6 +89,43 @@ export async function registrarSinCupo(
     return true;
   } catch (e) {
     console.warn(`[billing] no se pudo avisar al dueño del límite de ${limite}:`, e);
+    return false;
+  }
+}
+
+/**
+ * Excedente con precio (billing.md B7b): el límite se agotó pero el plan
+ * cobra la unidad extra, así que NO se corta nada — se sigue atendiendo y
+ * al dueño se le avisa UNA vez al día que desde ahora paga por cada extra,
+ * con el precio y lo acumulado. Mismo ritmo (uno al día) pero llave propia:
+ * si hoy se avisó "sin cupo" y el dueño sube a un plan que cobra el extra,
+ * el aviso de excedente no debe quedar silenciado. Nunca lanza.
+ */
+export async function avisarExcedente(env: Env, botId: string, limite: ClaveDeLimite, usage: UsageReport): Promise<boolean> {
+  try {
+    const { avisoDeExcedente, resumenDeExcedente } = await import("./kontrolia");
+    const aviso = avisoDeExcedente(limite, usage);
+    if (!aviso) return false;
+    const settings = new SettingsRepo(new Db(env.DB), botId);
+    const ultimo = Number((await settings.get(claveExcedenteAvisadoAt(limite))) ?? "0");
+    if (Number.isFinite(ultimo) && ultimo > 0 && Date.now() - ultimo < CADA_MS) return false;
+    await settings.set(claveExcedenteAvisadoAt(limite), String(Date.now()));
+    const acumulado = resumenDeExcedente(limite, usage);
+    const { notifyOwner } = await import("../tools/handoffHuman");
+    await notifyOwner(
+      env,
+      {
+        reason: "Tu plan llegó al límite — seguimos atendiendo",
+        summary: `${aviso}${acumulado ? ` Llevas ${acumulado}.` : ""} El extra aparece en tu siguiente factura; si prefieres, sube de plan en Plan y facturación.`,
+        ticketId: `excedente-${limite}`,
+        titulo: "Plan al límite: cobrando excedente",
+        ruta: "/admin/plan",
+      },
+      botId,
+    );
+    return true;
+  } catch (e) {
+    console.warn(`[billing] no se pudo avisar al dueño del excedente de ${limite}:`, e);
     return false;
   }
 }

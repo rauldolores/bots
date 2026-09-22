@@ -258,6 +258,10 @@ const GLOBAL_STYLE = `
   .sb-uso-row.alto .sb-uso-bar>i{background:#d97706}
   .sb-uso-row.agotado .sb-uso-val{color:var(--bad)}
   .sb-uso-row.agotado .sb-uso-bar>i{background:var(--bad)}
+  /* agotado pero con precio por excedente: se sigue atendiendo, va en ámbar */
+  .sb-uso-row.excedente .sb-uso-val,.sb-uso-row.excedente .sb-uso-extra{color:#b45309}
+  .sb-uso-row.excedente .sb-uso-bar>i{background:#d97706}
+  .sb-uso-extra{font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #sb-uso:hover .sb-uso-plan{color:var(--accent-2)}
   .live-pill{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:7px 14px;box-shadow:var(--shadow-sm)}
 
@@ -453,10 +457,11 @@ export function layout(opts: {
       if (!box || !d || !d.plan) return;
       var rows = (d.limites || []).map(function (l) {
         var pct = l.limit === null ? 0 : Math.min(100, Math.round((l.used / Math.max(l.limit, 1)) * 100));
-        var cls = l.agotado ? ' agotado' : (l.limit !== null && pct >= 80 ? ' alto' : '');
-        return '<div class="sb-uso-row' + cls + '" title="' + esc(l.label) + ': ' + esc(l.texto) + '">' +
+        var cls = l.agotado ? (l.conExcedente ? ' excedente' : ' agotado') : (l.limit !== null && pct >= 80 ? ' alto' : '');
+        return '<div class="sb-uso-row' + cls + '" title="' + esc(l.label) + ': ' + esc(l.texto) + (l.excedente ? ' · ' + esc(l.excedente) : '') + '">' +
           '<div class="sb-uso-top"><span class="sb-uso-label">' + esc(l.label) + '</span><span class="sb-uso-val">' + esc(l.texto) + '</span></div>' +
           (l.limit === null ? '' : '<div class="sb-uso-bar"><i style="width:' + pct + '%"></i></div>') +
+          (l.excedente ? '<div class="sb-uso-extra">' + esc(l.excedente) + '</div>' : '') +
         '</div>';
       }).join('');
       box.innerHTML = '<div class="sb-uso-plan" title="Ver plan y facturación">' + esc(d.plan) + (d.isLive ? '' : ' · sin acceso') + '</div>' + rows;

@@ -185,6 +185,12 @@ export async function ingestMessage(
       if (cupo.ok) {
         if (sesionAt !== null) void contarUso(env, bot.organization_id, LIMITES.conversaciones, claveDeUso);
         if (enEspera) await convs.admitir(conv.id).catch(() => {});
+        // Excedente con precio (billing.md B7b): se sigue atendiendo, KontrolIA
+        // cobra la conversación extra, y al dueño se le avisa una vez al día.
+        if (cupo.excedido && cupo.usage) {
+          const { avisarExcedente } = await import("../billing/sinCupo");
+          void avisarExcedente(env, botId, LIMITES.conversaciones, cupo.usage);
+        }
       } else {
         console.warn(`[billing] conversaciones agotadas para la organización ${bot.organization_id}: ${cupo.usage.used}/${cupo.usage.limit} — ${payload.channel} en espera`);
         const { MENSAJE_SIN_CUPO_CHAT, PAUSA_SIN_CUPO_MS, registrarSinCupo } = await import("../billing/sinCupo");

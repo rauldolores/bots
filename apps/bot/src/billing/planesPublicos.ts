@@ -31,7 +31,8 @@ export interface PlanPublico {
   features: string[];
   isDefault: boolean;
   sortOrder: number;
-  limits: Array<{ key: string; limit: number | null; period: string; description: string | null }>;
+  /** overagePriceAmount en centavos; null = el límite bloquea (igual que KontroliaPlanLimit). */
+  limits: Array<{ key: string; limit: number | null; period: string; description: string | null; overagePriceAmount: number | null }>;
 }
 
 interface FilaPlan {
@@ -55,6 +56,7 @@ interface FilaLimite {
   limit_value: number | null;
   period: string;
   description: string | null;
+  overage_price_amount: number | null;
 }
 
 /** Caché corta en memoria: la landing revalida cada pocos minutos y los precios cambian cada varios meses. */
@@ -77,7 +79,7 @@ export async function planesPublicos(db: Db, env: Pick<Env, "KONTROLIA_APP_SLUG"
   const ids = planes.map((p) => p.id);
   const limites = ids.length
     ? await db.all<FilaLimite>(
-        `SELECT plan_id, limit_key, limit_value, period, description
+        `SELECT plan_id, limit_key, limit_value, period, description, overage_price_amount
            FROM kontrolia_auth.plan_limits
           WHERE plan_id = ANY(?::uuid[])
           ORDER BY limit_key`,
@@ -88,7 +90,7 @@ export async function planesPublicos(db: Db, env: Pick<Env, "KONTROLIA_APP_SLUG"
   const porPlan = new Map<string, PlanPublico["limits"]>();
   for (const l of limites) {
     const lista = porPlan.get(l.plan_id) ?? [];
-    lista.push({ key: l.limit_key, limit: l.limit_value, period: l.period, description: l.description });
+    lista.push({ key: l.limit_key, limit: l.limit_value, period: l.period, description: l.description, overagePriceAmount: l.overage_price_amount ?? null });
     porPlan.set(l.plan_id, lista);
   }
 

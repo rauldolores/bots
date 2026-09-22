@@ -81,7 +81,10 @@ import {
   contarUso,
   mensajeDeLimite,
   textoDeUso,
+  resumenDeExcedente,
+  tieneExcedente,
   LIMITES,
+  type ClaveDeLimite,
 } from "../billing/kontrolia";
 import { startOnboarding, activateOnboarding, disableOnboarding, retryOnboarding } from "../channels/voice/onboarding/service";
 import { renderConfig } from "./views/config";
@@ -1710,6 +1713,9 @@ adminApp.get("/plan/uso", (c) => {
       limit: u.limit,
       texto: textoDeUso(u),
       agotado: u.limit !== null && u.used >= u.limit,
+      // B7b: agotado con precio no bloquea — el sidebar lo pinta ámbar, no rojo, y muestra lo acumulado.
+      conExcedente: tieneExcedente(u),
+      excedente: resumenDeExcedente(u.key as ClaveDeLimite, u),
     })),
   });
 });

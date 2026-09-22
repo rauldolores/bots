@@ -667,6 +667,8 @@ describe("/admin/plan — precios, compra y portal (B3/B4/B6)", () => {
         { key: "conversaciones", used: 37, limit: 100, remaining: 63, period: "month", periodStart: "", description: "Conversaciones" },
         { key: "canales", used: 2, limit: 2, remaining: 0, period: "lifetime", periodStart: "", description: null },
         { key: "bots", used: 1, limit: null, remaining: null, period: "lifetime", periodStart: "", description: "Bots" },
+        // B7b: agotado pero con precio por excedente — no bloquea, y el sidebar muestra lo acumulado
+        { key: "llamadas", used: 412, limit: 400, remaining: 0, period: "month", periodStart: "", description: "Minutos de voz", overagePriceAmount: 350, overageUnits: 12, overageAmount: 4200, currency: "MXN" },
       ],
     });
     const res = await adminApp.fetch(conSesion("/plan/uso"), KONTROLIA_ENV);
@@ -675,9 +677,10 @@ describe("/admin/plan — precios, compra y portal (B3/B4/B6)", () => {
     expect(body.plan).toBe("Plan Pro · anual");
     expect(body.isLive).toBe(true);
     expect(body.limites).toEqual([
-      { key: "conversaciones", label: "Conversaciones", used: 37, limit: 100, texto: "37 de 100 este mes", agotado: false },
-      { key: "canales", label: "canales", used: 2, limit: 2, texto: "2 de 2", agotado: true },
-      { key: "bots", label: "Bots", used: 1, limit: null, texto: "1 (sin límite)", agotado: false },
+      { key: "conversaciones", label: "Conversaciones", used: 37, limit: 100, texto: "37 de 100 este mes", agotado: false, conExcedente: false, excedente: null },
+      { key: "canales", label: "canales", used: 2, limit: 2, texto: "2 de 2", agotado: true, conExcedente: false, excedente: null },
+      { key: "bots", label: "Bots", used: 1, limit: null, texto: "1 (sin límite)", agotado: false, conExcedente: false, excedente: null },
+      { key: "llamadas", label: "Minutos de voz", used: 412, limit: 400, texto: "412 de 400 este mes", agotado: true, conExcedente: true, excedente: "12 minutos extra · $42.00 MXN este mes" },
     ]);
   });
 

@@ -13,6 +13,9 @@ import {
   iniciarCheckout,
   abrirPortal,
   hayCupo,
+  avisoDeExcedente,
+  resumenDeExcedente,
+  textoDePrecioExtra,
   contarUso,
   textoDeUso,
   mensajeDeLimite,
@@ -40,7 +43,7 @@ describe("hayCupo — requireLimit antes de crear (B7)", () => {
   it("sin API key deja pasar sin tocar la red", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    expect(await hayCupo(ENV_SIN_KEY, "org", LIMITES.bots)).toEqual({ ok: true, usage: null });
+    expect(await hayCupo(ENV_SIN_KEY, "org", LIMITES.bots)).toEqual({ ok: true, usage: null, excedido: false });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -64,9 +67,57 @@ describe("hayCupo — requireLimit antes de crear (B7)", () => {
 
   it("auth-server caído: deja pasar (fallo abierto), nunca lanza", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("ECONNRESET"); }));
-    expect(await hayCupo(ENV, "org-1", LIMITES.conversaciones)).toEqual({ ok: true, usage: null });
+    expect(await hayCupo(ENV, "org-1", LIMITES.conversaciones)).toEqual({ ok: true, usage: null, excedido: false });
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "boom" }, { status: 500 })));
-    expect(await hayCupo(ENV, "org-1", LIMITES.conversaciones)).toEqual({ ok: true, usage: null });
+    expect(await hayCupo(ENV, "org-1", LIMITES.conversaciones)).toEqual({ ok: true, usage: null, excedido: false });
+  });
+});
+
+describe("excedentes (B7b) — el límite agotado deja de bloquear cuando el plan cobra la unidad extra", () => {
+  const LLAMADAS_AGOTADAS = { key: "llamadas", used: 400, limit: 400, remaining: 0, period: "month", periodStart: "2026-09-01", exceeded: true, planSlug: "plan-pro", currency: "MXN" };
+
+  it("(a) agotado SIN precio: 402 → ok:false, exactamente como antes", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ usage: { ...LLAMADAS_AGOTADAS, overagePriceAmount: null, overageUnits: 0, overageAmount: 0 } })));
+    const r = await hayCupo(ENV, "org-1", LIMITES.llamadas);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.usage.overagePriceAmount).toBeNull();
+  });
+
+  it("(b) agotado CON precio: el SDK no lanza → ok:true y excedido:true, la operación continúa", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ usage: { ...LLAMADAS_AGOTADAS, overagePriceAmount: 350, overageUnits: 0, overageAmount: 0 } })));
+    const r = await hayCupo(ENV, "org-1", LIMITES.llamadas);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.excedido).toBe(true);
+      expect(r.usage?.exceeded).toBe(true);
+      expect(avisoDeExcedente(LIMITES.llamadas, r.usage!)).toBe("Tus 400 minutos del mes se agotaron; cada minuto extra cuesta $3.50 MXN.");
+    }
+  });
+
+  it("con cupo y precio configurado, excedido es false (todavía no se pasó)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ usage: { ...LLAMADAS_AGOTADAS, used: 10, remaining: 390, exceeded: false, overagePriceAmount: 350, overageUnits: 0, overageAmount: 0 } })));
+    const r = await hayCupo(ENV, "org-1", LIMITES.llamadas);
+    expect(r).toMatchObject({ ok: true, excedido: false });
+  });
+
+  it("(c) reportUsage por encima del límite: contarUso devuelve overageUnits/overageAmount y el resumen los muestra", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ usage: { ...LLAMADAS_AGOTADAS, used: 412, overagePriceAmount: 350, overageUnits: 12, overageAmount: 4200 } })));
+    const u = await contarUso(ENV, "org-1", LIMITES.llamadas, "call-1", 5);
+    expect(u?.overageUnits).toBe(12);
+    expect(u?.overageAmount).toBe(4200);
+    expect(resumenDeExcedente(LIMITES.llamadas, u!)).toBe("12 minutos extra · $42.00 MXN este mes");
+  });
+
+  it("sin precio (overagePriceAmount null) no hay aviso ni resumen: el comportamiento de siempre", () => {
+    const u = { ...LLAMADAS_AGOTADAS, overagePriceAmount: null, overageUnits: 0, overageAmount: 0 } as any;
+    expect(avisoDeExcedente(LIMITES.llamadas, u)).toBeNull();
+    expect(resumenDeExcedente(LIMITES.llamadas, u)).toBeNull();
+    expect(textoDePrecioExtra("llamadas", null)).toBeNull();
+  });
+
+  it("textoDePrecioExtra para la pantalla de precios: 'extra a $3.50 MXN/min'", () => {
+    expect(textoDePrecioExtra("llamadas", 350, "MXN")).toBe("extra a $3.50 MXN/min");
+    expect(textoDePrecioExtra("conversaciones", 190)).toBe("extra a $1.90 MXN/conversación");
   });
 });
 

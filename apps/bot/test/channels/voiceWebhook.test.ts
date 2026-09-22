@@ -30,9 +30,10 @@ vi.mock("../../src/billing/kontrolia", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/billing/kontrolia")>();
   return { ...actual, hayCupo: (...a: unknown[]) => hayCupoMock(...a) };
 });
+const notifyOwnerMock = vi.fn().mockResolvedValue(undefined);
 vi.mock("../../src/tools/handoffHuman", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/tools/handoffHuman")>();
-  return { ...actual, notifyOwner: vi.fn().mockResolvedValue(undefined) };
+  return { ...actual, notifyOwner: (...a: unknown[]) => notifyOwnerMock(...a) };
 });
 
 let db: Db;
@@ -60,6 +61,7 @@ beforeEach(async () => {
   db = await createTestDb();
   env = { DB: db.driver, DASHBOARD_BASE_URL: BASE_URL, TWILIO_ACCOUNT_SID: "ACxxxx" };
   hayCupoMock.mockReset().mockResolvedValue({ ok: true, usage: null });
+  notifyOwnerMock.mockReset().mockResolvedValue(undefined);
   // Conexión "real" del canal — mismo camino que /admin/conexiones (Vault +
   // bot_channels), no una variable de entorno suelta. Sin `name`: vault.secrets
   // vive en su propio schema y NO se trunca entre tests (no es del schema de
@@ -275,6 +277,26 @@ describe("handleIncomingVoiceCall — sin minutos en el plan", () => {
     const sig = twilioSignatureFor(canonicalUrl, PARAMS);
     await handleIncomingVoiceCall(callRequest(TEST_BOT_ID, PARAMS, sig), env, TEST_BOT_ID);
     expect(hayCupoMock).toHaveBeenCalledWith(expect.anything(), expect.any(String), "llamadas");
+  });
+
+  it("(B7b) minutos agotados pero el plan cobra el extra: NO cuelga, conecta el stream y avisa al dueño", async () => {
+    hayCupoMock.mockResolvedValue({
+      ok: true,
+      excedido: true,
+      usage: { key: "llamadas", used: 400, limit: 400, remaining: 0, period: "month", periodStart: "2026-09-01", exceeded: true, planSlug: "plan-pro", overagePriceAmount: 350, overageUnits: 0, overageAmount: 0, currency: "MXN" },
+    });
+    const sig = twilioSignatureFor(canonicalUrl, PARAMS);
+    const res = await handleIncomingVoiceCall(callRequest(TEST_BOT_ID, PARAMS, sig), env, TEST_BOT_ID);
+    const body = await res.text();
+    expect(body).toContain("<Connect><Stream");
+    expect(body).not.toContain("<Hangup/>");
+    // El aviso va en segundo plano (void) y pasa por la base: se espera a que llegue.
+    await vi.waitFor(() => expect(notifyOwnerMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ ticketId: "excedente-llamadas" }), TEST_BOT_ID), { timeout: 15_000 });
+    expect(notifyOwnerMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ titulo: "Plan al límite: cobrando excedente", summary: expect.stringContaining("cada minuto extra cuesta $3.50 MXN") }),
+      TEST_BOT_ID,
+    );
   });
 
   it("con minutos, conecta el stream como siempre", async () => {
