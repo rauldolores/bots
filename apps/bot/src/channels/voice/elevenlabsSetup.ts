@@ -436,24 +436,17 @@ export async function asegurarAgenteAlDia(
   const nombresDeHoy = resueltas ? Object.keys(resueltas) : Object.keys(registradas);
   if (guardada === huellaDeConfiguracion(voiceId, nombresDeHoy)) return { actualizado: false };
 
-  // Un agente NUNCA debe quedar con MENOS herramientas de las que ya tenía por
-  // un tropiezo de red. Pasó exactamente eso al aplicar un cambio de modelo: el
-  // servidor MCP no respondió a tiempo, se armó el conjunto sin sus 5
-  // herramientas, y el agente se reescribió con 7 en vez de 12. Peor todavía:
-  // como esas 7 sí se registraron, la huella se guardó y el sistema se quedó
-  // convencido de estar al día — la degradación se volvía permanente y muda.
+  // Aquí VIVÍA un candado por conteo: si el conjunto traía menos herramientas
+  // de las que el agente ya tenía, se abortaba, por si un servidor MCP no
+  // había respondido y lo dejábamos mutilado. El peligro es real, pero contar
+  // no sabe distinguirlo de que el dueño las apagara a propósito — y como
+  // cada pasada volvía a ver lo mismo, nunca convergía: apagar 40
+  // herramientas desde el panel quedaba bloqueado para siempre, con un aviso
+  // que culpaba al MCP.
   //
-  // No es un candado: quitar una herramienta a propósito desde el panel también
-  // baja la cuenta. Solo se aborta ESTA pasada; la siguiente lo reintenta, y
-  // como la huella no se guarda, converge en cuanto el conteo se estabilice.
-  if (resueltas && idsActuales.length > 0 && Object.keys(resueltas).length < idsActuales.length) {
-    return {
-      actualizado: false,
-      error:
-        `se iban a registrar ${Object.keys(resueltas).length} herramientas y el agente ya tiene ` +
-        `${idsActuales.length}; no se toca (probablemente un servidor MCP no respondió)`,
-    };
-  }
+  // La protección ahora vive donde SÍ se sabe: quien arma las herramientas
+  // (callBridge.ts) lanza si hay conectores MCP habilitados y no consiguió
+  // ninguna, y ese error llega aquí sin tocar al agente.
 
   const r = await prepararAgenteElevenLabs(db, botId, apiKey, voiceId, resueltas).catch((e) => ({
     ok: false as const,

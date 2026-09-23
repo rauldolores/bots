@@ -11,6 +11,7 @@ import type { Env } from "../../env";
 import type { Db } from "../../db/client";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
 import { llaveDeElevenLabs } from "./elevenlabsKey";
+import { BotConnectorsRepo } from "../../db/botConnectors";
 import type { VoiceSession } from "./session";
 
 export interface CallBridgeDeps {
@@ -104,7 +105,19 @@ export async function credencialesElevenLabs(
           import("../../tools/mcpTools"),
           import("./tools/consultarTarea"),
         ]);
+        // Un MCP caído NO puede acabar en un agente reescrito sin sus
+        // herramientas. Pasó: el servidor no respondió a tiempo, el agente se
+        // reescribió con 7 en vez de 12, la huella se guardó, y la
+        // degradación quedó permanente y muda. Por eso aquí se LANZA: quien
+        // llama (revisar) lo atrapa y deja al agente como estaba; la
+        // siguiente llamada lo reintenta con el MCP ya repuesto.
+        const hayMcp = (await new BotConnectorsRepo(db).listByBot(botId)).some(
+          (c) => c.category === "mcp" && c.enabled,
+        );
         const mcp = await loadMcpTools(env, db, botId).catch(() => ({}));
+        if (hayMcp && Object.keys(mcp).length === 0) {
+          throw new Error("el servidor MCP no respondió — no se toca el agente");
+        }
         // consultar_tarea (F-compañero) solo se registra si el bot tiene MCP
         // — sin eso, el puente nunca delega nada y no tendría qué consultar.
         // Aquí SOLO importa el esquema (nombre/descripción/parámetros) que

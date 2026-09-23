@@ -151,6 +151,16 @@ describe("las herramientas apagadas no se registran en el agente de voz", () => 
     expect(t).toHaveProperty("zendesk_searchTickets");
   });
 
+  it("si el MCP no responde, NO se arma un conjunto sin sus herramientas", async () => {
+    createMCPClientMock.mockRejectedValue(new Error("timeout"));
+
+    await credencialesElevenLabs(db, TEST_BOT_ID, env);
+    await esperarRevision();
+    const armar = asegurarAgenteAlDiaMock.mock.calls.at(-1)![4] as () => Promise<Record<string, any>>;
+
+    await expect(armar()).rejects.toThrow(/no respondió/);
+  });
+
   it("sin nada apagado, se registran todas", async () => {
     const t = await tools();
 

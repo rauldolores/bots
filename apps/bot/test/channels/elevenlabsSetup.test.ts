@@ -377,8 +377,13 @@ describe("la llave, antes de tocar la red", () => {
 // se reescribió con 7 en vez de 12. Como esas 7 sí se registraron, la huella se
 // guardó y el sistema se quedó convencido de estar al día: la degradación se
 // volvía permanente y nadie se enteraba.
+//
+// La protección vive ahora en quien ARMA las herramientas (callBridge.ts, que
+// lanza si hay MCP habilitado y no consiguió ninguna), no en un conteo aquí:
+// contar no sabe distinguir un MCP caído de un dueño apagando herramientas a
+// propósito, y ese conteo dejó bloqueada para siempre una reducción legítima.
 describe("un tropiezo de red no puede encoger al agente", () => {
-  it("aborta si se van a registrar MENOS herramientas de las que ya tiene", async () => {
+  it("si armar las herramientas falla, el agente se queda como estaba", async () => {
     settingsGuardados["voice_elevenlabs_config_hash"] = "vieja";
     settingsGuardados["voice_elevenlabs_tool_ids"] = JSON.stringify({
       searchKb: "tool_1",
@@ -390,17 +395,48 @@ describe("un tropiezo de red no puede encoger al agente", () => {
       throw new Error("no debió tocar la red");
     }) as any;
 
-    // El MCP no respondió: solo llegan las estáticas.
-    const r = await asegurarAgenteAlDia({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO, async () => ({
-      searchKb: {},
-      captureLead: {},
-    }));
+    await expect(
+      asegurarAgenteAlDia({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO, async () => {
+        throw new Error("el servidor MCP no respondió — no se toca el agente");
+      }),
+    ).rejects.toThrow("no se toca el agente");
 
-    expect(r.actualizado).toBe(false);
-    expect(r.error).toContain("no se toca");
     // Y sobre todo: la huella NO se guarda, así que el siguiente intento lo
     // vuelve a hacer en cuanto el MCP conteste.
     expect(settingsGuardados["voice_elevenlabs_config_hash"]).toBe("vieja");
+  });
+
+  // Lo que el conteo bloqueaba: apagar herramientas desde el panel es una
+  // orden, no un accidente, y tiene que llegar al agente.
+  it("una reducción deliberada SÍ se aplica", async () => {
+    settingsGuardados["voice_elevenlabs_config_hash"] = huellaDeConfiguracion(VOZ_DEL_CATALOGO, [
+      "searchKb",
+      "captureLead",
+      "mcp_vinqulia_a",
+      "mcp_vinqulia_b",
+    ]);
+    settingsGuardados["voice_elevenlabs_tool_ids"] = JSON.stringify({
+      searchKb: "tool_1",
+      captureLead: "tool_2",
+      mcp_vinqulia_a: "tool_3",
+      mcp_vinqulia_b: "tool_4",
+    });
+    let enviado: any;
+    global.fetch = fetchQueRespondePor({
+      voces: () => Response.json({ voices: [{ voice_id: VOZ_DEL_CATALOGO }] }),
+      herramientas: () => Response.json({ id: "tool_1" }),
+      crearAgente: (cuerpo) => {
+        enviado = cuerpo;
+        return Response.json({ agent_id: "agent-1" });
+      },
+    });
+
+    const r = await asegurarAgenteAlDia({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO, async () => ({
+      searchKb: {},
+    }));
+
+    expect(r.actualizado).toBe(true);
+    expect(enviado.conversation_config.agent.prompt.tool_ids).toHaveLength(1);
   });
 
   it("con el mismo número o más, sí actualiza", async () => {
