@@ -9,7 +9,7 @@ import type { Env } from "../env";
 import { Db } from "../db/client";
 import { BotsRepo } from "../db/bots";
 import { ConversationsRepo } from "../db/conversations";
-import { MessagesRepo } from "../db/messages";
+import { MessagesRepo, partsDe } from "../db/messages";
 import { ingestMessage } from "../agent/runner";
 import { wakeTickAfter } from "../queue/wake";
 import { ctxOpcional } from "../hono-utils";
@@ -115,6 +115,13 @@ widgetApp.get("/messages", async (c) => {
   const rows = await new MessagesRepo(db, botId).since(conv.id, after);
   return c.json({
     ok: true,
-    messages: rows.map((m) => ({ role: m.role, content: m.content, created_at: m.created_at })),
+    messages: rows.map((m) => ({
+      role: m.role,
+      content: m.content,
+      // Los bloques que no son texto (foto, archivo, enlace) — el script los
+      // pinta; sin esto el visitante leería "te mando el menú" y nada más.
+      parts: partsDe(m),
+      created_at: m.created_at,
+    })),
   });
 });

@@ -1,0 +1,16 @@
+-- Lo que el mensaje llevaba además del texto.
+--
+-- Desde que el bot puede mandar una foto o un PDF (ver channels/parts.ts), el
+-- historial se quedaba corto: `content` guarda lo que el modelo ESCRIBIÓ, así
+-- que en la bandeja el operador leía "te mando el menú" sin ninguna señal de
+-- que el menú hubiera salido. No poder ver lo que el bot le mandó a un cliente
+-- es un agujero de supervisión, que es justo para lo que existe la bandeja.
+--
+-- Guarda SOLO los bloques que no son texto (imagen, documento, audio, enlace,
+-- opciones), como JSON. El texto no se duplica aquí: sigue viviendo en
+-- `content`, que es lo que lee el LLM en el historial.
+--
+-- TEXT y no JSONB a propósito: es el mismo trato que `tool_calls` —se guarda
+-- con JSON.stringify y se lee con JSON.parse—, y así el comportamiento no
+-- depende de cómo cada driver decida hidratar un JSONB.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS parts TEXT;

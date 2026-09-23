@@ -265,7 +265,7 @@ describe("del modelo al canal", () => {
     expect(documentos).toHaveLength(1);
   });
 
-  it.skip("PENDIENTE-FASE-4 el archivo queda guardado en el historial", async () => {
+  it("el archivo queda guardado en el historial, para que la bandeja pueda mostrarlo", async () => {
     await repo.upsert({
       clave: "menu",
       tipo: "documento",

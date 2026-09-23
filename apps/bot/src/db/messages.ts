@@ -1,4 +1,5 @@
 import { Db } from "./client";
+import type { MessagePart } from "../channels/parts";
 
 export type MessageRole = "user" | "assistant" | "tool" | "owner";
 
@@ -14,11 +15,31 @@ export interface Message {
   cached_input_tokens: number | null;
   audio_seconds: number | null;
   image_count: number | null;
+  /** JSON de los bloques que NO son texto — ver la migración y `partsDe()`. */
+  parts: string | null;
   created_at: number;
+}
+
+/**
+ * Los bloques guardados de un mensaje, o [] si no llevaba ninguno.
+ *
+ * Tolerante a propósito: esto se usa para PINTAR una conversación. Un JSON
+ * corrupto de hace seis meses no puede dejar la bandeja en blanco.
+ */
+export function partsDe(m: { parts?: string | null }): MessagePart[] {
+  if (!m.parts) return [];
+  try {
+    const v = JSON.parse(m.parts);
+    return Array.isArray(v) ? (v as MessagePart[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface AppendOptions {
   toolCalls?: unknown[];
+  /** Los bloques que acompañaron al texto (foto, documento…). */
+  parts?: MessagePart[];
   modelUsed?: string;
   inputTokens?: number;
   outputTokens?: number;
@@ -46,8 +67,8 @@ export class MessagesRepo {
       `INSERT INTO messages (
         id, conversation_id, bot_id, role, content, tool_calls, model_used,
         input_tokens, output_tokens, cached_input_tokens,
-        audio_seconds, image_count, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        audio_seconds, image_count, parts, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         conversationId,
@@ -61,6 +82,7 @@ export class MessagesRepo {
         opts.cachedInputTokens ?? null,
         opts.audioSeconds ?? null,
         opts.imageCount ?? null,
+        opts.parts?.length ? JSON.stringify(opts.parts) : null,
         createdAt,
       ],
     );

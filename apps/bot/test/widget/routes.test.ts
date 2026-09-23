@@ -156,3 +156,40 @@ describe("POST /widget/message + GET /widget/messages", () => {
     expect(res.status).toBe(429);
   });
 });
+
+describe("los bloques llegan al widget", () => {
+  it("el polling devuelve la foto y el archivo, no solo el texto", async () => {
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("widget", "visitor-9");
+    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "assistant", "Aquí va el menú", {
+      parts: [
+        { kind: "image", url: "https://x/plato.jpg", caption: "Menú de hoy" },
+        { kind: "document", url: "https://x/carta.pdf", filename: "carta.pdf" },
+      ],
+    });
+
+    const res = await app.fetch(
+      new Request(`http://bot.test/widget/messages?bot=${TEST_BOT_ID}&key=${KEY}&sessionId=visitor-9`),
+      env,
+    );
+    const body = (await res.json()) as any;
+
+    expect(body.messages).toHaveLength(1);
+    expect(body.messages[0].content).toBe("Aquí va el menú");
+    expect(body.messages[0].parts).toEqual([
+      { kind: "image", url: "https://x/plato.jpg", caption: "Menú de hoy" },
+      { kind: "document", url: "https://x/carta.pdf", filename: "carta.pdf" },
+    ]);
+  });
+
+  it("un mensaje sin bloques trae una lista vacía, no null", async () => {
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("widget", "visitor-10");
+    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "assistant", "hola");
+
+    const res = await app.fetch(
+      new Request(`http://bot.test/widget/messages?bot=${TEST_BOT_ID}&key=${KEY}&sessionId=visitor-10`),
+      env,
+    );
+    const body = (await res.json()) as any;
+    expect(body.messages[0].parts).toEqual([]);
+  });
+});

@@ -301,3 +301,67 @@ describe("inbox — filtros por sentimiento del Analista", () => {
     expect(hc).not.toContain("Enojado");
   });
 });
+
+describe("la bandeja muestra lo que el bot MANDÓ, no solo lo que dijo", () => {
+  it("pinta la foto con su pie y el archivo con su nombre", async () => {
+    const conv = await convs.getOrCreate("telegram", "u9", "Marisol");
+    await msgs.append(conv.id, "user", "¿me pasas el menú?");
+    await msgs.append(conv.id, "assistant", "Claro, aquí va.", {
+      parts: [
+        { kind: "image", url: "https://x/plato.jpg", caption: "Menú de esta semana" },
+        { kind: "document", url: "https://x/carta.pdf", filename: "carta-completa.pdf" },
+      ],
+    });
+
+    const html = await renderThreadLive(env, TEST_BOT_ID, conv.id);
+
+    expect(html).toContain('class="nds-part nds-part--image"');
+    expect(html).toContain("https://x/plato.jpg");
+    expect(html).toContain("Menú de esta semana");
+    expect(html).toContain("carta-completa.pdf");
+    // El tipo de archivo es dato de máquina: va en la línea mono.
+    expect(html).toContain('class="nds-part__meta">PDF<');
+  });
+
+  it("un turno que solo mandó un archivo no deja una burbuja vacía", async () => {
+    const conv = await convs.getOrCreate("telegram", "u10");
+    await msgs.append(conv.id, "assistant", "", {
+      parts: [{ kind: "image", url: "https://x/local.jpg" }],
+    });
+
+    const html = await renderThreadLive(env, TEST_BOT_ID, conv.id);
+
+    expect(html).toContain("nds-part--image");
+    expect(html).not.toContain('<div class="nds-msg__bubble"></div>');
+  });
+
+  it("un enlace se pinta como tarjeta, con su dominio", async () => {
+    const conv = await convs.getOrCreate("telegram", "u11");
+    await msgs.append(conv.id, "assistant", "Por aquí llegas:", {
+      parts: [
+        {
+          kind: "link",
+          url: "https://www.google.com/maps/place/x",
+          title: "Sucursal Roma",
+          description: "Álvaro Obregón 210",
+        },
+      ],
+    });
+
+    const html = await renderThreadLive(env, TEST_BOT_ID, conv.id);
+
+    expect(html).toContain("nds-part--link");
+    expect(html).toContain("Sucursal Roma");
+    // Sin "www.": lo que importa es a dónde lleva.
+    expect(html).toContain('class="nds-part__meta">google.com<');
+  });
+
+  it("un JSON corrupto no tumba el hilo", async () => {
+    const conv = await convs.getOrCreate("telegram", "u12");
+    await msgs.append(conv.id, "assistant", "hola");
+    await db.run("UPDATE messages SET parts = ? WHERE conversation_id = ?", ["{roto", conv.id]);
+
+    const html = await renderThreadLive(env, TEST_BOT_ID, conv.id);
+    expect(html).toContain("hola");
+  });
+});

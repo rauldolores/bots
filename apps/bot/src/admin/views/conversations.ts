@@ -28,6 +28,8 @@ import { Db } from "../../db/client";
 import { InsightsRepo } from "../../db/insights";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
+import { partsDe } from "../../db/messages";
+import type { MessagePart } from "../../channels/parts";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
 import { resolveTimezone } from "../../datetime";
 import { TRAINING_CHANNEL } from "./sandbox";
@@ -115,6 +117,81 @@ function avatar(name: string, sm = false): string {
 
 function dot(tone: string): string {
   return `<span class="nds-dot nds-dot--${tone}" aria-hidden="true"></span>`;
+}
+
+/** El dominio de un enlace, que es lo que dice de verdad a dónde lleva. */
+function dominioDe(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+/** La extensión, en mayúsculas: "PDF", "XLSX". Es dato de máquina, va en mono. */
+function extensionDe(nombre: string): string {
+  const ext = nombre.split(".").pop() ?? "";
+  return ext && ext.length <= 5 ? ext.toUpperCase() : "archivo";
+}
+
+/**
+ * Los bloques que el bot mandó además del texto, con la forma del sistema.
+ *
+ * Reglas que se respetan aquí y conviene no perder al tocarlo:
+ *  - La geometría de la burbuja es la misma (tres esquinas `radius-bubble`, la
+ *    del hablante `radius-nub`): un adjunto es un mensaje, no una tarjeta
+ *    pegada al hilo.
+ *  - El pie va DENTRO de la burbuja de la foto, no debajo.
+ *  - Lo que produjo la máquina (tipo y peso del archivo, el dominio) va en
+ *    `mono`; el nombre del archivo es contenido y va en `ink`.
+ */
+function renderParts(parts: MessagePart[]): string {
+  return parts
+    .map((p) => {
+      switch (p.kind) {
+        case "image":
+          return `<div class="nds-part nds-part--image">
+            <img src="${escapeHtml(p.url)}" alt="${escapeHtml(p.caption ?? "Imagen enviada por el bot")}" loading="lazy">
+            ${p.caption ? `<div class="nds-part__caption">${escapeHtml(p.caption)}</div>` : ""}
+          </div>`;
+        case "document":
+          return `<a class="nds-part nds-part--file" href="${escapeHtml(p.url)}" target="_blank" rel="noopener noreferrer">
+            <span class="nds-part__tile" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path><path d="M14 3v5h5"></path></svg>
+            </span>
+            <span class="nds-part__body">
+              <span class="nds-part__name">${escapeHtml(p.filename)}</span>
+              <span class="nds-part__meta">${escapeHtml(extensionDe(p.filename))}</span>
+            </span>
+          </a>`;
+        case "audio":
+          return `<div class="nds-part nds-part--audio">
+            <audio controls preload="none" src="${escapeHtml(p.url)}"></audio>
+            ${p.transcript ? `<div class="nds-part__caption">${escapeHtml(p.transcript)}</div>` : ""}
+          </div>`;
+        case "link":
+          return `<a class="nds-part nds-part--link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener noreferrer">
+            <span class="nds-part__body">
+              <span class="nds-part__name">${escapeHtml(p.title)}</span>
+              ${p.description ? `<span class="nds-part__desc">${escapeHtml(p.description)}</span>` : ""}
+              <span class="nds-part__meta">${escapeHtml(dominioDe(p.url))}</span>
+            </span>
+          </a>`;
+        case "options":
+          // La pregunta vive DENTRO del bloque (los canales la exigen junto a
+          // los botones), así que se pinta aquí o se pierde.
+          //
+          // Los botones no son botones aquí: es el registro de lo que se le
+          // ofreció al cliente. Pulsarlos desde la bandeja no significaría nada.
+          return `<div class="nds-msg__bubble">${escapeHtml(p.text)}</div>
+          <div class="nds-part__options" role="list" aria-label="Opciones que se le ofrecieron">
+            ${p.options.map((o) => `<span class="nds-part__option" role="listitem">${escapeHtml(o.label)}</span>`).join("")}
+          </div>`;
+        default:
+          return "";
+      }
+    })
+    .join("");
 }
 
 interface InboxParams {
@@ -406,10 +483,18 @@ export async function renderThreadLive(env: Env, botId: string, convId: string):
              hx-get="/admin/conversations/${encodeURIComponent(convId)}/corregir?msg=${encodeURIComponent(String(m.id))}"
              hx-target="#modal-root" hx-swap="innerHTML">Corregir</button>`;
 
+      // Un turno que SOLO mandó un archivo no lleva texto: la burbuja vacía
+      // se omite en vez de dejar un globo en blanco sobre la foto.
+      const bloques = partsDe(m);
+      const texto = m.content.trim()
+        ? `<div class="nds-msg__bubble">${escapeHtml(m.content)}</div>`
+        : "";
+
       return `${divider}
       <article class="nds-msg nds-msg--agent${isOwner ? " nds-msg--owner" : ""}${cambioDeTurno ? " nds-msg--turn" : ""}">
         ${tools}
-        <div class="nds-msg__bubble">${escapeHtml(m.content)}</div>
+        ${texto}
+        ${bloques.length ? renderParts(bloques) : ""}
         <div class="nds-msg__foot">
           <div class="nds-meta">
             ${isOwner ? '<span class="nds-meta__who">Tú</span>' : ""}
@@ -673,6 +758,35 @@ a.nds-chip:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
 .nds-msg--human .nds-msg__bubble{background:var(--surface-inverse);color:var(--ink-inverse);
   border-bottom-right-radius:var(--radius-nub)}
 .nds-msg--owner .nds-msg__bubble{background:var(--accent-soft);color:var(--accent-ink);box-shadow:none}
+
+/* ---------- Bloques que no son texto (foto, archivo, enlace, audio) ---------- */
+/* Misma geometría que la burbuja: un adjunto es un mensaje, no una tarjeta
+   pegada al hilo. Por eso comparte radios, sombra y superficie. */
+.nds-part{display:block;max-width:100%;margin-top:var(--space-1);overflow:hidden;
+  border-radius:var(--radius-bubble) var(--radius-bubble) var(--radius-bubble) var(--radius-nub);
+  background:var(--surface-raised);box-shadow:var(--shadow-card);text-decoration:none;color:var(--ink)}
+.nds-part--image img{display:block;width:100%;max-width:320px;height:auto}
+.nds-part__caption{padding:var(--space-2) var(--space-4) var(--space-3);font-size:15px;line-height:23px;color:var(--ink)}
+.nds-part--file,.nds-part--link{display:flex;gap:var(--space-3);padding:10px 12px;max-width:420px}
+.nds-part--file{align-items:center}
+.nds-part--link{align-items:flex-start}
+.nds-part--file:hover,.nds-part--link:hover{background:var(--surface-sunken);color:var(--ink)}
+.nds-part--file:focus-visible,.nds-part--link:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.nds-part__tile{display:inline-flex;align-items:center;justify-content:center;flex:none;width:40px;height:40px;
+  border-radius:var(--radius-md);background:var(--surface-sunken);border:1px solid var(--border);color:var(--ink-muted)}
+.nds-part__body{display:flex;flex-direction:column;gap:2px;min-width:0}
+.nds-part__name{font-size:15px;line-height:21px;font-weight:500;color:var(--ink);overflow-wrap:anywhere}
+.nds-part__desc{font-size:13px;line-height:18px;color:var(--ink-muted)}
+/* Tipo de archivo y dominio los produjo la máquina: van en mono, como el
+   modelo y el costo. El nombre del archivo es contenido y va en ink. */
+.nds-part__meta{font-family:var(--font-mono);font-size:12px;line-height:16px;font-weight:500;color:var(--ink-subtle)}
+.nds-part--audio{padding:10px 12px;max-width:420px}
+.nds-part--audio audio{display:block;width:100%;max-width:320px}
+/* No son botones: es el registro de lo que se le ofreció al cliente. */
+.nds-part__options{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-2)}
+.nds-part__option{display:inline-flex;align-items:center;min-height:var(--tap-min);padding:0 var(--space-4);
+  border:1px solid var(--border-strong);border-radius:var(--radius-pill);
+  font-size:13px;line-height:18px;font-weight:500;color:var(--ink-muted)}
 .nds-msg__foot{display:flex;align-items:center;gap:var(--space-2);padding:0 var(--space-2);min-height:18px}
 .nds-msg--human .nds-msg__foot{flex-direction:row-reverse}
 

@@ -707,6 +707,9 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
       outputTokens,
       cachedInputTokens: cachedTokens,
       toolCalls: toolCallsMade.length > 0 ? toolCallsMade : undefined,
+      // Lo que se mandó además del texto, para que la bandeja pueda mostrarlo.
+      // Es lo único del turno que el historial no podía reconstruir solo.
+      parts: ctx.adjuntos.length > 0 ? ctx.adjuntos : undefined,
     }),
     stateRepo.saveTurnCounters(conversationKey, {
       toolCallsInLast2Turns: toolCallCount,

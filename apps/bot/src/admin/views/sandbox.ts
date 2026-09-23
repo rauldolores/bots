@@ -14,7 +14,8 @@
 // cuenta como conversación de un cliente.
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
-import { MessagesRepo } from "../../db/messages";
+import { MessagesRepo, partsDe } from "../../db/messages";
+import { partsAsText } from "../../channels/parts";
 import { ConversationsRepo } from "../../db/conversations";
 import { resolveTimezone } from "../../datetime";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
@@ -62,10 +63,17 @@ export async function renderTrainingThread(env: Env, botId: string): Promise<str
           <span style="font-size:9.5px;color:var(--dim)">${hora}</span>
         </div>`;
       }
+      // El ensayo es de TEXTO: aquí no se pintan la foto ni los botones, pero
+      // tampoco pueden desaparecer — si el bot mandó el menú y el sandbox no
+      // lo muestra, el dueño concluye que no lo mandó. Se muestra su versión
+      // degradada, la misma que recibiría un canal sin capacidades.
+      const bloques = partsAsText(partsDe(m));
+      const cuerpo = [m.content, ...bloques].filter((t) => t.trim()).join("\n\n");
+
       // Misma corrección que en las conversaciones reales — reusa el mismo
       // diálogo y termina en la misma lección.
       return `<div style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;max-width:78%">
-        <div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--cream)">${esc(m.content)}</div>
+        <div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--cream)">${esc(cuerpo)}</div>
         <span style="font-size:9.5px;color:var(--dim);display:inline-flex;gap:8px;align-items:center">${hora}
           <button type="button" title="Enseñarle cómo debió responder"
                   hx-get="/admin/conversations/${encodeURIComponent(convId)}/corregir?msg=${encodeURIComponent(String(m.id))}"

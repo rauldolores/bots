@@ -153,6 +153,23 @@ export const WIDGET_SCRIPT_JS = `(function () {
     ".nw-msg.error .nw-bubble-text{background:transparent;border:none;color:var(--nw-muted);font-size:11.5px;",
     "text-align:center;padding:2px 8px}",
     ".nw-time{font-size:10px;color:var(--nw-muted);padding:0 3px}",
+    // Bloques que no son texto. Misma geometría que la burbuja del bot (la
+    // esquina de abajo-izquierda recta) para que se lean como un mensaje suyo
+    // y no como una tarjeta pegada.
+    ".nw-part{display:block;max-width:100%;margin-top:4px;overflow:hidden;border-radius:14px 14px 14px 4px;",
+    "background:var(--nw-bg);border:1px solid var(--nw-border);text-decoration:none;color:var(--nw-text)}",
+    ".nw-part-image img{display:block;width:100%;max-width:240px;height:auto}",
+    ".nw-part-caption{padding:7px 13px 9px;font-size:13.5px;line-height:1.45}",
+    ".nw-part-row{display:flex;gap:10px;align-items:center;padding:9px 12px}",
+    ".nw-part-row:hover{background:var(--nw-surface)}",
+    ".nw-part-body{display:flex;flex-direction:column;gap:2px;min-width:0}",
+    ".nw-part-name{font-size:13.5px;font-weight:600;overflow-wrap:anywhere}",
+    ".nw-part-meta{font-size:11px;color:var(--nw-muted)}",
+    ".nw-part-audio{width:100%;max-width:240px;padding:6px}",
+    ".nw-options{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}",
+    ".nw-option{min-height:36px;padding:0 14px;border:1px solid var(--nw-border);border-radius:999px;",
+    "background:var(--nw-bg);color:var(--nw-text);font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer}",
+    ".nw-option:hover{background:var(--nw-surface)}",
     ".nw-typing{padding:0 16px 8px;font-size:12px;color:var(--nw-muted);font-style:italic;flex:none}",
     ".nw-typing[hidden]{display:none}",
     ".nw-composer{display:flex;gap:8px;padding:12px;border-top:1px solid var(--nw-border);background:var(--nw-bg);flex:none}",
@@ -244,13 +261,96 @@ export const WIDGET_SCRIPT_JS = `(function () {
     } catch (e) { return ""; }
   }
 
-  function appendBubble(kind, text, ts) {
+  // Los bloques que no son texto. Todo se arma con createElement +
+  // textContent: nada de innerHTML con datos, aunque vengan de nuestro propio
+  // servidor.
+  function appendParts(row, parts) {
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i];
+      if (p.kind === "image") {
+        var caja = document.createElement("div");
+        caja.className = "nw-part nw-part-image";
+        var img = document.createElement("img");
+        img.src = p.url;
+        img.alt = p.caption || "Imagen";
+        img.loading = "lazy";
+        caja.appendChild(img);
+        if (p.caption) {
+          var pie = document.createElement("div");
+          pie.className = "nw-part-caption";
+          pie.textContent = p.caption;
+          caja.appendChild(pie);
+        }
+        row.appendChild(caja);
+      } else if (p.kind === "document" || p.kind === "link") {
+        var a = document.createElement("a");
+        a.className = "nw-part nw-part-row";
+        a.href = p.url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        var cuerpo = document.createElement("span");
+        cuerpo.className = "nw-part-body";
+        var nombre = document.createElement("span");
+        nombre.className = "nw-part-name";
+        nombre.textContent = p.kind === "document" ? p.filename : p.title;
+        cuerpo.appendChild(nombre);
+        var meta = document.createElement("span");
+        meta.className = "nw-part-meta";
+        try {
+          meta.textContent = p.kind === "document"
+            ? (p.filename.split(".").pop() || "").toUpperCase()
+            : new URL(p.url).hostname.replace(/^www\./, "");
+        } catch (e) { meta.textContent = ""; }
+        cuerpo.appendChild(meta);
+        a.appendChild(cuerpo);
+        row.appendChild(a);
+      } else if (p.kind === "audio") {
+        var au = document.createElement("audio");
+        au.controls = true;
+        au.preload = "none";
+        au.src = p.url;
+        au.className = "nw-part nw-part-audio";
+        row.appendChild(au);
+      } else if (p.kind === "options" && p.options) {
+        // La pregunta viaja dentro del bloque (los canales la exigen junto a
+        // los botones): si no se pinta aquí, se pierde.
+        if (p.text) {
+          var preg = document.createElement("div");
+          preg.className = "nw-bubble-text";
+          preg.textContent = p.text;
+          row.appendChild(preg);
+        }
+        var fila = document.createElement("div");
+        fila.className = "nw-options";
+        for (var j = 0; j < p.options.length; j++) {
+          (function (opcion) {
+            var b = document.createElement("button");
+            b.type = "button";
+            b.className = "nw-option";
+            b.textContent = opcion.label;
+            // En el navegador un botón SÍ puede responder: manda su etiqueta
+            // como si la persona la hubiera escrito.
+            b.addEventListener("click", function () { sendMessage(opcion.label); });
+            fila.appendChild(b);
+          })(p.options[j]);
+        }
+        row.appendChild(fila);
+      }
+    }
+  }
+
+  function appendBubble(kind, text, ts, parts) {
     var row = document.createElement("div");
     row.className = "nw-msg " + kind;
-    var bubble = document.createElement("div");
-    bubble.className = "nw-bubble-text";
-    bubble.textContent = text;
-    row.appendChild(bubble);
+    // Un turno que solo mandó un archivo no lleva texto: sin esto quedaría un
+    // globo en blanco encima de la foto.
+    if (text) {
+      var bubble = document.createElement("div");
+      bubble.className = "nw-bubble-text";
+      bubble.textContent = text;
+      row.appendChild(bubble);
+    }
+    if (parts && parts.length) appendParts(row, parts);
     if (kind !== "error") {
       var time = document.createElement("span");
       time.className = "nw-time";
@@ -268,7 +368,7 @@ export const WIDGET_SCRIPT_JS = `(function () {
     for (var i = 0; i < state.messages.length; i++) {
       var m = state.messages[i];
       var kind = m.role === "user" ? "user" : m.role === "client-error" ? "error" : "bot";
-      appendBubble(kind, m.content, m.created_at);
+      appendBubble(kind, m.content, m.created_at, m.parts);
     }
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
