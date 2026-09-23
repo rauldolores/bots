@@ -9,6 +9,10 @@ primary_region = "dfw"
 [env]
   PORT = "8080"
   VOICE_ONLY = "1"
+  # Este proceso ES el servidor de voz: el TwiML tiene que mandar el media
+  # stream aquí, y el panel (que vive en Vercel) tiene que enseñar ESTA url
+  # como webhook de "A CALL COMES IN". Ver channels/voice/baseUrl.ts.
+  VOICE_PUBLIC_BASE_URL = "https://nodia-voice.fly.dev"
 
 [http_service]
   internal_port = 8080

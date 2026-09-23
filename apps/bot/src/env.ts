@@ -44,6 +44,14 @@ export interface Env {
   // dueño (ticket por correo, etc.) cuando este proceso no es el que sirve
   // /admin. Vacío = usa DASHBOARD_BASE_URL, como siempre.
   ADMIN_BASE_URL?: string;
+  // El reverso de ADMIN_BASE_URL: dónde vive el SERVIDOR DE VOZ cuando no es
+  // este proceso. Una llamada necesita un WebSocket bidireccional para el
+  // audio y Vercel no lo sirve, así que la voz corre aparte (Fly). El panel
+  // tiene que enseñar ESA url para "A CALL COMES IN" —no la suya—, y el TwiML
+  // tiene que mandar el media stream ahí. Vacío = este mismo despliegue
+  // atiende la voz (DASHBOARD_BASE_URL), que es el caso de una instalación
+  // de un solo proceso.
+  VOICE_PUBLIC_BASE_URL?: string;
 
   // Secrets (member-set via wrangler secret put)
   // Qué proveedor/modelo de IA usa el bot se decide SOLO desde /admin/config

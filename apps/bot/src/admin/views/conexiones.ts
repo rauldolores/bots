@@ -13,6 +13,7 @@ import { Db } from "../../db/client";
 import { BotChannelsRepo, type BotChannel } from "../../db/botChannels";
 import { BotConnectorsRepo, type BotConnector } from "../../db/botConnectors";
 import { VoiceNumbersRepo, DuplicateVoiceNumberError } from "../../db/voiceNumbers";
+import { voiceBaseUrl } from "../../channels/voice/baseUrl";
 import { createSecret, updateSecret, deleteSecret, readSecret } from "../../db/vault";
 import { setTelegramWebhook } from "../../channels/telegram";
 import { registerKapsoWebhook } from "../../channels/kapso";
@@ -182,7 +183,7 @@ const CHANNEL_META: Record<ConnectableChannel, ChannelMeta> = {
       { name: "phone_number", label: "Número de teléfono", placeholder: "+14155551234" },
     ],
     webhookNote:
-      'Después de guardar, copia la URL del webhook y pégala en Twilio → tu número → sección "Voice" → "A CALL COMES IN" (método <span class="font-mono">HTTP POST</span>).',
+      'Después de guardar, copia la URL del webhook y pégala en Twilio → tu número → sección "Voice" → "A CALL COMES IN" (método <span class="font-mono">HTTP POST</span>). Ojo: la de las llamadas apunta a otro servidor que la de los demás canales — cópiala tal cual de aquí abajo.',
   },
   manychat: {
     id: "manychat",
@@ -228,7 +229,11 @@ export function esCanalConectable(channel: string): channel is ConnectableChanne
 }
 
 function webhookUrlFor(env: Env, channel: string, botId: string): string {
-  const base = (env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
+  // La voz puede vivir en otro despliegue (ver channels/voice/baseUrl.ts). Si
+  // aquí se mostrara la URL del panel, el dueño la pegaría en Twilio, el
+  // webhook contestaría, y la llamada moriría al abrir el media stream contra
+  // un servidor que no puede sostener un WebSocket. Pasó.
+  const base = channel === "voice" ? voiceBaseUrl(env) : (env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
   return `${base}/webhooks/${channel}/${botId}`;
 }
 

@@ -10,6 +10,7 @@ import { BotChannelsRepo } from "../../db/botChannels";
 import { VoiceSessionsRepo } from "../../db/voiceSessions";
 import { resolveChannelEnv } from "../effectiveEnv";
 import { validateTwilioSignature } from "./twilioSignature";
+import { voiceBaseUrl } from "./baseUrl";
 import { buildStreamConnectResponse } from "./webhook";
 import { logVoiceEvent, maskId } from "./log";
 import { recordCallEvent } from "./events";
@@ -96,7 +97,7 @@ export async function handleTransferStatusCallback(request: Request, rawEnv: Env
   const params: Record<string, string> = {};
   for (const [k, v] of form.entries()) params[k] = String(v);
 
-  const base = (rawEnv.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
+  const base = voiceBaseUrl(rawEnv);
   const canonicalUrl = `${base}/webhooks/voice/${botId}/transfer-status`;
   const signature = request.headers.get("X-Twilio-Signature");
   const validSig = await validateTwilioSignature(authToken, canonicalUrl, params, signature);
@@ -171,7 +172,7 @@ export async function transferirLlamadaViva(
     const authToken = env.TWILIO_AUTH_TOKEN;
     if (!destino || !accountSid || !authToken) return { ok: false, motivo: "not_configured" };
 
-    const base = (env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
+    const base = voiceBaseUrl(env);
     const twiml = buildTransferTwiml(destino, `${base}/webhooks/voice/${deps.botId}/transfer-status`);
     const r = await redirectLiveCall({ accountSid, authToken }, deps.callSid, twiml);
     return r.ok ? { ok: true } : { ok: false, motivo: "twilio_api_error" };

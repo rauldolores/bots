@@ -11,6 +11,7 @@ import { BotChannelsRepo } from "../../db/botChannels";
 import { VoiceNumbersRepo } from "../../db/voiceNumbers";
 import { resolveChannelEnv } from "../effectiveEnv";
 import { validateTwilioSignature } from "./twilioSignature";
+import { voiceBaseUrl } from "./baseUrl";
 import { signStreamToken } from "./streamToken";
 import { buildConnectStreamTwiml } from "./twiml";
 import { logVoiceEvent, maskId } from "./log";
@@ -36,7 +37,7 @@ export function buildStreamConnectResponse(
   input: { botId: string; callSid: string; from: string; to: string; retomada?: string },
 ): Promise<Response> {
   return (async () => {
-    const base = (rawEnv.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
+    const base = voiceBaseUrl(rawEnv);
     const exp = Date.now() + STREAM_TOKEN_TTL_MS;
     // `retomada` solo existe cuando la llamada vuelve de una transferencia
     // fallida (transfer.ts). Va DENTRO de lo firmado: es lo que le cambia el
@@ -121,13 +122,13 @@ export async function handleIncomingVoiceCall(request: Request, rawEnv: Env, bot
     return new Response("forbidden", { status: 403 });
   }
 
-  // La URL para la firma es la CONFIGURADA (DASHBOARD_BASE_URL + path), no
+  // La URL para la firma es la CONFIGURADA (la base de voz + path), no
   // request.url — un proxy/balanceador puede reescribirla y descuadrar el
   // cálculo aunque la llamada sea legítima. Como respaldo, la URL que Twilio
   // pidió de verdad: un número que sigue apuntando al dominio anterior del
   // panel (Twilio firma la URL que llama) no se queda fuera tras un cambio
   // de dominio; la firma sigue exigiendo el Auth Token correcto.
-  const base = (rawEnv.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
+  const base = voiceBaseUrl(rawEnv);
   const canonicalUrl = `${base}/webhooks/voice/${botId}`;
   const signature = request.headers.get("X-Twilio-Signature");
   const requestedUrl = `${new URL(request.url).origin}/webhooks/voice/${botId}`;

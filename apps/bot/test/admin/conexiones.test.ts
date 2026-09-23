@@ -155,6 +155,30 @@ describe("connectChannel — voice", () => {
   });
 });
 
+describe("la URL del webhook que se le enseña al dueño", () => {
+  // El bug: la voz corre en otro despliegue (Fly) porque necesita WebSocket,
+  // y el panel mostraba la suya (Vercel). El dueño la pegaba en Twilio y la
+  // llamada moría al abrir el media stream, sin decir por qué.
+  const conVoz = { ...({} as Env), DB: null, DASHBOARD_BASE_URL: "https://app.test", VOICE_PUBLIC_BASE_URL: "https://voz.test" } as unknown as Env;
+
+  it("la de las llamadas apunta al servidor de voz; la de los demás canales, al panel", async () => {
+    const e = { ...conVoz, DB: db.driver } as Env;
+    await connectChannel(e, TEST_BOT_ID, "voice", form({ account_sid: "ACxxx", auth_token: "tok", phone_number: "+14155550111" }));
+    await connectChannel(e, TEST_BOT_ID, "telegram", form({ token: "123:ABC" }));
+
+    const html = await renderConexionesGrid(e, TEST_BOT_ID);
+    expect(html).toContain(`https://voz.test/webhooks/voice/${TEST_BOT_ID}`);
+    expect(html).toContain(`https://app.test/webhooks/telegram/${TEST_BOT_ID}`);
+    expect(html).not.toContain(`https://app.test/webhooks/voice/${TEST_BOT_ID}`);
+  });
+
+  it("sin servidor de voz aparte, la de llamadas es la del propio despliegue", async () => {
+    await connectChannel(env, TEST_BOT_ID, "voice", form({ account_sid: "ACxxx", auth_token: "tok", phone_number: "+14155550111" }));
+    const html = await renderConexionesGrid(env, TEST_BOT_ID);
+    expect(html).toContain(`https://bot.test/webhooks/voice/${TEST_BOT_ID}`);
+  });
+});
+
 describe("connectChannel — manychat", () => {
   it("guarda la API key en Vault", async () => {
     await connectChannel(env, TEST_BOT_ID, "manychat", form({ api_key: "mc-key" }));
