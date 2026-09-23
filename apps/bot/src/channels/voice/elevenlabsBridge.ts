@@ -351,6 +351,16 @@ export class ElevenLabsCallBridge implements CallBridge {
       callSid: maskId(this.deps.callSid),
       tool: nombre,
     });
+    // Los contadores de la llamada (tool_call_count / mcp_call_count /
+    // rag_query_count). Existían, con su prueba, pero NADIE los incrementaba:
+    // el panel enseñaba 0 herramientas en llamadas donde el log mostraba
+    // varias. Va aquí, en el único sitio por el que pasan todas.
+    if (this.callRowId) {
+      const tipo = this.mcpToolNames.has(nombre) ? "mcp" : nombre === "searchKb" ? "rag" : "other";
+      void new VoiceSessionsRepo(this.db(), this.deps.botId)
+        .incrementToolCall(this.callRowId, tipo)
+        .catch(() => {});
+    }
 
     const def = this.tools[nombre];
     if (!def?.execute) {

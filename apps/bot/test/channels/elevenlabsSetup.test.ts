@@ -288,12 +288,16 @@ describe("mantener al agente al día", () => {
     expect(settingsGuardados["voice_elevenlabs_config_hash"]).toBe(huellaDeConfiguracion(VOZ_DEL_CATALOGO));
   });
 
-  // El costo de armar las herramientas NO es el de una comparación: obliga a
-  // consultar los servidores MCP, y eso ocurría EN MEDIO de una llamada
-  // entrante, con el cliente escuchando silencio, para casi siempre tirar el
-  // resultado. Ahora se pasa una función y solo se paga si hay que reconfigurar.
-  it("con la huella al día, ni siquiera arma las herramientas", async () => {
-    settingsGuardados["voice_elevenlabs_config_hash"] = huellaDeConfiguracion(VOZ_DEL_CATALOGO);
+  // La huella lleva los NOMBRES de las herramientas, así que hay que saber
+  // cuáles son hoy para poder compararla: armarlas es el precio de que la
+  // comparación signifique algo. Antes se comparaba contra los ids YA
+  // GUARDADOS —o sea, contra sí misma— y por eso jamás detectaba un cambio de
+  // herramientas: un bot estuvo dos semanas con las viejas mientras el
+  // sistema se daba por actualizado. Lo que sí se conserva: si el conjunto no
+  // cambió, no se toca la red de ElevenLabs.
+  it("con el mismo conjunto de herramientas, las arma para comparar pero no toca la red", async () => {
+    settingsGuardados["voice_elevenlabs_config_hash"] = huellaDeConfiguracion(VOZ_DEL_CATALOGO, ["searchKb"]);
+    settingsGuardados["voice_elevenlabs_tool_ids"] = JSON.stringify({ searchKb: "tool_1" });
     global.fetch = vi.fn(async () => {
       throw new Error("no debió llamar a la red");
     }) as any;
@@ -301,11 +305,35 @@ describe("mantener al agente al día", () => {
 
     const r = await asegurarAgenteAlDia({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO, async () => {
       armadas++;
-      return {};
+      return { searchKb: {} };
     });
 
-    expect(armadas).toBe(0);
+    expect(armadas).toBe(1);
     expect(r.actualizado).toBe(false);
+  });
+
+  // El bug de fondo, en un test: conectar un MCP nuevo (o apagar tools desde
+  // el panel) cambia el conjunto, y eso TIENE que llegar al agente.
+  it("si aparecen herramientas nuevas, reconfigura al agente", async () => {
+    settingsGuardados["voice_elevenlabs_config_hash"] = huellaDeConfiguracion(VOZ_DEL_CATALOGO, ["searchKb"]);
+    settingsGuardados["voice_elevenlabs_tool_ids"] = JSON.stringify({ searchKb: "tool_1" });
+    let seActualizo = false;
+    global.fetch = fetchQueRespondePor({
+      voces: () => Response.json({ voices: [{ voice_id: VOZ_DEL_CATALOGO }] }),
+      herramientas: () => Response.json({ id: "tool_2" }),
+      crearAgente: () => {
+        seActualizo = true;
+        return Response.json({ agent_id: "agent-1" });
+      },
+    });
+
+    const r = await asegurarAgenteAlDia({} as any, "bot1", LLAVE, VOZ_DEL_CATALOGO, async () => ({
+      searchKb: {},
+      vinqulia_crear_nota: {},
+    }));
+
+    expect(seActualizo).toBe(true);
+    expect(r.actualizado).toBe(true);
   });
 
   it("pero si SÍ hay que actualizar, las pide y las usa", async () => {
@@ -440,7 +468,7 @@ describe("guardar la pantalla no le quita las herramientas al agente", () => {
     await prepararAgenteElevenLabs({} as any, "bot-1", LLAVE, VOZ_DEL_CATALOGO);
 
     expect(settingsGuardados.voice_elevenlabs_config_hash).toBe(
-      huellaDeConfiguracion(VOZ_DEL_CATALOGO, ["tool_a", "tool_b"]),
+      huellaDeConfiguracion(VOZ_DEL_CATALOGO, ["searchKb", "scheduleAppointment"]),
     );
     expect(settingsGuardados.voice_elevenlabs_config_hash).not.toContain("tools:|");
   });

@@ -237,8 +237,11 @@ export async function prepararAgenteElevenLabs(
   //
   // Un mapa VACÍO sí es una orden explícita de dejarlo sin ninguna (el dueño
   // las apagó todas en /admin/agente), y por eso se distingue de `undefined`.
+  let toolNames: string[] = [];
   if (tools === undefined) {
-    toolIds = Object.values(leerMapa(await repo.get(SETTING_KEYS.voiceElevenLabsToolIds)));
+    const mapa = leerMapa(await repo.get(SETTING_KEYS.voiceElevenLabsToolIds));
+    toolIds = Object.values(mapa);
+    toolNames = Object.keys(mapa);
   } else if (Object.keys(tools).length > 0) {
     const { registrarHerramientas } = await import("./elevenlabsTools");
     const previos = leerMapa(await repo.get(SETTING_KEYS.voiceElevenLabsToolIds));
@@ -246,6 +249,7 @@ export async function prepararAgenteElevenLabs(
     if (r.error) return { ok: false, error: r.error };
     await repo.set(SETTING_KEYS.voiceElevenLabsToolIds, JSON.stringify(r.ids));
     toolIds = Object.values(r.ids);
+    toolNames = Object.keys(r.ids);
     faltaronHerramientas = r.faltantes.length > 0;
     if (faltaronHerramientas) {
       console.error(`[voice-elevenlabs] herramientas sin registrar: ${r.faltantes.join(", ")}`);
@@ -334,7 +338,7 @@ export async function prepararAgenteElevenLabs(
   // guardaba pasara lo que pasara, y eso dejó al bot sin poder agendar
   // durante días — cada arreglo se desplegaba y nunca llegaba a aplicarse.
   if (!faltaronHerramientas) {
-    await repo.set(SETTING_KEYS.voiceElevenLabsConfigHash, huellaDeConfiguracion(voiceId, toolIds));
+    await repo.set(SETTING_KEYS.voiceElevenLabsConfigHash, huellaDeConfiguracion(voiceId, toolNames));
   }
   return { ok: true, agentId };
 }
@@ -349,16 +353,24 @@ export async function prepararAgenteElevenLabs(
  * nadie se le dijo que tenía que volver a guardarla. La llamada seguía muda
  * por un arreglo que ya estaba hecho.
  */
-export function huellaDeConfiguracion(voiceId: string, toolIds: string[] = []): string {
+export function huellaDeConfiguracion(voiceId: string, toolNames: string[] = []): string {
   return [
     voiceId,
     MODELO_TTS,
     MODELO_LLM,
     FORMATO_TELEFONIA,
     `max:${MAX_DURACION_SEG}`,
-    // Las herramientas entran en la huella: si el dueño enciende o apaga una
-    // desde /admin/agente, el agente se actualiza solo en la próxima llamada.
-    `tools:${[...toolIds].sort().join(",")}`,
+    // Las herramientas entran en la huella por su NOMBRE, no por su id.
+    //
+    // Antes iban los ids, y eso volvía la comprobación inútil: quien
+    // comparaba (asegurarAgenteAlDia) leía los ids GUARDADOS y armaba la
+    // huella con ellos, o sea la comparaba consigo misma. Siempre coincidía.
+    // Resultado: encender o apagar herramientas, o conectar un MCP con otras
+    // nuevas, no movía nada — el agente de un bot se quedó dos semanas con
+    // las herramientas viejas mientras el panel decía que todo estaba al día.
+    // Con los nombres, el conjunto de HOY se compara contra el conjunto con
+    // el que se registró, que es la pregunta que de verdad importa.
+    `tools:${[...toolNames].sort().join(",")}`,
     "overrides:v1",
     // La FORMA de las herramientas, no solo cuáles son.
     //
@@ -368,7 +380,7 @@ export function huellaDeConfiguracion(voiceId: string, toolIds: string[] = []): 
     // quedaba con la declaración vieja y no había forma de enterarse. Pasó
     // exactamente eso con `expects_response`, que estuvo en false durante
     // semanas. Subir este número obliga a volver a registrarlas una vez.
-    "tools_shape:v2-expects-response",
+    "tools_shape:v3-nombres",
   ].join("|");
 }
 
@@ -410,10 +422,19 @@ export async function asegurarAgenteAlDia(
 ): Promise<{ actualizado: boolean; error?: string }> {
   const repo = new SettingsRepo(db, botId);
   const guardada = (await repo.get(SETTING_KEYS.voiceElevenLabsConfigHash))?.trim();
-  const idsActuales = Object.values(leerMapa(await repo.get(SETTING_KEYS.voiceElevenLabsToolIds)));
-  if (guardada === huellaDeConfiguracion(voiceId, idsActuales)) return { actualizado: false };
+  const registradas = leerMapa(await repo.get(SETTING_KEYS.voiceElevenLabsToolIds));
+  const idsActuales = Object.values(registradas);
 
+  // Las herramientas se resuelven ANTES de comparar: la huella lleva sus
+  // nombres, y sin saber cuáles son hoy la comparación no dice nada (que es
+  // justo lo que pasaba — ver huellaDeConfiguracion). Cuesta consultar los
+  // servidores MCP, pero esto corre en segundo plano cuando el agente ya
+  // existe (callBridge.ts lanza `void revisar()`), así que no se lo cobra a
+  // nadie que esté llamando; y en el camino que sí espera —un agente que
+  // todavía no existe— había que resolverlas de todos modos.
   const resueltas = typeof tools === "function" ? await tools() : tools;
+  const nombresDeHoy = resueltas ? Object.keys(resueltas) : Object.keys(registradas);
+  if (guardada === huellaDeConfiguracion(voiceId, nombresDeHoy)) return { actualizado: false };
 
   // Un agente NUNCA debe quedar con MENOS herramientas de las que ya tenía por
   // un tropiezo de red. Pasó exactamente eso al aplicar un cambio de modelo: el
