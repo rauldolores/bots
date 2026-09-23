@@ -253,7 +253,7 @@ const GLOBAL_STYLE = `
      el rediseño): mismo patrón que "Resumen del envío" en campanas.ts. */
   #sb-uso[hidden]{display:none !important}
   #sb-uso{background:#1b1815;border-radius:12px;padding:11px 12px 12px}
-  .sb-uso-plan{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;color:#8a8274;padding:0 0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .12s ease}
+  .sb-uso-plan{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--accent);padding:0 0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .12s ease}
   .sb-uso-row{display:flex;flex-direction:column;gap:4px;padding:5px 0}
   .sb-uso-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:11.5px}
   .sb-uso-label{color:#b5ad9d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
@@ -269,8 +269,9 @@ const GLOBAL_STYLE = `
   .sb-uso-row.excedente .sb-uso-val,.sb-uso-row.excedente .sb-uso-extra{color:#e0a552}
   .sb-uso-row.excedente .sb-uso-bar>i{background:#d97706}
   .sb-uso-extra{font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  /* --accent-2 (#8a6a00) es el ámbar para fondo claro; sobre tinta se apaga. */
-  #sb-uso:hover .sb-uso-plan{color:var(--accent)}
+  /* El nombre del plan ya nace ámbar (es el título del bloque, no un enlace
+     que haya que descubrir); al pasar el mouse aclara para acusar recibo. */
+  #sb-uso:hover .sb-uso-plan{color:#ffd95e}
   .live-pill{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:7px 14px;box-shadow:var(--shadow-sm)}
 
   @media (max-width:767px){
