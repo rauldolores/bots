@@ -118,7 +118,20 @@ export async function credencialesElevenLabs(
         const extra = Object.keys(mcp).length > 0
           ? { consultar_tarea: consultarTareaTool(() => ({ tareas: new Map(), ultimaId: null })) }
           : {};
-        return { ...buildTools({ env, botId, getConversationId: () => null }), ...mcp, ...extra };
+        const todas = { ...buildTools({ env, botId, getConversationId: () => null }), ...mcp, ...extra };
+
+        // Los interruptores del panel valen también por teléfono.
+        //
+        // No valían: el chat filtra en agent/context.ts, pero aquí se
+        // registraba lo que devolviera loadMcpTools, en crudo. Un dueño que
+        // apagó 40 de las 50 herramientas de su CRM se las encontró TODAS
+        // registradas en su agente de voz — y cuantas más hay, peor elige el
+        // modelo cuál usar, que es justo lo que apagarlas venía a resolver.
+        const { resolveAgentConfig } = await import("../../settings-loader");
+        const apagadas = new Set(
+          (await resolveAgentConfig(env, Object.keys(todas), botId, { paraVoz: true })).disabledToolNames,
+        );
+        return Object.fromEntries(Object.entries(todas).filter(([nombre]) => !apagadas.has(nombre)));
       }).catch(() => ({ actualizado: false, error: "no se pudo verificar" }));
 
     if (agenteExistente) {

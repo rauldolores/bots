@@ -28,6 +28,8 @@ vi.mock("../../src/db/settings", () => ({
     voiceElevenLabsApiKey: "voice_elevenlabs_api_key",
     voiceElevenLabsVoiceId: "voice_elevenlabs_voice_id",
     voiceElevenLabsAgentId: "voice_elevenlabs_agent_id",
+    // Los interruptores del panel: el registro del agente de voz los respeta.
+    disabledTools: "disabled_tools",
   },
 }));
 
@@ -97,5 +99,62 @@ describe("consultar_tarea se registra en la cuenta cuando el bot tiene MCP", () 
     const armarTools = asegurarAgenteAlDiaMock.mock.calls[0][4] as () => Promise<Record<string, any>>;
     const tools = await armarTools();
     expect(tools).not.toHaveProperty("consultar_tarea");
+  });
+});
+
+/**
+ * Los interruptores de /admin/conexiones (y /admin/agente) valían para el
+ * chat y no para el teléfono: el registro del agente mandaba a ElevenLabs lo
+ * que devolviera loadMcpTools, en crudo. Un dueño que apagó 40 de las 50
+ * herramientas de su CRM se las encontró TODAS registradas — y cuantas más
+ * hay, peor elige el modelo, que es justo lo que apagarlas venía a resolver.
+ */
+describe("las herramientas apagadas no se registran en el agente de voz", () => {
+  beforeEach(async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "zendesk",
+      name: "Zendesk",
+      config: { url: "https://mcp.zendesk.example.com/mcp" },
+    });
+    createMCPClientMock.mockResolvedValue({
+      tools: async () => ({
+        searchTickets: { description: "x", inputSchema: { type: "object", properties: {} }, execute: vi.fn() },
+        deleteTicket: { description: "x", inputSchema: { type: "object", properties: {} }, execute: vi.fn() },
+      }),
+    });
+  });
+
+  const tools = async () => {
+    await credencialesElevenLabs(db, TEST_BOT_ID, env);
+    await esperarRevision();
+    const armar = asegurarAgenteAlDiaMock.mock.calls.at(-1)![4] as () => Promise<Record<string, any>>;
+    return await armar();
+  };
+
+  it("con una tool del MCP apagada, esa NO llega al registro; la encendida sí", async () => {
+    settingsGuardados.disabled_tools = "zendesk_deleteTicket";
+
+    const t = await tools();
+
+    expect(t).toHaveProperty("zendesk_searchTickets");
+    expect(t).not.toHaveProperty("zendesk_deleteTicket");
+  });
+
+  it("también apaga las internas — es el mismo interruptor", async () => {
+    settingsGuardados.disabled_tools = "captureLead";
+
+    const t = await tools();
+
+    expect(t).not.toHaveProperty("captureLead");
+    expect(t).toHaveProperty("zendesk_searchTickets");
+  });
+
+  it("sin nada apagado, se registran todas", async () => {
+    const t = await tools();
+
+    expect(t).toHaveProperty("zendesk_searchTickets");
+    expect(t).toHaveProperty("zendesk_deleteTicket");
   });
 });

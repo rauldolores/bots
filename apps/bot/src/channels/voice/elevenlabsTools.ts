@@ -71,8 +71,8 @@ const CAMPOS_DE_PROPIEDAD = ["type", "description", "enum", "items", "properties
  * Va recursivo porque un parámetro puede ser un objeto o un arreglo de
  * objetos, y ahí adentro vuelve a aparecer la misma basura.
  */
-function limpiarEsquema(nodo: unknown): unknown {
-  if (Array.isArray(nodo)) return nodo.map(limpiarEsquema);
+function limpiarEsquema(nodo: unknown, nombreDeLaPropiedad = ""): unknown {
+  if (Array.isArray(nodo)) return nodo.map((n) => limpiarEsquema(n, nombreDeLaPropiedad));
   if (!nodo || typeof nodo !== "object") return nodo;
 
   const entrada = nodo as Record<string, unknown>;
@@ -82,7 +82,7 @@ function limpiarEsquema(nodo: unknown): unknown {
     if (clave === "properties" && entrada.properties && typeof entrada.properties === "object") {
       const props: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(entrada.properties as Record<string, unknown>)) {
-        const limpia = limpiarEsquema(v) as Record<string, unknown>;
+        const limpia = limpiarEsquema(v, k) as Record<string, unknown>;
         // ElevenLabs EXIGE descripción en cada parámetro: sin ella responde
         // "Must set one of: description, dynamic_variable, is_system_provided,
         // constant_value, or is_omitted" y rechaza la herramienta ENTERA.
@@ -96,7 +96,17 @@ function limpiarEsquema(nodo: unknown): unknown {
       }
       salida.properties = props;
     } else if (clave === "items") {
-      salida.items = limpiarEsquema(entrada.items);
+      // Los ITEMS de un arreglo también necesitan descripción, no solo las
+      // propiedades de un objeto. Sin ella ElevenLabs responde el mismo 422
+      // ("Must set one of: description, …") y rechaza la herramienta entera:
+      // pasó con dos tools del CRM que reciben arreglos de números
+      // (`contactoIds`, `anadir`), y como la huella solo se guarda si TODAS
+      // quedaron, el agente se reconfiguraba en CADA llamada entrante.
+      const items = limpiarEsquema(entrada.items, nombreDeLaPropiedad) as Record<string, unknown> | undefined;
+      if (items && typeof items === "object" && !items.description) {
+        items.description = `Un elemento de ${nombreDeLaPropiedad || "la lista"}.`;
+      }
+      salida.items = items;
     } else {
       salida[clave] = entrada[clave];
     }

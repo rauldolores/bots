@@ -286,6 +286,56 @@ describe("el type es obligatorio: sin él ElevenLabs rechaza la herramienta ente
  * única fuente de verdad disponible nunca le llegaba, así que para contestar
  * no le quedaba más que adivinar.
  */
+/**
+ * Lo mismo que el `type`, con los ITEMS de un arreglo.
+ *
+ * ElevenLabs exige descripción en cada parámetro Y en los elementos de una
+ * lista. Dos herramientas del CRM que reciben arreglos de números
+ * (`contactoIds`, `anadir`) se caían con 422 — y como la huella solo se
+ * guarda si TODAS quedan registradas, el agente se reconfiguraba entero en
+ * cada llamada entrante: segundos de silencio para quien llamaba, por un
+ * campo sin describir dentro de una lista.
+ */
+describe("los items de un arreglo también llevan descripción", () => {
+  const esquema = (itemsDescription?: string) =>
+    ({
+      type: "object",
+      properties: {
+        contactoId: { type: "number", description: "El contacto" },
+        anadir: {
+          type: "array",
+          items: { type: "number", ...(itemsDescription ? { description: itemsDescription } : {}) },
+        },
+      },
+    }) as any;
+
+  const toolConArregloDeNumeros = (itemsDescription?: string) => ({
+    description: "Etiqueta un contacto",
+    inputSchema: jsonSchema(esquema(itemsDescription)),
+    execute: async () => ({ ok: true }),
+  });
+
+  it("un arreglo cuyos items no la traen sale con una, y el 422 no ocurre", async () => {
+    global.fetch = fetchQueRegistra(() => Response.json({ id: "tool_1" }));
+
+    const r = await registrarHerramientas(LLAVE, { etiquetar_contacto: toolConArregloDeNumeros() }, {});
+
+    expect(r.faltantes).toEqual([]);
+    const props = peticiones.find((p) => p.metodo === "POST")!.cuerpo.tool_config.parameters.properties;
+    expect(props.anadir.items.type).toBe("number");
+    expect(props.anadir.items.description).toBeTruthy();
+    expect(String(props.anadir.items.description)).toContain("anadir");
+  });
+
+  it("si los items YA traen descripción, se respeta la suya", async () => {
+    global.fetch = fetchQueRegistra(() => Response.json({ id: "tool_1" }));
+    await registrarHerramientas(LLAVE, { etiquetar_contacto: toolConArregloDeNumeros("Id de etiqueta") }, {});
+
+    const props = peticiones.find((p) => p.metodo === "POST")!.cuerpo.tool_config.parameters.properties;
+    expect(props.anadir.items.description).toBe("Id de etiqueta");
+  });
+});
+
 describe("las herramientas ESPERAN el resultado", () => {
   it("cada tool se registra con expects_response en true", async () => {
     peticiones = [];
