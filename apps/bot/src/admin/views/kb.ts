@@ -7,6 +7,17 @@ import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { KbDocsRepo, FIXTURE_CHUNKS, MAX_DOC_CHARS, chunkContent, type KbDoc } from "../../kb/docs";
 import { MediaAssetsRepo, type MediaAsset } from "../../db/mediaAssets";
+import { BotsRepo } from "../../db/bots";
+import { topeDelPlan, LIMITES } from "../../billing/kontrolia";
+import { almacenamientoDisponible } from "../../media/storage";
+import {
+  pesoLegible,
+  ESPACIO_POR_DEFECTO_MB,
+  MAX_IMAGEN_BYTES,
+  MAX_DOCUMENTO_BYTES,
+  TIPOS_DE_IMAGEN,
+  TIPOS_DE_DOCUMENTO,
+} from "../../media/limites";
 import { layout } from "./layout";
 
 function esc(s: string): string {
@@ -39,10 +50,18 @@ function banner(tone: "ok" | "bad" | "neutral", text: string): string {
  * punto de vista del dueño: el material del negocio. Lo que el bot SABE son
  * los documentos de arriba; lo que el bot ENTREGA son estos archivos.
  *
- * Lo que se guarda es una CLAVE y una descripción. El agente elige por clave
- * y nunca ve la URL — ver tools/sendMedia.ts.
+ * El archivo se sube DIRECTO a Supabase Storage desde el navegador, en tres
+ * pasos (firmar → subir → registrar). No es un capricho: en Vercel el cuerpo
+ * de una petición se corta en 4.5 MB, así que un PDF de 10 MB no llegaría si
+ * pasara por el servidor. Ver src/media/storage.ts.
  */
-function seccionDeMedios(assets: MediaAsset[]): string {
+function seccionDeMedios(
+  assets: MediaAsset[],
+  espacio: { usadoBytes: number; espacioMb: number; disponible: boolean },
+): string {
+  const totalBytes = espacio.espacioMb * 1024 * 1024;
+  const porcentaje = Math.min(100, Math.round((espacio.usadoBytes / totalBytes) * 100));
+
   const filas = assets.length
     ? assets
         .map(
@@ -52,9 +71,12 @@ function seccionDeMedios(assets: MediaAsset[]): string {
           <div style="display:flex;align-items:center;gap:8px">
             <code class="text-cream text-[12.5px]" style="font-family:ui-monospace,Menlo,monospace">${esc(a.clave)}</code>
             <span class="text-dim text-[10.5px]" style="border:1px solid var(--line);padding:1px 7px">${a.tipo}</span>
+            ${a.size_bytes ? `<span class="text-dim text-[10.5px]">${pesoLegible(Number(a.size_bytes))}</span>` : ""}
           </div>
           <div class="text-muted text-[11.5px]" style="margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.descripcion)}</div>
-          <div class="text-dim text-[10.5px]" style="margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.nombre_archivo ?? a.url)}</div>
+          <div class="text-dim text-[10.5px]" style="margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+            <a href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">${esc(a.nombre_archivo ?? a.url)}</a>
+          </div>
         </div>
         <form method="POST" action="/admin/kb/archivos/${encodeURIComponent(a.id)}/delete" style="flex:none">
           <button class="kbedit cursor-pointer" style="background:none;border:1px solid var(--line);color:var(--muted);padding:5px 12px;font-size:11px;transition:all .12s ease">Quitar</button>
@@ -68,20 +90,9 @@ function seccionDeMedios(assets: MediaAsset[]): string {
 
   const campo = "background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;outline:none;width:100%";
 
-  return `
-    <div style="margin:28px 0 16px">
-      <h2 class="font-display font-semibold text-[15px] text-cream">Archivos que el bot puede enviar</h2>
-      <p class="text-muted text-[12.5px]" style="margin-top:2px">
-        Tu menú en PDF, la foto del local, el catálogo. El bot los manda cuando el cliente los pide —
-        y solo puede mandar los que estén aquí: nunca escribe enlaces por su cuenta.
-      </p>
-    </div>
-
-    <div class="bg-panel border border-line" style="margin-bottom:16px;overflow:hidden">
-      ${filas}
-    </div>
-
-    <form method="POST" action="/admin/kb/archivos/save" class="bg-panel border border-line" style="padding:18px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:16px">
+  const formulario = espacio.disponible
+    ? `
+    <form id="form-archivo" class="bg-panel border border-line" style="padding:18px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:16px">
       <div style="display:flex;flex-direction:column;gap:5px">
         <label for="clave" class="font-display font-semibold text-[12px] text-cream">Clave</label>
         <p class="text-dim text-[11px]">Corta y en minúsculas. Es lo que el bot escribe para pedirlo.</p>
@@ -104,27 +115,107 @@ function seccionDeMedios(assets: MediaAsset[]): string {
                placeholder="El menú de la semana, con precios" style="${campo}">
       </div>
 
-      <div style="display:flex;flex-direction:column;gap:5px">
-        <label for="url" class="font-display font-semibold text-[12px] text-cream">Enlace al archivo</label>
-        <p class="text-dim text-[11px]">La dirección pública donde ya está subido.</p>
-        <input type="url" id="url" name="url" required maxlength="1000"
-               placeholder="https://tunegocio.com/menu.pdf" style="${campo}">
+      <div style="display:flex;flex-direction:column;gap:5px;grid-column:1/-1">
+        <label for="archivo" class="font-display font-semibold text-[12px] text-cream">El archivo</label>
+        <p class="text-dim text-[11px]">
+          Imágenes hasta ${pesoLegible(MAX_IMAGEN_BYTES)} (JPG, PNG, WEBP, GIF) y documentos hasta ${pesoLegible(MAX_DOCUMENTO_BYTES)} (PDF, Word, Excel, texto).
+          El tope no es nuestro: arriba de eso hay canales que no lo entregan.
+        </p>
+        <input type="file" id="archivo" name="archivo" required
+               accept="${[...TIPOS_DE_IMAGEN, ...TIPOS_DE_DOCUMENTO].join(",")}" style="${campo}">
       </div>
 
-      <div style="display:flex;flex-direction:column;gap:5px">
-        <label for="nombre_archivo" class="font-display font-semibold text-[12px] text-cream">Nombre del archivo</label>
-        <p class="text-dim text-[11px]">Solo documentos: así lo verá el cliente al recibirlo.</p>
-        <input type="text" id="nombre_archivo" name="nombre_archivo" maxlength="120"
-               placeholder="menu-de-la-semana.pdf" style="${campo}">
-      </div>
-
-      <div style="grid-column:1/-1;display:flex;justify-content:flex-end">
-        <button class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
+      <div style="grid-column:1/-1;display:flex;align-items:center;gap:12px">
+        <span id="archivo-estado" class="text-dim text-[11.5px]" style="flex:1"></span>
+        <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
                 style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 16px">
-          Guardar archivo
+          Subir archivo
         </button>
       </div>
-    </form>`;
+    </form>
+
+    <script>
+    (function () {
+      var f = document.getElementById("form-archivo");
+      if (!f) return;
+      var estado = document.getElementById("archivo-estado");
+      f.addEventListener("submit", async function (e) {
+        e.preventDefault();
+        var file = f.archivo.files[0];
+        if (!file) { estado.textContent = "Elige un archivo."; return; }
+        var btn = f.querySelector("button[type=submit]");
+        btn.disabled = true;
+        var datos = {
+          clave: f.clave.value, tipo: f.tipo.value, descripcion: f.descripcion.value,
+          nombre: file.name, mime: file.type, bytes: file.size,
+        };
+        try {
+          estado.textContent = "Preparando…";
+          var r1 = await fetch("/admin/kb/archivos/firma", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(datos),
+          });
+          var j1 = await r1.json();
+          if (!j1.ok) { estado.textContent = j1.error; btn.disabled = false; return; }
+
+          // Los bytes van DIRECTO a Storage: no pasan por el servidor del bot.
+          estado.textContent = "Subiendo " + file.name + "…";
+          var r2 = await fetch(j1.url, {
+            method: "PUT",
+            headers: { "Content-Type": file.type || "application/octet-stream" },
+            body: file,
+          });
+          if (!r2.ok) { estado.textContent = "No se pudo subir el archivo."; btn.disabled = false; return; }
+
+          estado.textContent = "Guardando…";
+          datos.path = j1.path;
+          var r3 = await fetch("/admin/kb/archivos/registrar", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(datos),
+          });
+          var j3 = await r3.json();
+          if (!j3.ok) { estado.textContent = j3.error; btn.disabled = false; return; }
+          window.location.href = "/admin/kb?archivo=1";
+        } catch (err) {
+          estado.textContent = "Algo falló al subir. Vuelve a intentarlo.";
+          btn.disabled = false;
+        }
+      });
+    })();
+    </script>`
+    : `<div class="bg-panel border border-line" style="padding:18px;margin-bottom:16px">
+         <p class="text-muted text-[12.5px]" style="margin:0">
+           Para subir archivos falta configurar el almacenamiento:
+           <code class="text-cream">SUPABASE_URL</code> y <code class="text-cream">SUPABASE_SERVICE_ROLE_KEY</code>.
+           Los archivos que ya estén cargados siguen funcionando.
+         </p>
+       </div>`;
+
+  return `
+    <div style="margin:28px 0 16px">
+      <h2 class="font-display font-semibold text-[15px] text-cream">Archivos que el bot puede enviar</h2>
+      <p class="text-muted text-[12.5px]" style="margin-top:2px">
+        Tu menú en PDF, la foto del local, el catálogo. El bot los manda cuando el cliente los pide —
+        y solo puede mandar los que estén aquí: nunca escribe enlaces por su cuenta.
+      </p>
+      <p class="text-dim text-[11.5px]" style="margin-top:6px">
+        Quien reciba el enlace puede abrirlo sin contraseña, igual que si se lo mandaras por WhatsApp.
+        Esto es para material que ya le compartes a tus clientes, no para documentos confidenciales.
+      </p>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+      <div style="flex:1;height:6px;background:var(--panel2);border:1px solid var(--line);overflow:hidden">
+        <div style="height:100%;width:${porcentaje}%;background:${porcentaje >= 90 ? "var(--bad)" : "var(--accent)"}"></div>
+      </div>
+      <span class="text-dim text-[11.5px]" style="white-space:nowrap">
+        ${pesoLegible(espacio.usadoBytes)} de ${espacio.espacioMb} MB
+      </span>
+    </div>
+
+    <div class="bg-panel border border-line" style="margin-bottom:16px;overflow:hidden">
+      ${filas}
+    </div>
+
+    ${formulario}`;
 }
 
 export async function renderKbList(
@@ -141,10 +232,18 @@ export async function renderKbList(
   visibleNavIds: Set<string> | null = null,
 ): Promise<string> {
   const db = new Db(env.DB);
-  const [docs, assets] = await Promise.all([
+  const medios = new MediaAssetsRepo(db, botId);
+  const [docs, assets, usadoBytes, bot] = await Promise.all([
     new KbDocsRepo(db, botId).list(),
-    new MediaAssetsRepo(db, botId).list(),
+    medios.list(),
+    medios.espacioUsado(),
+    new BotsRepo(db).getById(botId),
   ]);
+  // El tope lo dice el plan; sin plan configurado (instalación propia) manda
+  // el valor por defecto — ver media/limites.ts.
+  const espacioMb =
+    (bot ? await topeDelPlan(env, bot.organization_id, LIMITES.almacenamiento) : null) ??
+    ESPACIO_POR_DEFECTO_MB;
 
   const bannerHtml = flash?.saved
     ? banner("ok", "✓ Guardado e indexado — el bot ya puede usarlo.")
@@ -199,7 +298,11 @@ export async function renderKbList(
       ${rows}
     </div>
 
-    ${seccionDeMedios(assets)}
+    ${seccionDeMedios(assets, {
+      usadoBytes,
+      espacioMb,
+      disponible: almacenamientoDisponible(env),
+    })}
 
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px" class="text-dim text-[11.5px]">
       <span>Además, tu bot trae <b class="text-cream">${FIXTURE_CHUNKS.length}</b> fragmentos precargados del repo.</span>

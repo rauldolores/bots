@@ -40,6 +40,8 @@ import { channelLabel } from "../channels/labels";
 import type { ChannelId } from "../channels/shared";
 import { textParts } from "../channels/parts";
 import { MediaAssetsRepo, normalizarClave, CLAVE_VALIDA } from "../db/mediaAssets";
+import { almacenamientoDisponible, firmarSubida, tamanoReal, borrarArchivo, urlPublicaDe } from "../media/storage";
+import { validarArchivo, maxBytesDe, pesoLegible, ESPACIO_POR_DEFECTO_MB } from "../media/limites";
 import { renderInsights } from "./views/insights";
 import { analyzeConversations } from "../insights/analyzer";
 import { renderAgentePage, renderAgenteCanvas, renderNodeModal, toggleTool, toastOob } from "./views/agente";
@@ -89,6 +91,7 @@ import {
   esPrepago,
   saldoPrepago,
   LIMITES,
+  topeDelPlan,
   type ClaveDeLimite,
 } from "../billing/kontrolia";
 import { startOnboarding, activateOnboarding, disableOnboarding, retryOnboarding } from "../channels/voice/onboarding/service";
@@ -1026,40 +1029,141 @@ adminApp.post("/kb/:id/delete", async (c) => {
 // --- Biblioteca de medios (lo que el bot puede ENVIAR) ------------------------
 //
 // Vive bajo /kb porque comparte pantalla con Conocimiento (ver views/kb.ts).
-// Aquí solo se registra la DIRECCIÓN de un archivo que ya está publicado: subir
-// el archivo desde el panel es el siguiente paso, y necesita almacenamiento.
-adminApp.post("/kb/archivos/save", async (c) => {
-  const form = await c.req.formData();
-  const clave = normalizarClave(String(form.get("clave") ?? ""));
-  const tipo = String(form.get("tipo") ?? "documento") === "imagen" ? "imagen" : "documento";
-  const url = String(form.get("url") ?? "").trim().slice(0, 1000);
-  const descripcion = String(form.get("descripcion") ?? "").trim().slice(0, 200);
-  const nombreArchivo = String(form.get("nombre_archivo") ?? "").trim().slice(0, 120) || null;
+//
+// La subida es en DOS pasos y el archivo NO pasa por aquí:
+//
+//   1. /firma      valida clave, tipo y espacio, y devuelve una URL firmada.
+//   2. el navegador sube los bytes DIRECTO a Supabase Storage.
+//   3. /registrar  confirma el tamaño real contra Storage y guarda la fila.
+//
+// El rodeo es obligado: en Vercel el cuerpo de una petición se corta en 4.5 MB
+// (ver media/storage.ts). Y de paso el peso lo confirma el servidor
+// preguntándole a Storage, no creyéndole al navegador.
+
+/** Lo que permite el plan de este bot, en MB. */
+async function espacioDelBot(c: any, botId: string): Promise<number> {
+  const bot = await new BotsRepo(new Db(c.env.DB)).getById(botId);
+  if (!bot) return ESPACIO_POR_DEFECTO_MB;
+  const tope = await topeDelPlan(c.env, bot.organization_id, LIMITES.almacenamiento);
+  return tope ?? ESPACIO_POR_DEFECTO_MB;
+}
+
+adminApp.post("/kb/archivos/firma", async (c) => {
+  const botId = c.get("botId");
+  const body = (await c.req.json().catch(() => null)) as {
+    clave?: string; tipo?: string; descripcion?: string; nombre?: string; mime?: string; bytes?: number;
+  } | null;
+  if (!body) return c.json({ ok: false, error: "Petición inválida." }, 400);
+
+  const clave = normalizarClave(String(body.clave ?? ""));
+  const tipo = body.tipo === "imagen" ? "imagen" : "documento";
+  const descripcion = String(body.descripcion ?? "").trim().slice(0, 200);
 
   if (!clave || !CLAVE_VALIDA.test(clave)) {
-    return c.redirect("/admin/kb?archivoError=" + encodeURIComponent("La clave solo admite letras, números y guiones."));
+    return c.json({ ok: false, error: "La clave solo admite letras, números y guiones." }, 400);
   }
   if (!descripcion) {
-    return c.redirect("/admin/kb?archivoError=" + encodeURIComponent("Falta describir qué es el archivo: es lo único que el bot lee para decidir si lo manda."));
+    return c.json({
+      ok: false,
+      error: "Falta describir qué es el archivo: es lo único que el bot lee para decidir si lo manda.",
+    }, 400);
   }
-  // Solo http(s): el canal va a pedir esa URL desde el servidor, y un esquema
-  // raro ahí no es un archivo, es un problema.
-  if (!/^https?:\/\/\S+$/i.test(url)) {
-    return c.redirect("/admin/kb?archivoError=" + encodeURIComponent("El enlace debe empezar con http:// o https://"));
+  if (!almacenamientoDisponible(c.env)) {
+    return c.json({
+      ok: false,
+      error: "Falta configurar el almacenamiento (SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY).",
+    }, 400);
   }
 
-  await new MediaAssetsRepo(new Db(c.env.DB), c.get("botId")).upsert({
+  const repo = new MediaAssetsRepo(new Db(c.env.DB), botId);
+  const [usado, espacioMb, previo] = await Promise.all([
+    repo.espacioUsado(),
+    espacioDelBot(c, botId),
+    repo.getByClave(clave),
+  ]);
+  // Reemplazar un archivo no debe contar doble: lo que ocupa el que se va ya
+  // está sumado en `usado`.
+  const usadoNeto = Math.max(0, usado - (previo?.size_bytes ?? 0));
+
+  const rechazo = validarArchivo({
+    tipo,
+    mime: String(body.mime ?? ""),
+    bytes: Number(body.bytes ?? 0),
+    usadoBytes: usadoNeto,
+    espacioMb,
+  });
+  if (rechazo) return c.json({ ok: false, error: rechazo.motivo }, 400);
+
+  const firma = await firmarSubida(c.env, {
+    botId,
+    nombre: String(body.nombre ?? "archivo"),
+    maxBytes: maxBytesDe(tipo),
+  });
+  if (!firma.ok) return c.json({ ok: false, error: firma.error }, 502);
+  return c.json({ ok: true, url: firma.url, path: firma.path });
+});
+
+adminApp.post("/kb/archivos/registrar", async (c) => {
+  const botId = c.get("botId");
+  const body = (await c.req.json().catch(() => null)) as {
+    clave?: string; tipo?: string; descripcion?: string; nombre?: string; mime?: string; path?: string;
+  } | null;
+  const path = String(body?.path ?? "");
+  if (!body || !path.startsWith(`${botId}/`)) {
+    return c.json({ ok: false, error: "Petición inválida." }, 400);
+  }
+
+  const clave = normalizarClave(String(body.clave ?? ""));
+  const tipo = body.tipo === "imagen" ? "imagen" : "documento";
+  const descripcion = String(body.descripcion ?? "").trim().slice(0, 200);
+  if (!clave || !CLAVE_VALIDA.test(clave) || !descripcion) {
+    return c.json({ ok: false, error: "Faltan la clave o la descripción." }, 400);
+  }
+
+  // El peso lo dice Storage, no el navegador: si el archivo resultó más grande
+  // de lo permitido, se borra y no se guarda nada.
+  const bytes = await tamanoReal(c.env, path);
+  if (bytes === null) {
+    return c.json({ ok: false, error: "El archivo no llegó completo. Vuelve a intentarlo." }, 400);
+  }
+  if (bytes > maxBytesDe(tipo)) {
+    await borrarArchivo(c.env, path);
+    return c.json({
+      ok: false,
+      error: `El archivo pesa ${pesoLegible(bytes)} y el máximo son ${pesoLegible(maxBytesDe(tipo))}.`,
+    }, 400);
+  }
+
+  const repo = new MediaAssetsRepo(new Db(c.env.DB), botId);
+  const previo = await repo.getByClave(clave);
+  const nombre = String(body.nombre ?? "archivo").slice(0, 120);
+
+  await repo.upsert({
     clave,
     tipo,
-    url,
-    nombreArchivo: tipo === "documento" ? nombreArchivo : null,
+    url: urlPublicaDe(c.env, path)!,
+    nombreArchivo: nombre,
     descripcion,
+    storagePath: path,
+    sizeBytes: bytes,
+    mime: String(body.mime ?? "").slice(0, 100) || null,
   });
-  return c.redirect("/admin/kb?archivo=1");
+
+  // Reemplazo: el archivo viejo ya no lo alcanza nadie, y si no se borra sigue
+  // ocupando espacio que el dueño cree haber liberado.
+  if (previo?.storage_path && previo.storage_path !== path) {
+    await borrarArchivo(c.env, previo.storage_path);
+  }
+  return c.json({ ok: true });
 });
 
 adminApp.post("/kb/archivos/:id/delete", async (c) => {
-  await new MediaAssetsRepo(new Db(c.env.DB), c.get("botId")).delete(c.req.param("id"));
+  const repo = new MediaAssetsRepo(new Db(c.env.DB), c.get("botId"));
+  const asset = await repo.getById(c.req.param("id"));
+  await repo.delete(c.req.param("id"));
+  // Solo lo nuestro: una fila vieja registrada con una URL externa no tiene
+  // storage_path, y ahí no hay nada que borrar.
+  if (asset?.storage_path) await borrarArchivo(c.env, asset.storage_path);
   return c.redirect("/admin/kb?archivo=0");
 });
 

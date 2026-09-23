@@ -14,6 +14,10 @@ export interface MediaAsset {
   url: string;
   nombre_archivo: string | null;
   descripcion: string;
+  /** Ruta dentro del bucket. NULL = es una URL externa, no la borramos nosotros. */
+  storage_path: string | null;
+  size_bytes: number | null;
+  mime: string | null;
   created_at: number;
 }
 
@@ -43,7 +47,8 @@ export class MediaAssetsRepo {
 
   async list(): Promise<MediaAsset[]> {
     return this.db.all<MediaAsset>(
-      `SELECT id, bot_id, clave, tipo, url, nombre_archivo, descripcion, created_at
+      `SELECT id, bot_id, clave, tipo, url, nombre_archivo, descripcion,
+              storage_path, size_bytes, mime, created_at
          FROM media_assets WHERE bot_id = ? ORDER BY clave`,
       [this.botId],
     );
@@ -51,11 +56,35 @@ export class MediaAssetsRepo {
 
   async getByClave(clave: string): Promise<MediaAsset | null> {
     const row = await this.db.first<MediaAsset>(
-      `SELECT id, bot_id, clave, tipo, url, nombre_archivo, descripcion, created_at
+      `SELECT id, bot_id, clave, tipo, url, nombre_archivo, descripcion,
+              storage_path, size_bytes, mime, created_at
          FROM media_assets WHERE bot_id = ? AND clave = ?`,
       [this.botId, clave],
     );
     return row ?? null;
+  }
+
+  async getById(id: string): Promise<MediaAsset | null> {
+    const row = await this.db.first<MediaAsset>(
+      `SELECT id, bot_id, clave, tipo, url, nombre_archivo, descripcion,
+              storage_path, size_bytes, mime, created_at
+         FROM media_assets WHERE bot_id = ? AND id = ?`,
+      [this.botId, id],
+    );
+    return row ?? null;
+  }
+
+  /**
+   * Los bytes que ocupa este bot. Se SUMA de las filas en vez de llevar un
+   * contador aparte: un contador se desincroniza en cuanto alguien borra, y
+   * entonces el dueño se queda sin espacio que sí tiene.
+   */
+  async espacioUsado(): Promise<number> {
+    const row = await this.db.first<{ total: string | number | null }>(
+      "SELECT COALESCE(SUM(size_bytes), 0) AS total FROM media_assets WHERE bot_id = ?",
+      [this.botId],
+    );
+    return Number(row?.total ?? 0);
   }
 
   /**
@@ -68,15 +97,22 @@ export class MediaAssetsRepo {
     url: string;
     nombreArchivo?: string | null;
     descripcion: string;
+    storagePath?: string | null;
+    sizeBytes?: number | null;
+    mime?: string | null;
   }): Promise<void> {
     await this.db.run(
-      `INSERT INTO media_assets (id, bot_id, clave, tipo, url, nombre_archivo, descripcion, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO media_assets (id, bot_id, clave, tipo, url, nombre_archivo, descripcion,
+                                 storage_path, size_bytes, mime, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (bot_id, clave) DO UPDATE
          SET tipo = EXCLUDED.tipo,
              url = EXCLUDED.url,
              nombre_archivo = EXCLUDED.nombre_archivo,
-             descripcion = EXCLUDED.descripcion`,
+             descripcion = EXCLUDED.descripcion,
+             storage_path = EXCLUDED.storage_path,
+             size_bytes = EXCLUDED.size_bytes,
+             mime = EXCLUDED.mime`,
       [
         crypto.randomUUID(),
         this.botId,
@@ -85,6 +121,9 @@ export class MediaAssetsRepo {
         a.url,
         a.nombreArchivo ?? null,
         a.descripcion,
+        a.storagePath ?? null,
+        a.sizeBytes ?? null,
+        a.mime ?? null,
         Date.now(),
       ],
     );

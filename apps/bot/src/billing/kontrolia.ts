@@ -30,6 +30,14 @@ export const LIMITES = {
   conversaciones: "conversaciones",
   /** Minutos de llamadas de voz al mes. Se cuentan al colgar, redondeando hacia arriba. */
   llamadas: "llamadas",
+  /**
+   * Espacio de la biblioteca de medios, en MB. A diferencia de las demás, esta
+   * NO se reporta con contarUso: no es un flujo mensual sino un NIVEL, y un
+   * contador que solo sube se desincroniza en cuanto el dueño borra un
+   * archivo. El consumo se suma de `media_assets`; de aquí solo se lee cuánto
+   * permite el plan (ver media/limites.ts).
+   */
+  almacenamiento: "almacenamiento",
 } as const;
 export type ClaveDeLimite = (typeof LIMITES)[keyof typeof LIMITES];
 
@@ -205,6 +213,32 @@ export async function hayCupo(env: Env, organizationId: string, clave: ClaveDeLi
 }
 
 /**
+ * Cuánto permite el plan para una clave, sin contar nada.
+ *
+ * Para los límites que son un NIVEL y no un flujo (el espacio de la
+ * biblioteca): aquí solo se pregunta el tope; el consumo se mide donde de
+ * verdad vive. `null` = sin plan configurado o sin tope, y entonces manda el
+ * valor por defecto de quien llama.
+ */
+export async function topeDelPlan(
+  env: Env,
+  organizationId: string,
+  clave: ClaveDeLimite,
+): Promise<number | null> {
+  const cfg = usageConfig(env);
+  if (!cfg) return null;
+  try {
+    const usage = await requireLimit(cfg, organizationId, clave);
+    return usage.limit;
+  } catch (e) {
+    // Mismo criterio que hayCupo: si el auth-server no contesta, no se
+    // bloquea al negocio — rige el valor por defecto.
+    console.warn(`[billing] topeDelPlan(${clave}): usando el valor por defecto —`, e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+/**
  * Cuenta uno, DESPUÉS de que el recurso existe, con su id como
  * idempotencyKey: un reintento (o el mismo canal reconectado) nunca cuenta
  * doble. Nunca lanza — perder una cuenta es tolerable, tumbar la operación
@@ -240,6 +274,7 @@ const NOMBRE_DE_LIMITE: Record<ClaveDeLimite, string> = {
   canales: "canales conectados",
   conversaciones: "conversaciones",
   llamadas: "minutos de llamadas",
+  almacenamiento: "MB de archivos",
 };
 
 /**
@@ -306,7 +341,7 @@ export function tieneExcedente(u: ConExcedente): u is ConExcedente & { overagePr
 
 /** Unidad en singular/plural para hablar del excedente: "minuto extra", "3 conversaciones extra". */
 function unidad(clave: ClaveDeLimite, n: number): string {
-  const [uno, varios] = { bots: ["bot", "bots"], canales: ["canal", "canales"], conversaciones: ["conversación", "conversaciones"], llamadas: ["minuto", "minutos"] }[clave];
+  const [uno, varios] = { bots: ["bot", "bots"], canales: ["canal", "canales"], conversaciones: ["conversación", "conversaciones"], llamadas: ["minuto", "minutos"], almacenamiento: ["MB", "MB"] }[clave];
   return n === 1 ? uno : varios;
 }
 

@@ -183,6 +183,15 @@ export interface Env {
   // se prende al configurarla.
   SUPABASE_URL?: string;
   SUPABASE_ANON_KEY?: string;
+  /**
+   * La llave service_role, SOLO para subir archivos a Storage desde el
+   * servidor (media/storage.ts). Nunca sale al navegador: subir es escribir, y
+   * el bucket no tiene —ni debe tener— política que lo permita desde el
+   * cliente. Sin ella, la biblioteca de medios no ofrece subir archivos.
+   */
+  SUPABASE_SERVICE_ROLE_KEY?: string;
+  /** El bucket donde viven los archivos del bot. "medios" si no se dice otra cosa. */
+  SUPABASE_STORAGE_BUCKET?: string;
   // client_id que devolvió panel.kontrolia.io → Clientes OAuth al registrar
   // esta app. No es secreto (cliente público, PKCE, sin client_secret).
   OAUTH_CLIENT_ID?: string;

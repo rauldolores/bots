@@ -3,7 +3,7 @@
  * Workers AI simulado; la base y pgvector son reales.
  */
 import { EMBEDDING_DIMENSIONS } from "../../src/ai/embeddings";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { Db } from "../../src/db/client";
@@ -179,95 +179,133 @@ describe("budget save route", () => {
   });
 });
 
-describe("biblioteca de medios — lo que el bot puede enviar", () => {
+describe("biblioteca de medios — subir de verdad, no pegar una URL", () => {
+  const STORAGE = "https://proyecto.supabase.co";
+  let subidas: { url: string; method: string }[];
+
   function mediaRepo() {
     return new MediaAssetsRepo(new Db(env.DB), TEST_BOT_ID);
   }
 
-  it("guarda un archivo y el bot ya puede elegirlo por su clave", async () => {
-    const res = await adminApp.request(
-      "/kb/archivos/save",
-      {
-        method: "POST",
-        headers: FORM,
-        body: new URLSearchParams({
-          clave: "Menú de la Semana",
-          tipo: "documento",
-          url: "https://tunegocio.com/menu.pdf",
-          nombre_archivo: "menu.pdf",
-          descripcion: "El menú de la semana, con precios",
-        }),
-      },
-      env,
+  /** Un Storage de mentira que se comporta como el real en lo que importa. */
+  function fingirStorage(opts: { bytes?: number } = {}) {
+    subidas = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: any, init: any = {}) => {
+        const u = String(url);
+        subidas.push({ url: u, method: init.method ?? "GET" });
+        if (u.includes("/storage/v1/bucket")) return new Response("", { status: 409 }); // ya existe
+        if (u.includes("/object/upload/sign/")) {
+          const path = u.split("/object/upload/sign/medios/")[1];
+          return new Response(JSON.stringify({ url: `/object/upload/sign/medios/${path}?token=t` }), { status: 200 });
+        }
+        if (u.includes("/object/public/")) {
+          // HEAD: el peso REAL, que es el que manda.
+          return new Response(null, {
+            status: 200,
+            headers: { "content-length": String(opts.bytes ?? 2 * 1024 * 1024) },
+          });
+        }
+        return new Response("", { status: 200 });
+      }),
     );
+  }
 
-    expect(res.status).toBe(302);
-    const guardado = await mediaRepo().getByClave("menu-de-la-semana");
-    expect(guardado?.url).toBe("https://tunegocio.com/menu.pdf");
-    expect(guardado?.nombre_archivo).toBe("menu.pdf");
+  beforeEach(() => {
+    (env as any).SUPABASE_URL = STORAGE;
+    (env as any).SUPABASE_SERVICE_ROLE_KEY = "service-role-falsa";
+    fingirStorage();
   });
 
-  it("rechaza un enlace que no es http(s): el servidor va a pedir esa URL", async () => {
-    await adminApp.request(
-      "/kb/archivos/save",
-      {
-        method: "POST",
-        headers: FORM,
-        body: new URLSearchParams({
-          clave: "menu",
-          tipo: "documento",
-          url: "javascript:alert(1)",
-          descripcion: "Menú",
-        }),
-      },
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const cuerpo = (over: Record<string, unknown> = {}) => ({
+    clave: "menu",
+    tipo: "documento",
+    descripcion: "El menú de la semana",
+    nombre: "menu.pdf",
+    mime: "application/pdf",
+    bytes: 2 * 1024 * 1024,
+    ...over,
+  });
+
+  async function pedir(ruta: string, body: unknown) {
+    return adminApp.request(
+      ruta,
+      { method: "POST", headers: { ...AUTH, "Content-Type": "application/json" }, body: JSON.stringify(body) },
       env,
     );
+  }
+
+  it("firma la subida cuando todo está en orden", async () => {
+    const res = await pedir("/kb/archivos/firma", cuerpo());
+    expect(res.status).toBe(200);
+    const j = (await res.json()) as any;
+    expect(j.ok).toBe(true);
+    // El navegador sube DIRECTO a Storage: por eso se le devuelve una URL suya.
+    expect(j.url).toContain(`${STORAGE}/storage/v1/object/upload/sign/medios/`);
+    // La ruta cuelga del bot y de un UUID, no del nombre del archivo.
+    expect(j.path.startsWith(`${TEST_BOT_ID}/`)).toBe(true);
+    expect(j.path.endsWith("/menu.pdf")).toBe(true);
+  });
+
+  it("no firma nada sin descripción: es lo único que el bot lee para decidir", async () => {
+    const res = await pedir("/kb/archivos/firma", cuerpo({ descripcion: "  " }));
+    expect(res.status).toBe(400);
+    expect((await res.json() as any).error).toContain("describir");
+  });
+
+  it("no firma un tipo que ningún canal entrega", async () => {
+    const res = await pedir("/kb/archivos/firma", cuerpo({ mime: "application/x-msdownload" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("no firma un archivo más grande de lo que el canal acepta", async () => {
+    const res = await pedir("/kb/archivos/firma", cuerpo({ bytes: 11 * 1024 * 1024 }));
+    expect(res.status).toBe(400);
+    expect((await res.json() as any).error).toContain("10 MB");
+  });
+
+  it("registrar guarda la fila con el peso que dice STORAGE, no el que dijo el navegador", async () => {
+    fingirStorage({ bytes: 3 * 1024 * 1024 });
+    const path = `${TEST_BOT_ID}/abc/menu.pdf`;
+    // El navegador miente y dice que pesa 1 KB.
+    const res = await pedir("/kb/archivos/registrar", cuerpo({ path, bytes: 1024 }));
+
+    expect(res.status).toBe(200);
+    const guardado = await mediaRepo().getByClave("menu");
+    expect(Number(guardado!.size_bytes)).toBe(3 * 1024 * 1024);
+    expect(guardado!.storage_path).toBe(path);
+    expect(guardado!.url).toBe(`${STORAGE}/storage/v1/object/public/medios/${path}`);
+  });
+
+  it("si el archivo subido resultó más grande del tope, se borra y no se guarda", async () => {
+    fingirStorage({ bytes: 30 * 1024 * 1024 });
+    const path = `${TEST_BOT_ID}/abc/enorme.pdf`;
+    const res = await pedir("/kb/archivos/registrar", cuerpo({ path }));
+
+    expect(res.status).toBe(400);
+    expect(await mediaRepo().list()).toHaveLength(0);
+    expect(subidas.some((s) => s.method === "DELETE" && s.url.includes(path))).toBe(true);
+  });
+
+  it("no acepta registrar un archivo de OTRO bot", async () => {
+    const res = await pedir("/kb/archivos/registrar", cuerpo({ path: "otro-bot/abc/menu.pdf" }));
+    expect(res.status).toBe(400);
     expect(await mediaRepo().list()).toHaveLength(0);
   });
 
-  it("exige la descripción: sin ella el modelo no tiene con qué decidir", async () => {
-    await adminApp.request(
-      "/kb/archivos/save",
-      {
-        method: "POST",
-        headers: FORM,
-        body: new URLSearchParams({
-          clave: "menu",
-          tipo: "documento",
-          url: "https://x/m.pdf",
-          descripcion: "   ",
-        }),
-      },
-      env,
-    );
-    expect(await mediaRepo().list()).toHaveLength(0);
-  });
-
-  it("una imagen no guarda nombre de archivo", async () => {
-    await adminApp.request(
-      "/kb/archivos/save",
-      {
-        method: "POST",
-        headers: FORM,
-        body: new URLSearchParams({
-          clave: "local",
-          tipo: "imagen",
-          url: "https://x/local.jpg",
-          nombre_archivo: "sobra.jpg",
-          descripcion: "Foto del local",
-        }),
-      },
-      env,
-    );
-    expect((await mediaRepo().getByClave("local"))?.nombre_archivo).toBeNull();
-  });
-
-  it("quitar un archivo lo deja fuera del alcance del bot", async () => {
+  it("quitar un archivo lo borra también de Storage, no solo de la lista", async () => {
     await mediaRepo().upsert({
       clave: "menu",
       tipo: "documento",
-      url: "https://x/m.pdf",
+      url: `${STORAGE}/storage/v1/object/public/medios/${TEST_BOT_ID}/abc/menu.pdf`,
       descripcion: "Menú",
+      storagePath: `${TEST_BOT_ID}/abc/menu.pdf`,
+      sizeBytes: 2048,
     });
     const [a] = await mediaRepo().list();
 
@@ -279,18 +317,16 @@ describe("biblioteca de medios — lo que el bot puede enviar", () => {
 
     expect(res.status).toBe(302);
     expect(await mediaRepo().list()).toHaveLength(0);
+    expect(subidas.some((s) => s.method === "DELETE")).toBe(true);
   });
 
-  it("la pantalla de Conocimiento lista los archivos", async () => {
+  it("la pantalla muestra el espacio usado y el tope", async () => {
     await mediaRepo().upsert({
-      clave: "menu",
-      tipo: "documento",
-      url: "https://x/m.pdf",
-      descripcion: "El menú de la semana",
+      clave: "menu", tipo: "documento", url: "https://x/m.pdf",
+      descripcion: "El menú de la semana", sizeBytes: 5 * 1024 * 1024,
     });
     const html = await (await adminApp.request("/kb", { headers: AUTH }, env)).text();
     expect(html).toContain("Archivos que el bot puede enviar");
-    expect(html).toContain("menu");
-    expect(html).toContain("El menú de la semana");
+    expect(html).toContain("5.0 MB de 200 MB");
   });
 });
