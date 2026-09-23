@@ -6,11 +6,23 @@ import { snoozeUserTool } from "./snoozeUser";
 import { captureLeadTool } from "./captureLead";
 import { scheduleAppointmentTool } from "./scheduleAppointment";
 import { catalogQueryTool } from "./catalogQuery";
+import { enviarArchivoTool } from "./sendMedia";
+import { ofrecerOpcionesTool } from "./ofrecerOpciones";
+import type { MediaAsset } from "../db/mediaAssets";
+import type { MessagePart } from "../channels/parts";
 
 export interface ToolContext {
   env: Env;
   getConversationId: () => string | null;
   botId: string;
+  /**
+   * La biblioteca de medios del bot (db/mediaAssets.ts). Vacía o ausente = el
+   * negocio no ha cargado nada, y entonces `enviarArchivo` NI SE ANUNCIA: una
+   * tool que solo puede fallar es peor que no tenerla.
+   */
+  mediaAssets?: MediaAsset[];
+  /** Dónde deja sus bloques `enviarArchivo`. Lo provee quien vaya a enviarlos. */
+  adjuntar?: (part: MessagePart) => void;
   /**
    * Sandbox de entrenamiento (/admin/entrenamiento): el dueño conversa con su
    * propio bot para ver cómo responde. Las tools que ESCRIBEN se simulan —
@@ -53,6 +65,18 @@ export function buildTools(ctx: ToolContext) {
     catalogQuery: catalogQueryTool(ctx.env, ctx.botId),
   };
 
+  // Solo si hay archivos Y alguien que los reciba. Un canal que no sabe
+  // enviarlos (la voz, hoy) no pasa `adjuntar` y el modelo ni se entera de
+  // que existe la tool — mejor que ofrecer algo que se va a perder.
+  if (ctx.mediaAssets?.length && ctx.adjuntar) {
+    tools.enviarArchivo = enviarArchivoTool(ctx.mediaAssets, ctx.adjuntar);
+  }
+  // Los botones no necesitan biblioteca: basta con que haya por dónde
+  // mandarlos. En una llamada de voz no la hay.
+  if (ctx.adjuntar) {
+    tools.ofrecerOpciones = ofrecerOpcionesTool(ctx.adjuntar);
+  }
+
   // En el sandbox se simulan SOLO las que escriben. searchKb y catalogQuery se
   // dejan REALES a propósito: son de lectura, y son justamente lo que hay que
   // poder evaluar — si el bot contesta mal por un hueco en la base de
@@ -77,6 +101,18 @@ export function buildTools(ctx: ToolContext) {
       minutes: 60,
       reason: "entrenamiento",
     });
+    // El sandbox del panel solo pinta texto: un archivo adjuntado ahí no se
+    // vería, y el dueño creería que el bot no lo mandó. Se simula para que el
+    // ensayo muestre que el bot SÍ decidió mandarlo.
+    if (tools.enviarArchivo) {
+      tools.enviarArchivo = simulada(tools.enviarArchivo, {
+        enviado: true,
+        nota: "El archivo ya va en camino en este mismo mensaje. No agregues enlaces.",
+      });
+    }
+    // Los botones sí se dejan REALES: el sandbox los muestra en su versión de
+    // texto (ver admin/views/sandbox.ts) y cómo pregunta el bot es justo lo
+    // que el dueño viene a evaluar aquí.
   }
 
   return tools;

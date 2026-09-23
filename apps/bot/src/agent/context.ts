@@ -16,6 +16,8 @@ import { resolveAgentConfig, type AgentConfig } from "../settings-loader";
 import { buildTools } from "../tools";
 import { loadMcpTools } from "../tools/mcpTools";
 import { CustomerFactsRepo } from "../db/facts";
+import { MediaAssetsRepo } from "../db/mediaAssets";
+import type { MessagePart } from "../channels/parts";
 import { buildCustomerContext, renderCustomerContext } from "../customer/context";
 import { resolveTimezone } from "../datetime";
 import { AgentStateRepo, type AgentState } from "./state";
@@ -57,6 +59,12 @@ export interface AgentContext {
   state: AgentState | null;
   /** Nombre del <cliente_conocido> (mismo lookup de abajo), en crudo — para canales que necesitan el valor solo, no el bloque de texto ya armado (ej. el saludo de voz, ver voiceGreeting.ts). undefined si no se conoce. */
   knownCustomerName?: string;
+  /**
+   * Los bloques que `enviarArchivo` dejó durante el turno, en el orden en que
+   * los pidió el modelo (ver tools/sendMedia.ts). El canal los manda DESPUÉS
+   * del texto. Vacío en el camino de voz: ahí la tool ni se anuncia.
+   */
+  adjuntos: MessagePart[];
   /** Cuánto costó armar todo esto — ver AgentContextTimings. */
   timings: AgentContextTimings;
 }
@@ -95,7 +103,7 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
   let mcpMs = 0;
 
   // Tanda 1: nada de esto depende de nada más.
-  const [bot, mcpTools, state, facts] = await Promise.all([
+  const [bot, mcpTools, state, facts, mediaAssets] = await Promise.all([
     new BotsRepo(db).getById(botId),
     (async () => {
       const t = Date.now();
@@ -114,9 +122,25 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
           return [];
         })
       : Promise.resolve([]),
+    // La biblioteca de medios es un extra, como la memoria: si la consulta
+    // falla, el turno sigue sin poder mandar archivos, no se cae.
+    new MediaAssetsRepo(db, botId).list().catch((e) => {
+      console.warn("[buildAgentContext] media assets lookup failed:", e);
+      return [];
+    }),
   ]);
 
-  const tools = buildTools({ env, getConversationId: () => conversationId, botId, training: input.training });
+  const adjuntos: MessagePart[] = [];
+  const tools = buildTools({
+    env,
+    getConversationId: () => conversationId,
+    botId,
+    training: input.training,
+    mediaAssets,
+    // La voz no tiene cómo entregar un archivo, así que no recibe recolector
+    // y `enviarArchivo` no se le anuncia (ver tools/index.ts).
+    adjuntar: input.paraVoz ? undefined : (part: MessagePart) => adjuntos.push(part),
+  });
   const toolNames = Object.keys(tools);
 
   // Tanda 2: lo que sí dependía de la anterior.
@@ -184,6 +208,7 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
     cfg,
     state,
     knownCustomerName,
+    adjuntos,
     timings: { totalMs: Date.now() - t0, mcpMs },
   };
 }

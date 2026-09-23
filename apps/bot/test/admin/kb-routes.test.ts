@@ -8,6 +8,7 @@ import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { Db } from "../../src/db/client";
 import { KbDocsRepo } from "../../src/kb/docs";
+import { MediaAssetsRepo } from "../../src/db/mediaAssets";
 import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
 import type { Env } from "../../src/env";
 
@@ -175,5 +176,121 @@ describe("budget save route", () => {
       env,
     );
     expect(await settings.get(SETTING_KEYS.monthlyBudget)).toBe("");
+  });
+});
+
+describe("biblioteca de medios — lo que el bot puede enviar", () => {
+  function mediaRepo() {
+    return new MediaAssetsRepo(new Db(env.DB), TEST_BOT_ID);
+  }
+
+  it("guarda un archivo y el bot ya puede elegirlo por su clave", async () => {
+    const res = await adminApp.request(
+      "/kb/archivos/save",
+      {
+        method: "POST",
+        headers: FORM,
+        body: new URLSearchParams({
+          clave: "Menú de la Semana",
+          tipo: "documento",
+          url: "https://tunegocio.com/menu.pdf",
+          nombre_archivo: "menu.pdf",
+          descripcion: "El menú de la semana, con precios",
+        }),
+      },
+      env,
+    );
+
+    expect(res.status).toBe(302);
+    const guardado = await mediaRepo().getByClave("menu-de-la-semana");
+    expect(guardado?.url).toBe("https://tunegocio.com/menu.pdf");
+    expect(guardado?.nombre_archivo).toBe("menu.pdf");
+  });
+
+  it("rechaza un enlace que no es http(s): el servidor va a pedir esa URL", async () => {
+    await adminApp.request(
+      "/kb/archivos/save",
+      {
+        method: "POST",
+        headers: FORM,
+        body: new URLSearchParams({
+          clave: "menu",
+          tipo: "documento",
+          url: "javascript:alert(1)",
+          descripcion: "Menú",
+        }),
+      },
+      env,
+    );
+    expect(await mediaRepo().list()).toHaveLength(0);
+  });
+
+  it("exige la descripción: sin ella el modelo no tiene con qué decidir", async () => {
+    await adminApp.request(
+      "/kb/archivos/save",
+      {
+        method: "POST",
+        headers: FORM,
+        body: new URLSearchParams({
+          clave: "menu",
+          tipo: "documento",
+          url: "https://x/m.pdf",
+          descripcion: "   ",
+        }),
+      },
+      env,
+    );
+    expect(await mediaRepo().list()).toHaveLength(0);
+  });
+
+  it("una imagen no guarda nombre de archivo", async () => {
+    await adminApp.request(
+      "/kb/archivos/save",
+      {
+        method: "POST",
+        headers: FORM,
+        body: new URLSearchParams({
+          clave: "local",
+          tipo: "imagen",
+          url: "https://x/local.jpg",
+          nombre_archivo: "sobra.jpg",
+          descripcion: "Foto del local",
+        }),
+      },
+      env,
+    );
+    expect((await mediaRepo().getByClave("local"))?.nombre_archivo).toBeNull();
+  });
+
+  it("quitar un archivo lo deja fuera del alcance del bot", async () => {
+    await mediaRepo().upsert({
+      clave: "menu",
+      tipo: "documento",
+      url: "https://x/m.pdf",
+      descripcion: "Menú",
+    });
+    const [a] = await mediaRepo().list();
+
+    const res = await adminApp.request(
+      `/kb/archivos/${encodeURIComponent(a.id)}/delete`,
+      { method: "POST", headers: FORM },
+      env,
+    );
+
+    expect(res.status).toBe(302);
+    expect(await mediaRepo().list()).toHaveLength(0);
+  });
+
+  it("la pantalla de Conocimiento lista los archivos", async () => {
+    await mediaRepo().upsert({
+      clave: "menu",
+      tipo: "documento",
+      url: "https://x/m.pdf",
+      descripcion: "El menú de la semana",
+    });
+    const html = await (await adminApp.request("/kb", { headers: AUTH }, env)).text();
+    expect(html).toContain("Archivos que el bot puede enviar");
+    expect(html).toContain("menu");
+    expect(html).toContain("El menú de la semana");
   });
 });

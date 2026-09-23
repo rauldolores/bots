@@ -25,6 +25,7 @@ import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 import { AgentStateRepo } from "./state";
 import { buildAgentContext } from "./context";
 import type { AgentConfig } from "../settings-loader";
+import type { MessagePart } from "../channels/parts";
 import { desglosarContexto, clasificarFalla, registrarDiagnosticoLlm } from "./llmDiagnostics";
 
 export interface AgentTurnInput {
@@ -107,6 +108,12 @@ export interface AgentTurnResult {
   outputTokens: number;
   cachedTokens: number;
   toolCallsMade: ToolCallRecord[];
+  /**
+   * Los archivos que el modelo decidió mandar con `enviarArchivo`, ya como
+   * bloques listos para el canal (ver tools/sendMedia.ts). Salen DESPUÉS del
+   * texto, en el mismo turno.
+   */
+  adjuntos: MessagePart[];
   /** La config YA resuelta de este turno — para que el llamador no la vuelva a pedir (ver runner.ts). */
   cfg: AgentConfig;
 }
@@ -296,6 +303,14 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
   const attempt = async (m: any, provider: string, intentoModelId: string) => {
     numeroIntento++;
     const intentoInicio = Date.now();
+
+    // Los adjuntos son del intento que TERMINE bien, no la suma de todos.
+    // Al contrario de `avisosEnviados` (que sobrevive a propósito porque el
+    // cliente ya recibió ese texto), un archivo todavía no salió: si el
+    // intento anterior llamó a enviarArchivo y luego el proveedor tronó, el
+    // reintento vuelve a llamarla y el cliente recibiría el mismo archivo dos
+    // veces. Lo cazó la prueba de punta a punta en tools/sendMedia.test.ts.
+    ctx.adjuntos.length = 0;
 
     // Requisito de diagnóstico: la configuración EFECTIVA justo antes de
     // llamar al SDK — para poder comparar "lo que creemos que mandamos"
@@ -705,6 +720,7 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
     outputTokens,
     cachedTokens,
     toolCallsMade,
+    adjuntos: ctx.adjuntos,
     // Se devuelve para que runTurn NO tenga que volver a resolverlo: es la
     // misma config, y recalcularla cuesta 3 consultas + rearmar el system
     // prompt entero (que además se tira a la basura).

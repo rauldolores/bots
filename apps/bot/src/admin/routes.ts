@@ -39,6 +39,7 @@ import { pickAdapter } from "../replies/sender";
 import { channelLabel } from "../channels/labels";
 import type { ChannelId } from "../channels/shared";
 import { textParts } from "../channels/parts";
+import { MediaAssetsRepo, normalizarClave, CLAVE_VALIDA } from "../db/mediaAssets";
 import { renderInsights } from "./views/insights";
 import { analyzeConversations } from "../insights/analyzer";
 import { renderAgentePage, renderAgenteCanvas, renderNodeModal, toggleTool, toastOob } from "./views/agente";
@@ -979,6 +980,9 @@ adminApp.get("/kb", async (c) =>
         saved: c.req.query("saved") === "1",
         deleted: c.req.query("deleted") === "1",
         reindexed: c.req.query("reindexed") ?? undefined,
+        mediaSaved: c.req.query("archivo") === "1",
+        mediaDeleted: c.req.query("archivo") === "0",
+        mediaError: c.req.query("archivoError") ?? undefined,
       },
       visibleNavIds(c.get("kontroliaClaims")),
     ),
@@ -1017,6 +1021,46 @@ adminApp.post("/kb/:id/delete", async (c) => {
   await new KbDocsRepo(db, c.get("botId")).delete(id);
   await removeDocVectors(c.env, id, c.get("botId"));
   return c.redirect("/admin/kb?deleted=1");
+});
+
+// --- Biblioteca de medios (lo que el bot puede ENVIAR) ------------------------
+//
+// Vive bajo /kb porque comparte pantalla con Conocimiento (ver views/kb.ts).
+// Aquí solo se registra la DIRECCIÓN de un archivo que ya está publicado: subir
+// el archivo desde el panel es el siguiente paso, y necesita almacenamiento.
+adminApp.post("/kb/archivos/save", async (c) => {
+  const form = await c.req.formData();
+  const clave = normalizarClave(String(form.get("clave") ?? ""));
+  const tipo = String(form.get("tipo") ?? "documento") === "imagen" ? "imagen" : "documento";
+  const url = String(form.get("url") ?? "").trim().slice(0, 1000);
+  const descripcion = String(form.get("descripcion") ?? "").trim().slice(0, 200);
+  const nombreArchivo = String(form.get("nombre_archivo") ?? "").trim().slice(0, 120) || null;
+
+  if (!clave || !CLAVE_VALIDA.test(clave)) {
+    return c.redirect("/admin/kb?archivoError=" + encodeURIComponent("La clave solo admite letras, números y guiones."));
+  }
+  if (!descripcion) {
+    return c.redirect("/admin/kb?archivoError=" + encodeURIComponent("Falta describir qué es el archivo: es lo único que el bot lee para decidir si lo manda."));
+  }
+  // Solo http(s): el canal va a pedir esa URL desde el servidor, y un esquema
+  // raro ahí no es un archivo, es un problema.
+  if (!/^https?:\/\/\S+$/i.test(url)) {
+    return c.redirect("/admin/kb?archivoError=" + encodeURIComponent("El enlace debe empezar con http:// o https://"));
+  }
+
+  await new MediaAssetsRepo(new Db(c.env.DB), c.get("botId")).upsert({
+    clave,
+    tipo,
+    url,
+    nombreArchivo: tipo === "documento" ? nombreArchivo : null,
+    descripcion,
+  });
+  return c.redirect("/admin/kb?archivo=1");
+});
+
+adminApp.post("/kb/archivos/:id/delete", async (c) => {
+  await new MediaAssetsRepo(new Db(c.env.DB), c.get("botId")).delete(c.req.param("id"));
+  return c.redirect("/admin/kb?archivo=0");
 });
 
 // Global reindex: repo fixtures + every dashboard doc.

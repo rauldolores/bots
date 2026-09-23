@@ -6,6 +6,7 @@
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { KbDocsRepo, FIXTURE_CHUNKS, MAX_DOC_CHARS, chunkContent, type KbDoc } from "../../kb/docs";
+import { MediaAssetsRepo, type MediaAsset } from "../../db/mediaAssets";
 import { layout } from "./layout";
 
 function esc(s: string): string {
@@ -31,14 +32,119 @@ function banner(tone: "ok" | "bad" | "neutral", text: string): string {
   return `<div style="border:1px solid ${color};background:${bg};color:${tone === "neutral" ? "var(--muted)" : color};padding:10px 14px;font-size:12.5px;margin-bottom:16px">${text}</div>`;
 }
 
+/**
+ * "Archivos que el bot puede enviar" — la biblioteca de medios.
+ *
+ * Vive en Conocimiento y no en una pestaña propia porque es lo mismo desde el
+ * punto de vista del dueño: el material del negocio. Lo que el bot SABE son
+ * los documentos de arriba; lo que el bot ENTREGA son estos archivos.
+ *
+ * Lo que se guarda es una CLAVE y una descripción. El agente elige por clave
+ * y nunca ve la URL — ver tools/sendMedia.ts.
+ */
+function seccionDeMedios(assets: MediaAsset[]): string {
+  const filas = assets.length
+    ? assets
+        .map(
+          (a) => `
+      <div class="kbrow" style="display:flex;align-items:center;gap:12px;padding:13px 18px;border-top:1px solid var(--line);transition:background .12s ease">
+        <div style="min-width:0;flex:1">
+          <div style="display:flex;align-items:center;gap:8px">
+            <code class="text-cream text-[12.5px]" style="font-family:ui-monospace,Menlo,monospace">${esc(a.clave)}</code>
+            <span class="text-dim text-[10.5px]" style="border:1px solid var(--line);padding:1px 7px">${a.tipo}</span>
+          </div>
+          <div class="text-muted text-[11.5px]" style="margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.descripcion)}</div>
+          <div class="text-dim text-[10.5px]" style="margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.nombre_archivo ?? a.url)}</div>
+        </div>
+        <form method="POST" action="/admin/kb/archivos/${encodeURIComponent(a.id)}/delete" style="flex:none">
+          <button class="kbedit cursor-pointer" style="background:none;border:1px solid var(--line);color:var(--muted);padding:5px 12px;font-size:11px;transition:all .12s ease">Quitar</button>
+        </form>
+      </div>`,
+        )
+        .join("")
+    : `<div class="text-dim text-[12.5px]" style="padding:34px 18px;text-align:center">
+         Todavía no hay archivos. Mientras esta lista esté vacía, tu bot no puede enviar nada — ni siquiera lo intenta.
+       </div>`;
+
+  const campo = "background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;outline:none;width:100%";
+
+  return `
+    <div style="margin:28px 0 16px">
+      <h2 class="font-display font-semibold text-[15px] text-cream">Archivos que el bot puede enviar</h2>
+      <p class="text-muted text-[12.5px]" style="margin-top:2px">
+        Tu menú en PDF, la foto del local, el catálogo. El bot los manda cuando el cliente los pide —
+        y solo puede mandar los que estén aquí: nunca escribe enlaces por su cuenta.
+      </p>
+    </div>
+
+    <div class="bg-panel border border-line" style="margin-bottom:16px;overflow:hidden">
+      ${filas}
+    </div>
+
+    <form method="POST" action="/admin/kb/archivos/save" class="bg-panel border border-line" style="padding:18px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:16px">
+      <div style="display:flex;flex-direction:column;gap:5px">
+        <label for="clave" class="font-display font-semibold text-[12px] text-cream">Clave</label>
+        <p class="text-dim text-[11px]">Corta y en minúsculas. Es lo que el bot escribe para pedirlo.</p>
+        <input type="text" id="clave" name="clave" required maxlength="40" placeholder="menu" style="${campo}">
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:5px">
+        <label for="tipo" class="font-display font-semibold text-[12px] text-cream">Tipo</label>
+        <p class="text-dim text-[11px]">Una imagen se ve en el chat; un documento se descarga.</p>
+        <select id="tipo" name="tipo" style="${campo}">
+          <option value="documento">Documento</option>
+          <option value="imagen">Imagen</option>
+        </select>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:5px;grid-column:1/-1">
+        <label for="descripcion" class="font-display font-semibold text-[12px] text-cream">¿Qué es?</label>
+        <p class="text-dim text-[11px]">Lo único que el bot lee para decidir si este archivo responde lo que le preguntaron. Sé concreto.</p>
+        <input type="text" id="descripcion" name="descripcion" required maxlength="200"
+               placeholder="El menú de la semana, con precios" style="${campo}">
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:5px">
+        <label for="url" class="font-display font-semibold text-[12px] text-cream">Enlace al archivo</label>
+        <p class="text-dim text-[11px]">La dirección pública donde ya está subido.</p>
+        <input type="url" id="url" name="url" required maxlength="1000"
+               placeholder="https://tunegocio.com/menu.pdf" style="${campo}">
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:5px">
+        <label for="nombre_archivo" class="font-display font-semibold text-[12px] text-cream">Nombre del archivo</label>
+        <p class="text-dim text-[11px]">Solo documentos: así lo verá el cliente al recibirlo.</p>
+        <input type="text" id="nombre_archivo" name="nombre_archivo" maxlength="120"
+               placeholder="menu-de-la-semana.pdf" style="${campo}">
+      </div>
+
+      <div style="grid-column:1/-1;display:flex;justify-content:flex-end">
+        <button class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
+                style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 16px">
+          Guardar archivo
+        </button>
+      </div>
+    </form>`;
+}
+
 export async function renderKbList(
   env: Env,
   botId: string,
-  flash?: { saved?: boolean; deleted?: boolean; reindexed?: string },
+  flash?: {
+    saved?: boolean;
+    deleted?: boolean;
+    reindexed?: string;
+    mediaSaved?: boolean;
+    mediaDeleted?: boolean;
+    mediaError?: string;
+  },
   visibleNavIds: Set<string> | null = null,
 ): Promise<string> {
   const db = new Db(env.DB);
-  const docs = await new KbDocsRepo(db, botId).list();
+  const [docs, assets] = await Promise.all([
+    new KbDocsRepo(db, botId).list(),
+    new MediaAssetsRepo(db, botId).list(),
+  ]);
 
   const bannerHtml = flash?.saved
     ? banner("ok", "✓ Guardado e indexado — el bot ya puede usarlo.")
@@ -46,7 +152,13 @@ export async function renderKbList(
       ? banner("neutral", "Documento eliminado (también del índice del bot).")
       : flash?.reindexed
         ? banner("ok", `✓ Reindexado: ${esc(flash.reindexed)} fragmentos actualizados.`)
-        : "";
+        : flash?.mediaSaved
+          ? banner("ok", "✓ Archivo guardado — el bot ya puede enviarlo.")
+          : flash?.mediaDeleted
+            ? banner("neutral", "Archivo quitado. El bot ya no puede enviarlo.")
+            : flash?.mediaError
+              ? banner("bad", esc(flash.mediaError))
+              : "";
 
   const rows = docs.length
     ? docs
@@ -86,6 +198,8 @@ export async function renderKbList(
     <div class="bg-panel border border-line" style="margin-bottom:16px;overflow:hidden">
       ${rows}
     </div>
+
+    ${seccionDeMedios(assets)}
 
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px" class="text-dim text-[11.5px]">
       <span>Además, tu bot trae <b class="text-cream">${FIXTURE_CHUNKS.length}</b> fragmentos precargados del repo.</span>

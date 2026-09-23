@@ -449,6 +449,11 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
   if (result.text.trim()) {
     // La respuesta se aparta ANTES de mandarla. Si el canal falla, el reintento
     // la reenvía en vez de perderla — que era lo que pasaba antes.
+    //
+    // OJO: `pending_reply` es una columna de TEXTO, así que solo aparta el
+    // texto. Si el envío falla en un turno que además llevaba un archivo, el
+    // reintento manda el texto sin el archivo. Para arreglarlo hay que
+    // guardar los bloques serializados (JSON) en vez del texto pelón.
     await jobs.savePendingReply(conversationKey, result.text);
   }
 
@@ -468,8 +473,10 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
   // esta línea y el drenaje de la siguiente pasada lo recoge normal.
   await jobs.clearClaimedPending(conversationKey);
 
-  if (result.text.trim()) {
-    await enviarRespuesta(env, state, result.text, cfg, botId);
+  // También se envía cuando el modelo no dijo nada pero sí pidió un archivo:
+  // el adjunto ES la respuesta.
+  if (result.text.trim() || result.adjuntos.length > 0) {
+    await enviarRespuesta(env, state, result.text, cfg, botId, result.adjuntos);
     await jobs.clearPendingReply(conversationKey);
   }
 
