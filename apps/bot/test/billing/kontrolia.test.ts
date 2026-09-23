@@ -19,6 +19,7 @@ import {
   comprarPaquete,
   esPrepago,
   saldoPrepago,
+  precioDePaquete,
   contarUso,
   textoDeUso,
   mensajeDeLimite,
@@ -248,7 +249,7 @@ describe("prepago (B7c) — el saldo manda: con él se sigue, en cero vuelve el 
       expect(avisoDeExcedente(LIMITES.llamadas, r.usage)).toBe(
         "Tus 400 minutos del mes se agotaron. Te quedan 88 minutos de tu saldo prepagado, a $3.50 MXN cada minuto.",
       );
-      expect(resumenDeExcedente(LIMITES.llamadas, r.usage)).toBe("Saldo: 88 minutos");
+      expect(resumenDeExcedente(LIMITES.llamadas, r.usage)).toBe("88 minutos de saldo · 12 usadas este mes");
     }
   });
 
@@ -256,7 +257,19 @@ describe("prepago (B7c) — el saldo manda: con él se sigue, en cero vuelve el 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ usage: { ...PREPAGO, creditBalance: 0 } })));
     const r = await hayCupo(ENV, "org-1", LIMITES.llamadas);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(saldoPrepago(r.usage)).toBe(0);
+    if (!r.ok) {
+      expect(saldoPrepago(r.usage)).toBe(0);
+      // El 402 de prepago se resuelve comprando, no cambiando de plan.
+      expect(mensajeDeLimite(LIMITES.llamadas, r.usage)).toBe(
+        "Tu plan permite 400 minutos de llamadas al mes y tu saldo prepagado está en cero. Compra un paquete en Plan y facturación para seguir.",
+      );
+    }
+  });
+
+  it("el precio del paquete lo calcula KontrolIA por plan: si no viene, no se inventa (nunca un $0.00 que parezca gratis)", () => {
+    expect(precioDePaquete({ priceAmount: 21_000, currency: "MXN" })).toBe("$210.00 MXN");
+    expect(precioDePaquete({ priceAmount: null, currency: null })).toBeNull();
+    expect(precioDePaquete({ priceAmount: 0, currency: "MXN" })).toBeNull();
   });
 
   it("el saldo baja exactamente lo que reportUsage contó por encima del límite", async () => {

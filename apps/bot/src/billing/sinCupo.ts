@@ -137,6 +137,10 @@ export async function avisarExcedente(env: Env, botId: string, limite: ClaveDeLi
 /** Al admitir de nuevo (hubo cupo), el contador de afectados deja de crecer; no hay nada que reiniciar. */
 export function resumenParaElDueno(limite: ClaveDeLimite, usage: UsageReport | null, afectados: number): string {
   const uso = usage ? `${usage.used} de ${usage.limit}${usage.period === "month" ? " este mes" : ""}` : "el máximo";
+  // Prepago con saldo en cero (B7c): lo que destraba esto es comprar un
+  // paquete, no subir de plan — el mensaje lo tiene que decir.
+  const prepagoSinSaldo =
+    usage !== null && usage.billingMode === "prepaid" && typeof usage.overagePriceAmount === "number" && (usage.creditBalance ?? 0) <= 0;
   const que =
     limite === "llamadas"
       ? `minutos de llamadas (${uso})`
@@ -147,7 +151,9 @@ export function resumenParaElDueno(limite: ClaveDeLimite, usage: UsageReport | n
     limite === "llamadas"
       ? `${afectados} ${afectados === 1 ? "persona ha llamado" : "personas han llamado"} y no ${afectados === 1 ? "fue" : "fueron"} atendida${afectados === 1 ? "" : "s"}`
       : `${afectados} ${afectados === 1 ? "persona te ha escrito" : "personas te han escrito"} y no ${afectados === 1 ? "ha" : "han"} sido atendida${afectados === 1 ? "" : "s"}`;
-  return `Llegaste al límite de ${que}. Desde entonces ${quienes}. Súbelo en Plan y facturación para seguir atendiendo.`;
+  return prepagoSinSaldo
+    ? `Llegaste al límite de ${que} y tu saldo prepagado está en cero. Desde entonces ${quienes}. Compra un paquete en Plan y facturación para seguir atendiendo.`
+    : `Llegaste al límite de ${que}. Desde entonces ${quienes}. Súbelo en Plan y facturación para seguir atendiendo.`;
 }
 
 /** Cuántas conversaciones siguen esperando cupo — para el panel. */

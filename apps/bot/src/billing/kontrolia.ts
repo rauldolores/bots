@@ -242,10 +242,18 @@ const NOMBRE_DE_LIMITE: Record<ClaveDeLimite, string> = {
   llamadas: "minutos de llamadas",
 };
 
-/** Cómo se le dice al dueño que se topó con el límite, con el número real y a dónde ir. */
+/**
+ * Cómo se le dice al dueño que se topó con el límite. Dos salidas distintas
+ * (B7b/B7c): si el límite se paga por adelantado y el saldo llegó a cero, lo
+ * que resuelve es COMPRAR un paquete, no cambiar de plan.
+ */
 export function mensajeDeLimite(clave: ClaveDeLimite, usage: UsageReport): string {
   const nombre = NOMBRE_DE_LIMITE[clave];
-  return `Tu plan permite ${usage.limit} ${nombre}${usage.period === "month" ? " al mes" : ""} y ya llevas ${usage.used}. Cambia de plan en Plan y facturación.`;
+  const alMes = usage.period === "month" ? " al mes" : "";
+  if (esPrepago(usage)) {
+    return `Tu plan permite ${usage.limit} ${nombre}${alMes} y tu saldo prepagado está en cero. Compra un paquete en Plan y facturación para seguir.`;
+  }
+  return `Tu plan permite ${usage.limit} ${nombre}${alMes} y ya llevas ${usage.used}. Cambia de plan en Plan y facturación.`;
 }
 
 // ── Excedentes (billing.md B7b) ──────────────────────────────────────────────
@@ -274,6 +282,16 @@ export function esPrepago(u: ConExcedente): boolean {
 /** Unidades prepagadas que quedan. null = no aplica (pospago, o límite sin precio) — distinto de 0. */
 export function saldoPrepago(u: ConExcedente): number | null {
   return esPrepago(u) ? (u.creditBalance ?? 0) : null;
+}
+
+/**
+ * El precio de un paquete lo calcula KontrolIA para el plan del cliente
+ * (B7c): el mismo paquete cuesta distinto en cada plan, así que NUNCA se
+ * multiplica aquí. Si no viene un número positivo, no se muestra precio —
+ * mejor eso que un "$0.00" que parece gratis.
+ */
+export function precioDePaquete(pack: { priceAmount?: number | null; currency?: string | null }): string | null {
+  return typeof pack.priceAmount === "number" && pack.priceAmount > 0 ? dinero(pack.priceAmount, pack.currency ?? "MXN") : null;
 }
 
 /** "$3.50 MXN" — centavos → moneda del plan. */
@@ -320,7 +338,11 @@ export function resumenDeExcedente(clave: ClaveDeLimite, u: ConExcedente): strin
   if (!tieneExcedente(u)) return null;
   if (esPrepago(u)) {
     const saldo = saldoPrepago(u) ?? 0;
-    return `Saldo: ${saldo} ${unidad(clave, saldo)}`;
+    const usadas = u.creditUnitsUsed ?? 0;
+    const periodo = u.period === "month" ? " este mes" : u.period === "day" ? " hoy" : u.period === "year" ? " este año" : "";
+    return usadas > 0
+      ? `${saldo} ${unidad(clave, saldo)} de saldo · ${usadas} ${usadas === 1 ? "usada" : "usadas"}${periodo}`
+      : `${saldo} ${unidad(clave, saldo)} de saldo`;
   }
   if (!u.overageUnits || u.overageUnits <= 0) return null;
   const periodo = u.period === "month" ? " este mes" : u.period === "day" ? " hoy" : u.period === "year" ? " este año" : "";

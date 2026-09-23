@@ -1749,9 +1749,11 @@ adminApp.post("/plan/credits/checkout", async (c) => {
   const err =
     r.status === 403
       ? "Solo el dueño o un administrador de tu organización puede comprar paquetes."
-      : r.status === 400
-        ? `KontrolIA rechazó la compra: ${r.error}`
-        : r.status === 503
+      : r.status === 409
+        ? "No se puede comprar saldo para ese límite: tu organización necesita una suscripción activa y un plan que cobre ese consumo. Revisa tu plan aquí abajo."
+        : r.status === 400
+          ? `KontrolIA rechazó la compra: ${r.error}`
+          : r.status === 503
           ? "La instancia de KontrolIA no tiene Stripe configurado: los paquetes se asignan desde panel.kontrolia.io."
           : r.error;
   return c.redirect(`/admin/plan?err=${encodeURIComponent(err)}`, 302);

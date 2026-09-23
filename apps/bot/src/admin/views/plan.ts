@@ -6,7 +6,7 @@
 // manda a la URL de Stripe que devuelve KontrolIA.
 import type { KontroliaEntitlements, KontroliaPlan } from "@kontrolia/shared";
 import type { Env } from "../../env";
-import { avisoDeExcedente, dinero, esPrepago, motivoDeAcceso, resumenDeExcedente, saldoPrepago, textoDePrecioExtra, textoDeUso, tieneExcedente, type ClaveDeLimite } from "../../billing/kontrolia";
+import { avisoDeExcedente, esPrepago, motivoDeAcceso, precioDePaquete, resumenDeExcedente, saldoPrepago, textoDePrecioExtra, textoDeUso, tieneExcedente, type ClaveDeLimite } from "../../billing/kontrolia";
 import { DEFINICION_DE_CONVERSACION } from "../../billing/conversacion";
 import { layout } from "./layout";
 
@@ -111,6 +111,11 @@ export function renderPlan(
                 <span>Plan actual: <b class="text-cream">${esc(sub.planName)}</b>${sub.billingInterval === "year" ? " (anual)" : ""}</span>
                 ${st ? `<span style="color:${st.color}">● ${st.text}</span>` : ""}
                 ${sub.currentPeriodEnd ? `<span style="color:var(--dim)">${sub.cancelAtPeriodEnd ? "Termina" : "Se renueva"} el ${esc(fmtDate(sub.currentPeriodEnd))}</span>` : ""}
+                ${
+                  sub.courtesy?.isActive
+                    ? `<span style="color:var(--ok)" title="${esc(sub.courtesy.reason ?? "")}">🎁 Cortesía: ${sub.courtesy.months} ${sub.courtesy.months === 1 ? "mes" : "meses"} sin cobro${sub.courtesy.until ? ` hasta el ${esc(fmtDate(sub.courtesy.until))}` : ""}</span>`
+                    : ""
+                }
                 ${sub.provider === "stripe" ? `<span style="color:var(--dim)">· Stripe</span>` : `<span style="color:var(--dim)">· asignado por KontrolIA</span>`}
               </div>`
             : ""
@@ -311,12 +316,12 @@ export function renderPlan(
                   <input type="hidden" name="paquete" value="${esc(pk.id)}">
                   <button type="submit" class="text-[12px]" style="background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);padding:12px 16px;cursor:pointer;display:flex;flex-direction:column;gap:2px;align-items:flex-start;min-width:150px">
                     <span class="font-display font-bold text-[15px] text-cream">${pk.units.toLocaleString("es-MX")}</span>
-                    <span style="color:var(--muted)">${esc(dinero(pk.priceAmount, pk.currency))}</span>
+                    <span style="color:var(--muted)">${esc(precioDePaquete(pk) ?? "Ver precio al continuar")}</span>
                   </button>
                 </form>`
               : `<div class="text-[12px]" style="background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);padding:12px 16px;min-width:150px">
                   <div class="font-display font-bold text-[15px] text-cream">${pk.units.toLocaleString("es-MX")}</div>
-                  <div style="color:var(--muted)">${esc(dinero(pk.priceAmount, pk.currency))}</div>
+                  <div style="color:var(--muted)">${esc(precioDePaquete(pk) ?? "Ver precio al continuar")}</div>
                 </div>`,
           )
           .join("");
