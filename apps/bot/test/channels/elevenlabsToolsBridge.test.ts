@@ -22,6 +22,12 @@ import { VoiceSession } from "../../src/channels/voice/session";
 import type { CallBridgeDeps } from "../../src/channels/voice/callBridge";
 
 const createMCPClientMock = vi.fn();
+const notifyOwnerMock = vi.fn(async () => {});
+vi.mock("../../src/tools/handoffHuman", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/tools/handoffHuman")>();
+  return { ...actual, notifyOwner: (...a: unknown[]) => notifyOwnerMock(...(a as [])) };
+});
+
 vi.mock("@ai-sdk/mcp", () => ({
   createMCPClient: (...args: unknown[]) => createMCPClientMock(...args),
 }));
@@ -56,6 +62,7 @@ beforeEach(async () => {
   vi.spyOn(SettingsRepo.prototype, "all").mockResolvedValue({});
   createMCPClientMock.mockReset();
   sendToolResultMock.mockReset();
+  notifyOwnerMock.mockReset();
   env = { DB: db.driver };
   bridges = [];
   callSeq = 0;
@@ -295,6 +302,89 @@ describe("tool MCP de ESCRITURA: se delega — 'en_progreso' de inmediato, y con
 
     const { resultado } = await llamarTool(bridge, "consultar_tarea", { tarea_id: "no-existe-123" });
     expect((resultado as any).estado).toBe("no_encontrada");
+  });
+});
+
+/**
+ * El agente hizo lo correcto —"lo estoy gestionando", sin prometer que ya
+ * quedó— pero la tarea falló en segundo plano y nunca volvió a preguntar. El
+ * error se quedaba en el log: el cliente colgó creyendo que sí, y el dueño no
+ * se enteró nunca. Pasó con una nota y una tarea que el CRM rechazó por un id
+ * de contacto inventado.
+ */
+describe("al colgar, una tarea delegada que falló y nadie consultó se le avisa al dueño", () => {
+  const conMcpQueTruena = async (callerId: string) => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "crm",
+      name: "CRM",
+      config: { url: "https://mcp.crm.example.com/mcp" },
+    });
+    createMCPClientMock.mockResolvedValue({
+      tools: async () => ({
+        crear_nota: {
+          description: "Deja una nota",
+          inputSchema: jsonSchema({ type: "object", properties: {} }),
+          execute: vi.fn(async () => {
+            throw new Error("violates foreign key constraint");
+          }),
+        },
+      }),
+    });
+    return startBridge(callerId);
+  };
+
+  it("avisa, con la herramienta y el motivo", async () => {
+    const bridge = await conMcpQueTruena("+5215500000010");
+    const { resultado } = await llamarTool(bridge, "crm_crear_nota", {});
+    // Se deja terminar la tarea de fondo SIN consultarla — como en la llamada real.
+    await new Promise((r) => setTimeout(r, 120));
+    expect((resultado as any).estado).toBe("en_progreso");
+
+    await bridge.close("call_stopped");
+
+    expect(notifyOwnerMock).toHaveBeenCalledTimes(1);
+    const aviso = notifyOwnerMock.mock.calls[0][1] as { summary: string; reason: string };
+    expect(aviso.reason).toMatch(/sin registrar/i);
+    expect(aviso.summary).toContain("crm_crear_nota");
+  });
+
+  it("si el agente SÍ la consultó, no se avisa — ya tuvo ocasión de decírselo al cliente", async () => {
+    const bridge = await conMcpQueTruena("+5215500000011");
+    const { resultado } = await llamarTool(bridge, "crm_crear_nota", {});
+    const consulta = await esperarTareaLista(bridge, (resultado as any).tarea_id);
+    expect(consulta.estado).toBe("error");
+
+    await bridge.close("call_stopped");
+
+    expect(notifyOwnerMock).not.toHaveBeenCalled();
+  });
+
+  it("si todo salió bien, tampoco se avisa", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "mcp",
+      provider: "crm",
+      name: "CRM",
+      config: { url: "https://mcp.crm.example.com/mcp" },
+    });
+    createMCPClientMock.mockResolvedValue({
+      tools: async () => ({
+        crear_nota: {
+          description: "Deja una nota",
+          inputSchema: jsonSchema({ type: "object", properties: {} }),
+          execute: vi.fn(async () => ({ ok: true })),
+        },
+      }),
+    });
+    const bridge = await startBridge("+5215500000012");
+    await llamarTool(bridge, "crm_crear_nota", {});
+    await new Promise((r) => setTimeout(r, 120));
+
+    await bridge.close("call_stopped");
+
+    expect(notifyOwnerMock).not.toHaveBeenCalled();
   });
 });
 

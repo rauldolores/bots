@@ -650,9 +650,62 @@ export class ElevenLabsCallBridge implements CallBridge {
     // en el analisis diferido porque no necesita esperar: los hechos ya estan
     // escritos, y si algo no cuadra el dueno se entera hoy, no manana.
     await verificarLlamada(this.deps.env, this.db(), this.deps.botId, this.callRowId, this.conversationId);
+    await this.avisarDeTareasFallidas().catch((e) =>
+      console.error("[voice-elevenlabs] no se pudo avisar de las tareas fallidas:", e),
+    );
 
     await this.deps.voiceSession.end("completed", reason).catch((e: unknown) =>
       console.error("[voice-elevenlabs] no se pudo cerrar la sesión:", e),
+    );
+  }
+
+  /**
+   * Al colgar: las tareas delegadas que FALLARON y que el agente nunca
+   * consultó.
+   *
+   * Sin esto el error muere en el log. Pasó: el CRM rechazó una nota y una
+   * tarea (id de contacto inventado), el agente —que había dicho "lo estoy
+   * gestionando", correctamente— se despidió sin volver a preguntar, y el
+   * cliente colgó creyendo que las dos habían quedado. Nadie se enteró.
+   *
+   * Una tarea fallida que SÍ se consultó no cuenta: el agente ya lo supo y
+   * tuvo la oportunidad de decírselo al cliente en la misma llamada.
+   */
+  private async avisarDeTareasFallidas(): Promise<void> {
+    const fallidas = [...this.tareasDelegadas.values()].filter(
+      (t) => t.estado === "error" && !t.consultada,
+    );
+    if (fallidas.length === 0) return;
+
+    logVoiceEvent("tareas_fallidas_sin_consultar", {
+      botId: this.deps.botId,
+      callSid: maskId(this.deps.callSid),
+      cuantas: fallidas.length,
+      herramientas: fallidas.map((t) => t.toolName).join(","),
+    });
+    await recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.tarea_fallida", {
+      herramientas: fallidas.map((t) => t.toolName),
+      motivos: fallidas.map((t) => t.error ?? "sin motivo"),
+    }).catch(() => {});
+
+    const detalle = fallidas
+      .map((t) => `• ${t.toolName}: ${t.error ?? "no se pudo completar"}`)
+      .join("\n");
+    const { notifyOwner } = await import("../../tools/handoffHuman");
+    await notifyOwner(
+      this.deps.env,
+      {
+        reason: "Una llamada dejó algo sin registrar",
+        summary:
+          `En la llamada de ${this.deps.callerId ?? "un cliente"} el agente dijo que estaba gestionando algo y ` +
+          `no quedó registrado:
+${detalle}
+Revísalo a mano — el cliente colgó creyendo que sí quedó.`,
+        ticketId: `tarea-fallida-${this.callRowId}`,
+        titulo: "Llamada con algo sin registrar",
+        ruta: "/admin/conversations",
+      },
+      this.deps.botId,
     );
   }
 

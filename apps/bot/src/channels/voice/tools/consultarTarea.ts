@@ -15,6 +15,15 @@ export interface TareaDelegada {
   iniciadaEn: number;
   resultado?: unknown;
   error?: string;
+  /**
+   * ¿El agente llegó a preguntar cómo terminó?
+   *
+   * Importa al colgar: una tarea que falló y que NADIE consultó es una
+   * promesa a medias que muere en el log. Pasó — el CRM rechazó una nota y
+   * una tarea por un id inventado, el agente se despidió diciendo que las
+   * estaba gestionando, y ni el cliente ni el dueño se enteraron nunca.
+   */
+  consultada?: boolean;
 }
 
 export function consultarTareaTool(
@@ -36,6 +45,9 @@ export function consultarTareaTool(
 
       const tarea = tareas.get(id);
       if (!tarea) return { estado: "no_encontrada", mensaje: "Ese tarea_id no existe en esta llamada." };
+      // Queda constancia de que sí preguntó: al colgar, lo que se revisa es
+      // justo lo contrario — una tarea fallida que nadie consultó.
+      tarea.consultada = true;
 
       if (tarea.estado === "en_progreso") return { estado: "en_progreso" };
       if (tarea.estado === "error") return { estado: "error", motivo: tarea.error ?? "no se pudo completar" };

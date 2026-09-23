@@ -14,6 +14,12 @@ export type VoiceCallEventType =
   // describe lo que pasó durante la llamada sino lo que se comprobó DESPUÉS,
   // y por eso importa: es la diferencia entre creerle al agente y verificarlo.
   | "call.promesa_incumplida"
+  // Una tool delegada en segundo plano FALLÓ y el agente nunca preguntó cómo
+  // terminó. Se distingue de promesa_incumplida a propósito: ahí el bot
+  // afirmó que algo ya estaba hecho; aquí dijo lo correcto ("lo estoy
+  // gestionando") y aun así el cliente colgó con una promesa a medias,
+  // porque el error se quedó en el log.
+  | "call.tarea_fallida"
   | "call.ended";
 
 export interface VoiceCallEventRow {
