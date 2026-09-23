@@ -108,3 +108,70 @@ describe("sendOutboundEmail", () => {
     expect(globalThis.fetch).toHaveBeenCalled();
   });
 });
+
+describe("sendOutboundEmail — adjuntos de verdad", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  const ENV_MAILGUN = {
+    EMAIL_OUTBOUND_PROVIDER: "mailgun",
+    EMAIL_OUTBOUND_API_KEY: "key-fake",
+    EMAIL_OUTBOUND_DOMAIN: "minegocio.com",
+    EMAIL_FROM_ADDRESS: "soporte@minegocio.com",
+  } as Env;
+
+  it("Mailgun sube los bytes: multipart, sin Content-Type a mano", async () => {
+    // Mailgun no sabe ir por el archivo, así que primero se descarga…
+    globalThis.fetch = vi.fn(async (url: any) =>
+      String(url).includes("mailgun")
+        ? new Response("", { status: 200 })
+        : new Response(new Blob(["%PDF-1.4 contenido"]), { status: 200 }),
+    ) as any;
+
+    const r = await sendOutboundEmail(
+      ENV_MAILGUN,
+      "cliente@x.com",
+      "Re: hola",
+      "Aquí va la carta",
+      undefined,
+      [{ filename: "carta.pdf", url: "https://x/carta.pdf" }],
+    );
+
+    expect(r.ok).toBe(true);
+    const [, init] = (globalThis.fetch as any).mock.calls.find((c: any) =>
+      String(c[0]).includes("mailgun"),
+    );
+    expect(init.body).toBeInstanceOf(FormData);
+    // Sin boundary generado por fetch, el multipart no se puede parsear.
+    expect(init.headers["Content-Type"]).toBeUndefined();
+    expect((init.body as FormData).get("text")).toBe("Aquí va la carta");
+    expect((init.body as FormData).getAll("attachment")).toHaveLength(1);
+  });
+
+  it("si el archivo no se puede bajar, va su enlace: nada se pierde", async () => {
+    globalThis.fetch = vi.fn(async (url: any) =>
+      String(url).includes("mailgun")
+        ? new Response("", { status: 200 })
+        : new Response("no está", { status: 404 }),
+    ) as any;
+
+    const r = await sendOutboundEmail(
+      ENV_MAILGUN,
+      "cliente@x.com",
+      "Re: hola",
+      "Aquí va la carta",
+      undefined,
+      [{ filename: "carta.pdf", url: "https://x/carta.pdf" }],
+    );
+
+    expect(r.ok).toBe(true);
+    const [, init] = (globalThis.fetch as any).mock.calls.find((c: any) =>
+      String(c[0]).includes("mailgun"),
+    );
+    // Vuelve a form-encoded (ya no hay archivo que subir) y el enlace está.
+    const body = new URLSearchParams(init.body);
+    expect(body.get("text")).toContain("https://x/carta.pdf");
+  });
+});

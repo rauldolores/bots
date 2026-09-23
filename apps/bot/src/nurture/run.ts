@@ -28,6 +28,7 @@ import { createModel } from "../llm/provider";
 import { loadLlmOverrides } from "../settings-loader";
 import { pickAdapter } from "../replies/sender";
 import type { ChannelId } from "../channels/shared";
+import { textParts } from "../channels/parts";
 import { gatherContactContext, hasRepliedSince, isFreeformWindow, nextAllowedTime } from "./brakes";
 
 const DEFAULT_DAILY_CAP = 30; // mismo criterio conservador que followup/run.ts
@@ -321,7 +322,7 @@ async function processOneTouch(
   await msgs.append(conv.id, "assistant", text);
   await new ConversationsRepo(db, botId).touchLastMessage(conv.id, now);
   await pickAdapter(conv.channel as ChannelId).sendReply(
-    { channel: conv.channel as ChannelId, channelUserId: conv.channel_user_id, chunks: [text] },
+    { channel: conv.channel as ChannelId, channelUserId: conv.channel_user_id, parts: textParts([text]) },
     env,
   );
 

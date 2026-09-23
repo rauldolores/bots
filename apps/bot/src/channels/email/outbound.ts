@@ -81,12 +81,26 @@ function formatFrom(cfg: OutboundEmailConfig): string {
   return cfg.fromName ? `${cfg.fromName} <${cfg.fromAddress}>` : cfg.fromAddress;
 }
 
+/** Un archivo que viaja DENTRO del correo, no como enlace. */
+export interface AdjuntoDeCorreo {
+  filename: string;
+  url: string;
+}
+
+/**
+ * Tope por archivo en la ruta de Mailgun, que es la única que descarga los
+ * bytes en nuestro servidor. Un adjunto más grande no se cae: se manda su
+ * enlace (ver abajo) — la regla de siempre, ningún canal pierde información.
+ */
+const MAX_ADJUNTO_BYTES = 10 * 1024 * 1024;
+
 async function sendViaResend(
   cfg: OutboundEmailConfig,
   to: string,
   subject: string,
   text: string,
   hilo?: HiloDeCorreo,
+  adjuntos: AdjuntoDeCorreo[] = [],
 ): Promise<OutboundEmailResult> {
   try {
     const resend = new Resend(cfg.apiKey);
@@ -96,6 +110,11 @@ async function sendViaResend(
       to,
       subject,
       text,
+      // `path` = Resend descarga el archivo él mismo. Nada pasa por nuestra
+      // memoria, que es justo lo que queremos en un Worker.
+      ...(adjuntos.length
+        ? { attachments: adjuntos.map((a) => ({ filename: a.filename, path: a.url })) }
+        : {}),
       ...(Object.keys(headers).length ? { headers } : {}),
     });
     if (result.error) return { ok: false, error: result.error.message };
@@ -111,24 +130,70 @@ async function sendViaMailgun(
   subject: string,
   text: string,
   hilo?: HiloDeCorreo,
+  adjuntos: AdjuntoDeCorreo[] = [],
 ): Promise<OutboundEmailResult> {
   if (!cfg.domain) return { ok: false, error: "Falta el dominio de envío de Mailgun." };
   try {
-    const body = new URLSearchParams({ from: formatFrom(cfg), to, subject, text });
-    // Mailgun manda cabeceras arbitrarias con el prefijo "h:".
-    for (const [nombre, valor] of Object.entries(cabecerasDeHilo(hilo))) body.set(`h:${nombre}`, valor);
+    // Mailgun no sabe ir por el archivo: hay que subirle los bytes. Por eso
+    // esta ruta descarga y la de Resend no.
+    const archivos: { nombre: string; blob: Blob }[] = [];
+    let cuerpo = text;
+    for (const a of adjuntos) {
+      const descarga = await descargarAdjunto(a);
+      if (descarga) archivos.push(descarga);
+      // No se pudo (pesa de más, no responde, lo movieron): va el enlace. Que
+      // llegue peor es mejor que no llegue.
+      else cuerpo = `${cuerpo}\n\n${a.filename}: ${a.url}`;
+    }
+
+    const headers = cabecerasDeHilo(hilo);
+    let body: URLSearchParams | FormData;
+    if (archivos.length) {
+      const form = new FormData();
+      form.set("from", formatFrom(cfg));
+      form.set("to", to);
+      form.set("subject", subject);
+      form.set("text", cuerpo);
+      for (const [nombre, valor] of Object.entries(headers)) form.set(`h:${nombre}`, valor);
+      for (const f of archivos) form.append("attachment", f.blob, f.nombre);
+      body = form;
+    } else {
+      const params = new URLSearchParams({ from: formatFrom(cfg), to, subject, text: cuerpo });
+      // Mailgun manda cabeceras arbitrarias con el prefijo "h:".
+      for (const [nombre, valor] of Object.entries(headers)) params.set(`h:${nombre}`, valor);
+      body = params;
+    }
+
     const res = await fetch(`https://api.mailgun.net/v3/${encodeURIComponent(cfg.domain)}/messages`, {
       method: "POST",
       headers: {
         Authorization: `Basic ${btoa(`api:${cfg.apiKey}`)}`,
-        "Content-Type": "application/x-www-form-urlencoded",
+        // Con FormData NO se pone Content-Type a mano: fetch tiene que
+        // generar el boundary del multipart.
+        ...(body instanceof FormData ? {} : { "Content-Type": "application/x-www-form-urlencoded" }),
       },
-      body: body.toString(),
+      body: body instanceof FormData ? body : body.toString(),
     });
     if (!res.ok) return { ok: false, error: `Mailgun respondió ${res.status}: ${(await res.text()).slice(0, 300)}` };
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Baja un adjunto para Mailgun, o null si no se puede mandar como archivo. */
+async function descargarAdjunto(a: AdjuntoDeCorreo): Promise<{ nombre: string; blob: Blob } | null> {
+  try {
+    const res = await fetch(a.url);
+    if (!res.ok) return null;
+    const declarado = Number(res.headers.get("content-length") ?? "0");
+    if (declarado > MAX_ADJUNTO_BYTES) return null;
+    const blob = await res.blob();
+    // El content-length puede faltar o mentir: el tamaño real manda.
+    if (blob.size > MAX_ADJUNTO_BYTES) return null;
+    return { nombre: a.filename, blob };
+  } catch {
+    return null;
   }
 }
 
@@ -139,12 +204,13 @@ export async function sendOutboundEmail(
   subject: string,
   text: string,
   hilo?: HiloDeCorreo,
+  adjuntos: AdjuntoDeCorreo[] = [],
 ): Promise<OutboundEmailResult> {
   const cfg = loadOutboundEmailConfig(env);
   if (!cfg) {
     return { ok: false, error: "El correo saliente no está configurado — ve a /admin/config → Correo saliente." };
   }
   return cfg.provider === "resend"
-    ? sendViaResend(cfg, to, subject, text, hilo)
-    : sendViaMailgun(cfg, to, subject, text, hilo);
+    ? sendViaResend(cfg, to, subject, text, hilo, adjuntos)
+    : sendViaMailgun(cfg, to, subject, text, hilo, adjuntos);
 }

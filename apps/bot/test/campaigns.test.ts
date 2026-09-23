@@ -8,8 +8,8 @@ import { InsightsRepo } from "../src/db/insights";
 // Capturamos free-forms sin red
 const freeformSends = vi.hoisted(() => [] as { userId: string; text: string }[]);
 const sendReplyMock = vi.hoisted(() =>
-  vi.fn(async (r: { channelUserId: string; chunks: string[] }) => {
-    freeformSends.push({ userId: r.channelUserId, text: r.chunks[0] });
+  vi.fn(async (r: { channelUserId: string; parts: { text?: string }[] }) => {
+    freeformSends.push({ userId: r.channelUserId, text: r.parts[0].text ?? "" });
   }),
 );
 vi.mock("../src/replies/sender", () => ({
@@ -49,8 +49,8 @@ beforeEach(async () => {
   freeformSends.length = 0;
   templateCalls.length = 0;
   sendReplyMock.mockClear();
-  sendReplyMock.mockImplementation(async (r: { channelUserId: string; chunks: string[] }) => {
-    freeformSends.push({ userId: r.channelUserId, text: r.chunks[0] });
+  sendReplyMock.mockImplementation(async (r: { channelUserId: string; parts: { text?: string }[] }) => {
+    freeformSends.push({ userId: r.channelUserId, text: r.parts[0].text ?? "" });
   });
   vi.stubGlobal("fetch", async (url: any) => {
     templateCalls.push(String(url));

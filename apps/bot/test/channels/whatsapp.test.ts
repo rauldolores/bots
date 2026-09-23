@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { parseWhatsAppEvents, whatsappAdapter } from "../../src/channels/whatsapp";
+import { textParts } from "../../src/channels/parts";
 
 const ORIGIN = "https://bot.example.workers.dev";
 const env = { WHATSAPP_APP_SECRET: "s3cr3t" } as any;
@@ -92,7 +93,7 @@ describe("whatsappAdapter.sendReply", () => {
     const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     await whatsappAdapter.sendReply(
-      { channel: "whatsapp", channelUserId: "5215512345678", chunks: ["hola"] },
+      { channel: "whatsapp", channelUserId: "5215512345678", parts: textParts(["hola"]) },
       { WHATSAPP_PHONE_NUMBER_ID: "PHONE_ID", WHATSAPP_ACCESS_TOKEN: "TOKEN" } as any,
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -109,7 +110,7 @@ describe("whatsappAdapter.sendReply", () => {
 
   it("lanza si falta configuración", async () => {
     await expect(
-      whatsappAdapter.sendReply({ channel: "whatsapp", channelUserId: "x", chunks: ["hi"] }, {} as any),
+      whatsappAdapter.sendReply({ channel: "whatsapp", channelUserId: "x", parts: textParts(["hi"]) }, {} as any),
     ).rejects.toThrow(/WHATSAPP_PHONE_NUMBER_ID/);
   });
 });

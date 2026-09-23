@@ -1,4 +1,5 @@
 import type { ChannelAdapter, IncomingMessage, OutgoingReply } from "./shared";
+import { partesEnviables, partToText, type MessagePart } from "./parts";
 import type { Env } from "../env";
 
 const MANYCHAT_API = "https://api.manychat.com/fb";
@@ -81,6 +82,27 @@ function normalizeAttachments(raw: ManychatPayload["attachments"]): { type: stri
   return out;
 }
 
+/**
+ * Los `messages` de ManyChat para UN bloque — pueden ser dos.
+ *
+ * Su formato v2 tiene image/file/audio, pero ninguno lleva pie, así que el pie
+ * sale como mensaje de texto aparte y antes. Lo comparte el adaptador
+ * aprendido (learned.ts), que habla el mismo contrato.
+ */
+export function mensajesManychatDeParte(parte: MessagePart): Record<string, unknown>[] {
+  const pie = (texto?: string) => (texto ? [{ type: "text", text: texto }] : []);
+  switch (parte.kind) {
+    case "image":
+      return [...pie(parte.caption), { type: "image", url: parte.url }];
+    case "document":
+      return [...pie(parte.caption), { type: "file", url: parte.url }];
+    case "audio":
+      return [{ type: "audio", url: parte.url }];
+    default:
+      return [{ type: "text", text: partToText(parte) }];
+  }
+}
+
 export const manychatAdapter: ChannelAdapter = {
   async parseIncoming(request: Request, _env: Env): Promise<IncomingMessage> {
     const body = (await request.json()) as ManychatPayload;
@@ -136,7 +158,8 @@ export const manychatAdapter: ChannelAdapter = {
     // ManyChat needs the content type to match the channel (instagram is the
     // default since that's the primary IG flow).
     const contentType = env.MANYCHAT_CONTENT_TYPE ?? "instagram";
-    for (let i = 0; i < reply.chunks.length; i++) {
+    const mensajes = partesEnviables(reply.parts).flatMap(mensajesManychatDeParte);
+    for (let i = 0; i < mensajes.length; i++) {
       const delay = i === 0 ? 0 : reply.interChunkDelayMs ?? 1000;
       if (delay > 0) await new Promise((r) => setTimeout(r, delay));
       await fetch(`${MANYCHAT_API}/sending/sendContent`, {
@@ -151,7 +174,7 @@ export const manychatAdapter: ChannelAdapter = {
             version: "v2",
             content: {
               type: contentType,
-              messages: [{ type: "text", text: reply.chunks[i] }],
+              messages: [mensajes[i]],
             },
           },
         }),

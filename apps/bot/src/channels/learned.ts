@@ -1,4 +1,6 @@
 import type { ChannelAdapter, IncomingMessage, OutgoingReply } from "./shared";
+import { partesEnviables } from "./parts";
+import { mensajesManychatDeParte } from "./manychat";
 import type { Env } from "../env";
 import { Db } from "../db/client";
 import { SettingsRepo } from "../db/settings";
@@ -183,7 +185,8 @@ export function makeLearnedAdapter(channel: string): ChannelAdapter {
         channel ??
         "instagram";
 
-      for (let i = 0; i < reply.chunks.length; i++) {
+      const mensajes = partesEnviables(reply.parts).flatMap(mensajesManychatDeParte);
+      for (let i = 0; i < mensajes.length; i++) {
         const delay = i === 0 ? 0 : reply.interChunkDelayMs ?? 1000;
         if (delay > 0) await new Promise((r) => setTimeout(r, delay));
         await fetch(`${MANYCHAT_API}/sending/sendContent`, {
@@ -198,7 +201,7 @@ export function makeLearnedAdapter(channel: string): ChannelAdapter {
               version: "v2",
               content: {
                 type: contentType,
-                messages: [{ type: "text", text: reply.chunks[i] }],
+                messages: [mensajes[i]],
               },
             },
           }),

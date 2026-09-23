@@ -202,7 +202,7 @@ describe("sin cupo de conversaciones — al cliente final", () => {
 
     expect(r.scheduledInMs).toBeNull(); // no gasta LLM
     expect(sendReply).toHaveBeenCalledTimes(1);
-    const texto = sendReply.mock.calls[0][0].chunks[0] as string;
+    const texto = sendReply.mock.calls[0][0].parts[0].text as string;
     expect(texto).toBe(MENSAJE_SIN_CUPO_CHAT);
     expect(texto.toLowerCase()).not.toMatch(/plan|límite|limite|cupo/);
 

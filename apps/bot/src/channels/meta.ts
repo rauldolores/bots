@@ -9,6 +9,51 @@
 //  • GET de verificación (handshake con META_VERIFY_TOKEN) — lo maneja index.ts.
 //  • Validar la firma X-Hub-Signature-256 de cada POST — verifyMetaSignature().
 import type { ChannelAdapter, IncomingMessage, OutgoingReply, ChannelId } from "./shared";
+import { partesEnviables, partToText, type MessagePart } from "./parts";
+
+/**
+ * Los `message` de Meta para UN bloque — pueden ser dos.
+ *
+ * Un attachment de Meta no lleva texto, así que el pie sale como mensaje
+ * aparte y ANTES: primero se dice qué es, luego llega.
+ *
+ * Instagram no es Messenger aunque compartan Graph: no acepta archivos. Ahí el
+ * documento degrada a enlace, que sí llega, en vez de fallar en silencio.
+ */
+function mensajesMetaDeParte(parte: MessagePart, esIG: boolean): Record<string, unknown>[] {
+  const adjunto = (type: string, url: string) => ({
+    attachment: { type, payload: { url, is_reusable: true } },
+  });
+  const pie = (texto?: string) => (texto ? [{ text: texto }] : []);
+
+  switch (parte.kind) {
+    case "image":
+      return [...pie(parte.caption), adjunto("image", parte.url)];
+    case "document":
+      return esIG
+        ? [{ text: partToText(parte) }]
+        : [...pie(parte.caption), adjunto("file", parte.url)];
+    case "audio":
+      // En Messenger la nota de voz llega como audio; en IG se manda lo que
+      // decía (la transcripción), que es mejor que un enlace a un .ogg.
+      return esIG ? [{ text: partToText(parte) }] : [adjunto("audio", parte.url)];
+    case "options":
+      // Las quick replies son el mismo mensaje, no uno aparte: el texto es el
+      // cuerpo y los botones van colgados de él.
+      return [
+        {
+          text: parte.text,
+          quick_replies: parte.options.map((o) => ({
+            content_type: "text",
+            title: o.label,
+            payload: o.id,
+          })),
+        },
+      ];
+    default:
+      return [{ text: partToText(parte) }];
+  }
+}
 import type { Env } from "../env";
 
 const GRAPH_VERSION = "v21.0";
@@ -51,7 +96,11 @@ export function parseMetaEvents(body: MetaWebhookBody): IncomingMessage[] {
         kind: m?.text ? "text" : m?.attachments?.[0]?.type ?? "other",
       }));
       if (!m || m.is_echo) continue; // ignora echoes
-      if (m.quick_reply) continue; // tap de botón (quick reply), no es texto para el LLM
+      // El tap de una quick reply SÍ es una respuesta del cliente: Meta lo
+      // manda como mensaje normal con `text` = la etiqueta del botón y el
+      // payload aparte. Antes se descartaba (no había nada que las emitiera);
+      // ahora que el bot las ofrece, descartarlo sería dejar sin contestar a
+      // quien sí respondió.
       const sender = ev.sender?.id;
       if (!sender) continue;
       const audio = m.attachments?.find((a) => a.type === "audio");
@@ -63,6 +112,7 @@ export function parseMetaEvents(body: MetaWebhookBody): IncomingMessage[] {
         text: m.text || undefined,
         audioUrl: audio?.payload?.url,
         imageUrl: image?.payload?.url,
+        esRespuestaDeBoton: !!m.quick_reply,
         isOwnerMessage: false,
         receivedAt: Date.now(),
         rawPayload: ev,
@@ -146,12 +196,15 @@ export const metaAdapter: ChannelAdapter = {
     const node = useIG ? await instagramSenderId(token) : "me";
     const url = `${base}/${GRAPH_VERSION}/${node}/messages`;
     console.log("meta out:", JSON.stringify({ useIG, node, to: reply.channelUserId }));
-    for (let i = 0; i < reply.chunks.length; i++) {
+    // Un bloque puede volverse DOS mensajes (el pie y el adjunto), así que
+    // primero se arma la lista completa y luego se manda con su pausa.
+    const mensajes = partesEnviables(reply.parts).flatMap((p) => mensajesMetaDeParte(p, useIG));
+    for (let i = 0; i < mensajes.length; i++) {
       const delay = i === 0 ? 0 : reply.interChunkDelayMs ?? 1000;
       if (delay > 0) await new Promise((r) => setTimeout(r, delay));
       const payload: Record<string, unknown> = {
         recipient: { id: reply.channelUserId },
-        message: { text: reply.chunks[i] },
+        message: mensajes[i],
       };
       if (!useIG) payload.messaging_type = "RESPONSE"; // requerido en Messenger, no en IG Login
       const res = await fetch(url, {

@@ -59,7 +59,7 @@ describe("código vigente + texto exacto: vincula sin gastar turno", () => {
     expect(r.scheduledInMs).toBeNull();
     expect(sendReply).toHaveBeenCalledTimes(1);
     expect(sendReply.mock.calls[0][0].channelUserId).toBe("chat-999");
-    expect(sendReply.mock.calls[0][0].chunks[0]).toMatch(/te aviso por aquí/i);
+    expect(sendReply.mock.calls[0][0].parts[0].text).toMatch(/te aviso por aquí/i);
 
     expect(await settings.get(SETTING_KEYS.ownerTelegramChatId)).toBe("chat-999");
   });

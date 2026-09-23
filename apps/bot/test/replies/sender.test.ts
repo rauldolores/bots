@@ -7,13 +7,17 @@ import {
 import type { ChannelAdapter } from "../../src/channels/shared";
 
 describe("sendChunkedReply", () => {
-  it("invokes adapter.sendReply with all chunks", async () => {
+  it("invokes adapter.sendReply with one text part per chunk", async () => {
     const sendReply = vi.fn(async () => {});
     const adapter = { sendReply, parseIncoming: vi.fn() } as unknown as ChannelAdapter;
     await sendChunkedReply(adapter, "telegram", "user_1", ["a", "b", "c"], {} as any);
     expect(sendReply).toHaveBeenCalledOnce();
     const arg = (sendReply.mock.calls[0] as any[])[0];
-    expect(arg.chunks).toEqual(["a", "b", "c"]);
+    expect(arg.parts).toEqual([
+      { kind: "text", text: "a" },
+      { kind: "text", text: "b" },
+      { kind: "text", text: "c" },
+    ]);
     expect(arg.channelUserId).toBe("user_1");
   });
 

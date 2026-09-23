@@ -142,7 +142,7 @@ describe("runFollowups — envío y garantías", () => {
     expect(sendReplyMock).toHaveBeenCalledTimes(1);
     const [payload] = sendReplyMock.mock.calls[0];
     expect(payload.channelUserId).toBe("h1");
-    expect(payload.chunks[0]).toContain("duda");
+    expect(payload.parts[0].text).toContain("duda");
 
     const history = await msgs.lastN(hot, 5);
     expect(history[history.length - 1].role).toBe("assistant");

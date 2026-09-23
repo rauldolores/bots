@@ -12,6 +12,7 @@
 // tocarlas, lo servimos por un proxy FIRMADO (/webhooks/whatsapp/media/:id): la
 // URL es pública pero con HMAC + expiración, y el token queda del lado del server.
 import type { ChannelAdapter, IncomingMessage, OutgoingReply } from "./shared";
+import { partesEnviables, partToText, type MessagePart } from "./parts";
 import type { Env } from "../env";
 
 const GRAPH_VERSION = "v21.0";
@@ -25,6 +26,12 @@ interface WaMessage {
   text?: { body?: string };
   image?: { id?: string; caption?: string; mime_type?: string };
   audio?: { id?: string; voice?: boolean; mime_type?: string };
+  /** Toque de un botón: llega como mensaje normal, con este bloque en vez de texto. */
+  interactive?: {
+    type?: string;
+    button_reply?: { id?: string; title?: string };
+    list_reply?: { id?: string; title?: string };
+  };
 }
 
 interface WaChange {
@@ -121,8 +128,15 @@ export async function parseWhatsAppEvents(
         let text: string | undefined;
         let audioUrl: string | undefined;
         let imageUrl: string | undefined;
+        let esRespuestaDeBoton = false;
         if (m.type === "text") {
           text = m.text?.body || undefined;
+        } else if (m.type === "interactive") {
+          // Al historial va el TÍTULO del botón (lo que la persona vio y
+          // tocó), no su id.
+          const elegido = m.interactive?.button_reply ?? m.interactive?.list_reply;
+          text = elegido?.title || elegido?.id || undefined;
+          esRespuestaDeBoton = true;
         } else if (m.type === "image" && m.image?.id) {
           imageUrl = (await signedMediaUrl(m.image.id, env, origin, botId)) ?? undefined;
           text = m.image.caption || undefined;
@@ -142,6 +156,7 @@ export async function parseWhatsAppEvents(
           text,
           audioUrl,
           imageUrl,
+          esRespuestaDeBoton,
           isOwnerMessage: false,
           receivedAt: Date.now(),
           rawPayload: m,
@@ -188,6 +203,60 @@ export async function serveWhatsAppMedia(
   return new Response(fileRes.body, { status: 200, headers: { "Content-Type": contentType } });
 }
 
+/**
+ * El cuerpo de Meta para UN bloque. Lo exporta para Kapso, que habla el mismo
+ * protocolo (su API es un proxy de la de Meta) — que dos proveedores de
+ * WhatsApp armen el payload distinto solo produce dos bugs en vez de uno.
+ *
+ * Lo que gana el cliente con esto: el documento llega con su nombre real y su
+ * botón de descarga, y la foto con su pie dentro del mismo globo. Las
+ * plantillas (fuera de la ventana de 24h) y los botones interactivos son otra
+ * fase.
+ */
+export function mensajeWhatsAppDeParte(parte: MessagePart): Record<string, unknown> {
+  switch (parte.kind) {
+    case "image":
+      return {
+        type: "image",
+        image: { link: parte.url, ...(parte.caption ? { caption: parte.caption } : {}) },
+      };
+    case "document":
+      return {
+        type: "document",
+        document: {
+          link: parte.url,
+          // El único campo que convierte un enlace en un archivo con nombre.
+          filename: parte.filename,
+          ...(parte.caption ? { caption: parte.caption } : {}),
+        },
+      };
+    case "audio":
+      return { type: "audio", audio: { link: parte.url } };
+    case "link":
+      // Aquí sí se pide la vista previa: es lo que hace que un enlace se vea
+      // como tarjeta y no como una tira de caracteres.
+      return { type: "text", text: { preview_url: true, body: partToText(parte) } };
+    case "options":
+      // Cloud API acepta 3 botones como máximo; por eso la tool que los
+      // produce ya no deja pedir más (ver tools/ofrecerOpciones.ts).
+      return {
+        type: "interactive",
+        interactive: {
+          type: "button",
+          body: { text: parte.text },
+          action: {
+            buttons: parte.options.slice(0, 3).map((o) => ({
+              type: "reply",
+              reply: { id: o.id, title: o.label },
+            })),
+          },
+        },
+      };
+    default:
+      return { type: "text", text: { preview_url: false, body: partToText(parte) } };
+  }
+}
+
 export const whatsappAdapter: ChannelAdapter = {
   // Existe por la interfaz ChannelAdapter; el webhook /webhooks/whatsapp usa
   // parseWhatsAppEvents directamente (un POST puede traer varios mensajes).
@@ -206,7 +275,8 @@ export const whatsappAdapter: ChannelAdapter = {
       throw new Error("WhatsApp Cloud: falta WHATSAPP_PHONE_NUMBER_ID o WHATSAPP_ACCESS_TOKEN.");
     }
     const url = `https://graph.facebook.com/${GRAPH_VERSION}/${phoneId}/messages`;
-    for (let i = 0; i < reply.chunks.length; i++) {
+    const partes = partesEnviables(reply.parts);
+    for (let i = 0; i < partes.length; i++) {
       const delay = i === 0 ? 0 : reply.interChunkDelayMs ?? 1000;
       if (delay > 0) await new Promise((r) => setTimeout(r, delay));
       const res = await fetch(url, {
@@ -216,8 +286,7 @@ export const whatsappAdapter: ChannelAdapter = {
           messaging_product: "whatsapp",
           recipient_type: "individual",
           to: reply.channelUserId,
-          type: "text",
-          text: { preview_url: false, body: reply.chunks[i] },
+          ...mensajeWhatsAppDeParte(partes[i]),
         }),
       });
       // Fuera de la ventana de 24h Meta rechaza texto libre (pide plantilla HSM):

@@ -22,6 +22,7 @@ import { chunkReplyForChannel } from "../replies/chunker";
 import { pickAdapter } from "../replies/sender";
 import { costOfUsage } from "../pricing";
 import type { ChannelId, EmailThread } from "../channels/shared";
+import { textParts, type MessagePart } from "../channels/parts";
 import { AgentJobsRepo } from "../queue/jobs";
 import { WorkJobsRepo } from "../db/workJobs";
 
@@ -49,6 +50,8 @@ export interface AgentIncomingPayload {
   audioUrl?: string;
   imageUrl?: string;
   isOwnerMessage?: boolean;
+  /** Tocó un botón: se contesta sin esperar el buffer (ver abajo). */
+  esRespuestaDeBoton?: boolean;
   /** Solo correo: el hilo al que pertenece, para poder responder dentro de él. */
   emailThread?: EmailThread;
 }
@@ -133,7 +136,7 @@ export async function ingestMessage(
           {
             channel: "telegram",
             channelUserId: payload.channelUserId,
-            chunks: ["✅ Listo — a partir de ahora te aviso por aquí cuando el bot necesite que alguien intervenga."],
+            parts: textParts(["✅ Listo — a partir de ahora te aviso por aquí cuando el bot necesite que alguien intervenga."]),
           },
           env,
         );
@@ -204,7 +207,7 @@ export async function ingestMessage(
             await new MessagesRepo(db, botId).append(conv.id, "assistant", MENSAJE_SIN_CUPO_CHAT);
             const channel = payload.channel as ChannelId;
             await pickAdapter(channel).sendReply(
-              { channel, channelUserId: payload.channelUserId, chunks: [MENSAJE_SIN_CUPO_CHAT] },
+              { channel, channelUserId: payload.channelUserId, parts: textParts([MENSAJE_SIN_CUPO_CHAT]) },
               env,
             );
           } catch (e) {
@@ -260,7 +263,7 @@ export async function ingestMessage(
         await new MessagesRepo(db, botId).append(conv.id, "assistant", MENSAJE_DE_BAJA);
         const channel = payload.channel as ChannelId;
         await pickAdapter(channel).sendReply(
-          { channel, channelUserId: payload.channelUserId, chunks: [MENSAJE_DE_BAJA] },
+          { channel, channelUserId: payload.channelUserId, parts: textParts([MENSAJE_DE_BAJA]) },
           env,
         );
         console.warn(`[opt-out] conv ${conv.id} pidió baja — registrada`);
@@ -292,7 +295,7 @@ export async function ingestMessage(
         await new MessagesRepo(db, botId).append(conv.id, "assistant", DAILY_CAP_MESSAGE);
         const channel = payload.channel as ChannelId;
         await pickAdapter(channel).sendReply(
-          { channel, channelUserId: payload.channelUserId, chunks: [DAILY_CAP_MESSAGE] },
+          { channel, channelUserId: payload.channelUserId, parts: textParts([DAILY_CAP_MESSAGE]) },
           env,
         );
         console.warn(`[spam-guard] conv ${conv.id} tope diario de turnos → descanso 12h`);
@@ -342,10 +345,15 @@ export async function ingestMessage(
     return { acknowledged: true, scheduledInMs: null };
   }
 
-  await jobs.schedule(key, cfg.bufferMs);
+  // El buffer existe por si la persona SIGUE escribiendo: se espera unos
+  // segundos y se contesta a todo junto, que es lo que hace que no se sienta
+  // robot. Después de tocar un botón no hay nada que seguir escribiendo —
+  // ahí el mismo retraso se siente roto, no humano. Es la única excepción.
+  const espera = payload.esRespuestaDeBoton ? 0 : cfg.bufferMs;
+  await jobs.schedule(key, espera);
   return {
     acknowledged: true,
-    scheduledInMs: cfg.bufferMs,
+    scheduledInMs: espera,
     warm: { botId, conversationId: conv.id },
   };
 }
@@ -490,13 +498,15 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
   return true;
 }
 
-/** Trocea y manda por el canal de la conversación. */
+/** Trocea y manda por el canal de la conversación, con sus adjuntos detrás. */
 async function enviarRespuesta(
   env: Env,
   state: { channel: string; channelUserId: string; conversationId?: string | null },
   texto: string,
   cfg: { maxChunks: number; interChunkDelayMs?: number },
   botId?: string,
+  /** Lo que dejó `enviarArchivo` en este turno — va DESPUÉS del texto. */
+  adjuntos: MessagePart[] = [],
 ): Promise<void> {
   const channel = state.channel as ChannelId;
   await pickAdapter(channel).sendReply(
@@ -504,7 +514,17 @@ async function enviarRespuesta(
       channel,
       channelUserId: state.channelUserId,
       // Por canal, no por config: en correo NUNCA se parte (ver chunker.ts).
-      chunks: chunkReplyForChannel(channel, texto, cfg.maxChunks),
+      // Cada trozo es un bloque de texto; los demás bloques (foto, documento,
+      // opciones) los arma quien los produzca — ver channels/parts.ts.
+      // El archivo va al final: primero se dice de qué se trata, luego llega.
+      //
+      // El filtro es por el turno que SOLO manda un archivo: ahí el texto
+      // viene vacío y el troceo devuelve [""], que se colaría como un bloque
+      // de texto en blanco delante de la foto.
+      parts: [
+        ...textParts(chunkReplyForChannel(channel, texto, cfg.maxChunks).filter((t) => t.trim())),
+        ...adjuntos,
+      ],
       interChunkDelayMs: cfg.interChunkDelayMs,
       // Solo los usa el correo, para responder dentro del mismo hilo. Los
       // demás canales los ignoran.

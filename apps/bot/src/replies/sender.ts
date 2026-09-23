@@ -1,4 +1,5 @@
 import type { ChannelAdapter, ChannelId } from "../channels/shared";
+import { textParts } from "../channels/parts";
 import type { Env } from "../env";
 import { telegramAdapter } from "../channels/telegram";
 import { manychatAdapter } from "../channels/manychat";
@@ -20,6 +21,11 @@ export function chunkDelayMs(chunk: string): number {
   return Math.min(MAX_DELAY_MS, Math.max(MIN_DELAY_MS, proportional));
 }
 
+/**
+ * Manda una respuesta de PURO TEXTO ya troceada. Sigue existiendo porque es
+ * el caso de siempre; los bloques que no son texto se arman con
+ * channels/parts.ts y se pasan a `adapter.sendReply` directo.
+ */
 export async function sendChunkedReply(
   adapter: ChannelAdapter,
   channel: ChannelId,
@@ -33,7 +39,7 @@ export async function sendChunkedReply(
     interChunkDelayMs ??
     (chunks.length > 1 ? chunkDelayMs(chunks[0]) : undefined);
   await adapter.sendReply(
-    { channel, channelUserId, chunks, interChunkDelayMs: delay },
+    { channel, channelUserId, parts: textParts(chunks), interChunkDelayMs: delay },
     env,
   );
 }

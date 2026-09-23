@@ -28,6 +28,7 @@ import { resolveBotId } from "./tenant";
 import { segmentMembers, type CampaignFilters } from "./segments";
 import { pickAdapter } from "./replies/sender";
 import type { ChannelId } from "./channels/shared";
+import { textParts } from "./channels/parts";
 import { CampaignJobsRepo, type CampaignJob } from "./queue/campaignJobs";
 
 export interface ContentTemplate {
@@ -236,7 +237,7 @@ async function processOneJob(
     if (job.kind === "freeform") {
       const channel = job.channel as ChannelId;
       await pickAdapter(channel).sendReply(
-        { channel, channelUserId: job.channel_user_id, chunks: [job.freeform_text!] },
+        { channel, channelUserId: job.channel_user_id, parts: textParts([job.freeform_text!]) },
         env,
       );
       await msgs.append(job.conversation_id, "assistant", job.freeform_text!);

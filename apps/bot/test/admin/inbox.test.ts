@@ -148,7 +148,7 @@ describe("inbox — owner reply (takeover)", () => {
     expect(sendReplyMock).toHaveBeenCalledTimes(1);
     const [payload] = sendReplyMock.mock.calls[0];
     expect(payload.channelUserId).toBe("u3");
-    expect(payload.chunks).toEqual(["Hola, soy Ana 👋"]);
+    expect(payload.parts).toEqual([{ kind: "text", text: "Hola, soy Ana 👋" }]);
 
     // Persisted as owner + bot paused (takeover).
     const history = await msgs.lastN(conv.id, 10);

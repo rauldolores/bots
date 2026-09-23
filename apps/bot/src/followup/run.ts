@@ -27,6 +27,7 @@ import { resolveAgentConfig, loadLlmOverrides } from "../settings-loader";
 import { createModel } from "../llm/provider";
 import { pickAdapter } from "../replies/sender";
 import type { ChannelId } from "../channels/shared";
+import { textParts } from "../channels/parts";
 import { resolveBotId } from "../tenant";
 
 /** Ventana de elegibilidad medida desde el último mensaje del cliente. */
@@ -210,7 +211,7 @@ Escribe UN solo mensaje de seguimiento MUY breve (máximo 2 líneas): retoma con
         {
           channel: cand.channel as ChannelId,
           channelUserId: cand.channel_user_id,
-          chunks: [text],
+          parts: textParts([text]),
           interChunkDelayMs: 0,
         },
         env,

@@ -48,7 +48,7 @@ describe("una baja por WhatsApp", () => {
 
     expect(r.scheduledInMs).toBeNull(); // no se gasta LLM
     expect(sendReply).toHaveBeenCalledTimes(1);
-    expect(sendReply.mock.calls[0][0].chunks[0]).toMatch(/no te vuelvo a escribir/i);
+    expect(sendReply.mock.calls[0][0].parts[0].text).toMatch(/no te vuelvo a escribir/i);
 
     const optOuts = new OptOutsRepo(db, TEST_BOT_ID);
     expect(await optOuts.isOptedOut(phoneVariants("+525512345678"))).toBe(true);

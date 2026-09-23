@@ -1,4 +1,5 @@
 import type { ChannelAdapter, IncomingMessage, OutgoingReply } from "./shared";
+import { partesEnviables, partToText } from "./parts";
 import type { Env } from "../env";
 
 export const twilioAdapter: ChannelAdapter = {
@@ -39,14 +40,35 @@ export const twilioAdapter: ChannelAdapter = {
     if (!sid || !tok || !from) throw new Error("Twilio credentials missing");
     const auth = btoa(`${sid}:${tok}`);
     const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
-    for (let i = 0; i < reply.chunks.length; i++) {
+    // Twilio no distingue foto de documento: TODO adjunto es un MediaUrl y el
+    // destinatario decide cómo abrirlo. El pie viaja en el mismo mensaje.
+    const partes = partesEnviables(reply.parts);
+    for (let i = 0; i < partes.length; i++) {
       const delay = i === 0 ? 0 : reply.interChunkDelayMs ?? 1000;
       if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+      const parte = partes[i];
+      // Con media, el Body es solo el pie (si lo hay): repetir la URL ahí
+      // haría que el cliente reciba el archivo Y el enlace al archivo.
+      let media: string | null = null;
+      let texto = "";
+      switch (parte.kind) {
+        case "image":
+        case "document":
+          media = parte.url;
+          texto = parte.caption ?? "";
+          break;
+        case "audio":
+          media = parte.url;
+          break;
+        default:
+          texto = partToText(parte);
+      }
       const body = new URLSearchParams({
         From: `whatsapp:${from}`,
         To: `whatsapp:${reply.channelUserId}`,
-        Body: reply.chunks[i],
+        Body: texto,
       });
+      if (media) body.set("MediaUrl0", media);
       await fetch(url, {
         method: "POST",
         headers: {

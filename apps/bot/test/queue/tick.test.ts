@@ -293,7 +293,10 @@ describe("tick también procesa campañas encoladas (F6)", () => {
     const r = await tick(env);
     expect(r.campaignsSent).toBe(1);
     expect(sendReply).toHaveBeenCalledWith(
-      expect.objectContaining({ channelUserId: "u5", chunks: ["aviso de campaña"] }),
+      expect.objectContaining({
+        channelUserId: "u5",
+        parts: [{ kind: "text", text: "aviso de campaña" }],
+      }),
       env,
     );
   });

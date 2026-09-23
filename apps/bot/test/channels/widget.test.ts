@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { widgetAdapter } from "../../src/channels/widget";
+import { textParts } from "../../src/channels/parts";
 
 describe("widgetAdapter", () => {
   it("parseIncoming arma un IncomingMessage desde el body JSON del script", async () => {
@@ -16,7 +17,7 @@ describe("widgetAdapter", () => {
 
   it("sendReply es un no-op (la persistencia ya ocurrió en runTurn antes de llamarlo)", async () => {
     await expect(
-      widgetAdapter.sendReply({ channel: "widget", channelUserId: "s1", chunks: ["hola"] }, {} as any),
+      widgetAdapter.sendReply({ channel: "widget", channelUserId: "s1", parts: textParts(["hola"]) }, {} as any),
     ).resolves.toBeUndefined();
   });
 });

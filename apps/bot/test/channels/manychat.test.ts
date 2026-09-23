@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { manychatAdapter } from "../../src/channels/manychat";
 import type { Env } from "../../src/env";
+import { textParts } from "../../src/channels/parts";
 
 // Payloads mirror a typical ManyChat/n8n flow: ManyChat posts the subscriber in
 // `id`, the text in `last_input_text`, and media in `attachments`.
@@ -122,7 +123,7 @@ describe("manychatAdapter.sendReply", () => {
       .mockResolvedValue(new Response("{}", { status: 200 }));
     const env = { MANYCHAT_API_KEY: "key" } as unknown as Env;
     await manychatAdapter.sendReply(
-      { channel: "manychat", channelUserId: "abc123", chunks: ["hola"] },
+      { channel: "manychat", channelUserId: "abc123", parts: textParts(["hola"]) },
       env,
     );
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -142,7 +143,7 @@ describe("manychatAdapter.sendReply", () => {
       MANYCHAT_CONTENT_TYPE: "whatsapp",
     } as unknown as Env;
     await manychatAdapter.sendReply(
-      { channel: "manychat", channelUserId: "abc123", chunks: ["hi"] },
+      { channel: "manychat", channelUserId: "abc123", parts: textParts(["hi"]) },
       env,
     );
     const body = JSON.parse(String((fetchSpy.mock.calls[0][1] as RequestInit).body));

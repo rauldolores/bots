@@ -38,6 +38,7 @@ import {
 import { pickAdapter } from "../replies/sender";
 import { channelLabel } from "../channels/labels";
 import type { ChannelId } from "../channels/shared";
+import { textParts } from "../channels/parts";
 import { renderInsights } from "./views/insights";
 import { analyzeConversations } from "../insights/analyzer";
 import { renderAgentePage, renderAgenteCanvas, renderNodeModal, toggleTool, toastOob } from "./views/agente";
@@ -2768,7 +2769,7 @@ adminApp.post("/conversations/:id/reply", async (c) => {
       {
         channel: conv.channel as ChannelId,
         channelUserId: conv.channel_user_id,
-        chunks: [text],
+        parts: textParts([text]),
         interChunkDelayMs: 0,
       },
       c.env,

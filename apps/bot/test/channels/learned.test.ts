@@ -4,6 +4,7 @@ import { SettingsRepo } from "../../src/db/settings";
 import { saveLearnedMapping, type LearnedMapping } from "../../src/learn/mapping";
 import { makeLearnedAdapter } from "../../src/channels/learned";
 import type { Env } from "../../src/env";
+import { textParts } from "../../src/channels/parts";
 
 let d1: any;
 let repo: SettingsRepo;
@@ -140,7 +141,7 @@ describe("makeLearnedAdapter.sendReply — content.type (auto-channel)", () => {
       .mockResolvedValue(new Response("{}", { status: 200 }));
     const adapter = makeLearnedAdapter("instagram");
     await adapter.sendReply(
-      { channel: "manychat", channelUserId: "abc123", chunks: ["hola"] },
+      { channel: "manychat", channelUserId: "abc123", parts: textParts(["hola"]) },
       env,
     );
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
@@ -166,7 +167,7 @@ describe("makeLearnedAdapter.sendReply — content.type (auto-channel)", () => {
       env,
     );
     await adapter.sendReply(
-      { channel: "manychat", channelUserId: "abc123", chunks: ["hi"] },
+      { channel: "manychat", channelUserId: "abc123", parts: textParts(["hi"]) },
       env,
     );
     const body = JSON.parse(
@@ -186,7 +187,7 @@ describe("makeLearnedAdapter.sendReply — content.type (auto-channel)", () => {
     const adapter = makeLearnedAdapter("n8n");
     await adapter.parseIncoming(req({ uid: "u1", src: "messenger" }), env);
     await adapter.sendReply(
-      { channel: "manychat", channelUserId: "u1", chunks: ["yo"] },
+      { channel: "manychat", channelUserId: "u1", parts: textParts(["yo"]) },
       env,
     );
     const body = JSON.parse(
@@ -206,7 +207,7 @@ describe("makeLearnedAdapter.sendReply — content.type (auto-channel)", () => {
     const adapter = makeLearnedAdapter("custom");
     await adapter.parseIncoming(req({ id: "u3" }), env);
     await adapter.sendReply(
-      { channel: "manychat", channelUserId: "u3", chunks: ["hi"] },
+      { channel: "manychat", channelUserId: "u3", parts: textParts(["hi"]) },
       env,
     );
     const body = JSON.parse(
@@ -224,7 +225,7 @@ describe("makeLearnedAdapter.sendReply — content.type (auto-channel)", () => {
     // No channel in payload, no mapping, env override present.
     await adapter.parseIncoming(req({ id: "u4", last_input_text: "x" }), envWa);
     await adapter.sendReply(
-      { channel: "manychat", channelUserId: "u4", chunks: ["hi"] },
+      { channel: "manychat", channelUserId: "u4", parts: textParts(["hi"]) },
       envWa,
     );
     const body = JSON.parse(
@@ -240,7 +241,7 @@ describe("makeLearnedAdapter.sendReply — content.type (auto-channel)", () => {
     const adapter = makeLearnedAdapter("messenger");
     await adapter.parseIncoming(req({ id: "u5", last_input_text: "x" }), env);
     await adapter.sendReply(
-      { channel: "manychat", channelUserId: "u5", chunks: ["hi"] },
+      { channel: "manychat", channelUserId: "u5", parts: textParts(["hi"]) },
       env,
     );
     const body = JSON.parse(
@@ -258,7 +259,7 @@ describe("makeLearnedAdapter.sendReply — content.type (auto-channel)", () => {
       {
         channel: "manychat",
         channelUserId: "abc",
-        chunks: ["one", "two"],
+        parts: textParts(["one", "two"]),
         interChunkDelayMs: 0, // avoid real setTimeout wait in tests
       },
       env,
@@ -274,7 +275,7 @@ describe("makeLearnedAdapter.sendReply — content.type (auto-channel)", () => {
     const adapter = makeLearnedAdapter("instagram");
     await expect(
       adapter.sendReply(
-        { channel: "manychat", channelUserId: "abc", chunks: ["hi"] },
+        { channel: "manychat", channelUserId: "abc", parts: textParts(["hi"]) },
         { DB: d1.driver } as unknown as Env,
       ),
     ).rejects.toThrow("MANYCHAT_API_KEY not set");

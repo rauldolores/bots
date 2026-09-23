@@ -10,6 +10,8 @@
 // (su Platform API lo permite), así que solo pega dos datos y no tiene que
 // copiar URLs a ningún panel ajeno.
 import type { ChannelAdapter, IncomingMessage, OutgoingReply } from "./shared";
+import { partesEnviables } from "./parts";
+import { mensajeWhatsAppDeParte } from "./whatsapp";
 import type { Env } from "../env";
 
 const WHATSAPP_API = "https://api.kapso.ai/meta/whatsapp/v24.0";
@@ -202,7 +204,11 @@ export const kapsoAdapter: ChannelAdapter = {
     const phoneNumberId = env.KAPSO_PHONE_NUMBER_ID;
     if (!apiKey || !phoneNumberId) throw new Error("Kapso: faltan credenciales (API key / phone number id)");
 
-    for (let i = 0; i < reply.chunks.length; i++) {
+    // El cuerpo lo arma el mismo constructor que WhatsApp Cloud: la API de
+    // Kapso es un proxy de la de Meta, así que un documento con nombre o una
+    // foto con pie se mandan igual por los dos.
+    const partes = partesEnviables(reply.parts);
+    for (let i = 0; i < partes.length; i++) {
       const delay = i === 0 ? 0 : reply.interChunkDelayMs ?? 1000;
       if (delay > 0) await new Promise((r) => setTimeout(r, delay));
       const res = await fetch(`${WHATSAPP_API}/${encodeURIComponent(phoneNumberId)}/messages`, {
@@ -211,8 +217,7 @@ export const kapsoAdapter: ChannelAdapter = {
         body: JSON.stringify({
           messaging_product: "whatsapp",
           ...destinatario(reply.channelUserId),
-          type: "text",
-          text: { body: reply.chunks[i] },
+          ...mensajeWhatsAppDeParte(partes[i]),
         }),
       });
       if (!res.ok) {
