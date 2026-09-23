@@ -22,10 +22,10 @@ import { VoiceSession } from "../../src/channels/voice/session";
 import type { CallBridgeDeps } from "../../src/channels/voice/callBridge";
 
 const createMCPClientMock = vi.fn();
-const notifyOwnerMock = vi.fn(async () => {});
+const notifyOwnerMock = vi.fn(async (..._a: unknown[]) => {});
 vi.mock("../../src/tools/handoffHuman", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/tools/handoffHuman")>();
-  return { ...actual, notifyOwner: (...a: unknown[]) => notifyOwnerMock(...(a as [])) };
+  return { ...actual, notifyOwner: (...a: unknown[]) => notifyOwnerMock(...a) };
 });
 
 vi.mock("@ai-sdk/mcp", () => ({

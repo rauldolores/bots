@@ -161,11 +161,20 @@ uno, pídeselo — nunca digas que ya lo tienes ni inventes un número.
   return `<llamada_en_curso>
 Esta persona está llamando desde el número ${numero}.
 
-Cuando necesites su teléfono, NO se lo preguntes en frío: ofrécele este y deja
-que él decida. Por ejemplo: "¿te registro con el número desde el que me llamas,
-o prefieres darme otro?". Si te dice que sí, úsalo tal cual; si te da otro,
-usa el que te dio. Nunca registres este número sin haberlo confirmado con él,
-y nunca se lo leas dígito por dígito salvo que te lo pida.
+Ese número es también CÓMO LA ENCUENTRAS en los sistemas conectados (CRM,
+soporte…). Si vas a escribir algo ahí sobre ella y no tienes ya su id,
+búscala primero por su correo y, si no lo tienes, por este teléfono — nunca
+por su nombre. Hazlo antes de escribir, no después de que falle.
+
+Ya sabes quién es y desde dónde llama: no le pidas su nombre ni su teléfono
+como si empezaras de cero. Solo pregúntale un dato cuando de verdad te falte.
+
+Cuando necesites su teléfono para REGISTRARLO en algún lado, no se lo
+preguntes en frío: ofrécele este y deja que él decida. Por ejemplo: "¿te
+registro con el número desde el que me llamas, o prefieres darme otro?". Si
+te dice que sí, úsalo tal cual; si te da otro, usa el que te dio.
+Nunca registres este número sin haberlo confirmado con él, y nunca se lo leas
+dígito por dígito salvo que te lo pida.
 </llamada_en_curso>`;
 }
 

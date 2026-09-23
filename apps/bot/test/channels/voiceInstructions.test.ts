@@ -74,6 +74,22 @@ describe("bloqueLlamadaEnCurso — el teléfono del que llama", () => {
     expect(b).toContain("Nunca registres este número sin haberlo confirmado");
   });
 
+  // Llamada real (2026-09-23 22:36): el agente tenía el número en el prompt,
+  // buscó al cliente en el CRM POR SU NOMBRE, obtuvo "sin resultados" —el CRM
+  // solo indexa correo y teléfono— y terminó inventando el id 1. El cliente sí
+  // estaba ahí, y se encontraba justo por el número desde el que llamaba.
+  it("dice que ese número es cómo encontrarlo en los sistemas conectados, y que no se busca por nombre", () => {
+    const b = bloqueLlamadaEnCurso("+525545562046");
+    expect(b).toMatch(/búscala primero por su correo/i);
+    expect(b).toMatch(/nunca[\s\S]{0,20}por su nombre/i);
+    expect(b).toMatch(/antes de escribir/i);
+  });
+
+  it("y que no vuelva a pedir el nombre ni el teléfono que ya tiene", () => {
+    const b = bloqueLlamadaEnCurso("+525545562046");
+    expect(b).toMatch(/no le pidas su nombre ni su teléfono/i);
+  });
+
   it("con número oculto le dice que NO lo tiene, en vez de dejarlo deducir uno", () => {
     // gateway.ts cae al CallSid de Twilio cuando el llamante oculta su número.
     // Ese identificador no es un teléfono y no debe llegar al cliente jamás.
