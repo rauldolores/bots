@@ -246,23 +246,31 @@ const GLOBAL_STYLE = `
   .sb-nav::-webkit-scrollbar-track{background:var(--sb-bg)}
   .sb-nav::-webkit-scrollbar-thumb{background:var(--linelit)}
   .sb-sec{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;padding:16px 12px 6px}
-  /* consumo del plan en el sidebar (se pinta con /admin/plan/uso) */
+  /* Consumo del plan en el sidebar (se pinta con /admin/plan/uso).
+     Bloque de TINTA dentro de una sidebar clara: es lo único que no es
+     navegación ahí abajo, y en papel sobre papel se perdía. Los colores van
+     fijos aquí, no por los tokens --sb-* (que son claros a propósito desde
+     el rediseño): mismo patrón que "Resumen del envío" en campanas.ts. */
   #sb-uso[hidden]{display:none !important}
-  .sb-uso-plan{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--sb-dim);padding:0 2px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .sb-uso-row{display:flex;flex-direction:column;gap:4px;padding:5px 2px}
+  #sb-uso{background:#1b1815;border-radius:12px;padding:11px 12px 12px}
+  .sb-uso-plan{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;color:#8a8274;padding:0 0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .12s ease}
+  .sb-uso-row{display:flex;flex-direction:column;gap:4px;padding:5px 0}
   .sb-uso-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:11.5px}
-  .sb-uso-label{color:var(--sb-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-  .sb-uso-val{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:var(--cream);white-space:nowrap;flex:none}
-  .sb-uso-bar{height:4px;border-radius:999px;background:var(--sb-panel);overflow:hidden}
+  .sb-uso-label{color:#b5ad9d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .sb-uso-val{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:#f4f1ea;white-space:nowrap;flex:none}
+  .sb-uso-bar{height:4px;border-radius:999px;background:rgba(244,241,234,.12);overflow:hidden}
   .sb-uso-bar>i{display:block;height:100%;border-radius:999px;background:var(--accent);transition:width .3s ease}
-  .sb-uso-row.alto .sb-uso-bar>i{background:#d97706}
-  .sb-uso-row.agotado .sb-uso-val{color:var(--bad)}
-  .sb-uso-row.agotado .sb-uso-bar>i{background:var(--bad)}
+  .sb-uso-row.alto .sb-uso-bar>i{background:#e09b2d}
+  /* Sobre tinta, --bad (#dc2626) no alcanza contraste como TEXTO: el rojo
+     claro es para leer, el saturado para la barra, que no se lee. */
+  .sb-uso-row.agotado .sb-uso-val{color:#f6928d}
+  .sb-uso-row.agotado .sb-uso-bar>i{background:#dc2626}
   /* agotado pero con precio por excedente: se sigue atendiendo, va en ámbar */
-  .sb-uso-row.excedente .sb-uso-val,.sb-uso-row.excedente .sb-uso-extra{color:#b45309}
+  .sb-uso-row.excedente .sb-uso-val,.sb-uso-row.excedente .sb-uso-extra{color:#e0a552}
   .sb-uso-row.excedente .sb-uso-bar>i{background:#d97706}
   .sb-uso-extra{font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #sb-uso:hover .sb-uso-plan{color:var(--accent-2)}
+  /* --accent-2 (#8a6a00) es el ámbar para fondo claro; sobre tinta se apaga. */
+  #sb-uso:hover .sb-uso-plan{color:var(--accent)}
   .live-pill{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:7px 14px;box-shadow:var(--shadow-sm)}
 
   @media (max-width:767px){
