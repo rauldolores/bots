@@ -98,7 +98,31 @@ describe("inbox — page and fragments", () => {
     expect(html).toContain("precio corte");
     expect(html).toContain("haiku");
     expect(html).toContain("$0.00"); // turn cost, 4-decimal format
-    expect(html).toContain("🟢 bot activo");
+    expect(html).toContain("bot activo");
+  });
+
+  it("el hilo sigue el sistema de diseño: día en divisor, hora bajo la burbuja y diagnóstico en el DOM pero oculto", async () => {
+    const conv = await convs.getOrCreate("telegram", "u8", "Ana");
+    await msgs.append(conv.id, "user", "¿Abren hoy?");
+    await msgs.append(conv.id, "assistant", "Sí, hasta las 8.", {
+      modelUsed: "claude-haiku-4-5-20251001",
+      inputTokens: 100,
+      outputTokens: 10,
+      cachedInputTokens: 0,
+    });
+
+    const html = await renderThreadLive(env, TEST_BOT_ID, conv.id);
+
+    // La fecha se saca del mensaje a un divisor de día…
+    expect(html).toContain('class="nds-day__label"');
+    expect(html).toContain("Hoy");
+    // …y bajo la burbuja solo queda la hora (sin día ni mes).
+    expect(html).toMatch(/<span class="nds-meta__time">\d{2}:\d{2}/);
+    // El modelo y el costo viven en el DOM (los lee un lector de pantalla)
+    // pero solo se revelan en hover/foco.
+    expect(html).toContain('class="nds-meta__tech"');
+    expect(html).toContain('class="nds-msg nds-msg--human');
+    expect(html).toContain('class="nds-msg nds-msg--agent');
   });
 });
 
