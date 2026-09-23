@@ -1627,6 +1627,13 @@ export async function renderMcpEditModal(env: Env, botId: string, provider: stri
     `
     <form hx-post="/admin/conexiones/connectors/mcp/${encodeURIComponent(provider)}/editar" hx-target="#modal-root" hx-swap="innerHTML">
       <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+        <label class="font-display font-semibold text-[12.5px] text-cream">Dirección del servidor MCP</label>
+        <input type="url" name="url" value="${esc(typeof connector.config.url === "string" ? connector.config.url : "")}" placeholder="https://tu-sistema.com/api/mcp" required
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;font-family:'JetBrains Mono',ui-monospace,monospace;outline:none;width:100%">
+        <p class="text-dim text-[11px]" style="margin:0">Cámbiala si el proveedor se mudó de dominio. Al guardar tendrás que
+          <b>reconectar</b>: el permiso que diste era para la dirección anterior y no sirve para la nueva.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
         <label class="font-display font-semibold text-[12.5px] text-cream">¿Para qué sirve y cuándo usarlo?</label>
         <textarea name="purpose" rows="4" placeholder="${esc(MCP_PURPOSE_PLACEHOLDER)}"
                   style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;font-family:inherit;outline:none;width:100%;resize:vertical">${esc(connector.config.purpose ?? "")}</textarea>
@@ -1638,15 +1645,63 @@ export async function renderMcpEditModal(env: Env, botId: string, provider: stri
   );
 }
 
-/** Guarda el propósito editado y devuelve el modal de éxito (la grilla se refresca aparte, OOB). */
+/**
+ * Guarda el propósito y, si cambió, la dirección del servidor.
+ *
+ * La URL se puede editar porque los proveedores se mudan de dominio (pasó
+ * con Vinqulia: crm.kontrolia.io → app.vinqulia.com) y antes la única salida
+ * era quitar el conector y volver a agregarlo, perdiendo el propósito escrito
+ * y qué herramientas estaban apagadas.
+ *
+ * Cambiar la URL invalida lo que se guardó de OAuth: el permiso se otorgó
+ * para el recurso ANTERIOR y el servidor nuevo lo rechaza ("protected
+ * resource does not match"). Así que se borra el rastro del registro OAuth
+ * —cliente y servidor de autorización— para que Reconectar arranque de cero
+ * contra el dominio nuevo, y se limpia el fallo viejo para no dejar en la
+ * tarjeta un error que ya no aplica. El token en sí vive en Vault
+ * (secret_ref) y mergeConfig no lo toca: lo reemplaza el callback al
+ * reconectar.
+ */
 export async function saveMcpPurpose(env: Env, botId: string, provider: string, form: FormData): Promise<string> {
   const purpose = String(form.get("purpose") ?? "").trim();
-  await new BotConnectorsRepo(new Db(env.DB)).mergeConfig(botId, provider, { purpose });
+  const url = String(form.get("url") ?? "").trim();
+  const db = new Db(env.DB);
+  const repo = new BotConnectorsRepo(db);
+  const connector = await repo.getByBotAndProvider(botId, provider);
+  const urlAnterior = typeof connector?.config.url === "string" ? connector.config.url : "";
+  const cambioUrl = url !== "" && url !== urlAnterior;
+
+  if (url && !/^https:\/\//i.test(url)) {
+    return modalShell(
+      "plug",
+      "Dirección inválida",
+      `<div class="text-[12.5px]" style="color:var(--bad);margin:0 0 14px">La dirección debe empezar con <span class="font-mono">https://</span>.</div>
+       <button type="button" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:9px"
+               hx-get="/admin/conexiones/connectors/mcp/${encodeURIComponent(provider)}/editar" hx-target="#modal-root" hx-swap="innerHTML">Volver</button>`,
+    );
+  }
+
+  const patch: Record<string, string> = { purpose };
+  if (cambioUrl) {
+    patch.url = url;
+    patch.oauthClientInfo = "";
+    patch.oauthServerInfo = "";
+    patch.oauthExpiresAt = "";
+    patch.mcpLastError = "";
+    patch.mcpLastErrorAt = "";
+  }
+  await repo.mergeConfig(botId, provider, patch);
+
   return modalShell(
     "plug",
     "Guardado",
     `<div class="text-[13px]" style="color:var(--ok);font-weight:600;margin-bottom:12px">✓ Listo</div>
-     <p class="text-[12.5px]" style="color:var(--muted);margin:0 0 14px">El agente va a tomarlo en cuenta desde su próximo mensaje.</p>
+     ${
+       cambioUrl
+         ? `<p class="text-[12.5px]" style="color:var(--muted);margin:0 0 14px">La dirección quedó en <span class="font-mono" style="color:var(--cream)">${esc(url)}</span>.
+              Ahora dale a <b>Reconectar</b> en la tarjeta para autorizar el acceso en el dominio nuevo — hasta entonces el agente no tiene estas herramientas.</p>`
+         : `<p class="text-[12.5px]" style="color:var(--muted);margin:0 0 14px">El agente va a tomarlo en cuenta desde su próximo mensaje.</p>`
+     }
      <button type="button" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:9px"
              onclick="document.getElementById('modal-root').innerHTML=''">Listo</button>`,
   );

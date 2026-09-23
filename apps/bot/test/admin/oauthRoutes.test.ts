@@ -118,7 +118,11 @@ beforeEach(async () => {
   verifyAccessTokenMock.mockReset();
   exchangeCodeMock.mockReset();
   refreshSessionMock.mockReset();
-  listMembershipsMock.mockReset();
+  // Con valor por defecto: listMemberships nunca devuelve undefined en
+  // producción (atrapa y regresa []), así que el mock tampoco debe — sin esto,
+  // cualquier prueba que toque /projects sin configurarlo revienta con un 500
+  // que no existe.
+  listMembershipsMock.mockReset().mockResolvedValue([]);
   switchActiveOrganizationMock.mockReset();
 });
 
