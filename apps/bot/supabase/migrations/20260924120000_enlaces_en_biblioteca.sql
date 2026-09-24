@@ -1,0 +1,16 @@
+-- La biblioteca también guarda ENLACES: la ubicación en Maps, la página de
+-- reservas, el formulario de facturación.
+--
+-- Desde la fase de bloques los canales y la bandeja ya sabían pintar una
+-- tarjeta de enlace (channels/parts.ts), pero nada la producía. Ahora una fila
+-- de `media_assets` con tipo 'enlace' la produce, por la misma tool que manda
+-- los archivos (tools/sendMedia.ts).
+--
+-- Sigue valiendo la regla de siempre: el modelo NUNCA escribe una URL. Esta la
+-- escribe el DUEÑO en el panel; el modelo solo elige la clave.
+--
+-- `titulo` es lo que el cliente lee en la tarjeta. No se reusa `descripcion`
+-- porque esa se escribe para el MODELO ("úsalo cuando pregunten por el
+-- estacionamiento o cómo llegar"), y como título de una tarjeta se leería
+-- absurdo. Queda NULL para imágenes y documentos.
+ALTER TABLE media_assets ADD COLUMN IF NOT EXISTS titulo TEXT;

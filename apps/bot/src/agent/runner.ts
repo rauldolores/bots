@@ -389,7 +389,16 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
   if (aMedioEnviar) {
     const estado = await stateRepo.get(conversationKey);
     if (estado) {
-      await enviarRespuesta(env, estado, aMedioEnviar, await resolveAgentConfig(env, [], botId), botId);
+      // Con sus adjuntos: el PDF que no llegó en el primer intento tiene que
+      // llegar en este, no quedarse en el camino.
+      await enviarRespuesta(
+        env,
+        estado,
+        aMedioEnviar.texto,
+        await resolveAgentConfig(env, [], botId),
+        botId,
+        aMedioEnviar.adjuntos,
+      );
       console.log(`[runTurn] reenvío exitoso para ${conversationKey}`);
       reenviada = true;
     }
@@ -446,15 +455,14 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
   // quedar vacío si el modelo lo dijo todo antes de la herramienta y después no
   // agregó nada — en ese caso no hay nada que mandar, y mandar "" haría que el
   // canal publique un mensaje en blanco.
-  if (result.text.trim()) {
+  if (result.text.trim() || result.adjuntos.length > 0) {
     // La respuesta se aparta ANTES de mandarla. Si el canal falla, el reintento
     // la reenvía en vez de perderla — que era lo que pasaba antes.
     //
-    // OJO: `pending_reply` es una columna de TEXTO, así que solo aparta el
-    // texto. Si el envío falla en un turno que además llevaba un archivo, el
-    // reintento manda el texto sin el archivo. Para arreglarlo hay que
-    // guardar los bloques serializados (JSON) en vez del texto pelón.
-    await jobs.savePendingReply(conversationKey, result.text);
+    // Se aparta COMPLETA, con sus archivos. Antes solo se guardaba el texto: un
+    // envío fallido que llevaba un PDF se reintentaba sin el PDF, y un turno que
+    // solo mandaba el archivo ni siquiera se apartaba (ver queue/jobs.ts).
+    await jobs.savePendingReply(conversationKey, { texto: result.text, adjuntos: result.adjuntos });
   }
 
   // Los mensajes que produjeron esta respuesta se dan por contestados AQUÍ,

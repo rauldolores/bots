@@ -4,7 +4,8 @@
 // el modelo elige una CLAVE, nunca una URL.
 import { Db } from "./client";
 
-export type MediaAssetTipo = "imagen" | "documento";
+/** "enlace" no ocupa espacio: es una URL que escribe el dueño, no un archivo nuestro. */
+export type MediaAssetTipo = "imagen" | "documento" | "enlace";
 
 export interface MediaAsset {
   id: string;
@@ -18,6 +19,8 @@ export interface MediaAsset {
   storage_path: string | null;
   size_bytes: number | null;
   mime: string | null;
+  /** Solo enlaces: lo que el cliente lee en la tarjeta. */
+  titulo: string | null;
   created_at: number;
 }
 
@@ -48,7 +51,7 @@ export class MediaAssetsRepo {
   async list(): Promise<MediaAsset[]> {
     return this.db.all<MediaAsset>(
       `SELECT id, bot_id, clave, tipo, url, nombre_archivo, descripcion,
-              storage_path, size_bytes, mime, created_at
+              storage_path, size_bytes, mime, titulo, created_at
          FROM media_assets WHERE bot_id = ? ORDER BY clave`,
       [this.botId],
     );
@@ -57,7 +60,7 @@ export class MediaAssetsRepo {
   async getByClave(clave: string): Promise<MediaAsset | null> {
     const row = await this.db.first<MediaAsset>(
       `SELECT id, bot_id, clave, tipo, url, nombre_archivo, descripcion,
-              storage_path, size_bytes, mime, created_at
+              storage_path, size_bytes, mime, titulo, created_at
          FROM media_assets WHERE bot_id = ? AND clave = ?`,
       [this.botId, clave],
     );
@@ -67,7 +70,7 @@ export class MediaAssetsRepo {
   async getById(id: string): Promise<MediaAsset | null> {
     const row = await this.db.first<MediaAsset>(
       `SELECT id, bot_id, clave, tipo, url, nombre_archivo, descripcion,
-              storage_path, size_bytes, mime, created_at
+              storage_path, size_bytes, mime, titulo, created_at
          FROM media_assets WHERE bot_id = ? AND id = ?`,
       [this.botId, id],
     );
@@ -100,11 +103,12 @@ export class MediaAssetsRepo {
     storagePath?: string | null;
     sizeBytes?: number | null;
     mime?: string | null;
+    titulo?: string | null;
   }): Promise<void> {
     await this.db.run(
       `INSERT INTO media_assets (id, bot_id, clave, tipo, url, nombre_archivo, descripcion,
-                                 storage_path, size_bytes, mime, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 storage_path, size_bytes, mime, titulo, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (bot_id, clave) DO UPDATE
          SET tipo = EXCLUDED.tipo,
              url = EXCLUDED.url,
@@ -112,7 +116,8 @@ export class MediaAssetsRepo {
              descripcion = EXCLUDED.descripcion,
              storage_path = EXCLUDED.storage_path,
              size_bytes = EXCLUDED.size_bytes,
-             mime = EXCLUDED.mime`,
+             mime = EXCLUDED.mime,
+             titulo = EXCLUDED.titulo`,
       [
         crypto.randomUUID(),
         this.botId,
@@ -124,6 +129,7 @@ export class MediaAssetsRepo {
         a.storagePath ?? null,
         a.sizeBytes ?? null,
         a.mime ?? null,
+        a.titulo ?? null,
         Date.now(),
       ],
     );

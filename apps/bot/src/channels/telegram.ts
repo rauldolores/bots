@@ -73,6 +73,52 @@ export async function resolveTelegramFileUrl(
   return `https://api.telegram.org/file/bot${token}/${json.result.file_path}`;
 }
 
+/**
+ * Tope para bajar un documento y resubirlo. Es el mismo de la biblioteca
+ * (media/limites.ts): nada más grande llega hasta aquí por la vía normal.
+ */
+const MAX_DOCUMENTO_RESUBIDO = 10 * 1024 * 1024;
+
+/**
+ * Sube el documento a Telegram con el nombre que el dueño le puso.
+ *
+ * Por URL, Telegram deduce el nombre de la ruta, y la ruta es la versión
+ * saneada que guarda Storage: sin acentos ni espacios. Para que el cliente
+ * reciba "Menú de la semana.pdf" hay que mandarle los bytes con su nombre.
+ *
+ * No encarece nada: esos bytes Telegram los bajaría de Storage igual al
+ * recibir la URL; aquí los bajamos nosotros y se los pasamos.
+ *
+ * Devuelve false —y quien llama cae al envío por URL— solo cuando NO se pudo
+ * bajar el archivo o Telegram lo rechazó (en ambos casos no se mandó nada).
+ * Si la petición a Telegram truena a medio camino, se deja pasar el error: no
+ * se sabe si llegó, y reintentar por URL podría duplicarlo. Ese caso lo
+ * recoge el reintento del turno, que ya reenvía los adjuntos (queue/jobs.ts).
+ */
+async function enviarDocumentoConNombre(
+  token: string,
+  chat_id: string,
+  parte: { url: string; filename: string; caption?: string },
+): Promise<boolean> {
+  let bytes: Blob;
+  try {
+    const res = await fetch(parte.url);
+    if (!res.ok) return false;
+    bytes = await res.blob();
+  } catch {
+    return false;
+  }
+  if (bytes.size === 0 || bytes.size > MAX_DOCUMENTO_RESUBIDO) return false;
+
+  const form = new FormData();
+  form.set("chat_id", chat_id);
+  form.set("document", bytes, parte.filename);
+  if (parte.caption) form.set("caption", parte.caption);
+
+  const envio = await fetch(`${TG_API}${token}/sendDocument`, { method: "POST", body: form });
+  return envio.ok;
+}
+
 export const telegramAdapter: ChannelAdapter = {
   async parseIncoming(request: Request, env: Env): Promise<IncomingMessage> {
     const update = (await request.json()) as TgUpdate;
@@ -149,9 +195,9 @@ export const telegramAdapter: ChannelAdapter = {
    * cliente ve ícono, nombre, peso y un botón de descarga en vez de un enlace
    * azul. Es la misma llamada HTTP.
    *
-   * Límite conocido: al enviar POR URL, el nombre del archivo lo deduce
-   * Telegram de la ruta — `filename` del bloque se ignora. Ponerlo exige subir
-   * los bytes (multipart), que es otra cosa.
+   * Los documentos se SUBEN, no se mandan por URL: por URL, Telegram deduce el
+   * nombre de la ruta y el cliente recibía "Menu-de-la-semana.pdf" en vez de
+   * "Menú de la semana.pdf". Ver enviarDocumentoConNombre().
    */
   async sendReply(reply: OutgoingReply, env: Env): Promise<void> {
     const token = env.TELEGRAM_BOT_TOKEN;
@@ -170,6 +216,12 @@ export const telegramAdapter: ChannelAdapter = {
 
       const parte = partes[i];
       const chat_id = reply.channelUserId;
+
+      // Documento: con su nombre real si se puede; si no, por URL como antes.
+      if (parte.kind === "document" && (await enviarDocumentoConNombre(token, chat_id, parte))) {
+        continue;
+      }
+
       const [metodo, cuerpo] =
         parte.kind === "image"
           ? ["sendPhoto", { chat_id, photo: parte.url, caption: parte.caption }]

@@ -75,7 +75,7 @@ function seccionDeMedios(
           </div>
           <div class="text-muted text-[11.5px]" style="margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.descripcion)}</div>
           <div class="text-dim text-[10.5px]" style="margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-            <a href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">${esc(a.nombre_archivo ?? a.url)}</a>
+            <a href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">${esc(a.titulo ?? a.nombre_archivo ?? a.url)}</a>
           </div>
         </div>
         <form method="POST" action="/admin/kb/archivos/${encodeURIComponent(a.id)}/delete" style="flex:none">
@@ -90,8 +90,19 @@ function seccionDeMedios(
 
   const campo = "background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;outline:none;width:100%";
 
-  const formulario = espacio.disponible
-    ? `
+  // Sin Storage no se pueden subir archivos, pero un enlace no se sube: se
+  // sigue ofreciendo, solo que con "enlace" como única opción.
+  const aviso = espacio.disponible
+    ? ""
+    : `<div class="bg-panel border border-line" style="padding:14px 18px;margin-bottom:12px">
+         <p class="text-muted text-[12px]" style="margin:0">
+           Para subir archivos falta configurar el almacenamiento:
+           <code class="text-cream">SUPABASE_URL</code> y <code class="text-cream">SUPABASE_SERVICE_ROLE_KEY</code>.
+           Mientras tanto puedes guardar enlaces, y lo ya cargado sigue funcionando.
+         </p>
+       </div>`;
+
+  const formulario = `${aviso}
     <form id="form-archivo" class="bg-panel border border-line" style="padding:18px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:16px">
       <div style="display:flex;flex-direction:column;gap:5px">
         <label for="clave" class="font-display font-semibold text-[12px] text-cream">Clave</label>
@@ -101,10 +112,11 @@ function seccionDeMedios(
 
       <div style="display:flex;flex-direction:column;gap:5px">
         <label for="tipo" class="font-display font-semibold text-[12px] text-cream">Tipo</label>
-        <p class="text-dim text-[11px]">Una imagen se ve en el chat; un documento se descarga.</p>
+        <p class="text-dim text-[11px]">Una imagen se ve en el chat; un documento se descarga; un enlace sale como tarjeta.</p>
         <select id="tipo" name="tipo" style="${campo}">
-          <option value="documento">Documento</option>
-          <option value="imagen">Imagen</option>
+          ${espacio.disponible ? `<option value="documento">Documento</option>
+          <option value="imagen">Imagen</option>` : ""}
+          <option value="enlace">Enlace (ubicación, reservas, una página)</option>
         </select>
       </div>
 
@@ -115,7 +127,22 @@ function seccionDeMedios(
                placeholder="El menú de la semana, con precios" style="${campo}">
       </div>
 
-      <div style="display:flex;flex-direction:column;gap:5px;grid-column:1/-1">
+      <div id="campos-enlace" style="display:none;grid-column:1/-1;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px">
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <label for="url" class="font-display font-semibold text-[12px] text-cream">El enlace</label>
+          <p class="text-dim text-[11px]">La dirección completa, con https://</p>
+          <input type="url" id="url" name="url" maxlength="1000"
+                 placeholder="https://maps.google.com/…" style="${campo}">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <label for="titulo" class="font-display font-semibold text-[12px] text-cream">Título de la tarjeta</label>
+          <p class="text-dim text-[11px]">Lo que tu cliente lee. Si lo dejas vacío, se muestra el dominio.</p>
+          <input type="text" id="titulo" name="titulo" maxlength="80"
+                 placeholder="Sucursal Roma — cómo llegar" style="${campo}">
+        </div>
+      </div>
+
+      <div id="campo-archivo" style="display:flex;flex-direction:column;gap:5px;grid-column:1/-1">
         <label for="archivo" class="font-display font-semibold text-[12px] text-cream">El archivo</label>
         <p class="text-dim text-[11px]">
           Imágenes hasta ${pesoLegible(MAX_IMAGEN_BYTES)} (JPG, PNG, WEBP, GIF) y documentos hasta ${pesoLegible(MAX_DOCUMENTO_BYTES)} (PDF, Word, Excel, texto).
@@ -129,7 +156,7 @@ function seccionDeMedios(
         <span id="archivo-estado" class="text-dim text-[11.5px]" style="flex:1"></span>
         <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
                 style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 16px">
-          Subir archivo
+          <span id="texto-boton">Subir archivo</span>
         </button>
       </div>
     </form>
@@ -139,8 +166,45 @@ function seccionDeMedios(
       var f = document.getElementById("form-archivo");
       if (!f) return;
       var estado = document.getElementById("archivo-estado");
+      var enlace = document.getElementById("campos-enlace");
+      var archivo = document.getElementById("campo-archivo");
+      var textoBoton = document.getElementById("texto-boton");
+
+      // Un enlace no se sube: cambia qué campos se piden y qué se exige.
+      function segunTipo() {
+        var esEnlace = f.tipo.value === "enlace";
+        enlace.style.display = esEnlace ? "grid" : "none";
+        archivo.style.display = esEnlace ? "none" : "flex";
+        f.archivo.required = !esEnlace;
+        f.url.required = esEnlace;
+        textoBoton.textContent = esEnlace ? "Guardar enlace" : "Subir archivo";
+      }
+      f.tipo.addEventListener("change", segunTipo);
+      segunTipo();
+
       f.addEventListener("submit", async function (e) {
         e.preventDefault();
+        if (f.tipo.value === "enlace") {
+          var btnE = f.querySelector("button[type=submit]");
+          btnE.disabled = true;
+          estado.textContent = "Guardando…";
+          try {
+            var rE = await fetch("/admin/kb/archivos/enlace", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                clave: f.clave.value, descripcion: f.descripcion.value,
+                url: f.url.value, titulo: f.titulo.value,
+              }),
+            });
+            var jE = await rE.json();
+            if (!jE.ok) { estado.textContent = jE.error; btnE.disabled = false; return; }
+            window.location.href = "/admin/kb?archivo=1";
+          } catch (err) {
+            estado.textContent = "Algo falló al guardar. Vuelve a intentarlo.";
+            btnE.disabled = false;
+          }
+          return;
+        }
         var file = f.archivo.files[0];
         if (!file) { estado.textContent = "Elige un archivo."; return; }
         var btn = f.querySelector("button[type=submit]");
@@ -180,14 +244,7 @@ function seccionDeMedios(
         }
       });
     })();
-    </script>`
-    : `<div class="bg-panel border border-line" style="padding:18px;margin-bottom:16px">
-         <p class="text-muted text-[12.5px]" style="margin:0">
-           Para subir archivos falta configurar el almacenamiento:
-           <code class="text-cream">SUPABASE_URL</code> y <code class="text-cream">SUPABASE_SERVICE_ROLE_KEY</code>.
-           Los archivos que ya estén cargados siguen funcionando.
-         </p>
-       </div>`;
+    </script>`;
 
   return `
     <div style="margin:28px 0 16px">

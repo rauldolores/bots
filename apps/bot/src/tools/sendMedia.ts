@@ -21,6 +21,15 @@ import type { MessagePart } from "../channels/parts";
  *     como foto en Telegram y como enlace en SMS sin que la tool se entere
  *     (ver channels/parts.ts).
  */
+/** El dominio de un enlace, sin "www.": lo que dice de verdad a dónde lleva. */
+function dominioDe(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
 export function enviarArchivoTool(
   assets: MediaAsset[],
   adjuntar: (part: MessagePart) => void,
@@ -30,9 +39,10 @@ export function enviarArchivoTool(
 
   return tool({
     description:
-      "Entrega al cliente un archivo del negocio (foto, menú, catálogo, comprobante…). " +
-      "Úsala cuando lo que pide se responde mejor con el archivo que describiéndolo. " +
-      "El archivo sale solo; no escribas enlaces ni describas la ruta.\n" +
+      "Entrega al cliente un archivo o enlace del negocio (foto, menú, catálogo, la ubicación, " +
+      "la página de reservas…). " +
+      "Úsala cuando lo que pide se responde mejor con el archivo o el enlace que describiéndolo. " +
+      "Sale solo; no escribas enlaces ni describas la ruta.\n" +
       `Disponibles:\n${catalogo}`,
     inputSchema: z.object({
       clave: z.enum(claves).describe("La clave del archivo a enviar."),
@@ -52,13 +62,22 @@ export function enviarArchivoTool(
       adjuntar(
         asset.tipo === "imagen"
           ? { kind: "image", url: asset.url, caption: pie }
-          : {
-              kind: "document",
-              url: asset.url,
-              // Sin nombre no hay documento: el canal necesita cómo llamarlo.
-              filename: asset.nombre_archivo ?? `${asset.clave}.pdf`,
-              caption: pie,
-            },
+          : asset.tipo === "enlace"
+            ? {
+                kind: "link",
+                url: asset.url,
+                // El título lo escribió el dueño para el cliente; sin él, el
+                // dominio dice al menos a dónde lleva.
+                title: asset.titulo || dominioDe(asset.url),
+                description: pie,
+              }
+            : {
+                kind: "document",
+                url: asset.url,
+                // Sin nombre no hay documento: el canal necesita cómo llamarlo.
+                filename: asset.nombre_archivo ?? `${asset.clave}.pdf`,
+                caption: pie,
+              },
       );
 
       return {

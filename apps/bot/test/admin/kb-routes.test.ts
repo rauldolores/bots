@@ -338,6 +338,41 @@ describe("biblioteca de medios — subir de verdad, no pegar una URL", () => {
     expect(subidas.some((s) => s.method === "DELETE")).toBe(true);
   });
 
+  it("un enlace se guarda sin subir nada ni ocupar espacio", async () => {
+    const res = await pedir("/kb/archivos/enlace", {
+      clave: "Cómo llegar",
+      descripcion: "La ubicación en Maps, para quien pregunte la dirección",
+      url: "https://maps.google.com/?q=roma",
+      titulo: "Sucursal Roma",
+    });
+
+    expect(res.status).toBe(200);
+    const a = await mediaRepo().getByClave("como-llegar");
+    expect(a!.tipo).toBe("enlace");
+    expect(a!.titulo).toBe("Sucursal Roma");
+    expect(a!.size_bytes).toBeNull();
+    // Nada tocó Storage: un enlace no es un archivo nuestro.
+    expect(subidas.some((s) => s.url.includes("/storage/v1/object/"))).toBe(false);
+  });
+
+  it("rechaza un enlace que no es http(s): en una tarjeta que el cliente toca, es un problema", async () => {
+    const res = await pedir("/kb/archivos/enlace", {
+      clave: "malo",
+      descripcion: "x",
+      url: "javascript:alert(1)",
+    });
+    expect(res.status).toBe(400);
+    expect(await mediaRepo().list()).toHaveLength(0);
+  });
+
+  it("sin Storage configurado, el panel sigue ofreciendo enlaces", async () => {
+    delete (env as any).SUPABASE_SERVICE_ROLE_KEY;
+    const html = await (await adminApp.request("/kb", { headers: AUTH }, env)).text();
+    expect(html).toContain('<option value="enlace">');
+    expect(html).not.toContain('<option value="documento">');
+    expect(html).toContain("Mientras tanto puedes guardar enlaces");
+  });
+
   it("la pantalla muestra el espacio usado y el tope", async () => {
     await mediaRepo().upsert({
       clave: "menu", tipo: "documento", url: "https://x/m.pdf",

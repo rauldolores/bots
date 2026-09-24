@@ -1156,6 +1156,44 @@ adminApp.post("/kb/archivos/registrar", async (c) => {
   return c.json({ ok: true });
 });
 
+// Un enlace no se sube: el dueño escribe la URL y un título para la tarjeta.
+// El modelo sigue sin escribir URLs — solo elige la clave (tools/sendMedia.ts).
+adminApp.post("/kb/archivos/enlace", async (c) => {
+  const botId = c.get("botId");
+  const body = (await c.req.json().catch(() => null)) as {
+    clave?: string; descripcion?: string; url?: string; titulo?: string;
+  } | null;
+  if (!body) return c.json({ ok: false, error: "Petición inválida." }, 400);
+
+  const clave = normalizarClave(String(body.clave ?? ""));
+  const descripcion = String(body.descripcion ?? "").trim().slice(0, 200);
+  const url = String(body.url ?? "").trim().slice(0, 1000);
+  const titulo = String(body.titulo ?? "").trim().slice(0, 80) || null;
+
+  if (!clave || !CLAVE_VALIDA.test(clave)) {
+    return c.json({ ok: false, error: "La clave solo admite letras, números y guiones." }, 400);
+  }
+  if (!descripcion) {
+    return c.json({
+      ok: false,
+      error: "Falta describir cuándo mandarlo: es lo único que el bot lee para decidir.",
+    }, 400);
+  }
+  // Solo http(s): un "javascript:" o un "file:" en una tarjeta que el cliente
+  // va a tocar no es un enlace, es un problema.
+  if (!/^https?:\/\/\S+$/i.test(url)) {
+    return c.json({ ok: false, error: "El enlace debe empezar con http:// o https://" }, 400);
+  }
+
+  const repo = new MediaAssetsRepo(new Db(c.env.DB), botId);
+  const previo = await repo.getByClave(clave);
+  await repo.upsert({ clave, tipo: "enlace", url, descripcion, titulo });
+  // Si esa clave antes era un archivo nuestro, ya nadie lo alcanza: se borra
+  // para no ocupar espacio que el dueño cree haber liberado.
+  if (previo?.storage_path) await borrarArchivo(c.env, previo.storage_path);
+  return c.json({ ok: true });
+});
+
 adminApp.post("/kb/archivos/:id/delete", async (c) => {
   const repo = new MediaAssetsRepo(new Db(c.env.DB), c.get("botId"));
   const asset = await repo.getById(c.req.param("id"));

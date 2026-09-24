@@ -187,6 +187,58 @@ describe("la tool enviarArchivo", () => {
   });
 });
 
+describe("enlaces de la biblioteca", () => {
+  function herramientas(adjuntos: MessagePart[]) {
+    return repo.list().then((mediaAssets) =>
+      buildTools({
+        env,
+        getConversationId: () => null,
+        botId: TEST_BOT_ID,
+        mediaAssets,
+        adjuntar: (p) => adjuntos.push(p),
+      }),
+    );
+  }
+
+  it("un enlace sale como tarjeta, con el título que escribió el dueño", async () => {
+    await repo.upsert({
+      clave: "como-llegar",
+      tipo: "enlace",
+      url: "https://maps.google.com/?q=roma",
+      descripcion: "La ubicación",
+      titulo: "Sucursal Roma",
+    });
+    const adjuntos: MessagePart[] = [];
+    const tools = await herramientas(adjuntos);
+
+    await tools.enviarArchivo.execute({ clave: "como-llegar", pie: "A una cuadra del metro" });
+
+    expect(adjuntos).toEqual([
+      {
+        kind: "link",
+        url: "https://maps.google.com/?q=roma",
+        title: "Sucursal Roma",
+        description: "A una cuadra del metro",
+      },
+    ]);
+  });
+
+  it("sin título, la tarjeta muestra el dominio: dice al menos a dónde lleva", async () => {
+    await repo.upsert({
+      clave: "reservas",
+      tipo: "enlace",
+      url: "https://www.opentable.com/r/sabor-roma",
+      descripcion: "Para reservar mesa",
+    });
+    const adjuntos: MessagePart[] = [];
+    const tools = await herramientas(adjuntos);
+
+    await tools.enviarArchivo.execute({ clave: "reservas" });
+
+    expect((adjuntos[0] as any).title).toBe("opentable.com");
+  });
+});
+
 describe("del modelo al canal", () => {
   it("el archivo que pidió el modelo llega al adaptador, detrás del texto", async () => {
     await repo.upsert({
@@ -288,6 +340,55 @@ describe("del modelo al canal", () => {
     );
     expect(JSON.parse(fila!.parts!)).toEqual([
       { kind: "document", url: "https://x/menu.pdf", filename: "menu.pdf" },
+    ]);
+  });
+
+  it("si el canal falla, el reintento manda el archivo también — no solo el texto", async () => {
+    await repo.upsert({
+      clave: "menu",
+      tipo: "documento",
+      url: "https://x/menu.pdf",
+      nombreArchivo: "menu.pdf",
+      descripcion: "El menú de la semana",
+    });
+    streamTextMock.mockImplementation((opts: any) => {
+      void opts.tools.enviarArchivo.execute({ clave: "menu" });
+      return makeStreamResult("Aquí va.", [{ toolName: "enviarArchivo" }]);
+    });
+
+    await ingestMessage(env, { channel: "telegram", channelUserId: "u5", text: "el menú" });
+    await vencerTurnos();
+    // Primer intento: el modelo contesta, pero el canal está caído.
+    sendReply.mockRejectedValueOnce(new Error("canal caído"));
+    await tick(env);
+
+    // Segundo intento: se reenvía lo apartado, sin volver a pensar.
+    await vencerTurnos();
+    await tick(env);
+
+    expect(sendReply).toHaveBeenCalledTimes(2);
+    expect(streamTextMock).toHaveBeenCalledTimes(1);
+    const { parts } = sendReply.mock.calls[1][0];
+    expect(parts.some((p: MessagePart) => p.kind === "document")).toBe(true);
+  });
+
+  it("un turno que SOLO mandó el archivo también se reintenta", async () => {
+    await repo.upsert({ clave: "local", tipo: "imagen", url: "https://x/l.jpg", descripcion: "Foto del local" });
+    streamTextMock.mockImplementation((opts: any) => {
+      void opts.tools.enviarArchivo.execute({ clave: "local" });
+      return makeStreamResult("", [{ toolName: "enviarArchivo" }]);
+    });
+
+    await ingestMessage(env, { channel: "telegram", channelUserId: "u6", text: "foto?" });
+    await vencerTurnos();
+    sendReply.mockRejectedValueOnce(new Error("canal caído"));
+    await tick(env);
+    await vencerTurnos();
+    await tick(env);
+
+    expect(sendReply).toHaveBeenCalledTimes(2);
+    expect(sendReply.mock.calls[1][0].parts).toEqual([
+      { kind: "image", url: "https://x/l.jpg" },
     ]);
   });
 

@@ -76,6 +76,44 @@ describe("Telegram — un método por bloque", () => {
     expect(urls.some((u: string) => u.includes("/sendMessage"))).toBe(false);
   });
 
+  it("el PDF se SUBE con su nombre real, con acentos y espacios", async () => {
+    const f = espiarFetch();
+    const conAcentos: MessagePart = {
+      kind: "document",
+      url: "https://x/Menu-de-la-semana.pdf",
+      filename: "Menú de la semana.pdf",
+      caption: "Aquí va",
+    };
+    await telegramAdapter.sendReply(
+      { channel: "telegram", channelUserId: "1", parts: [conAcentos], interChunkDelayMs: 0 },
+      env,
+    );
+
+    // Primero se baja el archivo…
+    expect(f.mock.calls.some((c: any) => String(c[0]) === "https://x/Menu-de-la-semana.pdf")).toBe(true);
+    // …y se sube como multipart, con el nombre que puso el dueño.
+    const envio = f.mock.calls.find((c: any) => String(c[0]).includes("/sendDocument"));
+    const form = envio![1].body as FormData;
+    expect(form).toBeInstanceOf(FormData);
+    expect((form.get("document") as File).name).toBe("Menú de la semana.pdf");
+    expect(form.get("caption")).toBe("Aquí va");
+  });
+
+  it("si el archivo no se puede bajar, cae al envío por URL: llega con otro nombre, pero llega", async () => {
+    const f = vi.fn(async (url: any) =>
+      String(url).startsWith("https://x/")
+        ? new Response("no está", { status: 404 })
+        : new Response("{}", { status: 200 }),
+    );
+    vi.stubGlobal("fetch", f);
+    await telegramAdapter.sendReply(
+      { channel: "telegram", channelUserId: "1", parts: [PDF], interChunkDelayMs: 0 },
+      env,
+    );
+    const envio = (f.mock.calls as any[]).find((c) => String(c[0]).includes("/sendDocument"));
+    expect(JSON.parse(String(envio[1].body)).document).toBe("https://x/carta.pdf");
+  });
+
   it("la nota de voz va por sendVoice", async () => {
     const f = espiarFetch();
     await telegramAdapter.sendReply(

@@ -6,6 +6,35 @@
 // Guardamos epoch ms (decisión D4) pero lo calcula la base.
 
 import type { Db } from "../db/client";
+import type { MessagePart } from "../channels/parts";
+
+/** Lo que se aparta antes de enviar: el texto y los archivos que lo acompañaban. */
+export interface RespuestaApartada {
+  texto: string;
+  adjuntos: MessagePart[];
+}
+
+/**
+ * Lee lo que quedó en `pending_reply`. Si es el sobre de bloques, lo abre; si
+ * no, es texto plano — el formato de siempre y el de las filas viejas.
+ *
+ * Se reconoce el sobre por su FORMA completa (v, texto, adjuntos), no por
+ * "parece JSON": una respuesta del modelo que por casualidad fuera un objeto
+ * JSON tiene que seguir mandándose como texto.
+ */
+export function leerRespuestaApartada(raw: string): RespuestaApartada {
+  if (raw.startsWith("{")) {
+    try {
+      const v = JSON.parse(raw);
+      if (v && v.v === 1 && typeof v.texto === "string" && Array.isArray(v.adjuntos)) {
+        return { texto: v.texto, adjuntos: v.adjuntos as MessagePart[] };
+      }
+    } catch {
+      // no era el sobre: es texto
+    }
+  }
+  return { texto: raw, adjuntos: [] };
+}
 
 /**
  * Cuánto puede tardar un turno antes de considerarse abandonado.
@@ -200,21 +229,32 @@ export class AgentJobsRepo {
    *
    * Si el envío falla, el reintento la encuentra aquí y solo la reenvía: no
    * vuelve a llamar al LLM ni duplica nada en el historial.
+   *
+   * La columna es TEXT y así se queda: sin adjuntos se guarda el texto tal
+   * cual (el caso común, y el formato de las filas que ya existían); con
+   * adjuntos se guarda un sobre JSON. Antes solo se guardaba el texto, así
+   * que un envío fallido que llevaba un PDF se reintentaba SIN el PDF — o, si
+   * el modelo solo había mandado el archivo, no se reintentaba nada.
    */
-  async savePendingReply(conversationKey: string, text: string): Promise<void> {
+  async savePendingReply(conversationKey: string, respuesta: RespuestaApartada): Promise<void> {
+    const guardado = respuesta.adjuntos.length
+      ? JSON.stringify({ v: 1, texto: respuesta.texto, adjuntos: respuesta.adjuntos })
+      : respuesta.texto;
     await this.db.run("UPDATE agent_jobs SET pending_reply = ? WHERE conversation_key = ?", [
-      text,
+      guardado,
       conversationKey,
     ]);
   }
 
   /** La respuesta que quedó a medio enviar, si la hay. */
-  async getPendingReply(conversationKey: string): Promise<string | null> {
+  async getPendingReply(conversationKey: string): Promise<RespuestaApartada | null> {
     const row = await this.db.first<{ pending_reply: string | null }>(
       "SELECT pending_reply FROM agent_jobs WHERE conversation_key = ?",
       [conversationKey],
     );
-    return row?.pending_reply ?? null;
+    const raw = row?.pending_reply;
+    if (raw == null) return null;
+    return leerRespuestaApartada(raw);
   }
 
   /**
