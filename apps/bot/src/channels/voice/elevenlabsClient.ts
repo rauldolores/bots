@@ -171,6 +171,15 @@ export class ElevenLabsClient {
     this.send({ user_audio_chunk: audioBase64 });
   }
 
+  /**
+   * Lo que el cliente "dice", como TEXTO en vez de audio (evento user_message
+   * del WebSocket de Agents). Solo lo usan las pruebas automáticas
+   * (scripts/pruebas): una llamada real siempre llega como audio.
+   */
+  sendUserText(texto: string): void {
+    this.send({ type: "user_message", text: texto });
+  }
+
   private send(payload: unknown): void {
     if (this.cerrado || this.ws?.readyState !== WebSocket.OPEN) return;
     this.ws.send(JSON.stringify(payload));

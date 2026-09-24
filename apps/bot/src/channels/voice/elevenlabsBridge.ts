@@ -620,6 +620,18 @@ export class ElevenLabsCallBridge implements CallBridge {
     this.client?.sendUserAudio(payloadBase64);
   }
 
+  /**
+   * El cliente habla por TEXTO — solo para las pruebas automáticas
+   * (scripts/pruebas/canales/voz.ts), que simulan una llamada sin teléfono ni
+   * audio. Todo lo demás es la llamada real: el mismo prompt, las mismas
+   * herramientas ejecutadas aquí, lo mismo que queda guardado.
+   */
+  enviarTextoDelCliente(texto: string): void {
+    this.ultimaActividad = Date.now();
+    void this.persistirTurno("user", texto);
+    this.client?.sendUserText(texto);
+  }
+
   handleTwilioDtmf(_digit: string): void {
     // Sin uso todavía: el puente de OpenAI tampoco actúa sobre DTMF hoy.
   }

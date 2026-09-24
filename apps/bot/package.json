@@ -16,6 +16,7 @@
     "leads:backfill-contacts": "tsx --env-file-if-exists=.env scripts/backfill-lead-contacts.ts",
     "kb:reindex": "tsx scripts/generate-fixtures.ts",
     "eval": "tsx scripts/eval-bot-live.ts",
+    "pruebas": "tsx --env-file-if-exists=.env scripts/pruebas/correr.ts",
     "start": "tsx --env-file-if-exists=.env src/runtime/node.ts",
     "dev:cf": "wrangler dev",
     "deploy:cf": "wrangler deploy",

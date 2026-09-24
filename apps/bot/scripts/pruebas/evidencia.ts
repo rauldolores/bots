@@ -1,0 +1,67 @@
+// Lo que de verdad quedó registrado en la base después de una conversación de
+// prueba: el juez no califica lo que el agente DICE que hizo, sino lo que hizo.
+import { Db } from "../../src/db/client";
+import type { Env } from "../../src/env";
+import type { Evidencia } from "./tipos";
+
+export async function leerEvidencia(env: Env, botId: string, convId: string | null, correo?: string): Promise<Evidencia> {
+  const db = new Db(env.DB);
+  const filtrado = correo
+    ? await db.first<{ categoria: string; motivo: string | null }>(
+        "SELECT categoria, motivo FROM correos_filtrados WHERE bot_id = ? AND remitente = ? ORDER BY recibido_at DESC LIMIT 1",
+        [botId, correo],
+      )
+    : null;
+  if (!convId) {
+    return { conversacionId: null, tickets: [], leads: [], citas: [], herramientas: [], nombreEnConversacion: null, correoFiltrado: filtrado };
+  }
+
+  const [tickets, leads, citas, mensajes, conv, eventosDeVoz] = await Promise.all([
+    db.all<Evidencia["tickets"][number]>(
+      "SELECT summary, requester_name, requester_contact, external_id FROM tickets WHERE bot_id = ? AND conversation_id = ?",
+      [botId, convId],
+    ),
+    db.all<Evidencia["leads"][number]>(
+      "SELECT name, contact, intent, external_id FROM leads WHERE bot_id = ? AND conversation_id = ?",
+      [botId, convId],
+    ),
+    db.all<Evidencia["citas"][number]>(
+      "SELECT starts_at, notes, external_ref FROM appointments WHERE bot_id = ? AND conversation_id = ?",
+      [botId, convId],
+    ),
+    db.all<{ tool_calls: string | null }>(
+      "SELECT tool_calls FROM messages WHERE bot_id = ? AND conversation_id = ? AND tool_calls IS NOT NULL ORDER BY created_at",
+      [botId, convId],
+    ),
+    db.first<{ display_name: string | null }>("SELECT display_name FROM conversations WHERE id = ?", [convId]),
+    // En voz las herramientas no pasan por messages: quedan como eventos de la llamada.
+    db.all<{ tool: string | null }>(
+      `SELECT e.payload->>'tool' AS tool FROM voice_call_events e
+       JOIN voice_sessions s ON s.id = e.call_id
+       WHERE s.conversation_id = ? AND e.event_type = 'call.tool_called' ORDER BY e.occurred_at`,
+      [convId],
+    ),
+  ]);
+
+  const herramientas: string[] = [];
+  for (const m of mensajes) {
+    try {
+      for (const t of JSON.parse(m.tool_calls ?? "[]") as { toolName?: string; ok?: boolean }[]) {
+        if (t.toolName) herramientas.push(t.ok === false ? `${t.toolName} (falló)` : t.toolName);
+      }
+    } catch {
+      /* formato viejo: se ignora */
+    }
+  }
+  for (const e of eventosDeVoz) if (e.tool) herramientas.push(e.tool);
+
+  return {
+    conversacionId: convId,
+    tickets,
+    leads,
+    citas,
+    herramientas,
+    nombreEnConversacion: conv?.display_name ?? null,
+    correoFiltrado: filtrado,
+  };
+}
