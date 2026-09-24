@@ -15,6 +15,7 @@ import { classifyContact, normalizePhone, normalizeEmail, regionForTimezone } fr
 import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 import { resolveBotId } from "../tenant";
 import { resolveChannelEnv } from "../channels/effectiveEnv";
+import { nombreDePersona } from "./nombreDePersona";
 
 /** Últimos mensajes de la conversación, en texto plano — lo que ve el dueño (o la plataforma de tickets) al abrir el ticket. */
 async function buildTranscript(db: Db, botId: string, convId: string): Promise<string> {
@@ -39,8 +40,27 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
         .describe("Qué tan urgente es: urgent = el cliente no puede operar/pagar; high = afecta bastante; normal = molestia normal; low = duda menor"),
       contact: z.string().optional().describe("Teléfono o correo del cliente — pídeselo si el canal no lo trae ya"),
       name: z.string().max(80).optional().describe("Nombre de la persona, tal como te lo dijo — pídeselo si no lo sabes"),
+      naturaleza: z
+        .enum(["problema", "interes_comercial"])
+        .describe(
+          "problema = algo le falla, un cobro, una queja, un reclamo (esto SÍ es un ticket). " +
+            "interes_comercial = quiere precio, cotización, una demo, saber si el producto hace algo, o que un asesor lo contacte para comprar (esto NO es un ticket: es captureLead).",
+        ),
     }),
-    execute: async ({ reason, summary, category, priority, contact, name }) => {
+    execute: async ({ reason, summary, category, priority, contact, name, naturaleza }) => {
+      // Un interés comercial abierto como ticket de soporte se pierde: el
+      // equipo de soporte no vende, y en el CRM no aparece como oportunidad.
+      // Pasó en las pruebas del 2026-09-24 con "¿cuánto cuesta?" y con "¿se
+      // integra con X?". La descripción ya lo decía y el modelo lo hizo igual,
+      // así que se hace cumplir aquí.
+      if (naturaleza === "interes_comercial") {
+        return {
+          ticketId: null,
+          created: false,
+          message:
+            "No se creó el ticket: esto es interés comercial, no un problema de soporte. Regístralo con captureLead (con su nombre, contacto y lo que busca) para que el equipo comercial le dé seguimiento.",
+        };
+      }
       const convId = getConversationId();
       const db = new Db(env.DB);
       const tickets = new TicketsRepo(db, botId);
@@ -93,10 +113,12 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
       // tenía ni cómo saludarlo al abrirlos. El nombre se busca primero en lo
       // que ya sabemos (la conversación, su lead) y solo al final en lo que
       // el modelo trae — sin ninguno, se pide antes de actuar.
+      requesterName = nombreDePersona(requesterName);
       if (!requesterName && convId) {
-        requesterName = (await new LeadsRepo(db, botId).findByConversation(convId))?.name ?? null;
+        requesterName = nombreDePersona((await new LeadsRepo(db, botId).findByConversation(convId))?.name);
       }
-      const nombreDicho = (name ?? "").replace(/\s+/g, " ").trim();
+      // "Cliente", "Usuario"… no es saber el nombre — ver nombreDePersona.ts.
+      const nombreDicho = nombreDePersona(name) ?? "";
       if (!requesterName && nombreDicho) {
         requesterName = nombreDicho;
         // Queda en la conversación: el siguiente turno (y el panel) ya lo saben.

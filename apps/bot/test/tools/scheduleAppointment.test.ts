@@ -230,3 +230,34 @@ describe("scheduleAppointmentTool — mover una cita ya acordada", () => {
     });
   });
 });
+
+// Pruebas automáticas del 2026-09-24: una demo quedó a nombre de "Cliente" y
+// se registró DOS veces para la misma hora.
+describe("scheduleAppointmentTool — a nombre de quién, y sin duplicar", () => {
+  it("un nombre de relleno sin nombre conocido en la conversación: no agenda y pide el nombre", async () => {
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("widget", "s-relleno");
+    const tool = scheduleAppointmentTool(env, () => conv.id, TEST_BOT_ID);
+    const r = (await tool.execute!({ ...INPUT, attendeeName: "Cliente" }, {} as any)) as { error?: string };
+    expect(r.error).toBe("missing_name");
+    expect(await new AppointmentsRepo(db, TEST_BOT_ID).listUpcoming(10, 0)).toHaveLength(0);
+  });
+
+  it("un relleno con el nombre ya conocido en la conversación: agenda con el nombre real", async () => {
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "123", "Andrés Luna");
+    const tool = scheduleAppointmentTool(env, () => conv.id, TEST_BOT_ID);
+    await tool.execute!({ ...INPUT, attendeeName: "Cliente" }, {} as any);
+    const [cita] = await new AppointmentsRepo(db, TEST_BOT_ID).listUpcoming(10, 0);
+    expect(cita.customer_name).toBe("Andrés Luna");
+  });
+
+  it("la misma cita otra vez (misma conversación, misma hora): no crea otra", async () => {
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("widget", "s-dup");
+    const tool = scheduleAppointmentTool(env, () => conv.id, TEST_BOT_ID);
+    const a = (await tool.execute!(INPUT, {} as any)) as { appointmentId: string };
+    const b = (await tool.execute!(INPUT, {} as any)) as { appointmentId: string; message: string };
+    expect(b.appointmentId).toBe(a.appointmentId);
+    expect(b.message).toContain("ya estaba agendada");
+    const todas = await db.all("SELECT id FROM appointments WHERE bot_id = ?", [TEST_BOT_ID]);
+    expect(todas).toHaveLength(1);
+  });
+});

@@ -48,6 +48,7 @@ describe("handoffHumanTool", () => {
     const tool = handoffHumanTool(envNoResend, () => convId, TEST_BOT_ID);
     const result = await tool.execute!(
       {
+        naturaleza: "problema",
         reason: "complejo",
         summary: "María pregunta sobre shampoo sin sulfatos",
         category: "product",
@@ -71,7 +72,7 @@ describe("handoffHumanTool — el contacto es obligatorio", () => {
   it("sin contact explícito y por un canal opaco (Telegram), se rechaza y NO crea el ticket", async () => {
     const tool = handoffHumanTool(env, () => convId, TEST_BOT_ID);
     const result = (await tool.execute!(
-      { reason: "x", summary: "y", category: "other", priority: "normal" },
+      { naturaleza: "problema", reason: "x", summary: "y", category: "other", priority: "normal" },
       {} as any,
     )) as { ticketId: string | null; created: boolean };
 
@@ -86,7 +87,7 @@ describe("handoffHumanTool — el contacto es obligatorio", () => {
     const tool = handoffHumanTool(env, () => conv.id, TEST_BOT_ID);
 
     const result = (await tool.execute!(
-      { reason: "x", summary: "y", category: "other", priority: "normal" },
+      { naturaleza: "problema", reason: "x", summary: "y", category: "other", priority: "normal" },
       {} as any,
     )) as { ticketId: string; created: boolean };
 
@@ -108,7 +109,7 @@ describe("handoffHumanTool — el contacto es obligatorio", () => {
 
     const tool = handoffHumanTool(env, () => convId, TEST_BOT_ID);
     const result = (await tool.execute!(
-      { reason: "x", summary: "y", category: "other", priority: "normal" },
+      { naturaleza: "problema", reason: "x", summary: "y", category: "other", priority: "normal" },
       {} as any,
     )) as { ticketId: string; created: boolean };
 
@@ -138,7 +139,7 @@ describe("handoffHumanTool — con una plataforma de tickets conectada", () => {
     const envNoResend = { ...env, RESEND_API_KEY: undefined };
     const tool = handoffHumanTool(envNoResend, () => convId, TEST_BOT_ID);
     const result = await tool.execute!(
-      { reason: "complejo", summary: "María pregunta sobre shampoo", category: "product", priority: "normal", contact: "maria@ejemplo.com" },
+      { naturaleza: "problema", reason: "complejo", summary: "María pregunta sobre shampoo", category: "product", priority: "normal", contact: "maria@ejemplo.com" },
       {} as any,
     );
     expect((result as { ticketId: string }).ticketId).toBeTruthy();
@@ -169,7 +170,7 @@ describe("handoffHumanTool — con una plataforma de tickets conectada", () => {
     const envNoResend = { ...env, RESEND_API_KEY: undefined };
     const tool = handoffHumanTool(envNoResend, () => convId, TEST_BOT_ID);
     const result = await tool.execute!(
-      { reason: "complejo", summary: "María pregunta sobre shampoo", category: "product", priority: "normal", contact: "maria@ejemplo.com" },
+      { naturaleza: "problema", reason: "complejo", summary: "María pregunta sobre shampoo", category: "product", priority: "normal", contact: "maria@ejemplo.com" },
       {} as any,
     );
     expect((result as { ticketId: string }).ticketId).toBeTruthy();
@@ -187,7 +188,7 @@ describe("handoffHumanTool — prioridad, quién pide, y transcripción", () => 
 
     const tool = handoffHumanTool(env, () => conv.id, TEST_BOT_ID);
     const result = await tool.execute!(
-      { reason: "pago", summary: "cliente no puede pagar", category: "billing", priority: "urgent" },
+      { naturaleza: "problema", reason: "pago", summary: "cliente no puede pagar", category: "billing", priority: "urgent" },
       {} as any,
     );
     const ticket = await tickets.getById((result as { ticketId: string }).ticketId);
@@ -202,7 +203,7 @@ describe("handoffHumanTool — prioridad, quién pide, y transcripción", () => 
   it("sin conversationId (ej. una llamada de sistema), no truena — requester/transcript quedan vacíos, pero igual exige contact", async () => {
     const tool = handoffHumanTool(env, () => null, TEST_BOT_ID);
     const result = await tool.execute!(
-      { reason: "x", summary: "y", category: "other", priority: "normal", contact: "sistema@ejemplo.com" },
+      { naturaleza: "problema", reason: "x", summary: "y", category: "other", priority: "normal", contact: "sistema@ejemplo.com" },
       {} as any,
     );
     const ticket = await tickets.getById((result as { ticketId: string }).ticketId);
@@ -230,7 +231,7 @@ describe("handoffHumanTool — prioridad, quién pide, y transcripción", () => 
     }) as any;
 
     const tool = handoffHumanTool({ ...env, RESEND_API_KEY: undefined }, () => conv.id, TEST_BOT_ID);
-    await tool.execute!({ reason: "x", summary: "y", category: "billing", priority: "high", contact: "ana@x.com" }, {} as any);
+    await tool.execute!({ naturaleza: "problema", reason: "x", summary: "y", category: "billing", priority: "high", contact: "ana@x.com" }, {} as any);
 
     expect(pushedBody.ticket.priority).toBe("high");
     expect(pushedBody.ticket.requester).toEqual({ name: "Ana", email: "ana@x.com" });
@@ -388,7 +389,7 @@ describe("handoffHumanTool — sin saber quién es, no hay ticket", () => {
     const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("email", "alguien@ejemplo.com");
     const tool = handoffHumanTool(env, () => conv.id, TEST_BOT_ID);
     const r = (await tool.execute!(
-      { reason: "ayuda", summary: "pide ayuda", category: "other", priority: "normal" },
+      { naturaleza: "problema", reason: "ayuda", summary: "pide ayuda", category: "other", priority: "normal" },
       {} as any,
     )) as { created: boolean; message: string };
     expect(r.created).toBe(false);
@@ -401,7 +402,7 @@ describe("handoffHumanTool — sin saber quién es, no hay ticket", () => {
     const conv = await convs.getOrCreate("email", "alguien@ejemplo.com");
     const tool = handoffHumanTool(env, () => conv.id, TEST_BOT_ID);
     const r = (await tool.execute!(
-      { reason: "ayuda", summary: "no le llega la factura", category: "billing", priority: "normal", name: "Laura Pérez" },
+      { naturaleza: "problema", reason: "ayuda", summary: "no le llega la factura", category: "billing", priority: "normal", name: "Laura Pérez" },
       {} as any,
     )) as { created: boolean };
     expect(r.created).toBe(true);
@@ -415,10 +416,36 @@ describe("handoffHumanTool — sin saber quién es, no hay ticket", () => {
     const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("email", "ana@ejemplo.com", "Ana Ruiz");
     const tool = handoffHumanTool(env, () => conv.id, TEST_BOT_ID);
     await tool.execute!(
-      { reason: "x", summary: "y", category: "other", priority: "normal", name: "Anita" },
+      { naturaleza: "problema", reason: "x", summary: "y", category: "other", priority: "normal", name: "Anita" },
       {} as any,
     );
     const [t] = await tickets.listOpen();
     expect(t.requester_name).toBe("Ana Ruiz");
+  });
+});
+
+// Lo comercial no es un ticket de soporte: se pierde entre los problemas y en
+// el CRM no aparece como oportunidad (pruebas automáticas del 2026-09-24).
+describe("handoffHumanTool — interés comercial no abre ticket", () => {
+  it("con naturaleza=interes_comercial no crea nada y manda a captureLead", async () => {
+    const tool = handoffHumanTool(env, () => convId, TEST_BOT_ID);
+    const r = (await tool.execute!(
+      { naturaleza: "interes_comercial", reason: "precio", summary: "quiere saber el precio", category: "other", priority: "normal", contact: "a@b.com" },
+      {} as any,
+    )) as { created: boolean; message: string };
+    expect(r.created).toBe(false);
+    expect(r.message).toContain("captureLead");
+    expect(await tickets.listOpen()).toHaveLength(0);
+  });
+
+  it("un nombre de relleno ('Cliente') no cuenta como saber quién es", async () => {
+    const db = new Db(env.DB);
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("email", "x@ejemplo.com");
+    const tool = handoffHumanTool(env, () => conv.id, TEST_BOT_ID);
+    const r = (await tool.execute!(
+      { naturaleza: "problema", reason: "x", summary: "y", category: "other", priority: "normal", name: "Cliente" },
+      {} as any,
+    )) as { created: boolean };
+    expect(r.created).toBe(false);
   });
 });

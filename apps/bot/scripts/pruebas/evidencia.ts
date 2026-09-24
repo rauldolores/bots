@@ -26,7 +26,7 @@ export async function leerEvidencia(env: Env, botId: string, convId: string | nu
       [botId, convId],
     ),
     db.all<Evidencia["citas"][number]>(
-      "SELECT starts_at, notes, external_ref FROM appointments WHERE bot_id = ? AND conversation_id = ?",
+      "SELECT starts_at, notes, external_ref FROM appointments WHERE bot_id = ? AND conversation_id = ? AND status = 'scheduled'",
       [botId, convId],
     ),
     db.all<{ tool_calls: string | null }>(

@@ -10,6 +10,9 @@ import { CALENDAR_ADAPTERS } from "../connectors/registry";
 import type { CalendarConnector, ConnectorCreds } from "../connectors/types";
 import { localTimeToUtcMs, resolveTimezone } from "../datetime";
 import { registrarCitaEnCrm } from "../appointments/crmSync";
+import { ConversationsRepo } from "../db/conversations";
+import { LeadsRepo } from "../db/leads";
+import { nombreDePersona } from "./nombreDePersona";
 
 /**
  * Agenda una cita. Si el bot tiene un calendario conectado (Cal.com…), la
@@ -111,6 +114,32 @@ export function scheduleAppointmentTool(env: Env, getConversationId: () => strin
           error: "invalid_start_time" as const,
           message: "Esa fecha/hora ya pasó o no es válida — confirma con el cliente la fecha exacta (con año) antes de reintentar.",
         };
+      }
+
+      // A nombre de QUIÉN. El modelo, cuando no lo sabe, rellena con
+      // "Cliente" — y así quedó una demo en el CRM en las pruebas del
+      // 2026-09-24. Se toma el nombre que ya conozca la conversación; si no
+      // hay ninguno de verdad, se pide antes de agendar.
+      let nombre = nombreDePersona(attendeeName);
+      if (!nombre && convId) {
+        const conv = await new ConversationsRepo(db, botId).getById(convId);
+        nombre =
+          nombreDePersona(conv?.display_name) ??
+          nombreDePersona((await new LeadsRepo(db, botId).findByConversation(convId))?.name);
+      }
+      if (!nombre) {
+        return {
+          error: "missing_name" as const,
+          message: "No se agendó: todavía no sabes cómo se llama la persona. Pregúntale su nombre y vuelve a llamar esta tool con él.",
+        };
+      }
+      attendeeName = nombre;
+
+      // La MISMA cita dos veces (el modelo llama la herramienta de nuevo para
+      // "confirmar") no es un cambio: se contesta que ya estaba, sin crear otra
+      // ni tocar el calendario. Visto en las pruebas: dos altas para una demo.
+      if (anterior && Math.abs(Number(anterior.starts_at) - startsAt) < 60_000) {
+        return { appointmentId: anterior.id, message: "Esa cita ya estaba agendada a esa hora; no se creó otra." };
       }
 
 

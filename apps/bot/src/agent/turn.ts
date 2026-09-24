@@ -10,7 +10,7 @@
 // Solo sabe: dado un texto de usuario ya resuelto, correr un turno completo y
 // dejarlo persistido en messages/agent_state.
 
-import { streamText } from "ai";
+import { streamText, generateText, stepCountIs } from "ai";
 import type { SystemModelMessage } from "ai";
 import type { Env } from "../env";
 import { Db } from "../db/client";
@@ -27,6 +27,7 @@ import { buildAgentContext } from "./context";
 import type { AgentConfig } from "../settings-loader";
 import type { MessagePart } from "../channels/parts";
 import { desglosarContexto, clasificarFalla, registrarDiagnosticoLlm } from "./llmDiagnostics";
+import { afirmacionSinRespaldo, notaDeCorreccion } from "./cumplimiento";
 
 export interface AgentTurnInput {
   env: Env;
@@ -245,6 +246,8 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
   let toolCallCount = 0;
   let toolCallsMade: ToolCallRecord[] = [];
   let usedModelId = modelId;
+  /** El modelo del intento que terminó bien — la guarda de cumplimiento lo reusa. */
+  let modeloExitoso: any = null;
   const tLlm = Date.now();
   // Se cuenta FUERA de attempt() a propósito: si un intento adelanta el aviso y
   // luego falla, el reintento no debe volver a mandárselo al cliente.
@@ -550,6 +553,7 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
       (err as { __llmDiagLogged?: boolean }).__llmDiagLogged = true;
       throw err;
     }
+    modeloExitoso = m;
   };
 
   // Requisito 6/7 del diagnóstico: nunca reintentar a ciegas — cada `attempt()`
@@ -674,6 +678,61 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
     if (!ok) {
       assistantText = "Algo falló de mi lado, intenta de nuevo en un momento.";
       fullAssistantText = assistantText;
+    }
+  }
+
+  // GUARDA DE CUMPLIMIENTO — ver agent/cumplimiento.ts. Si la respuesta dice
+  // que algo ya quedó hecho y ninguna herramienta de este turno lo hizo, se
+  // le da UNA oportunidad al modelo de corregir antes de que salga: hacerlo
+  // de verdad (con las mismas herramientas) o dejar de afirmarlo. Si la
+  // corrección falla, sale la respuesta original — nunca se deja al cliente
+  // sin contestar por esto.
+  if (modeloExitoso) {
+    const sinRespaldo = afirmacionSinRespaldo(assistantText, toolCallsMade);
+    if (sinRespaldo) {
+      console.warn(`[turno] afirmó sin respaldo (${sinRespaldo.motivo}): "${sinRespaldo.dijo}" — corrigiendo`);
+      try {
+        const correccion = await generateText({
+          model: modeloExitoso,
+          system,
+          messages: [
+            ...aiMessages,
+            { role: "assistant", content: fullAssistantText || assistantText },
+            { role: "user", content: notaDeCorreccion(sinRespaldo) },
+          ],
+          tools: enabledTools,
+          stopWhen: stepCountIs(4),
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          ...(cfg.temperature !== undefined ? { temperature: cfg.temperature } : {}),
+        });
+        const corregido = correccion.text.trim();
+        if (corregido) {
+          // Lo ya adelantado al cliente (párrafo o aviso) no se puede retirar;
+          // se sustituye solo lo que faltaba por enviar.
+          const yaEnviado = fullAssistantText.slice(0, Math.max(0, fullAssistantText.length - assistantText.length));
+          assistantText = corregido;
+          fullAssistantText = `${yaEnviado}${corregido}`;
+        }
+        for (const s of correccion.steps) {
+          const byCallId = new Map<string, any>();
+          for (const tr of ((s as any).toolResults ?? []) as any[]) {
+            if (tr?.toolCallId) byCallId.set(tr.toolCallId, tr);
+          }
+          for (const tc of (s.toolCalls ?? []) as any[]) {
+            toolCallsMade.push({
+              toolName: tc.toolName as string,
+              input: tc.input,
+              ...summarizeToolResult(tc.toolCallId ? byCallId.get(tc.toolCallId) : undefined),
+            });
+            toolCallCount++;
+          }
+        }
+        inputTokens += correccion.usage?.inputTokens ?? 0;
+        outputTokens += correccion.usage?.outputTokens ?? 0;
+        cachedTokens += correccion.usage?.cachedInputTokens ?? 0;
+      } catch (e) {
+        console.error("[turno] la corrección de cumplimiento falló; sale la respuesta original:", e);
+      }
     }
   }
 

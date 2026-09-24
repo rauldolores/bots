@@ -23,7 +23,18 @@ export function catalogQueryTool(env: Env, botId: string) {
             (p.sku?.toLowerCase() === q),
         )
         .slice(0, 5);
-      return { matches };
+      if (matches.length > 0) return { matches };
+      // Un catálogo vacío no es "no sé". En las pruebas del 2026-09-24 el
+      // agente contestó "no tengo información del precio" tras esta consulta,
+      // cuando su base de conocimiento sí explicaba cómo se cotiza. Muchos
+      // negocios tienen sus precios en documentos, no en el catálogo.
+      return {
+        matches,
+        nota:
+          catalog.length === 0
+            ? "Este negocio no tiene catálogo cargado. Antes de decir que no tienes la información, búscala en la base de conocimiento (searchKb): ahí suelen estar los precios, planes o cómo se cotiza."
+            : "No hay productos del catálogo que coincidan. Antes de decir que no tienes la información, búscala en la base de conocimiento (searchKb).",
+      };
     },
   });
 }
