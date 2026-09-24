@@ -352,6 +352,16 @@ export async function connectEmailChannel(env: Env, botId: string, provider: Ema
   const str = (name: string) => String(form.get(name) ?? "").trim();
   const existing = await repo.getByBotAndChannel(botId, "email");
 
+  // Cambiar de proveedor deja inservibles las credenciales del anterior, y
+  // antes se quedaban en Vault para siempre: la llave de Resend seguía ahí
+  // aunque el bot ya usara Mailgun. Se borran al cambiar — una credencial que
+  // nadie usa es riesgo sin beneficio.
+  const proveedorAnterior = existing?.config.inboundProvider;
+  if (proveedorAnterior && proveedorAnterior !== provider) {
+    if (existing?.secret_ref) await deleteSecret(db, existing.secret_ref).catch(() => {});
+    if (existing?.verify_token_ref) await deleteSecret(db, existing.verify_token_ref).catch(() => {});
+  }
+
   if (provider === "resend") {
     const apiKey = str("api_key");
     const signingSecret = str("signing_secret");
