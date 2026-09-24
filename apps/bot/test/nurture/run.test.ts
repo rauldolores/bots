@@ -52,6 +52,20 @@ function todayNoonMx(): number {
 }
 const NOON = todayNoonMx();
 
+/**
+ * La hora de los mensajes del cliente, SIEMPRE relativa a NOON.
+ *
+ * Estas pruebas inscriben al lead a las 12:00 de hoy (hora de México), pero
+ * los mensajes se creaban con la hora REAL. Eso las hacía depender del reloj:
+ * corridas en la mañana, los mensajes caían ANTES de la inscripción y el
+ * código concluía —con razón— que el cliente no había respondido; corridas en
+ * la tarde, caían DESPUÉS y concluía lo contrario. Unas pasaban de mañana y
+ * otras de tarde, y en CI (que corre de madrugada en México) fallaban
+ * siempre las mismas. Con estas dos constantes, el orden lo decide la prueba.
+ */
+const ANTES_DE_INSCRIBIR = NOON - 3600_000;
+const DESPUES_DE_INSCRIBIR = NOON + 1_000;
+
 async function pgNow(): Promise<number> {
   const row = await db.first<{ now_ms: string | number }>(
     "SELECT (EXTRACT(EPOCH FROM now()) * 1000)::bigint as now_ms",
@@ -222,7 +236,7 @@ describe("un lead en VARIOS seguimientos", () => {
 describe("processNurtureJobs — el toque se manda", () => {
   it("con una conversación existente: manda, registra 'sent', y programa el siguiente paso", async () => {
     const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("twilio", "+5215512345678");
-    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "hola, quiero info");
+    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "hola, quiero info", { createdAt: ANTES_DE_INSCRIBIR });
     const leadId = await new LeadsRepo(db, TEST_BOT_ID).create({
       conversationId: conv.id,
       channelUserId: conv.channel_user_id,
@@ -254,7 +268,7 @@ describe("processNurtureJobs — el toque se manda", () => {
 
   it("último paso: al mandarlo, la secuencia se marca 'completado'", async () => {
     const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("twilio", "+5215512345678");
-    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "hola");
+    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "hola", { createdAt: ANTES_DE_INSCRIBIR });
     const leadId = await new LeadsRepo(db, TEST_BOT_ID).create({ conversationId: conv.id, channelUserId: conv.channel_user_id, intent: "x" });
     const seqId = await makeSequence([{ afterHours: 0, instruction: "único paso" }]);
     await enrollLeadInSequence(env, TEST_BOT_ID, leadId, seqId, NOON);
@@ -301,7 +315,7 @@ describe("processNurtureJobs — sin conversación existente (sin contacto en fr
 describe("processNurtureJobs — frenos que detienen la secuencia", () => {
   async function setupEnrolled() {
     const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("twilio", "+5215512345678");
-    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "hola");
+    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "hola", { createdAt: ANTES_DE_INSCRIBIR });
     const leadId = await new LeadsRepo(db, TEST_BOT_ID).create({ conversationId: conv.id, channelUserId: conv.channel_user_id, intent: "x" });
     const seqId = await makeSequence();
     await enrollLeadInSequence(env, TEST_BOT_ID, leadId, seqId, NOON);
@@ -336,7 +350,7 @@ describe("processNurtureJobs — frenos que detienen la secuencia", () => {
     // le contesta a él — detenerlo sería matar un seguimiento por algo que no
     // tiene que ver. Tampoco se le habla encima: se salta y sigue.
     const { conv, leadId, seqId } = await setupEnrolled();
-    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "ya no me interesa, gracias");
+    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "ya no me interesa, gracias", { createdAt: DESPUES_DE_INSCRIBIR });
 
     const result = await processNurtureJobs(env, 5, { now: NOON + 60_000 });
     expect(result.skipped).toBe(1);
@@ -350,7 +364,7 @@ describe("processNurtureJobs — frenos que detienen la secuencia", () => {
   // cotización apagaría también el del webinar, que nunca le escribió.
   it("responder detiene SOLO al seguimiento que le escribió", async () => {
     const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("twilio", "+5215512345678");
-    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "hola");
+    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "hola", { createdAt: ANTES_DE_INSCRIBIR });
     const leadId = await new LeadsRepo(db, TEST_BOT_ID).create({
       conversationId: conv.id, channelUserId: conv.channel_user_id, intent: "x",
     });
@@ -371,7 +385,11 @@ describe("processNurtureJobs — frenos que detienen la secuencia", () => {
       channel: "twilio", addressNorm: conv.channel_user_id, status: "sent",
     });
     // El cliente contesta DESPUÉS de ese toque.
-    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "sí, mándamela");
+    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "sí, mándamela", {
+      // Después de la inscripción (NOON) y después del toque, que `claim` fecha
+      // con la hora real: el que sea más tarde, más un segundo.
+      createdAt: Math.max(NOON, Date.now()) + 1_000,
+    });
 
     // Y ahora vence el paso 1 de cada una.
     const jobs = new WorkJobsRepo(db);
@@ -418,7 +436,7 @@ describe("processNurtureJobs — frenos que detienen la secuencia", () => {
 describe("processNurtureJobs — frenos que solo reprograman (no detienen ni consumen el paso)", () => {
   it("tope diario alcanzado: reprograma más tarde, no manda, y el paso sigue pendiente", async () => {
     const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("twilio", "+5215512345678");
-    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "hola");
+    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "hola", { createdAt: ANTES_DE_INSCRIBIR });
     const leadId = await new LeadsRepo(db, TEST_BOT_ID).create({ conversationId: conv.id, channelUserId: conv.channel_user_id, intent: "x" });
     const seqId = await makeSequence();
     await enrollLeadInSequence(env, TEST_BOT_ID, leadId, seqId, NOON);
@@ -449,7 +467,7 @@ describe("processNurtureJobs — frenos que solo reprograman (no detienen ni con
 
   it("fuera de horario permitido: reprograma para la próxima ventana, sin mandar", async () => {
     const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("twilio", "+5215512345678");
-    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "hola");
+    await new MessagesRepo(db, TEST_BOT_ID).append(conv.id, "user", "hola", { createdAt: ANTES_DE_INSCRIBIR });
     const leadId = await new LeadsRepo(db, TEST_BOT_ID).create({ conversationId: conv.id, channelUserId: conv.channel_user_id, intent: "x" });
     const seqId = await makeSequence();
     const madrugada = NOON - 9 * 3600_000; // 03:00 local en vez de 12:00
