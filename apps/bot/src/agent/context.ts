@@ -152,6 +152,7 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
   const [cfg, cliente] = await Promise.all([
     resolveAgentConfig(env, toolNames, botId, { paraVoz: input.paraVoz }),
     buildCustomerContext(db, botId, {
+      env,
       conversationId,
       channelUserId: state?.channelUserId ?? null,
     }),

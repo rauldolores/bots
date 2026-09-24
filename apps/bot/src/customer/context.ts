@@ -23,6 +23,7 @@
  *     cada prompt — ver LIMITES.
  */
 import type { Db } from "../db/client";
+import type { Env } from "../env";
 import { LeadsRepo, type Lead } from "../db/leads";
 import { LeadContactsRepo, type LeadContact } from "../db/leadContacts";
 import { TicketsRepo, type Ticket } from "../db/tickets";
@@ -32,6 +33,7 @@ import { ConversationsRepo, type Conversation } from "../db/conversations";
 import { NurtureSequencesRepo } from "../db/nurtureSequences";
 import { NurtureEnrollmentsRepo } from "../db/nurtureEnrollments";
 import { readCrmSnapshot, renderCrmSnapshot } from "./crmSnapshot";
+import { lineaDeContactoMcp, resolverContactoEnMcp, type ContactoResuelto } from "./contactoMcp";
 import type { CrmCustomerSnapshot } from "../connectors/types";
 
 /**
@@ -56,6 +58,13 @@ export interface CustomerContext {
   /** Seguimiento activo, si está inscrito en una secuencia. */
   seguimiento: { secuencia: string; objetivo: string; toques: LeadTouch[] } | null;
   /**
+   * Su ficha en el CRM conectado por MCP, resuelta por nosotros con su correo
+   * o su teléfono (ver contactoMcp.ts). `undefined` = este bot no tiene MCP y
+   * no hay nada que decir; `null` = hay MCP y no apareció, que también se
+   * dice en el prompt.
+   */
+  contactoMcp?: ContactoResuelto | null;
+  /**
    * Lo que el CRM sabe de esta persona: empresa, oportunidades abiertas, notas
    * del equipo. Sale de CACHÉ — el turno nunca espera al CRM (ver crmSnapshot.ts).
    * `null` si no hay CRM conectado, o si la caché está fría.
@@ -63,7 +72,31 @@ export interface CustomerContext {
   crm: CrmCustomerSnapshot | null;
 }
 
+/**
+ * Su correo y su teléfono, de lo que sepamos de él: las direcciones
+ * normalizadas de lead_contacts, y como respaldo el contacto del propio lead.
+ */
+async function resolverContactoDelLead(
+  env: Env | undefined,
+  db: Db,
+  botId: string,
+  lead: Lead,
+  contactos: LeadContact[],
+): Promise<ContactoResuelto | null | undefined> {
+  if (!env) return undefined; // quien llamó no pasó env: sin MCP que consultar
+  const email =
+    contactos.find((c) => c.kind === "email")?.address_norm ??
+    (lead.contact?.includes("@") ? lead.contact : null);
+  const telefono =
+    contactos.find((c) => c.kind === "phone")?.address_norm ??
+    (lead.contact && !lead.contact.includes("@") ? lead.contact : null);
+  if (!email && !telefono) return undefined;
+  return resolverContactoEnMcp(env, db, botId, { email, telefono });
+}
+
 export interface CustomerContextInput {
+  /** Hace falta para consultar el MCP; sin él, el contexto se arma igual pero sin la ficha del CRM. */
+  env?: Env;
   /** La conversación actual, si la hay (en el seguimiento puede no haberla). */
   conversationId?: string | null;
   /** Identidad del canal — con esto se encuentra al lead cuando no hay conversación conocida. */
@@ -106,7 +139,15 @@ export async function buildCustomerContext(
     // Los otros canales dependen de las direcciones halladas arriba.
     const otrosCanales = await otrasConversaciones(db, botId, lead, contactos).catch(() => []);
 
-    return { lead, contactos, otrosCanales, ticketsAbiertos, citasProximas, seguimiento, crm };
+    // Quién es en el CRM conectado por MCP. Se resuelve AQUÍ, con su correo o
+    // su teléfono, en vez de dejar que el modelo lo adivine durante la
+    // conversación — que fue exactamente lo que falló tres veces seguidas.
+    // Con el snapshot del conector nativo ya resuelto no hace falta.
+    const contactoMcp = crm?.contactId
+      ? undefined
+      : await resolverContactoDelLead(input.env, db, botId, lead, contactos);
+
+    return { lead, contactos, otrosCanales, ticketsAbiertos, citasProximas, seguimiento, crm, contactoMcp };
   } catch (e) {
     console.warn("[customerContext] no se pudo armar el contexto:", e);
     return VACIO;
@@ -250,6 +291,14 @@ export function renderCustomerContext(ctx: CustomerContext, timeZone: string): s
 
   const delCrm = renderCrmSnapshot(ctx.crm);
   if (delCrm) lineas.push(delCrm);
+
+  // Quién es en el CRM conectado por MCP. Va DESPUÉS del snapshot para no
+  // pisar el id del conector nativo cuando ese existe, y se imprime aunque no
+  // haya aparecido: el silencio es lo que el modelo rellena inventando.
+  if (ctx.contactoMcp !== undefined && !ctx.crm?.contactId) {
+    const linea = lineaDeContactoMcp(ctx.contactoMcp, true);
+    if (linea) lineas.push(linea);
+  }
 
   if (lineas.length === 0) return null;
   return `<cliente_conocido>\n${lineas.join("\n")}\n</cliente_conocido>`;
