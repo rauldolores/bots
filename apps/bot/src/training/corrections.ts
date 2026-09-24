@@ -24,6 +24,7 @@
 import { generateText } from "ai";
 import type { Env } from "../env";
 import { Db } from "../db/client";
+import { registrarUso } from "../db/aiUsage";
 import { MessagesRepo } from "../db/messages";
 import { createModel } from "../llm/provider";
 import { loadLlmOverrides } from "../settings-loader";
@@ -56,7 +57,8 @@ export async function proponerLeccion(
 ): Promise<{ regla: string; generalizada: boolean }> {
   const fallback = input.correccion.trim().slice(0, MAX_REGLA);
   try {
-    const historia = await new MessagesRepo(new Db(env.DB), botId).lastN(
+    const db = new Db(env.DB);
+    const historia = await new MessagesRepo(db, botId).lastN(
       input.conversationId,
       CONTEXTO_MENSAJES,
     );
@@ -65,8 +67,8 @@ export async function proponerLeccion(
       .map((m) => `${m.role === "user" ? "Cliente" : "Bot"}: ${m.content.slice(0, 400)}`)
       .join("\n");
 
-    const { model } = createModel(env, "fast", await loadLlmOverrides(env, botId));
-    const { text } = await generateText({
+    const { model, modelId } = createModel(env, "fast", await loadLlmOverrides(env, botId));
+    const { text, usage } = await generateText({
       model,
       prompt: `Un supervisor corrigió a un bot de atención a clientes. Convierte su corrección en UNA regla general que el bot pueda seguir en futuras conversaciones.
 
@@ -85,6 +87,7 @@ No inventes políticas que el supervisor no dijo — si su corrección es espec�
 Máximo 200 caracteres.`,
     });
 
+    await registrarUso(db, botId, { source: "entrenamiento", refId: input.conversationId, modelUsed: modelId, usage });
     const regla = text.trim().replace(/^["'\-•\s]+|["'\s]+$/g, "").slice(0, MAX_REGLA);
     if (!regla) return { regla: fallback, generalizada: false };
     return { regla, generalizada: true };

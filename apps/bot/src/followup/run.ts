@@ -20,6 +20,7 @@
 import { generateText } from "ai";
 import type { Env } from "../env";
 import { Db } from "../db/client";
+import { registrarUso } from "../db/aiUsage";
 import { MessagesRepo } from "../db/messages";
 import { ConversationsRepo } from "../db/conversations";
 import { BotsRepo } from "../db/bots";
@@ -162,7 +163,9 @@ async function runFollowupsForBot(
   const msgs = new MessagesRepo(db, botId);
   const convs = new ConversationsRepo(db, botId);
   const bot = await new BotsRepo(db).getById(botId);
-  const { model, modelId } = createModel(env, "fast", await loadLlmOverrides(env));
+  // Con botId: sin él, loadLlmOverrides cae al bot por defecto y el
+  // seguimiento del bot B se pensaba con la llave y el plan del bot A.
+  const { model, modelId } = createModel(env, "fast", await loadLlmOverrides(env, botId));
 
   let sent = 0;
   let skipped = 0;
@@ -200,6 +203,9 @@ ${transcript}
 Escribe UN solo mensaje de seguimiento MUY breve (máximo 2 líneas): retoma con naturalidad lo último que hablaron y pregúntale si necesita ayuda o le quedó alguna duda. NO repitas links que ya le mandaste salvo que sea natural. Responde SOLO con el mensaje, sin comillas ni explicación.`,
       });
 
+      // El mensaje se guarda con model_used pero sin tokens: el costo va aquí,
+      // una sola vez.
+      await registrarUso(db, botId, { source: "seguimiento", refId: cand.id, modelUsed: modelId, usage: result.usage });
       const text = result.text.trim();
       if (!text) throw new Error("empty followup text");
 

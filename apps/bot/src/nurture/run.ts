@@ -13,6 +13,7 @@ import { generateText } from "ai";
 import { buildCustomerContext, renderCustomerContext } from "../customer/context";
 import type { Env } from "../env";
 import { Db } from "../db/client";
+import { registrarUso } from "../db/aiUsage";
 import { LeadsRepo, type Lead } from "../db/leads";
 import { NurtureSequencesRepo, type NurtureSequence } from "../db/nurtureSequences";
 import { NurtureEnrollmentsRepo } from "../db/nurtureEnrollments";
@@ -342,7 +343,9 @@ async function draftTouchMessage(
   conversationId: string,
 ): Promise<string> {
   const bot = await new BotsRepo(db).getById(botId);
-  const { model } = createModel(env, "fast", await loadLlmOverrides(env));
+  // Con botId, igual que en followup/run.ts: sin él, la secuencia de un bot
+  // se escribía con la llave y el plan del bot por defecto.
+  const { model, modelId } = createModel(env, "fast", await loadLlmOverrides(env, botId));
   const history = await new MessagesRepo(db, botId).lastN(conversationId, 6);
   // Con qué se escribe este toque. Antes era `lead.intent` y nada más: el bot
   // le escribía a alguien tres días después sin saber si tenía un caso
@@ -373,5 +376,6 @@ ${transcript || "(sin conversación previa registrada)"}
 
 Escribe UN solo mensaje MUY breve (máximo 2-3 líneas) que cumpla este paso. Responde SOLO con el mensaje, sin comillas ni explicación.`,
   });
+  await registrarUso(db, botId, { source: "nurture", refId: conversationId, modelUsed: modelId, usage: result.usage });
   return result.text.trim() || instruction;
 }

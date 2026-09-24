@@ -16,6 +16,7 @@ import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { layout } from "./layout";
 import { costOfUsage, type ModelId } from "../../pricing";
+import { costoPorConversacion, type Concepto } from "../../billing/costoPorConversacion";
 import { fetchTwilioUsage } from "../twilioUsage";
 import { monthIaCostUsd } from "../../budget";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
@@ -60,16 +61,27 @@ export async function renderCosts(env: Env, botId: string, saved = false, visibl
     cached: number;
     msgs: number;
   }>(
+    // messages (las respuestas) + ai_usage (todo lo que se piensa fuera del
+    // turno: CRM, analista, seguimientos, habilidades…). Antes solo se leía
+    // messages, así que esas llamadas contaban para el tope mensual pero no
+    // aparecían en ninguna tarjeta de esta pantalla.
     `SELECT to_char(to_timestamp(created_at / 1000.0) AT TIME ZONE 'UTC', 'YYYY-MM-DD') as day, model_used,
-            SUM(COALESCE(input_tokens, 0)) as input,
-            SUM(COALESCE(output_tokens, 0)) as output,
-            SUM(COALESCE(cached_input_tokens, 0)) as cached,
-            COUNT(*) as msgs
-     FROM messages
-     WHERE bot_id = ? AND created_at > ? AND model_used IS NOT NULL
+            SUM(input) as input, SUM(output) as output, SUM(cached) as cached, COUNT(*) as msgs
+     FROM (
+       SELECT created_at, model_used,
+              COALESCE(input_tokens, 0) as input, COALESCE(output_tokens, 0) as output,
+              COALESCE(cached_input_tokens, 0) as cached
+         FROM messages
+        WHERE bot_id = ? AND created_at > ? AND model_used IS NOT NULL
+       UNION ALL
+       SELECT created_at, model_used,
+              COALESCE(input_tokens, 0), COALESCE(output_tokens, 0), COALESCE(cached_input_tokens, 0)
+         FROM ai_usage
+        WHERE bot_id = ? AND created_at > ? AND source <> 'voice'
+     ) todo
      GROUP BY day, model_used
      ORDER BY day DESC`,
-    [botId, thirtyDays],
+    [botId, thirtyDays, botId, thirtyDays],
   );
 
   let iaMonth = 0;
@@ -180,7 +192,7 @@ export async function renderCosts(env: Env, botId: string, saved = false, visibl
         <div class="text-[10px] text-dim mt-1">IA + Twilio + Voz</div>
       </div>
       <div class="card bg-panel border border-line p-5">
-        <div class="text-muted text-[11px]">🧠 IA (Claude)</div>
+        <div class="text-muted text-[11px]">🧠 IA</div>
         <div class="font-display font-bold text-[24px] mt-1.5 leading-none">${money(iaMonth)}</div>
         <div class="text-[10px] text-dim mt-1">hoy ${money4(iaToday)}</div>
       </div>
@@ -194,6 +206,60 @@ export async function renderCosts(env: Env, botId: string, saved = false, visibl
         <div class="font-display font-bold text-[24px] mt-1.5 leading-none">${money(voiceMonth)}</div>
         <div class="text-[10px] text-dim mt-1">${voiceCallsMonth} llamada${voiceCallsMonth === 1 ? "" : "s"}</div>
       </div>
+    </div>`;
+
+  // --- Costo real por conversación (30 días) --------------------------------
+  const cpc = await costoPorConversacion(db, botId, thirtyDays);
+  const CONCEPTOS: Array<[Concepto, string, string]> = [
+    ["respuestas", "Respuestas", "lo que el bot le contesta al cliente"],
+    ["despues", "Análisis al cerrar", "dejar el CRM al día y calificar la conversación"],
+    ["seguimientos", "Seguimientos", "volver a escribirle a quien dejó de contestar"],
+    ["voz", "Llamadas", "ElevenLabs + telefonía, estimado"],
+  ];
+  const totalDesglose = CONCEPTOS.reduce((a, [k]) => a + cpc.desglose[k], 0);
+  const filasConcepto = CONCEPTOS.filter(([k]) => cpc.desglose[k] > 0)
+    .map(([k, nombre, detalle]) => {
+      const pct = totalDesglose > 0 ? Math.round((cpc.desglose[k] / totalDesglose) * 100) : 0;
+      const porConv = cpc.conversaciones ? cpc.desglose[k] / cpc.conversaciones : 0;
+      return `<tr style="border-top:1px solid var(--line)">
+        <td class="py-2 pr-2"><div class="text-[12.5px] text-cream">${esc(nombre)}</div><div class="text-[10.5px] text-dim">${esc(detalle)}</div></td>
+        <td class="text-right text-[12px] text-muted" style="font-variant-numeric:tabular-nums">${pct}%</td>
+        <td class="text-right font-semibold text-cream" style="font-variant-numeric:tabular-nums">${money4(porConv)}</td>
+      </tr>`;
+    })
+    .join("");
+  const filasCaras = cpc.masCaras
+    .map((c) => `<tr style="border-top:1px solid var(--line)">
+        <td class="py-2 pr-2 text-[12px]"><a href="/admin/conversations/${encodeURIComponent(c.id)}" class="text-cream" style="text-decoration:underline;text-underline-offset:2px">${esc(c.nombre || "Sin nombre")}</a> <span class="text-dim text-[10.5px]">· ${esc(c.canal)}</span></td>
+        <td class="text-right font-semibold text-cream" style="font-variant-numeric:tabular-nums">${money4(c.usd)}</td>
+      </tr>`)
+    .join("");
+  const conversacionCard = `
+    <div class="card bg-panel border border-line p-[18px]">
+      <div class="font-display font-semibold text-[14px] mb-1">💬 Costo real por conversación <span class="text-[10px] text-dim font-normal">(30 días · medido)</span></div>
+      ${
+        cpc.conversaciones === 0
+          ? `<p class="text-[12.5px] text-dim m-0 mt-2">Todavía no hay conversaciones de clientes en los últimos 30 días.</p>`
+          : `
+      <div class="flex flex-wrap items-end gap-x-8 gap-y-2 mt-2 mb-3">
+        <div><div class="text-[10.5px] text-dim">Promedio</div><div class="font-display font-bold text-[24px] leading-none" style="font-variant-numeric:tabular-nums">${money4(cpc.promedioUsd)}</div></div>
+        <div><div class="text-[10.5px] text-dim">La típica (mediana)</div><div class="font-display font-bold text-[18px] leading-none text-muted" style="font-variant-numeric:tabular-nums">${money4(cpc.medianaUsd)}</div></div>
+        <div><div class="text-[10.5px] text-dim">Conversaciones</div><div class="font-display font-bold text-[18px] leading-none text-muted">${cpc.conversaciones}</div></div>
+      </div>
+      <table class="w-full" style="border-collapse:collapse">
+        <thead><tr class="text-[9.5px] tracking-[.1em] uppercase text-dim text-left"><th class="font-normal pb-2">En qué se va</th><th class="font-normal text-right pb-2">Del total</th><th class="font-normal text-right pb-2">Por conversación</th></tr></thead>
+        <tbody>${filasConcepto}</tbody>
+      </table>
+      ${
+        filasCaras
+          ? `<div class="text-[10.5px] text-dim uppercase tracking-[.1em] mt-4 mb-1">Las más caras</div>
+      <table class="w-full" style="border-collapse:collapse"><tbody>${filasCaras}</tbody></table>`
+          : ""
+      }
+      <p class="text-[10.5px] text-dim mt-3 mb-0 leading-relaxed">Suma lo que se gastó en cada conversación, incluido lo que se piensa después de contestar.
+        Cuando el promedio queda muy arriba de la mediana, unas pocas conversaciones largas están cargando el número: revisa las más caras.
+        ${cpc.fueraDeConversacionesUsd > 0 ? `Aparte, ${money4(cpc.fueraDeConversacionesUsd)} fueron de IA que no es de ninguna conversación de cliente (sandbox, sugerencias del panel, mejoras, habilidades).` : ""}</p>`
+      }
     </div>`;
 
   // --- Desglose IA por modelo ------------------------------------------------
@@ -298,6 +364,7 @@ export async function renderCosts(env: Env, botId: string, saved = false, visibl
   const body = `
     <div class="flex flex-col gap-4" style="max-width:1080px">
       ${cards}
+      ${conversacionCard}
       ${budgetCard}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-[14px]">
         ${iaCard}

@@ -10,7 +10,68 @@
 // no repetir ese error.
 import { Db } from "./client";
 
-export type AiUsageSource = "skill" | "voice";
+/**
+ * De dónde salió el gasto. Todo lo que NO es un turno del chat (esos guardan
+ * sus tokens en `messages`) tiene que caer aquí, o su costo es invisible
+ * para el tope mensual y para Costos:
+ *   crm           — análisis de la conversación para dejar el CRM al día
+ *   analisis      — el "analista de conversaciones" (sentimiento, resolución…)
+ *   mejoras       — borradores de base de conocimiento y lecciones
+ *   seguimiento   — mensaje a un lead que dejó de contestar
+ *   nurture       — pasos de una secuencia de seguimiento
+ *   entrenamiento — convertir una corrección del dueño en regla
+ *   panel         — lo que el dueño dispara desde /admin (sugerencias, prueba de IA)
+ */
+export type AiUsageSource =
+  | "skill"
+  | "voice"
+  | "crm"
+  | "analisis"
+  | "mejoras"
+  | "seguimiento"
+  | "nurture"
+  | "entrenamiento"
+  | "panel";
+
+/** Lo que devuelve `usage` en cualquier generateText/generateObject del AI SDK. */
+export interface UsoDelSdk {
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedInputTokens?: number;
+}
+
+/**
+ * Registra una llamada a la IA que no es un turno del chat. `refId` es la
+ * conversación cuando la hay: así el costo POR CONVERSACIÓN suma también lo
+ * que se gastó después de contestar (el análisis del CRM, el del analista),
+ * que es justo lo que antes no se veía.
+ *
+ * Nunca lanza: perder un registro de costo es tolerable; tumbar el análisis o
+ * el seguimiento que lo disparó, no.
+ */
+export async function registrarUso(
+  db: Db,
+  botId: string,
+  input: { source: AiUsageSource; refId?: string | null; modelUsed: string; usage: UsoDelSdk | undefined | null },
+): Promise<void> {
+  const u = input.usage;
+  if (!u) return;
+  const inputTokens = u.inputTokens ?? 0;
+  const outputTokens = u.outputTokens ?? 0;
+  if (inputTokens === 0 && outputTokens === 0) return;
+  try {
+    await new AiUsageRepo(db, botId).record({
+      source: input.source,
+      refId: input.refId ?? null,
+      modelUsed: input.modelUsed,
+      inputTokens,
+      outputTokens,
+      cachedInputTokens: u.cachedInputTokens ?? 0,
+    });
+  } catch (e) {
+    console.warn(`[ai_usage] no se pudo registrar ${input.source}:`, e instanceof Error ? e.message : e);
+  }
+}
 
 export interface AiUsageInput {
   source: AiUsageSource;

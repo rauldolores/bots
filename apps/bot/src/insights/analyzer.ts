@@ -15,6 +15,7 @@ import { generateText } from "ai";
 import { z } from "zod";
 import type { Env } from "../env";
 import { Db } from "../db/client";
+import { registrarUso } from "../db/aiUsage";
 import { MessagesRepo } from "../db/messages";
 import { InsightsRepo, type UpsertInsightInput } from "../db/insights";
 import { CustomerFactsRepo } from "../db/facts";
@@ -212,7 +213,7 @@ export async function analyzeConversations(
   let analyzed = 0;
   let errors = 0;
 
-  const { model } = createModel(env, "fast", await loadLlmOverrides(env, botId));
+  const { model, modelId } = createModel(env, "fast", await loadLlmOverrides(env, botId));
 
   for (const conv of pending) {
     try {
@@ -225,6 +226,7 @@ export async function analyzeConversations(
         prompt: gradingPrompt(businessName, transcript, conv.open_tickets > 0, objetivo),
       });
 
+      await registrarUso(db, botId, { source: "analisis", refId: conv.id, modelUsed: modelId, usage: result.usage });
       const insight = parseInsightJson(result.text);
       if (!insight) {
         errors++;

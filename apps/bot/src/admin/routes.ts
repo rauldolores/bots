@@ -135,6 +135,7 @@ import { enqueueCampaign, createHandoffTemplate, contentApprovalStatus, listCont
 import { segmentCount, parseCampaignFilters } from "../segments";
 import { resolveTimezone } from "../datetime";
 import { Db } from "../db/client";
+import { registrarUso } from "../db/aiUsage";
 import { BotChannelsRepo } from "../db/botChannels";
 import { LeadsRepo, type Lead } from "../db/leads";
 import { TicketsRepo } from "../db/tickets";
@@ -2523,12 +2524,13 @@ adminApp.post("/config/suggest-fields", async (c) => {
   if (!niche) return c.json({ fields: FALLBACK_SUGGEST_FIELDS });
   try {
     const ov = await loadLlmOverrides(c.env, c.get("botId"));
-    const { model } = createModel(c.env, "fast", ov);
+    const { model, modelId } = createModel(c.env, "fast", ov);
     const result = await generateObject({
       model,
       schema: SUGGEST_FIELDS_SCHEMA,
       prompt: `Un dueño de un negocio de giro "${niche}" está configurando un chatbot de atención al cliente. Sugiere entre 4 y 8 datos ESPECÍFICOS de ese giro que un cliente típicamente preguntaría y que el dueño debería capturar — cada uno como un campo corto "nombre del dato" + un placeholder de ejemplo para el valor. NO sugieras horario, precios/catálogo, ubicación, métodos de pago, teléfono ni sitio web — esos ya se capturan aparte. Responde en español, campos concretos y accionables para ESTE giro, no genéricos.`,
     });
+    await registrarUso(new Db(c.env.DB), c.get("botId"), { source: "panel", modelUsed: modelId, usage: result.usage });
     return c.json(result.object);
   } catch (err) {
     console.error("[config] suggest-fields falló:", err);
@@ -2549,6 +2551,7 @@ adminApp.get("/config/llm-test", async (c) => {
       // generar nada) — 20 da margen sin volverse una prueba lenta/cara.
       maxOutputTokens: 20,
     });
+    await registrarUso(new Db(c.env.DB), c.get("botId"), { source: "panel", modelUsed: modelId, usage: r.usage });
     const okText = r.text.trim().slice(0, 20) || "ok";
     return c.redirect(
       `/admin/config?llmtest=${encodeURIComponent(`ok:${provider}/${modelId} → "${okText}"`)}`,
@@ -3077,7 +3080,7 @@ adminApp.post("/conversations/:id/suggest", async (c) => {
   const suggestBotId = c.get("botId");
   const msgs = new MessagesRepo(suggestDb, suggestBotId);
   const history = await msgs.lastN(c.req.param("id"), 20);
-  const { model } = createModel(c.env, "fast", await loadLlmOverrides(c.env, suggestBotId));
+  const { model, modelId } = createModel(c.env, "fast", await loadLlmOverrides(c.env, suggestBotId));
   const aiMessages = history.map((m) => ({
     role: (m.role === "tool" ? "user" : m.role === "owner" ? "assistant" : m.role) as
       | "user"
@@ -3104,6 +3107,7 @@ adminApp.post("/conversations/:id/suggest", async (c) => {
     system: sys,
     messages: aiMessages,
   });
+  await registrarUso(suggestDb, suggestBotId, { source: "panel", refId: c.req.param("id"), modelUsed: modelId, usage: result.usage });
   // HTMX swaps this into #suggestion-box; the "Usar" button fills the composer.
   return c.html(renderSuggestionBox(result.text));
 });

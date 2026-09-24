@@ -15,6 +15,7 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import type { Env } from "../env";
 import { Db } from "../db/client";
+import { registrarUso } from "../db/aiUsage";
 import { createModel } from "../llm/provider";
 import { loadLlmOverrides } from "../settings-loader";
 import { MessagesRepo } from "../db/messages";
@@ -151,8 +152,8 @@ export async function analizarConversacion(
       .filter(Boolean)
       .join("; ");
 
-    const { model } = createModel(env, "fast", await loadLlmOverrides(env, botId));
-    const { object } = await generateObject({
+    const { model, modelId } = createModel(env, "fast", await loadLlmOverrides(env, botId));
+    const { object, usage } = await generateObject({
       model,
       schema: AnalisisSchema,
       prompt: `Eres un operador comercial revisando una conversación que acaba de terminar, para dejar el CRM al día.
@@ -164,6 +165,7 @@ ${transcripcion}
 
 Reporta ÚNICAMENTE lo que el cliente dijo de forma explícita. No deduzcas, no completes huecos, no inventes montos ni fechas. Si de esta conversación no se aprende nada nuevo, deja los campos vacíos — eso es una respuesta válida y preferible a inventar.`,
     });
+    await registrarUso(db, botId, { source: "crm", refId: conversationId, modelUsed: modelId, usage });
 
     const propuestas = await proponerDesdeAnalisis(db, botId, {
       analisis: object,

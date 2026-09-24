@@ -15,6 +15,7 @@
 import { generateText } from "ai";
 import type { Env } from "../env";
 import { Db } from "../db/client";
+import { registrarUso } from "../db/aiUsage";
 import { InsightsRepo } from "../db/insights";
 import { MessagesRepo } from "../db/messages";
 import { SuggestionsRepo } from "../db/suggestions";
@@ -51,7 +52,7 @@ export async function detectKbGaps(env: Env, limit = 3, botIdOverride?: string):
   const thirtyDays = Date.now() - 30 * 86_400_000;
 
   const gaps = await insights.missedKb(thirtyDays, 10);
-  const { model } = createModel(env, "fast", await loadLlmOverrides(env, botId));
+  const { model, modelId } = createModel(env, "fast", await loadLlmOverrides(env, botId));
   let created = 0;
   let errors = 0;
 
@@ -72,6 +73,8 @@ Los clientes preguntaron esto y el bot NO supo responder:
 Redacta una entrada de base de conocimiento que la responda. Si el contexto del negocio no tiene el dato, escribe la entrada con el marcador [COMPLETA AQUÍ] donde falte información real.
 Responde SOLO con JSON: {"title": "...", "content": "..."} (content: 2-6 frases en español, directas).`,
       });
+      // Sin conversación: es un hueco de la base, sale de varias.
+      await registrarUso(db, botId, { source: "mejoras", modelUsed: modelId, usage: result.usage });
       const draft = extractJson<{ title?: string; content?: string }>(result.text);
       if (!draft?.content) {
         errors++;
@@ -114,7 +117,7 @@ export async function detectLessons(env: Env, limit = 3, botIdOverride?: string)
     [botId, sevenDays],
   );
 
-  const { model } = createModel(env, "fast", await loadLlmOverrides(env, botId));
+  const { model, modelId } = createModel(env, "fast", await loadLlmOverrides(env, botId));
   let created = 0;
   let errors = 0;
 
@@ -140,6 +143,7 @@ ${transcript}
 Si no hay una lección clara y generalizable, responde {"lesson": null}.
 Responde SOLO con JSON: {"lesson": "..." | null}`,
       });
+      await registrarUso(db, botId, { source: "mejoras", refId: conv.conversation_id, modelUsed: modelId, usage: result.usage });
       const parsed = extractJson<{ lesson?: string | null }>(result.text);
       const lesson = parsed?.lesson?.trim();
       if (!lesson) continue;
