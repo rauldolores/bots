@@ -68,14 +68,62 @@ interface EsquemaTool {
   inputSchema?: unknown;
 }
 
-function leerCache(c: BotConnector): EsquemaTool[] | null {
+/**
+ * Una fecha-hora local SIN zona, tal cual la escribe un modelo:
+ * "2026-09-28T10:00" o "2026-09-28T10:00:00". Lo que NO trae es el desfase,
+ * y hay servidores —el MCP de un CRM, sin ir más lejos— que lo exigen y
+ * rechazan la fecha entera sin él.
+ */
+const FECHA_HORA_SIN_ZONA = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::\d{2})?(?:\.\d+)?$/;
+
+/**
+ * Le pone el desfase horario del negocio a las fechas-hora que van sin él.
+ *
+ * Se hace aquí y no pidiéndoselo al modelo porque ya se intentó: el prompt
+ * decía, literal, "escribe aaaa-mm-ddThh:mm-06:00" con el número calculado
+ * para hoy, y el agente mandó igual "2026-09-28T10:00:00". El CRM la rechazó
+ * y la tarea del cliente no se creó. Un formato no es una decisión: es una
+ * conversión, y las conversiones las hace el código.
+ *
+ * Deliberadamente conservador: solo toca cadenas que YA son una fecha-hora y
+ * a las que solo les falta la zona. Una fecha sin hora ("2026-09-28") se deja
+ * intacta — muchos sistemas la quieren así para un plazo sin hora concreta.
+ */
+export function conDesfaseHorario(valor: unknown, desfase: string): unknown {
+  if (typeof valor === "string") {
+    const m = FECHA_HORA_SIN_ZONA.exec(valor.trim());
+    return m ? `${m[1]}${desfase}` : valor;
+  }
+  if (Array.isArray(valor)) return valor.map((v) => conDesfaseHorario(v, desfase));
+  if (valor && typeof valor === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(valor as Record<string, unknown>)) out[k] = conDesfaseHorario(v, desfase);
+    return out;
+  }
+  return valor;
+}
+
+/**
+ * El catálogo guardado, y si ya toca refrescarlo.
+ *
+ * Vencido NO significa inservible: un catálogo de hace dos horas describe las
+ * mismas herramientas que uno de hace diez minutos —los servidores MCP no
+ * cambian su lista cada tarde— y esperar a listarlas otra vez cuesta, con
+ * OAuth, más de tres segundos con el cliente al teléfono escuchando silencio.
+ *
+ * Medido: llamadas espaciadas más de una hora pagaban SIEMPRE ese viaje, así
+ * que la caché no servía para nada en el único caso que importa, la primera
+ * llamada del día. Ahora se sirve lo que haya y se refresca por detrás.
+ */
+function leerCache(c: BotConnector): { esquemas: EsquemaTool[]; vencido: boolean } | null {
   const at = Number(c.config[TOOLS_CACHE_AT_KEY] ?? "");
-  if (!Number.isFinite(at) || at <= 0 || Date.now() - at > TOOLS_CACHE_TTL_MS) return null;
+  if (!Number.isFinite(at) || at <= 0) return null;
+  const vencido = Date.now() - at > TOOLS_CACHE_TTL_MS;
   const raw = c.config[TOOLS_CACHE_KEY];
   if (typeof raw !== "string" || !raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? (parsed as EsquemaTool[]) : null;
+    return Array.isArray(parsed) && parsed.length > 0 ? { esquemas: parsed as EsquemaTool[], vencido } : null;
   } catch {
     return null;
   }
@@ -94,6 +142,26 @@ function guardarCache(repo: BotConnectorsRepo, botId: string, c: BotConnector, t
       [TOOLS_CACHE_AT_KEY]: String(Date.now()),
     })
     .catch((e) => console.warn(`[mcpTools] no se pudo guardar el catálogo de ${c.name ?? c.provider}:`, e));
+}
+
+/**
+ * Vuelve a listar y guarda, sin que nadie espere. Un fallo aquí no se nota:
+ * el turno ya salió con el catálogo viejo, que es justo lo que se quería.
+ */
+async function refrescarCatalogo(
+  env: Env,
+  db: Db,
+  repo: BotConnectorsRepo,
+  botId: string,
+  c: BotConnector,
+  etiqueta: string,
+): Promise<void> {
+  try {
+    const tools = await conTimeout(conectarYListarTools(env, db, c), MCP_TOTAL_TIMEOUT_MS, `[mcpTools] ${etiqueta}`);
+    guardarCache(repo, botId, c, tools as Record<string, any>);
+  } catch (e) {
+    console.warn(`[mcpTools] no se pudo refrescar el catálogo de ${etiqueta}:`, e instanceof Error ? e.message : e);
+  }
 }
 
 /** Borra el catálogo guardado — tras una llamada a una tool que el servidor ya no reconoce. */
@@ -123,6 +191,7 @@ function toolsDesdeCache(
       inputSchema: jsonSchema((e.inputSchema ?? { type: "object", properties: {} }) as any),
       execute: async (args: unknown) => {
         const vivas = (await conectarYListarTools(env, db, c)) as Record<string, any>;
+        args = conDesfaseHorario(args, await desfaseDelNegocio(db, botId));
         const real = vivas[e.name];
         if (!real?.execute) {
           // El catálogo quedó viejo: la tool ya no existe allá. Se tira el
@@ -136,6 +205,33 @@ function toolsDesdeCache(
     });
   }
   return out;
+}
+
+/**
+ * El desfase horario del negocio, cacheado en memoria: se consulta en cada
+ * llamada a una herramienta y la zona no cambia entre turnos.
+ */
+const desfasePorBot = new Map<string, { at: number; valor: string }>();
+const DESFASE_TTL_MS = 10 * 60_000;
+
+async function desfaseDelNegocio(db: Db, botId: string): Promise<string> {
+  const guardado = desfasePorBot.get(botId);
+  if (guardado && Date.now() - guardado.at < DESFASE_TTL_MS) return guardado.valor;
+  try {
+    const { SettingsRepo, SETTING_KEYS } = await import("../db/settings");
+    const { resolveTimezone, desfaseHorario } = await import("../datetime");
+    const zona = resolveTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
+    const valor = desfaseHorario(new Date(), zona);
+    desfasePorBot.set(botId, { at: Date.now(), valor });
+    return valor;
+  } catch {
+    return "+00:00";
+  }
+}
+
+/** Solo para pruebas. */
+export function olvidarDesfases(): void {
+  desfasePorBot.clear();
 }
 
 function enCooldown(c: BotConnector): boolean {
@@ -188,8 +284,10 @@ export async function loadMcpTools(env: Env, db: Db, botId: string): Promise<Rec
       // 1.3–2.6 s medidos en producción.
       const cacheado = leerCache(c);
       if (cacheado) {
+        // Vencido se sirve igual y se refresca DETRÁS: el turno no espera.
+        if (cacheado.vencido) void refrescarCatalogo(env, db, repo, botId, c, etiqueta);
         const prefijadas: Record<string, unknown> = {};
-        for (const [name, t] of Object.entries(toolsDesdeCache(env, db, repo, botId, c, cacheado))) {
+        for (const [name, t] of Object.entries(toolsDesdeCache(env, db, repo, botId, c, cacheado.esquemas))) {
           prefijadas[mcpToolName(prefix, name)] = t;
         }
         return prefijadas;
