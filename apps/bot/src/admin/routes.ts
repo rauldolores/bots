@@ -99,6 +99,7 @@ import { renderConfig } from "./views/config";
 import {
   renderConexiones,
   renderConnectModal,
+  reRegistrarWebhookTelegram,
   esCanalConectable,
   renderAppOAuthModal,
   guardarAppOAuthDesdePanel,
@@ -2130,6 +2131,12 @@ adminApp.post("/conexiones/email/:provider/connect", async (c) => {
   const gridHtml = await renderConexionesGrid(c.env, c.get("botId"));
   return c.html(modalHtml + gridHtml);
 });
+
+// Va ANTES del genérico /conexiones/:channel/:accion — mismo motivo que
+// /conexiones/email/disconnect: si no, el segmento dinámico se lo traga.
+adminApp.post("/conexiones/telegram/webhook", async (c) =>
+  c.html(await reRegistrarWebhookTelegram(c.env, c.get("botId"))),
+);
 
 adminApp.post("/conexiones/:channel/disconnect", async (c) => {
   const channel = c.req.param("channel");

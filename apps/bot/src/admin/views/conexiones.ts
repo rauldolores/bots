@@ -1123,6 +1123,42 @@ export async function disconnectConnector(env: Env, botId: string, provider: str
   await repo.disable(botId, provider);
 }
 
+/**
+ * Vuelve a registrar el webhook de Telegram con el token YA guardado.
+ *
+ * Telegram guarda la URL a la que entrega los mensajes; si el panel cambia de
+ * dominio (pasó dos veces: agentes.kontrolia.io → panel.nodiagents.com →
+ * app.nodiagents.com), esa URL sigue siendo la vieja. Mientras el dominio
+ * viejo siga vivo como alias no se nota — y el día que se quite, el bot deja
+ * de recibir mensajes sin ningún aviso. Antes la única forma de arreglarlo era
+ * desconectar y volver a pegar el token de BotFather.
+ */
+export async function reRegistrarWebhookTelegram(env: Env, botId: string): Promise<string> {
+  const db = new Db(env.DB);
+  const row = await new BotChannelsRepo(db).getByBotAndChannel(botId, "telegram");
+  const token = row?.secret_ref ? await readSecret(db, row.secret_ref).catch(() => null) : null;
+  if (!token) {
+    return modalShell(
+      "send",
+      "Telegram",
+      `<div class="text-[12.5px]" style="color:var(--bad)">No encontré el token guardado de Telegram. Desconecta el canal y vuelve a conectarlo con el token de BotFather.</div>`,
+    );
+  }
+  const url = webhookUrlFor(env, "telegram", botId);
+  const result = await setTelegramWebhook(token, url);
+  return modalShell(
+    "send",
+    "Telegram",
+    result.ok
+      ? `<div class="text-[13px]" style="color:var(--ok);font-weight:600;margin-bottom:10px">✓ Webhook actualizado</div>
+         <p class="text-[12.5px]" style="color:var(--muted);margin:0 0 14px">Telegram ya entrega los mensajes a <span class="font-mono" style="color:var(--cream)">${esc(url)}</span>. Mándale un mensaje a tu bot para confirmar.</p>
+         <button type="button" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:9px"
+                 onclick="document.getElementById('modal-root').innerHTML=''">Listo</button>`
+      : `<div class="text-[12.5px]" style="color:var(--bad);margin-bottom:10px">Telegram no aceptó el cambio: ${esc(result.error ?? "error desconocido")}</div>
+         <p class="text-[12px]" style="color:var(--muted);margin:0">Si dice que el token no es válido, lo revocaste en BotFather: desconecta el canal y conéctalo con el token nuevo.</p>`,
+  );
+}
+
 /** Guarda la config editable de un conector ya conectado — solo config, nunca toca el secret_ref/token. */
 export async function updateConnectorConfig(env: Env, botId: string, provider: string, form: FormData): Promise<void> {
   const category = categoryOfProvider(provider);
@@ -2191,6 +2227,15 @@ async function renderConnectableCard(env: Env, db: Db, botId: string, meta: Chan
        ${widgetApiDocs}
        ${voiceOnboardingLink}
        ${vieneDelDespliegue}
+       ${
+         meta.id === "telegram"
+           ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
+                <button type="button" class="text-[11px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 10px;cursor:pointer;background:none"
+                        hx-post="/admin/conexiones/telegram/webhook" hx-target="#modal-root" hx-swap="innerHTML">Actualizar webhook</button>
+                <span class="text-[10.5px] text-dim">Úsalo si cambiaste el dominio del panel: le dice a Telegram a dónde mandar los mensajes, con el token que ya tienes guardado.</span>
+              </div>`
+           : ""
+       }
        <form method="POST" action="/admin/conexiones/${meta.id}/disconnect" style="margin-top:4px" onsubmit="return confirm('¿Desconectar ${esc(meta.name)}? El bot dejará de recibir mensajes por aquí.')">
          <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Desconectar</button>
        </form>`
