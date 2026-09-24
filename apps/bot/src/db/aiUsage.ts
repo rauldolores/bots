@@ -21,6 +21,7 @@ import { Db } from "./client";
  *   nurture       — pasos de una secuencia de seguimiento
  *   entrenamiento — convertir una corrección del dueño en regla
  *   panel         — lo que el dueño dispara desde /admin (sugerencias, prueba de IA)
+ *   filtro        — el filtro de intención del correo entrante (¿es un cliente?)
  */
 export type AiUsageSource =
   | "skill"
@@ -31,7 +32,8 @@ export type AiUsageSource =
   | "seguimiento"
   | "nurture"
   | "entrenamiento"
-  | "panel";
+  | "panel"
+  | "filtro";
 
 /** Lo que devuelve `usage` en cualquier generateText/generateObject del AI SDK. */
 export interface UsoDelSdk {

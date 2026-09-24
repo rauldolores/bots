@@ -27,6 +27,7 @@ import {
 import { listMcpConnectorTools } from "../../tools/mcpTools";
 import { mcpToolPrefixes, mcpToolName } from "../../connectors/mcpNaming";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
+import { CorreosFiltradosRepo, type CorreoFiltrado } from "../../db/correosFiltrados";
 import { resolveConnectorCreds } from "../../connectors/creds";
 import type { PipelineStageOption } from "../../connectors/types";
 import {
@@ -439,8 +440,48 @@ async function renderEmailCard(env: Env, db: Db, botId: string): Promise<string>
       <p class="text-dim text-[12px]" style="margin:0">Correos que te escriban tus clientes entran al mismo flujo que cualquier canal — leads, tickets, CRM. Elige un proveedor (solo uno activo a la vez; conectar el otro lo reemplaza). El correo de SALIDA se configura aparte, en <a href="/admin/config" class="text-accent" style="text-decoration:none">/admin/config → Correo saliente</a>.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">${connectButtons}</div>
       ${ok ? copyRow("Webhook activo", emailWebhookUrlFor(env, activeProvider!, botId)) : ""}
+      ${ok ? await renderCorreosFiltrados(db, botId) : ""}
       ${disconnect}
     </div>`;
+}
+
+const CATEGORIA_FILTRADA: Record<string, string> = {
+  vendedor: "Vendedor",
+  publicidad: "Publicidad",
+  notificacion: "Aviso automático",
+  spam: "Spam",
+  otro: "Otro",
+};
+
+/**
+ * Lo que el filtro de intención apartó (channels/email/triage.ts). Se muestra
+ * para que el dueño pueda detectar un cliente apartado por error: un filtro
+ * que calla sin dejar rastro es uno en el que nadie confía.
+ */
+async function renderCorreosFiltrados(db: Db, botId: string): Promise<string> {
+  const repo = new CorreosFiltradosRepo(db, botId);
+  const [recientes, enElMes] = await Promise.all([
+    repo.recientes(8).catch((): CorreoFiltrado[] => []),
+    repo.contarDesde(Date.now() - 30 * 24 * 60 * 60 * 1000).catch(() => 0),
+  ]);
+  const titulo = `<span class="text-[10.5px]" style="color:var(--dim)">Sin contestar por el filtro · ${enElMes} en los últimos 30 días — <a href="/admin/config" class="text-accent" style="text-decoration:none">ajustar</a></span>`;
+  if (recientes.length === 0) {
+    return `<div style="display:flex;flex-direction:column;gap:4px">${titulo}<span class="text-dim text-[11.5px]">Nada por ahora. La publicidad, los vendedores y los avisos automáticos aparecerán aquí en vez de recibir respuesta.</span></div>`;
+  }
+  const filas = recientes
+    .map(
+      (f) => `<li style="display:flex;flex-direction:column;gap:1px;padding:6px 0;border-top:1px solid var(--line)">
+        <span class="text-[11.5px] text-cream" style="display:flex;gap:8px;flex-wrap:wrap;align-items:baseline">
+          <span style="font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line);padding:1px 6px">${esc(CATEGORIA_FILTRADA[f.categoria] ?? f.categoria)}</span>
+          <span style="word-break:break-all">${esc(f.remitente)}</span>
+          <span class="text-dim text-[10.5px]" style="margin-left:auto;font-variant-numeric:tabular-nums">${esc(new Date(Number(f.recibido_at)).toISOString().slice(0, 10))}</span>
+        </span>
+        ${f.asunto ? `<span class="text-[11px]" style="color:var(--muted)">${esc(f.asunto)}</span>` : ""}
+        ${f.motivo ? `<span class="text-dim text-[10.5px]">${esc(f.motivo)}</span>` : ""}
+      </li>`,
+    )
+    .join("");
+  return `<div style="display:flex;flex-direction:column;gap:4px">${titulo}<ul style="list-style:none;margin:0;padding:0">${filas}</ul></div>`;
 }
 
 function copyRow(label: string, value: string): string {

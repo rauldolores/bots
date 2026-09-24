@@ -18,6 +18,7 @@ import {
   esCorreoAutomatico,
   limpiarCuerpoReenviado,
   remitenteReal,
+  nombreDelRemitente,
 } from "./reenvio";
 
 /** Mismo estilo que twilioSignature.ts/meta.ts — HMAC vía crypto.subtle, portable Node/Cloudflare/Vercel. */
@@ -168,9 +169,11 @@ export async function parseResendInbound(
   return {
     channel: "email",
     channelUserId: remitente,
+    displayName: nombreDelRemitente({ from, replyTo: primerReplyTo(full), text: texto }, remitente) ?? undefined,
     // El asunto se antepone: es la única "pista de tema" que un correo trae
     // aparte del cuerpo, y el agente la pierde si solo se le manda el texto.
     text: subject ? `Asunto: ${subject}\n\n${cuerpo}` : cuerpo,
+    emailCuerpoCompleto: cuerpo,
     receivedAt: Date.now(),
     rawPayload: payload,
     emailThread: { subject, messageId: full?.message_id ?? headers["message-id"] ?? undefined },

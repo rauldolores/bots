@@ -184,6 +184,10 @@ export const SETTING_KEYS = {
   // un campo de más para gente que no es técnica.
   emailInboundAddress: "email_inbound_address",
   emailFromName: "email_from_name",
+  // Filtro de intención del correo entrante (channels/email/triage.ts): un
+  // modelo barato decide si es un cliente o publicidad/proveedores/avisos.
+  // Encendido por defecto; "0" lo apaga y todo correo se atiende como antes.
+  emailFiltroIntencion: "email_filtro_intencion",
   // Aplicación OAuth del dueño para Google Calendar y Jira.
   //
   // Vivían SOLO como variables de entorno del despliegue, y ahí no las podía

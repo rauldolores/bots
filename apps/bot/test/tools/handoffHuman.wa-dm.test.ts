@@ -20,7 +20,7 @@ let fetchSpy: any;
 beforeEach(async () => {
   const d1 = await createTestDb();
   const db = d1;
-  const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "owner-test");
+  const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "owner-test", "Cliente");
   convId = conv.id;
   env = {
     DB: d1.driver,

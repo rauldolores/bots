@@ -22,6 +22,21 @@ const SIN_TROCEO: ReadonlySet<string> = new Set(["email"]);
  * el resto. Es el único punto por el que debería pasar el troceo de una
  * respuesta.
  */
+/**
+ * ¿Se puede mandar algo ANTES de la respuesta final? (el primer párrafo en
+ * cuanto el modelo lo cierra, o el "déjame revisar…" antes de una herramienta
+ * lenta — ver runAgentTurnCore). Es el mismo criterio que el troceo: donde no
+ * se parte, tampoco se adelanta.
+ *
+ * Existe porque el troceo solo cubría la respuesta FINAL: en correo, el
+ * adelanto salía como un correo y el resto como otro, un segundo después —
+ * dos "Re: Ayuda" por un solo correo del cliente (visto el 2026-09-09 y el
+ * 2026-09-24).
+ */
+export function permiteAdelantos(channel: string): boolean {
+  return !SIN_TROCEO.has(channel);
+}
+
 export function chunkReplyForChannel(channel: string, text: string, maxChunks?: number): string[] {
   if (SIN_TROCEO.has(channel)) {
     const entero = text.trim();

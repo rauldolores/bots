@@ -39,6 +39,13 @@ export interface IncomingMessage {
    * lee al responder (ver channels/email/channel.ts).
    */
   emailThread?: EmailThread;
+  /**
+   * Solo correo: el cuerpo CON la firma, para el filtro de intención
+   * (channels/email/triage.ts), que de ahí saca nombre, empresa y teléfono.
+   * Mailgun manda el cuerpo principal ya sin firma (`stripped-text`), por eso
+   * no basta con `text`.
+   */
+  emailCuerpoCompleto?: string;
 }
 
 /** El hilo de correo al que pertenece una conversación. */

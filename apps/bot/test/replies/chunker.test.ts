@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { chunkReply, chunkReplyForChannel } from "../../src/replies/chunker";
+import { chunkReply, chunkReplyForChannel, permiteAdelantos } from "../../src/replies/chunker";
 
 describe("chunkReply", () => {
   it("returns single chunk for short text", () => {
@@ -88,5 +88,20 @@ describe("chunkReplyForChannel — el correo no se parte", () => {
   // Un canal que publica "" deja un mensaje en blanco al cliente.
   it("un texto vacío no manda un correo en blanco", () => {
     expect(chunkReplyForChannel("email", "   ", 3)).toEqual([]);
+  });
+});
+
+describe("permiteAdelantos — un correo del cliente, un correo de respuesta", () => {
+  // Bug real (2026-09-09 y 2026-09-24): el troceo final ya dejaba el correo
+  // entero, pero el ADELANTO por párrafo salía antes como su propio correo —
+  // dos "Re: Ayuda" con un segundo de diferencia.
+  it("en correo no se adelanta nada: ni el primer párrafo ni el aviso de herramienta", () => {
+    expect(permiteAdelantos("email")).toBe(false);
+  });
+
+  it("en chat sí: ahí el adelanto es lo que hace que se sienta rápido", () => {
+    for (const canal of ["telegram", "whatsapp", "widget", "messenger", "instagram", "kapso", "twilio", "manychat"]) {
+      expect(permiteAdelantos(canal)).toBe(true);
+    }
   });
 });

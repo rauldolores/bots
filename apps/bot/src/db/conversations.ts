@@ -123,6 +123,21 @@ export class ConversationsRepo {
   }
 
   /**
+   * Pone el nombre de la persona SOLO si la conversación aún no tiene uno.
+   * Nunca pisa: el primero que se supo (el de su cuenta, su firma o el que
+   * ella misma dijo) gana, y un nombre que alguien corrigió a mano no se
+   * cambia por uno adivinado después.
+   */
+  async setDisplayNameIfEmpty(id: string, name: string | null | undefined): Promise<void> {
+    const nombre = (name ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+    if (!nombre) return;
+    await this.db.run(
+      "UPDATE conversations SET display_name = ? WHERE id = ? AND bot_id = ? AND (display_name IS NULL OR display_name = '')",
+      [nombre, id, this.botId],
+    );
+  }
+
+  /**
    * Guarda datos sueltos de la conversación (hoy: el hilo de correo al que
    * pertenece). Se MEZCLA con lo que ya hubiera en vez de pisarlo — la
    * columna es de todos, no de un solo caso de uso.

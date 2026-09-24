@@ -18,7 +18,7 @@ import { VENTANA_DE_CONVERSACION_MS } from "../billing/conversacion";
 import { politicaDeIa, avisarSinLlave } from "../billing/llaveDeIa";
 import { resolveAgentConfig } from "../settings-loader";
 import type { WarmTarget } from "../customer/warm";
-import { chunkReplyForChannel } from "../replies/chunker";
+import { chunkReplyForChannel, permiteAdelantos } from "../replies/chunker";
 import { pickAdapter } from "../replies/sender";
 import { costOfUsage } from "../pricing";
 import type { ChannelId, EmailThread } from "../channels/shared";
@@ -96,6 +96,14 @@ export async function ingestMessage(
     payload.channelUserId,
     payload.displayName,
   );
+  // Una conversación que nació sin nombre (un correo sin firma, un primer
+  // mensaje sin perfil) lo toma en cuanto llega uno: getOrCreate solo lo pone
+  // al crear. Nunca pisa uno que ya tenía.
+  if (!conv.display_name && payload.displayName) {
+    await convs.setDisplayNameIfEmpty(conv.id, payload.displayName).catch((e) => {
+      console.warn("[ingest] no se pudo guardar el nombre de la conversación:", e);
+    });
+  }
   await state.upsertIdentity(key, {
     conversationId: conv.id,
     channel: payload.channel,
@@ -434,9 +442,14 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
     // sale YA, como mensaje suelto, en vez de esperar a que termine todo el
     // turno. Se manda sin trocear (es una frase corta) y sin pausas entre
     // partes: el punto es justamente que llegue antes de la espera.
-    onInterimMessage: async (aviso) => {
-      await enviarRespuesta(env, state, aviso, { maxChunks: 1, interChunkDelayMs: 0 }, botId);
-    },
+    //
+    // Salvo donde un envío extra es un correo extra: ahí todo va en UNA sola
+    // respuesta por turno (ver permiteAdelantos en replies/chunker.ts).
+    onInterimMessage: permiteAdelantos(state.channel)
+      ? async (aviso) => {
+          await enviarRespuesta(env, state, aviso, { maxChunks: 1, interChunkDelayMs: 0 }, botId);
+        }
+      : undefined,
   });
 
   // maxChunks/interChunkDelayMs son config de ENTREGA (no del turno en sí),

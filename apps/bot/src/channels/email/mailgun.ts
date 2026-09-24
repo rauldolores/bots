@@ -18,6 +18,7 @@ import {
   esCorreoAutomatico,
   limpiarCuerpoReenviado,
   remitenteReal,
+  nombreDelRemitente,
 } from "./reenvio";
 import type { OpcionesEntrada } from "./resend";
 
@@ -100,10 +101,15 @@ export function parseMailgunInbound(form: FormData, opts: OpcionesEntrada = {}):
   }
 
   const cuerpo = limpiarCuerpoReenviado(text);
+  const replyTo = String(form.get("Reply-To") ?? headers["reply-to"] ?? "");
+  const cuerpoPlano = String(form.get("body-plain") ?? text);
   return {
     channel: "email",
     channelUserId: remitente,
+    displayName: nombreDelRemitente({ from: sender, replyTo, text: cuerpoPlano }, remitente) ?? undefined,
     text: subject ? `Asunto: ${subject}\n\n${cuerpo}` : cuerpo,
+    // body-plain y no stripped-text: aquí SÍ interesa la firma (ver triage.ts).
+    emailCuerpoCompleto: limpiarCuerpoReenviado(cuerpoPlano.trim()),
     receivedAt: Date.now(),
     rawPayload: Object.fromEntries(form.entries()),
     emailThread: { subject, messageId: headers["message-id"] ?? undefined },

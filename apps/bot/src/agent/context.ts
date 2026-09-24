@@ -16,6 +16,7 @@ import { resolveAgentConfig, type AgentConfig } from "../settings-loader";
 import { buildTools } from "../tools";
 import { loadMcpTools } from "../tools/mcpTools";
 import { CustomerFactsRepo } from "../db/facts";
+import { ConversationsRepo } from "../db/conversations";
 import { MediaAssetsRepo } from "../db/mediaAssets";
 import type { MessagePart } from "../channels/parts";
 import { buildCustomerContext, renderCustomerContext } from "../customer/context";
@@ -103,7 +104,7 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
   let mcpMs = 0;
 
   // Tanda 1: nada de esto depende de nada más.
-  const [bot, mcpTools, state, facts, mediaAssets] = await Promise.all([
+  const [bot, mcpTools, state, facts, mediaAssets, conversacion] = await Promise.all([
     new BotsRepo(db).getById(botId),
     (async () => {
       const t = Date.now();
@@ -128,6 +129,10 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
       console.warn("[buildAgentContext] media assets lookup failed:", e);
       return [];
     }),
+    // Solo por el nombre con el que se presenta (ver <quien_escribe> abajo).
+    conversationId
+      ? new ConversationsRepo(db, botId).getById(conversationId).catch(() => null)
+      : Promise.resolve(null),
   ]);
 
   const adjuntos: MessagePart[] = [];
@@ -202,6 +207,22 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
   if (cliente.lead?.name) knownCustomerName = cliente.lead.name;
   const bloqueCliente = renderCustomerContext(cliente, resolveTimezone(bot?.config?.timezone));
   if (bloqueCliente) memoryBlocks.push(bloqueCliente);
+
+  // Sin lead con nombre, el modelo no sabía NADA de con quién hablaba — ni el
+  // nombre de su cuenta ni el de la firma del correo — y abría tickets a
+  // nombre de nadie. Se le dice lo que se sabe, o que no se sabe.
+  if (!cliente.lead?.name && conversationId) {
+    const nombre = conversacion?.display_name?.trim();
+    memoryBlocks.push(
+      nombre
+        ? `<quien_escribe>
+Se presenta como "${nombre}" (el nombre de su cuenta o de su firma). Dirígete a esta persona por su nombre.
+</quien_escribe>`
+        : `<quien_escribe>
+Todavía no sabes cómo se llama esta persona. Para contestar dudas no hace falta, pero antes de registrar un caso, agendar o comprometer algo a su nombre, pregúntale cómo se llama (y lo que haga falta para atenderla).
+</quien_escribe>`,
+    );
+  }
 
   return {
     bot,

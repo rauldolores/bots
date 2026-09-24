@@ -379,6 +379,14 @@ function renderCorreoSalienteSection(settings: Record<string, string>): string {
           placeholder: "asesor@tucuenta.resend.app",
         })}
       </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <input type="hidden" name="email_filtro_intencion_en_form" value="1">
+        <label class="font-display font-semibold text-[12.5px] text-cream" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" name="${SETTING_KEYS.emailFiltroIntencion}" value="1" ${settings[SETTING_KEYS.emailFiltroIntencion] === "0" ? "" : "checked"}>
+          Contestar solo a clientes
+        </label>
+        <p class="text-dim text-[11px]">Antes de contestar el primer correo de alguien, una IA económica revisa si es un cliente o si es publicidad, un vendedor o un aviso automático. Esos no se contestan: quedan listados en <a href="/admin/conexiones" style="color:var(--accent-2)">Conexiones → Correo entrante</a> y siguen en tu buzón. Ante la duda, se contesta.</p>
+      </div>
       <div id="email-mailgun-domain-block" style="display:${provider === "mailgun" ? "flex" : "none"};flex-direction:column;gap:6px">
         ${renderTextField({
           name: SETTING_KEYS.emailOutboundDomain,

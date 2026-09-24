@@ -29,7 +29,7 @@ beforeEach(async () => {
   tickets = new TicketsRepo(db, TEST_BOT_ID);
   // The tickets table FKs conversation_id -> conversations(id), so we need a
   // real conversation row before the tool can attach a ticket to it.
-  const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "u1");
+  const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("telegram", "u1", "María");
   convId = conv.id;
   env = {
     DB: d1.driver,
@@ -82,7 +82,7 @@ describe("handoffHumanTool — el contacto es obligatorio", () => {
 
   it("por un canal telefónico (WhatsApp/Twilio) NO hace falta contact explícito — el número del canal ya sirve", async () => {
     const db = new Db(env.DB);
-    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("twilio", "+5215512345678");
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("twilio", "+5215512345678", "Pedro");
     const tool = handoffHumanTool(env, () => conv.id, TEST_BOT_ID);
 
     const result = (await tool.execute!(
@@ -373,5 +373,52 @@ describe("notifyOwner — resuelve destinos desde settings cuando el entorno no 
     );
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("SIN canal de aviso configurado"));
     errorSpy.mockRestore();
+  });
+});
+
+// A nombre de QUIÉN. Pasó por correo el 2026-09-24: alguien escribió "ayuda",
+// el bot abrió dos tickets y el equipo no sabía ni cómo saludarlo.
+describe("handoffHumanTool — sin saber quién es, no hay ticket", () => {
+  let db: Db;
+  beforeEach(async () => {
+    db = new Db(env.DB);
+  });
+
+  it("correo sin nombre conocido y sin `name`: se rechaza y pide el nombre", async () => {
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("email", "alguien@ejemplo.com");
+    const tool = handoffHumanTool(env, () => conv.id, TEST_BOT_ID);
+    const r = (await tool.execute!(
+      { reason: "ayuda", summary: "pide ayuda", category: "other", priority: "normal" },
+      {} as any,
+    )) as { created: boolean; message: string };
+    expect(r.created).toBe(false);
+    expect(r.message).toContain("nombre");
+    expect(await tickets.listOpen()).toHaveLength(0);
+  });
+
+  it("con el nombre que dio la persona: crea el ticket y lo deja en la conversación", async () => {
+    const convs = new ConversationsRepo(db, TEST_BOT_ID);
+    const conv = await convs.getOrCreate("email", "alguien@ejemplo.com");
+    const tool = handoffHumanTool(env, () => conv.id, TEST_BOT_ID);
+    const r = (await tool.execute!(
+      { reason: "ayuda", summary: "no le llega la factura", category: "billing", priority: "normal", name: "Laura Pérez" },
+      {} as any,
+    )) as { created: boolean };
+    expect(r.created).toBe(true);
+    const [t] = await tickets.listOpen();
+    expect(t.requester_name).toBe("Laura Pérez");
+    expect(t.requester_contact).toBe("alguien@ejemplo.com");
+    expect((await convs.getById(conv.id))?.display_name).toBe("Laura Pérez");
+  });
+
+  it("el nombre que ya trae la conversación (su firma, su cuenta) gana sobre el del modelo", async () => {
+    const conv = await new ConversationsRepo(db, TEST_BOT_ID).getOrCreate("email", "ana@ejemplo.com", "Ana Ruiz");
+    const tool = handoffHumanTool(env, () => conv.id, TEST_BOT_ID);
+    await tool.execute!(
+      { reason: "x", summary: "y", category: "other", priority: "normal", name: "Anita" },
+      {} as any,
+    );
+    const [t] = await tickets.listOpen();
+    expect(t.requester_name).toBe("Ana Ruiz");
   });
 });

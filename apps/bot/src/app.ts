@@ -12,6 +12,11 @@ import { handleIncomingVoiceCall } from "./channels/voice/webhook";
 import { handleTransferStatusCallback } from "./channels/voice/transfer";
 import { verifyResendSignature, parseResendInbound } from "./channels/email/resend";
 import { verifyMailgunSignature, parseMailgunInbound } from "./channels/email/mailgun";
+import { clasificarCorreo, type Triage } from "./channels/email/triage";
+import { CorreosFiltradosRepo } from "./db/correosFiltrados";
+import { ConversationsRepo } from "./db/conversations";
+import { CustomerFactsRepo } from "./db/facts";
+import type { IncomingMessage } from "./channels/shared";
 import { verifyKapsoSignature, parseKapsoInbound } from "./channels/kapso";
 import { BotChannelsRepo } from "./db/botChannels";
 import { readSecret } from "./db/vault";
@@ -265,8 +270,7 @@ async function routeEmailToAgent(
     // mismo webhook si el dueño no filtró la suscripción — se ignoran en vez
     // de tratarlos como error, para no reintentar de más del lado de Resend.
     if (!msg) return new Response("ok", { status: 200 });
-    const r = await ingestMessage(c.env, msg, botId);
-    if (r.scheduledInMs !== null) wakeTickAfter(c.env, ctxOpcional(c), r.scheduledInMs, r.warm);
+    await entregarCorreo(c, msg, botId);
     return new Response("ok", { status: 200 });
   }
 
@@ -287,9 +291,72 @@ async function routeEmailToAgent(
 
   const msg = parseMailgunInbound(form, await opcionesDeEntrada(c.env, botId));
   if (!msg) return new Response("ok", { status: 200 });
+  await entregarCorreo(c, msg, botId);
+  return new Response("ok", { status: 200 });
+}
+
+/**
+ * El último paso de un correo entrante, igual para los dos proveedores:
+ * ¿se contesta? y, si sí, ¿quién es?
+ *
+ * El filtro de intención (channels/email/triage.ts) corre SOLO con alguien
+ * que no ha escrito antes: si ya hay conversación, ya se decidió que es
+ * alguien a quien se atiende, y volver a clasificar cada respuesta suya solo
+ * gastaría — y podría apartar a media conversación un "gracias, ¿y el precio?".
+ *
+ * La misma llamada saca de su firma el nombre, la empresa y el teléfono. El
+ * nombre va a la conversación (el agente se dirige a la persona por él, y un
+ * ticket ya tiene a nombre de quién abrirse); empresa y teléfono quedan como
+ * datos del cliente.
+ */
+async function entregarCorreo(
+  c: { env: Env; executionCtx?: unknown },
+  msg: IncomingMessage,
+  botId: string,
+): Promise<void> {
+  const db = new Db(c.env.DB);
+  let triage: Triage | null = null;
+  const yaEscribio = await new ConversationsRepo(db, botId)
+    .findByChannelUserId("email", msg.channelUserId)
+    .catch(() => null);
+  if (!yaEscribio) {
+    triage = await clasificarCorreo(c.env, botId, {
+      de: msg.channelUserId,
+      asunto: msg.emailThread?.subject ?? "",
+      cuerpo: msg.emailCuerpoCompleto ?? msg.text ?? "",
+    });
+    if (!triage.atender) {
+      console.log(`[email] filtrado (${triage.categoria}): ${triage.motivo}`);
+      await new CorreosFiltradosRepo(db, botId)
+        .record({
+          remitente: msg.channelUserId,
+          asunto: msg.emailThread?.subject ?? null,
+          categoria: triage.categoria,
+          motivo: triage.motivo,
+        })
+        .catch((e) => console.warn("[email] no se pudo registrar el correo filtrado:", e));
+      return;
+    }
+    // La firma dice cómo se llama DE VERDAD ("Laura Pérez, Gerente de
+    // Compras"); el nombre de la cuenta a veces es un apodo o el de la empresa.
+    if (triage.nombre) msg.displayName = triage.nombre;
+  }
+
   const r = await ingestMessage(c.env, msg, botId);
   if (r.scheduledInMs !== null) wakeTickAfter(c.env, ctxOpcional(c), r.scheduledInMs, r.warm);
-  return new Response("ok", { status: 200 });
+
+  const datos = [
+    triage?.empresa ? `Trabaja en ${triage.empresa}` : null,
+    triage?.telefono ? `Su teléfono (de su firma): ${triage.telefono}` : null,
+  ].filter((d): d is string => !!d);
+  if (datos.length > 0) {
+    const conv = await new ConversationsRepo(db, botId).findByChannelUserId("email", msg.channelUserId).catch(() => null);
+    if (conv) {
+      await new CustomerFactsRepo(db, botId)
+        .addMany(conv.id, datos)
+        .catch((e) => console.warn("[email] no se pudieron guardar los datos de la firma:", e));
+    }
+  }
 }
 
 app.post("/webhooks/email/resend/:botId", (c) => routeEmailToAgent(c, "resend", c.req.param("botId")));

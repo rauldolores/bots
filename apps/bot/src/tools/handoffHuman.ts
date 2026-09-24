@@ -27,7 +27,8 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
     description:
       "Abre un ticket de SOPORTE y le avisa al dueño. Es para problemas POST-VENTA: algo no le funciona, un cobro mal hecho, lleva días esperando, una queja o un reclamo, un bug, algo legal. " +
       "NO la uses para pedidos de cotización, precios ni interés comercial — eso es captureLead, aunque tú no puedas dar el precio y haya que pasárselo a alguien del equipo. " +
-      "Necesita un teléfono o correo REAL para poder darle seguimiento — si el canal ya lo trae (WhatsApp, llamada) no hace falta pedirlo, pero si no (Telegram, Messenger, el widget web) pídeselo antes de llamar esta tool: sin eso, el ticket se rechaza.",
+      "Necesita un teléfono o correo REAL para poder darle seguimiento — si el canal ya lo trae (WhatsApp, llamada) no hace falta pedirlo, pero si no (Telegram, Messenger, el widget web) pídeselo antes de llamar esta tool: sin eso, el ticket se rechaza. " +
+      "También necesita saber A NOMBRE DE QUIÉN va el caso: si no sabes cómo se llama la persona, pregúntaselo antes y pásalo en `name`.",
     inputSchema: z.object({
       reason: z.string().describe("Categoría corta del problema"),
       summary: z.string().max(300).describe("Resumen en 1 frase del contexto"),
@@ -37,8 +38,9 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
         .default("normal")
         .describe("Qué tan urgente es: urgent = el cliente no puede operar/pagar; high = afecta bastante; normal = molestia normal; low = duda menor"),
       contact: z.string().optional().describe("Teléfono o correo del cliente — pídeselo si el canal no lo trae ya"),
+      name: z.string().max(80).optional().describe("Nombre de la persona, tal como te lo dijo — pídeselo si no lo sabes"),
     }),
-    execute: async ({ reason, summary, category, priority, contact }) => {
+    execute: async ({ reason, summary, category, priority, contact, name }) => {
       const convId = getConversationId();
       const db = new Db(env.DB);
       const tickets = new TicketsRepo(db, botId);
@@ -83,6 +85,29 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
           created: false,
           message:
             "No se creó el ticket: falta un teléfono o correo válido para poder darle seguimiento. Pídeselo al cliente y vuelve a llamar esta tool con ese dato.",
+        };
+      }
+
+      // Obligatorio también: A NOMBRE DE QUIÉN. Pasó por correo el 2026-09-24:
+      // alguien escribió "ayuda", el bot abrió dos tickets y el equipo no
+      // tenía ni cómo saludarlo al abrirlos. El nombre se busca primero en lo
+      // que ya sabemos (la conversación, su lead) y solo al final en lo que
+      // el modelo trae — sin ninguno, se pide antes de actuar.
+      if (!requesterName && convId) {
+        requesterName = (await new LeadsRepo(db, botId).findByConversation(convId))?.name ?? null;
+      }
+      const nombreDicho = (name ?? "").replace(/\s+/g, " ").trim();
+      if (!requesterName && nombreDicho) {
+        requesterName = nombreDicho;
+        // Queda en la conversación: el siguiente turno (y el panel) ya lo saben.
+        if (convId) await new ConversationsRepo(db, botId).setDisplayNameIfEmpty(convId, nombreDicho);
+      }
+      if (!requesterName && convId) {
+        return {
+          ticketId: null,
+          created: false,
+          message:
+            "No se creó el ticket: todavía no sabes cómo se llama la persona. Pregúntale su nombre (y lo que haga falta para atender su caso) y vuelve a llamar esta tool pasándolo en `name`.",
         };
       }
 

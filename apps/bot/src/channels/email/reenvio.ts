@@ -204,3 +204,48 @@ export function dirigidoAEsteBot(
   const recibido = new Set(destinatarios.map((d) => soloDireccion(d)).filter(Boolean));
   return aceptadas.some((a) => recibido.has(a));
 }
+
+/**
+ * El nombre de una dirección con formato de cabecera:
+ * `"Raúl Dolores" <raul@x.com>` o `Raúl Dolores <raul@x.com>` → "Raúl Dolores".
+ * Vacío si solo viene la dirección, o si el "nombre" es la dirección misma
+ * (hay clientes de correo que ponen `raul@x.com <raul@x.com>`).
+ */
+export function nombreDeDireccion(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const m = raw.match(/^\s*"?([^"<]*?)"?\s*<[^>]+>\s*$/);
+  const nombre = (m?.[1] ?? "").replace(/\s+/g, " ").trim();
+  if (!nombre || nombre.includes("@")) return "";
+  return nombre.slice(0, 80);
+}
+
+/**
+ * El nombre de quien DE VERDAD escribió — el de la misma cabecera que dio su
+ * dirección (ver remitenteReal). En un reenvío, el `From:` es el buzón del
+ * negocio: su nombre sería "Kontrolia", no el del cliente, así que se busca
+ * la línea "De:" del bloque reenviado que trae la dirección real.
+ *
+ * Antes no se guardaba ninguno: las conversaciones de correo nacían sin
+ * nombre y un ticket podía abrirse sin saber a nombre de quién.
+ */
+export function nombreDelRemitente(
+  correo: { from: string; replyTo?: string | null; text?: string | null },
+  remitente: string,
+): string | null {
+  const real = soloDireccion(remitente);
+  if (!real) return null;
+  for (const candidato of [correo.from, correo.replyTo ?? ""]) {
+    if (soloDireccion(candidato) === real) {
+      const n = nombreDeDireccion(candidato);
+      if (n) return n;
+    }
+  }
+  for (const linea of (correo.text ?? "").split(/\r?\n/)) {
+    const m = linea.match(/^[\s>*]*(?:De|From)\s*:\s*(.+)$/i);
+    if (m && soloDireccion(m[1]) === real) {
+      const n = nombreDeDireccion(m[1].replace(/\*/g, "").trim());
+      if (n) return n;
+    }
+  }
+  return null;
+}

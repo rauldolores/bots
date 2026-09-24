@@ -228,7 +228,12 @@ describe("runTurn — mensaje multimodal y prompt", () => {
     const arg = await correrTurno({ tier: "free", lastContent: "hola" });
 
     expect(Array.isArray(arg.system)).toBe(true);
-    expect(arg.system).toHaveLength(1);
+    // [0] = el prompt del bot, igual para todos (se cachea). [1] = lo de ESTA
+    // persona — aquí, que aún no se sabe su nombre (<quien_escribe>) — y va
+    // aparte justo para no romper la caché del [0].
+    expect(arg.system).toHaveLength(2);
+    expect(arg.system[1].content).toContain("<quien_escribe>");
+    expect(arg.system[1].providerOptions).toBeUndefined();
     expect(arg.system[0].role).toBe("system");
     expect(typeof arg.system[0].content).toBe("string");
     expect(arg.system[0].providerOptions).toEqual({

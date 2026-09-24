@@ -18,6 +18,14 @@ import { createSecret } from "../src/db/vault";
 import { SettingsRepo } from "../src/db/settings";
 import type { Db } from "../src/db/client";
 import type { Env } from "../src/env";
+import type { Triage } from "../src/channels/email/triage";
+
+// El filtro de intención llama a un modelo: aquí se simula su veredicto. Por
+// defecto "atender", que es también lo que hace el filtro de verdad cuando no
+// puede clasificar (falla abierto).
+const ATENDER: Triage = { atender: true, categoria: "cliente", motivo: "", nombre: null, empresa: null, telefono: null, clasificado: true };
+const clasificarMock = vi.fn(async (..._a: unknown[]): Promise<Triage> => ATENDER);
+vi.mock("../src/channels/email/triage", () => ({ clasificarCorreo: (...a: unknown[]) => clasificarMock(...a) }));
 
 let db: Db;
 let env: Env;
@@ -39,6 +47,7 @@ function mailgunSignature(signingKey: string, timestamp: string, token: string):
 beforeEach(async () => {
   db = await createTestDb();
   vi.restoreAllMocks();
+  clasificarMock.mockReset().mockResolvedValue(ATENDER);
   vi.spyOn(SettingsRepo.prototype, "all").mockResolvedValue({});
   env = {
     DB: db.driver,
@@ -203,5 +212,58 @@ describe("captureLead con un correo entrante real de punta a punta", () => {
     expect(conv?.channel).toBe("email");
     expect(conv?.channel_user_id).toBe("cliente@ejemplo.com");
     expect(leads).toHaveLength(0); // todavía no corrió el turno
+  });
+});
+
+// El filtro de intención (channels/email/triage.ts): lo que no es un cliente
+// no llega al agente, pero queda registrado para que el dueño lo vea.
+describe("correo entrante — filtro de intención", () => {
+  beforeEach(async () => {
+    await new BotChannelsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      channel: "email",
+      verifyTokenRef: await createSecret(db, MAILGUN_SIGNING_KEY),
+      config: { inboundProvider: "mailgun" },
+    });
+  });
+
+  function correoMailgun(campos: Record<string, string>) {
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const token = crypto.randomUUID().replace(/-/g, "") + "abcdefghijklmnopqr";
+    const form = new URLSearchParams({ ...campos, timestamp, token, signature: mailgunSignature(MAILGUN_SIGNING_KEY, timestamp, token) });
+    return app.fetch(new Request(`${BASE_URL}/webhooks/email/mailgun/${TEST_BOT_ID}`, { method: "POST", body: form }), env);
+  }
+
+  it("un vendedor: no abre conversación ni turno, y queda en correos_filtrados", async () => {
+    clasificarMock.mockResolvedValue({ ...ATENDER, atender: false, categoria: "vendedor", motivo: "Agencia ofreciendo SEO" });
+    const res = await correoMailgun({ sender: "ventas@agencia.com", subject: "Posicione su web", "stripped-text": "Hola, ofrecemos SEO" });
+    expect(res.status).toBe(200);
+    expect(await db.all("SELECT * FROM conversations")).toHaveLength(0);
+    expect(await db.all("SELECT * FROM agent_jobs")).toHaveLength(0);
+    const [f] = await db.all<{ remitente: string; categoria: string; asunto: string }>("SELECT * FROM correos_filtrados");
+    expect(f).toMatchObject({ remitente: "ventas@agencia.com", categoria: "vendedor", asunto: "Posicione su web" });
+  });
+
+  it("un cliente: toma el nombre de su firma y guarda empresa y teléfono como datos suyos", async () => {
+    clasificarMock.mockResolvedValue({ ...ATENDER, nombre: "Laura Pérez", empresa: "Acme", telefono: "55 1234 5678" });
+    await correoMailgun({
+      sender: "laura@acme.com",
+      subject: "Ayuda",
+      "stripped-text": "No me llega la factura",
+      "body-plain": "No me llega la factura\n\nLaura Pérez\nAcme\n55 1234 5678",
+    });
+    const conv = await db.first<{ id: string; display_name: string }>("SELECT id, display_name FROM conversations");
+    expect(conv?.display_name).toBe("Laura Pérez");
+    const hechos = (await db.all<{ fact: string }>("SELECT fact FROM customer_facts")).map((h) => h.fact);
+    expect(hechos).toEqual(expect.arrayContaining(["Trabaja en Acme", "Su teléfono (de su firma): 55 1234 5678"]));
+    // El clasificador ve el cuerpo CON firma (body-plain), no el recortado.
+    expect((clasificarMock.mock.calls[0][2] as { cuerpo: string }).cuerpo).toContain("Laura Pérez");
+    expect(await db.all("SELECT * FROM agent_jobs")).toHaveLength(1);
+  });
+
+  it("alguien que ya escribió antes no se vuelve a clasificar", async () => {
+    await correoMailgun({ sender: "cliente@ejemplo.com", subject: "Duda", "stripped-text": "¿Tienen envíos?" });
+    await correoMailgun({ sender: "cliente@ejemplo.com", subject: "Re: Duda", "stripped-text": "Gracias, ¿y el precio?" });
+    expect(clasificarMock).toHaveBeenCalledTimes(1);
   });
 });

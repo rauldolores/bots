@@ -2802,6 +2802,11 @@ adminApp.post("/config", async (c) => {
   const emailInboundAddressRaw = form.get(SETTING_KEYS.emailInboundAddress);
   if (emailInboundAddressRaw !== null)
     await repo.set(SETTING_KEYS.emailInboundAddress, String(emailInboundAddressRaw).trim().toLowerCase());
+  // Casilla: desmarcada no viaja en el form, por eso el campo oculto dice que
+  // la sección SÍ estaba (sin él, guardar otra pantalla lo apagaría).
+  if (form.get("email_filtro_intencion_en_form") === "1") {
+    await repo.set(SETTING_KEYS.emailFiltroIntencion, form.get(SETTING_KEYS.emailFiltroIntencion) === "1" ? "1" : "0");
+  }
   const emailFromNameRaw = form.get(SETTING_KEYS.emailFromName);
   if (emailFromNameRaw !== null) await repo.set(SETTING_KEYS.emailFromName, String(emailFromNameRaw).trim());
   if (form.get("email_outbound_api_key_clear") === "1") {
