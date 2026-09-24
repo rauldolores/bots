@@ -123,17 +123,34 @@ export class WorkJobsRepo {
    * secuencia — un lead puede estar en varios seguimientos, y cancelar uno no
    * puede llevarse por delante a los otros.
    */
+  /**
+   * Cancela los toques pendientes de un lead.
+   *
+   * `payload` queda guardado como una CADENA JSON dentro del jsonb, no como
+   * objeto — el mismo comportamiento de postgres.js que documenta
+   * botConnectors.listOAuthMcp(). Sobre una cadena, `payload->>'leadId'` es
+   * NULL, así que la versión anterior de este DELETE no borraba NADA, sin
+   * error: detener un seguimiento o reinscribir a un lead dejaba vivos los
+   * toques pendientes, y la persona SEGUÍA recibiendo mensajes después de que
+   * el dueño decidió pararlos. Lo cazaron las pruebas de nurture/run.
+   *
+   * `(payload #>> '{}')::jsonb` saca el valor de adentro y lo vuelve objeto:
+   * funciona igual con la cadena de hoy que con un objeto, si algún día se
+   * corrige la codificación.
+   */
   async cancelNurtureTouchesForLead(botId: string, leadId: string, sequenceId?: string): Promise<void> {
     if (sequenceId) {
       await this.db.run(
         `DELETE FROM work_jobs WHERE bot_id = ? AND kind = 'nurture_touch'
-           AND payload->>'leadId' = ? AND payload->>'sequenceId' = ?`,
+           AND (payload #>> '{}')::jsonb->>'leadId' = ?
+           AND (payload #>> '{}')::jsonb->>'sequenceId' = ?`,
         [botId, leadId, sequenceId],
       );
       return;
     }
     await this.db.run(
-      `DELETE FROM work_jobs WHERE bot_id = ? AND kind = 'nurture_touch' AND payload->>'leadId' = ?`,
+      `DELETE FROM work_jobs WHERE bot_id = ? AND kind = 'nurture_touch'
+         AND (payload #>> '{}')::jsonb->>'leadId' = ?`,
       [botId, leadId],
     );
   }
