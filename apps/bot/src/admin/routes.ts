@@ -1097,7 +1097,6 @@ adminApp.post("/kb/archivos/firma", async (c) => {
   const firma = await firmarSubida(c.env, {
     botId,
     nombre: String(body.nombre ?? "archivo"),
-    maxBytes: maxBytesDe(tipo),
   });
   if (!firma.ok) return c.json({ ok: false, error: firma.error }, 502);
   return c.json({ ok: true, url: firma.url, path: firma.path });

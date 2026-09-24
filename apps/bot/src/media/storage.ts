@@ -14,6 +14,7 @@
 // clientes — menús, catálogos, fotos del local. No es el lugar para un
 // documento confidencial, y el panel lo dice.
 import type { Env } from "../env";
+import { MAX_IMAGEN_BYTES, MAX_DOCUMENTO_BYTES } from "./limites";
 
 export interface ArchivoSubido {
   /** La ruta dentro del bucket. Es lo que se guarda en la base. */
@@ -44,35 +45,60 @@ export function urlPublicaDe(env: Env, path: string): string | null {
 }
 
 /**
- * Crea el bucket si no existe. Se llama antes de la primera subida en vez de
- * pedirle al dueño que lo cree en el panel de Supabase: quien instala esto
- * probablemente no sabe qué es un bucket.
+ * El tope del BUCKET es el del tipo más grande, no el del archivo que toca.
  *
- * `fileSizeLimit` va también aquí, como segunda línea: si algún día alguien
- * sube por otra vía, el propio Storage lo rechaza.
+ * Antes se pasaba el del archivo en turno, y eso era un bug con fecha: el
+ * bucket se crea UNA vez, con el tope del primer archivo que alguien sube. Si
+ * ese primero era una foto, el bucket nacía con 5 MB para siempre, y todo PDF
+ * de más de 5 MB fallaba al subir con un "No se pudo subir el archivo" sin
+ * explicación. El tope por tipo ya lo aplicamos nosotros (media/limites.ts);
+ * el del bucket solo es la segunda línea contra lo que llegue por otra vía.
  */
-async function asegurarBucket(cfg: { url: string; key: string; bucket: string }, maxBytes: number): Promise<void> {
-  const res = await fetch(`${cfg.url}/storage/v1/bucket`, {
+const TOPE_DEL_BUCKET = Math.max(MAX_IMAGEN_BYTES, MAX_DOCUMENTO_BYTES);
+
+/**
+ * Deja el bucket como tiene que estar: lo crea si no existe y, si existe, le
+ * vuelve a poner la configuración.
+ *
+ * Se llama antes de cada subida en vez de pedirle al dueño que lo cree en el
+ * panel de Supabase: quien instala esto probablemente no sabe qué es un
+ * bucket. Y se reescribe cuando ya existe porque un bucket creado a mano, o
+ * por una versión anterior de este código con el tope equivocado, se tiene
+ * que corregir solo — si no, el error aparece semanas después y en otra parte.
+ */
+async function asegurarBucket(cfg: { url: string; key: string; bucket: string }): Promise<void> {
+  const headers = {
+    Authorization: `Bearer ${cfg.key}`,
+    apikey: cfg.key,
+    "Content-Type": "application/json",
+  };
+  const ajustes = { public: true, file_size_limit: TOPE_DEL_BUCKET };
+
+  const crear = await fetch(`${cfg.url}/storage/v1/bucket`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${cfg.key}`,
-      apikey: cfg.key,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      id: cfg.bucket,
-      name: cfg.bucket,
-      public: true,
-      file_size_limit: maxBytes,
-    }),
+    headers,
+    body: JSON.stringify({ id: cfg.bucket, name: cfg.bucket, ...ajustes }),
   });
-  // 409 = ya existe, que es el caso normal a partir del segundo archivo.
-  if (!res.ok && res.status !== 409) {
-    const detalle = (await res.text().catch(() => "")).slice(0, 200);
-    // No se lanza: puede ser que el bucket exista y la llave no tenga permiso
-    // de crearlo. Si de verdad no existe, la subida de abajo lo dirá.
-    console.warn(`[storage] no se pudo asegurar el bucket ${cfg.bucket}: ${res.status} ${detalle}`);
+  if (crear.ok) return;
+
+  // 409 = ya existe, el caso normal a partir del segundo archivo: se le
+  // reescriben los ajustes por si nació con otros.
+  if (crear.status === 409) {
+    const ajustar = await fetch(`${cfg.url}/storage/v1/bucket/${cfg.bucket}`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(ajustes),
+    });
+    if (!ajustar.ok) {
+      console.warn(`[storage] no se pudo ajustar el bucket ${cfg.bucket}: ${ajustar.status}`);
+    }
+    return;
   }
+
+  // No se lanza: puede ser que la llave no tenga permiso de crear buckets.
+  // Si de verdad no existe, la firma de abajo lo dirá con su propio error.
+  const detalle = (await crear.text().catch(() => "")).slice(0, 200);
+  console.warn(`[storage] no se pudo asegurar el bucket ${cfg.bucket}: ${crear.status} ${detalle}`);
 }
 
 /** Nombre de archivo seguro para una ruta: sin acentos, espacios ni sorpresas. */
@@ -100,14 +126,14 @@ export function nombreSeguro(nombre: string): string {
  */
 export async function firmarSubida(
   env: Env,
-  a: { botId: string; nombre: string; maxBytes: number },
+  a: { botId: string; nombre: string },
 ): Promise<{ ok: true; url: string; path: string } | { ok: false; error: string }> {
   const cfg = config(env);
   if (!cfg) {
     return { ok: false, error: "Falta configurar SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY." };
   }
 
-  await asegurarBucket(cfg, a.maxBytes);
+  await asegurarBucket(cfg);
 
   const path = `${a.botId}/${crypto.randomUUID()}/${nombreSeguro(a.nombre)}`;
   const res = await fetch(`${cfg.url}/storage/v1/object/upload/sign/${cfg.bucket}/${path}`, {

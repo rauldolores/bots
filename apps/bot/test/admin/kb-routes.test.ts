@@ -181,7 +181,7 @@ describe("budget save route", () => {
 
 describe("biblioteca de medios — subir de verdad, no pegar una URL", () => {
   const STORAGE = "https://proyecto.supabase.co";
-  let subidas: { url: string; method: string }[];
+  let subidas: { url: string; method: string; body?: string }[];
 
   function mediaRepo() {
     return new MediaAssetsRepo(new Db(env.DB), TEST_BOT_ID);
@@ -194,7 +194,7 @@ describe("biblioteca de medios — subir de verdad, no pegar una URL", () => {
       "fetch",
       vi.fn(async (url: any, init: any = {}) => {
         const u = String(url);
-        subidas.push({ url: u, method: init.method ?? "GET" });
+        subidas.push({ url: u, method: init.method ?? "GET", body: typeof init.body === "string" ? init.body : undefined });
         if (u.includes("/storage/v1/bucket")) return new Response("", { status: 409 }); // ya existe
         if (u.includes("/object/upload/sign/")) {
           const path = u.split("/object/upload/sign/medios/")[1];
@@ -250,6 +250,24 @@ describe("biblioteca de medios — subir de verdad, no pegar una URL", () => {
     // La ruta cuelga del bot y de un UUID, no del nombre del archivo.
     expect(j.path.startsWith(`${TEST_BOT_ID}/`)).toBe(true);
     expect(j.path.endsWith("/menu.pdf")).toBe(true);
+  });
+
+  it("el bucket nace con el tope del tipo MÁS grande, aunque la primera subida sea una foto", async () => {
+    // El caso que rompía: la primera subida es una imagen (5 MB) y el bucket
+    // se quedaba con ese tope para siempre, así que un PDF de 8 MB fallaba.
+    await pedir("/kb/archivos/firma", cuerpo({ tipo: "imagen", mime: "image/jpeg", nombre: "local.jpg" }));
+
+    const crear = subidas.find((s) => s.method === "POST" && s.url.endsWith("/storage/v1/bucket"));
+    expect(JSON.parse(crear!.body!).file_size_limit).toBe(10 * 1024 * 1024);
+  });
+
+  it("si el bucket ya existía, le reescribe los ajustes para corregirse solo", async () => {
+    // fingirStorage contesta 409 (ya existe) a la creación.
+    await pedir("/kb/archivos/firma", cuerpo());
+
+    const ajuste = subidas.find((s) => s.method === "PUT" && s.url.endsWith("/storage/v1/bucket/medios"));
+    expect(ajuste).toBeTruthy();
+    expect(JSON.parse(ajuste!.body!)).toEqual({ public: true, file_size_limit: 10 * 1024 * 1024 });
   });
 
   it("no firma nada sin descripción: es lo único que el bot lee para decidir", async () => {
