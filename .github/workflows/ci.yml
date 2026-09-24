@@ -15,26 +15,23 @@ jobs:
       run:
         working-directory: apps/bot
 
-    # Los tests ya no levantan Miniflare: hablan con un Postgres real, que es la
-    # única forma de comprobar el dialecto, los claims atómicos y el traductor de
-    # placeholders. La imagen trae pgvector, que hará falta desde F2.
-    services:
-      postgres:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-
+    # Los tests hablan con un Postgres real: es la única forma de comprobar el
+    # dialecto, los claims atómicos y el traductor de placeholders.
+    #
+    # Y tiene que ser la Postgres DE SUPABASE, no una pelona. Antes esto era
+    # `pgvector/pgvector:pg17`, y ahí no existe el schema `vault`: el bot guarda
+    # todas las llaves (Twilio, correo, ElevenLabs, OAuth, el respaldo del LLM)
+    # en Supabase Vault, así que todo lo que toca un secreto tronaba en CI con
+    # `schema "vault" does not exist` — mientras pasaba en local y funcionaba
+    # en producción. Nueve archivos de pruebas en rojo por el entorno, no por
+    # el código. Con `supabase db start` CI corre sobre la misma imagen que la
+    # Supabase local (config.toml: major_version = 17), con Vault y pgvector.
     steps:
       - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: supabase db start
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -44,4 +41,5 @@ jobs:
       - run: npm run typecheck
       - run: npm test
         env:
-          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          # El puerto de la base que abre `supabase db start` (config.toml → [db] port).
+          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
