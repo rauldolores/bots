@@ -369,12 +369,16 @@ describe("processNurtureJobs — frenos que detienen la secuencia", () => {
       conversationId: conv.id, channelUserId: conv.channel_user_id, intent: "x",
     });
     const seqs = new NurtureSequencesRepo(db, TEST_BOT_ID);
-    const dosPasos = [
+    // Tres pasos, no dos: el que vence abajo es el paso 1, y si fuera el
+    // último el webinar terminaría "completado" pase lo que pase — la prueba
+    // mediría el fin del guion, no a quién se le atribuye la respuesta.
+    const tresPasos = [
       { afterHours: 0, instruction: "primer toque" },
       { afterHours: 24, instruction: "segundo toque" },
+      { afterHours: 48, instruction: "tercer toque" },
     ];
-    const cotizacion = await seqs.create({ name: "Cotización", goal: "Cerrar", steps: dosPasos });
-    const webinar = await seqs.create({ name: "Webinar", goal: "Invitar", steps: dosPasos });
+    const cotizacion = await seqs.create({ name: "Cotización", goal: "Cerrar", steps: tresPasos });
+    const webinar = await seqs.create({ name: "Webinar", goal: "Invitar", steps: tresPasos });
     await enrollLeadInSequence(env, TEST_BOT_ID, leadId, cotizacion, NOON);
     await enrollLeadInSequence(env, TEST_BOT_ID, leadId, webinar, NOON);
 

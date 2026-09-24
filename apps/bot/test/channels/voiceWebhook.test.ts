@@ -35,6 +35,11 @@ vi.mock("../../src/tools/handoffHuman", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/tools/handoffHuman")>();
   return { ...actual, notifyOwner: (...a: unknown[]) => notifyOwnerMock(...a) };
 });
+// Se carga YA, no la primera vez que sinCupo.ts lo pide con import(): los
+// avisos corren en segundo plano, y si dos de esos import() del módulo
+// simulado coinciden, a uno le toca el notifyOwner REAL — el aviso nunca
+// llega al mock y la prueba de B7b fallaba de vez en cuando.
+await import("../../src/tools/handoffHuman");
 
 let db: Db;
 let env: any;
@@ -271,6 +276,9 @@ describe("handleIncomingVoiceCall — sin minutos en el plan", () => {
     expect(body).not.toContain("<Connect>");
     // Lo que oye el cliente no menciona el plan: es asunto del negocio.
     expect(body.toLowerCase()).not.toMatch(/plan|límite|limite|minutos/);
+    // El aviso al dueño va en segundo plano: se espera aquí para que no
+    // aterrice en el mock de la prueba siguiente.
+    await vi.waitFor(() => expect(notifyOwnerMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ ticketId: "sin-cupo-llamadas" }), TEST_BOT_ID), { timeout: 15_000 });
   });
 
   it("pregunta por el límite 'llamadas', no por 'conversaciones'", async () => {
