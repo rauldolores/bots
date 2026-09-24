@@ -44,10 +44,15 @@ export async function leerEvidencia(env: Env, botId: string, convId: string | nu
   ]);
 
   const herramientas: string[] = [];
+  const resultados: { herramienta: string; salida: string }[] = [];
   for (const m of mensajes) {
     try {
-      for (const t of JSON.parse(m.tool_calls ?? "[]") as { toolName?: string; ok?: boolean }[]) {
+      for (const t of JSON.parse(m.tool_calls ?? "[]") as { toolName?: string; ok?: boolean; output?: unknown }[]) {
         if (t.toolName) herramientas.push(t.ok === false ? `${t.toolName} (falló)` : t.toolName);
+        if (t.toolName && t.output !== undefined) {
+          const salida = typeof t.output === "string" ? t.output : JSON.stringify(t.output);
+          resultados.push({ herramienta: t.toolName, salida: salida.slice(0, 1500) });
+        }
       }
     } catch {
       /* formato viejo: se ignora */
@@ -61,6 +66,7 @@ export async function leerEvidencia(env: Env, botId: string, convId: string | nu
     leads,
     citas,
     herramientas,
+    resultados,
     nombreEnConversacion: conv?.display_name ?? null,
     correoFiltrado: filtrado,
   };

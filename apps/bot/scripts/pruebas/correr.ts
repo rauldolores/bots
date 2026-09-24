@@ -247,6 +247,31 @@ async function main() {
   mkdirSync(dir, { recursive: true });
 
   // Limpiar lo de un run anterior (uno que se corrió con --sin-limpiar, o que se cortó).
+  // Volver a juzgar un run guardado (otro modelo de juez, criterios nuevos) sin repetir las conversaciones.
+  const rejuzgar = arg("rejuzgar");
+  if (rejuzgar) {
+    const archivo = join(dir, `pruebas-${rejuzgar}.json`);
+    const previo = JSON.parse(readFileSync(archivo, "utf8"));
+    const resultados = previo.resultados as ResultadoEscenario[];
+    for (const r of resultados) {
+      const esc = ESCENARIOS.find((e) => e.id === r.escenario);
+      if (!esc || r.estado === "omitido" || r.estado === "error" || esc.espera.sinRespuesta) continue;
+      r.chequeos = chequeosDe(esc, r.canal, r.transcripcion, r.evidencia);
+      r.veredicto = await juzgar(env, previo.botId ?? botId, esc, r.canal, r.transcripcion, r.evidencia, r.chequeos);
+      r.estado = r.chequeos.every((c) => c.ok) && r.veredicto.aprobado ? "aprobado" : "reprobado";
+      console.log(`[${r.canal}/${r.escenario}] ${r.estado} ${r.veredicto.calificacion}`);
+    }
+    const sufijo = `${rejuzgar}-rejuzgado`;
+    writeFileSync(join(dir, `pruebas-${sufijo}.json`), JSON.stringify({ ...previo, resultados }, null, 2));
+    writeFileSync(
+      join(dir, `pruebas-${sufijo}.html`),
+      generarReporte({ runId: sufijo, inicio: previo.inicio, duracionMs: previo.duracionMs, resultados, limpieza: previo.limpieza }),
+    );
+    console.log(`Reporte: ${join(dir, `pruebas-${sufijo}.html`)}`);
+    await closeDrivers();
+    return;
+  }
+
   const limpiarRun = arg("limpiar");
   if (limpiarRun) {
     const previo = JSON.parse(readFileSync(join(dir, `pruebas-${limpiarRun}.json`), "utf8")) as { marcas: Marca[] };

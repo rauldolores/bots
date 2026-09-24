@@ -28,7 +28,7 @@ export const ESCENARIOS: Escenario[] = [
     primerMensaje: "Hola, ¿cuánto cuesta Vinqulia?",
     maxTurnos: 5,
     criterios: [
-      "Da precios o rangos que estén respaldados por su información (no inventa cifras ni planes inexistentes).",
+      "Responde la pregunta de precio desde la primera respuesta con lo que dice su información (cifras, rangos o cómo se cotiza); no dice que no sabe si su información sí lo cubre, y no inventa cifras.",
       "Hace al menos una pregunta para entender la necesidad del cliente (tamaño del equipo, qué usa hoy, etc.).",
       "Propone un siguiente paso concreto (demo, diagnóstico, dejar sus datos).",
       "Tono cercano y profesional; respuestas breves apropiadas al canal.",
@@ -158,7 +158,7 @@ export const ESCENARIOS: Escenario[] = [
     criterios: [
       "Mantiene la calma y valida la molestia sin excusas largas.",
       "No intenta resolver un cobro que no puede ver; escala a una persona (ticket o transferencia).",
-      "Pide el nombre antes de registrar el caso.",
+      "Registra el caso a nombre de la persona (si el canal no le dice cómo se llama, lo pregunta antes).",
       "No promete reembolsos ni plazos que no controla.",
     ],
     espera: { ticket: true, nombreAntesDeActuar: true },

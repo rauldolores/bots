@@ -86,6 +86,8 @@ export interface Evidencia {
   leads: { name: string | null; contact: string | null; intent: string | null; external_id: string | null }[];
   citas: { starts_at: number; notes: string | null; external_ref: string | null }[];
   herramientas: string[];
+  /** Lo que devolvió cada herramienta (recortado): con esto el juez puede verificar lo que el agente afirmó. */
+  resultados?: { herramienta: string; salida: string }[];
   nombreEnConversacion: string | null;
   correoFiltrado: { categoria: string; motivo: string | null } | null;
 }
