@@ -99,12 +99,22 @@ function slugify(s: string): string {
   return base || "bot";
 }
 
+/** La forma de `bots.id`. Ver getById: es lo que separa un 404 de un 500. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export class BotsRepo {
   constructor(private readonly db: Db) {}
 
   /** id ausente → null sin consultar (no un id "que no existe" — un id que nunca se resolvió). */
   async getById(id: string | undefined | null): Promise<Bot | null> {
     if (!id) return null;
+    // El id casi siempre llega de AFUERA: la URL de un webhook
+    // (/webhooks/<canal>/:botId), un query param del widget. `bots.id` es UUID,
+    // y mandarle a Postgres algo que no lo es no da "no existe": revienta con
+    // `invalid input syntax for type uuid` y la ruta contesta 500. Cualquiera
+    // que pegara a /webhooks/email/resend/basura producía un error del
+    // servidor. Algo que no tiene forma de UUID no puede ser de ningún bot.
+    if (!UUID.test(id)) return null;
     const row = await this.db.first<BotRow>("SELECT * FROM bots WHERE id = ?", [id]);
     return row ? toBot(row) : null;
   }
