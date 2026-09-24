@@ -265,9 +265,14 @@ describe("loadMcpTools — un conector roto no se cobra en cada turno", () => {
 
     await loadMcpTools(env, db, TEST_BOT_ID);
 
-    const row = await new BotConnectorsRepo(db).getByBotAndProvider(TEST_BOT_ID, "mcp-roto");
-    expect(row?.config.mcpLastError).toContain("token vencido");
-    expect(Number(row?.config.mcpLastErrorAt)).toBeGreaterThan(0);
+    // La marca se escribe SIN await a propósito (el turno del cliente no espera
+    // una escritura de diagnóstico), así que se espera a que aterrice en vez de
+    // leerla en el mismo instante.
+    await vi.waitFor(async () => {
+      const row = await new BotConnectorsRepo(db).getByBotAndProvider(TEST_BOT_ID, "mcp-roto");
+      expect(row?.config.mcpLastError).toContain("token vencido");
+      expect(Number(row?.config.mcpLastErrorAt)).toBeGreaterThan(0);
+    });
   });
 
   it("si falló hace poco, NI SE INTENTA — ahí está el ahorro de segundos por turno", async () => {
@@ -321,8 +326,15 @@ describe("loadMcpTools — un conector roto no se cobra en cada turno", () => {
     createMCPClientMock.mockResolvedValue({ tools: async () => ({}) });
 
     await loadMcpTools(env, db, TEST_BOT_ID);
-    await new Promise((r) => setTimeout(r, 50)); // la limpieza es best-effort (void)
 
+    // Antes: un setTimeout de 50 ms, frágil bajo carga — y además tapaba un bug
+    // real (dos escrituras a la vez que se pisaban, ver guardarCache()).
+    await vi.waitFor(async () => {
+      const row = await new BotConnectorsRepo(db).getByBotAndProvider(TEST_BOT_ID, "mcp-ok");
+      expect(row?.config.mcpLastError).toBe("");
+    });
+    // Y se queda borrada: que ninguna escritura rezagada la resucite.
+    await new Promise((r) => setTimeout(r, 200));
     const row = await new BotConnectorsRepo(db).getByBotAndProvider(TEST_BOT_ID, "mcp-ok");
     expect(row?.config.mcpLastError).toBe("");
   });

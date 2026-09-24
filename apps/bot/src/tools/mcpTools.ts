@@ -130,7 +130,25 @@ function leerCache(c: BotConnector): { esquemas: EsquemaTool[]; vencido: boolean
 }
 
 /** Best-effort: si no se puede guardar, el próximo turno simplemente vuelve a listar. */
-function guardarCache(repo: BotConnectorsRepo, botId: string, c: BotConnector, tools: Record<string, any>): void {
+/**
+ * Guarda el catálogo y, si se pide, borra la marca de fallo — en UNA sola
+ * escritura.
+ *
+ * Tienen que ir juntas. `mergeConfig` lee, mezcla en JS y escribe la config
+ * entera, sin atomicidad, así que dos escrituras a la vez sobre el mismo
+ * conector se pisan: la que leyó antes resucita lo que la otra acababa de
+ * borrar. Cuando un conector se recuperaba salían dos (limpiar el error y
+ * guardar el catálogo), y a veces la del catálogo volvía a poner la marca de
+ * error — el panel seguía diciendo que el conector fallaba aunque ya
+ * funcionara. Lo cazó "al recuperarse borra la marca" en mcpTools.test.ts.
+ */
+function guardarCache(
+  repo: BotConnectorsRepo,
+  botId: string,
+  c: BotConnector,
+  tools: Record<string, any>,
+  opts: { limpiarFallo?: boolean } = {},
+): void {
   const esquemas: EsquemaTool[] = Object.entries(tools).map(([name, t]) => ({
     name,
     description: t?.description,
@@ -140,6 +158,7 @@ function guardarCache(repo: BotConnectorsRepo, botId: string, c: BotConnector, t
     .mergeConfig(botId, c.provider, {
       [TOOLS_CACHE_KEY]: JSON.stringify(esquemas),
       [TOOLS_CACHE_AT_KEY]: String(Date.now()),
+      ...(opts.limpiarFallo ? { [ERR_KEY]: "", [ERR_AT_KEY]: "" } : {}),
     })
     .catch((e) => console.warn(`[mcpTools] no se pudo guardar el catálogo de ${c.name ?? c.provider}:`, e));
 }
@@ -299,14 +318,12 @@ export async function loadMcpTools(env: Env, db: Db, botId: string): Promise<Rec
           MCP_TOTAL_TIMEOUT_MS,
           `[mcpTools] ${etiqueta}`,
         );
-        // Se recuperó: se borra la marca para que el panel deje de avisar.
-        if (c.config[ERR_AT_KEY]) {
-          void repo
-            .mergeConfig(botId, c.provider, { [ERR_KEY]: "", [ERR_AT_KEY]: "" })
-            .catch((e) => console.error(`[mcpTools] no se pudo limpiar el estado de ${etiqueta}:`, e));
-        }
-        // Se guarda el catálogo para que los próximos turnos no paguen el viaje.
-        guardarCache(repo, botId, c, tools as Record<string, any>);
+        // Se guarda el catálogo para que los próximos turnos no paguen el viaje
+        // y, si venía fallando, se borra la marca para que el panel deje de
+        // avisar. Las dos cosas en UNA escritura: ver guardarCache().
+        guardarCache(repo, botId, c, tools as Record<string, any>, {
+          limpiarFallo: Boolean(c.config[ERR_AT_KEY]),
+        });
         const prefixed: Record<string, unknown> = {};
         for (const [name, t] of Object.entries(tools)) {
           prefixed[mcpToolName(prefix, name)] = t;
