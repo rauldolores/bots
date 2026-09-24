@@ -25,14 +25,23 @@ import { conversationKeyOf } from "../../src/agent/key";
 import { MessagesRepo } from "../../src/db/messages";
 import type { Db } from "../../src/db/client";
 
+/**
+ * runAgentTurnCore recorre `fullStream` (no `textStream`) para poder ver el
+ * momento exacto en que el modelo llama a una herramienta — ver turn.ts. Este
+ * helper se había quedado con la forma vieja: `fullStream` llegaba undefined,
+ * el turno tronaba y la sesión de voz contestaba "Algo falló de mi lado". Es
+ * el mismo desajuste que ya documentó y arregló test/queue/tick.test.ts.
+ */
 function makeStreamResult(text: string) {
   async function* gen() {
-    yield text;
+    yield { type: "text-delta", text };
   }
   return {
-    textStream: gen(),
+    fullStream: gen(),
     usage: Promise.resolve({ inputTokens: 8, outputTokens: 4, cachedInputTokens: 0 }),
     steps: Promise.resolve([{ toolCalls: [] }]),
+    finishReason: Promise.resolve("stop"),
+    warnings: Promise.resolve([]),
   };
 }
 

@@ -117,14 +117,11 @@ describe("otras rutas sin ExecutionContext", () => {
       conToken,
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      ok: true,
-      claimed: 0,
-      answered: 0,
-      failed: 0,
-      campaignsSent: 0,
-      skillsRun: 0,
-    });
+    // Esta prueba es sobre el TOKEN, no sobre los contadores del tick. Antes
+    // comparaba el objeto completo y se rompía cada vez que el tick ganaba un
+    // contador (el último fue `nurtureSent`), sin que nada estuviera mal. El
+    // conteo exhaustivo ya lo cuida test/queue/tick.test.ts.
+    expect(await res.json()).toMatchObject({ ok: true, claimed: 0 });
   });
 
   it("/cron/tick acepta el token por Authorization (así lo manda Vercel Cron)", async () => {
