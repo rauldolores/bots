@@ -1,4 +1,4 @@
-import { DEFAULT_TIMEZONE, formatTodayLong, proximosDias } from "./datetime";
+import { DEFAULT_TIMEZONE, desfaseHorario, formatTodayLong, proximosDias } from "./datetime";
 
 export interface SystemPromptInput {
   botName: string;
@@ -77,6 +77,12 @@ equivocaste. Más vale una pregunta que una cita el día equivocado.
 Toda hora que menciones o mandes a una herramienta (ej. agendar una cita) es
 en la zona horaria LOCAL del negocio ({{TIMEZONE}}), no UTC — el sistema ya
 convierte, tú solo usas la hora tal cual la dice el cliente.
+
+Si una herramienta pide una fecha CON HORA y su formato incluye desfase
+horario, el de este negocio hoy es {{DESFASE_HORARIO}}: escribe
+aaaa-mm-ddThh:mm{{DESFASE_HORARIO}} (ej. 2026-09-24T17:00{{DESFASE_HORARIO}}).
+Sin el desfase, esas herramientas rechazan la fecha y lo que ibas a registrar
+no queda.
 </fecha_actual>
 
 {{CONTEXTO_REGIONAL}}
@@ -338,6 +344,7 @@ respétalo: nunca insistas de más con tal de cumplirlo.
     .replaceAll("{{BUSINESS_CONTEXT}}", input.businessContext)
     .replaceAll("{{TOOL_LIST}}", toolList)
     .replaceAll("{{TIMEZONE}}", timezone)
+    .replaceAll("{{DESFASE_HORARIO}}", desfaseHorario(now, timezone))
     .replaceAll("{{NICHO_PLAYBOOK}}", input.nichoPlaybook ?? "")
     .replaceAll("{{LECCIONES}}", lessonsBlock)
     .replaceAll("{{CONTEXTO_REGIONAL}}", contextoRegional)

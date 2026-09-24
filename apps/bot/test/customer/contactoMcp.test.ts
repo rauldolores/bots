@@ -6,10 +6,19 @@
  * escribió en el CRM con `id: 1` — un número puesto por poner. El cliente SÍ
  * estaba ahí y se encontraba por el número desde el que llamaba.
  */
-import { describe, it, expect, vi } from "vitest";
-import { idsDeLaRespuesta, lineaDeContactoMcp, resolverContactoEnMcp } from "../../src/customer/contactoMcp";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  idsDeLaRespuesta,
+  lineaDeContactoMcp,
+  olvidarContactosMcp,
+  resolverContactoEnMcp,
+} from "../../src/customer/contactoMcp";
 import type { Env } from "../../src/env";
 import type { Db } from "../../src/db/client";
+
+// La resolución se cachea 10 min en memoria; sin limpiarla, un test vería la
+// respuesta del anterior.
+beforeEach(() => olvidarContactosMcp());
 
 const env = {} as Env;
 const db = {} as Db;

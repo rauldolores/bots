@@ -23,6 +23,22 @@ import type { Db } from "../db/client";
 /** Tope de la búsqueda. Corre antes de saludar: pasado esto, mejor sin id que con el cliente esperando. */
 const TIMEOUT_MS = 2_500;
 
+/**
+ * Cuánto vale una resolución antes de volver a preguntarle al CRM.
+ *
+ * Diez minutos: más que una llamada, y si alguien dio de alta al contacto
+ * mientras tanto, la siguiente conversación lo verá. Se cachea TAMBIÉN el
+ * "no apareció" — repetir una búsqueda que ya sabemos vacía son dos viajes
+ * al CRM por llamada, con el cliente esperando el saludo.
+ */
+const VIGENCIA_MS = 10 * 60_000;
+const cache = new Map<string, { at: number; valor: ContactoResuelto | null }>();
+
+/** Solo para pruebas y para cuando el dueño acaba de dar de alta a alguien. */
+export function olvidarContactosMcp(): void {
+  cache.clear();
+}
+
 /** Cómo se llama, en cualquier MCP, la herramienta que busca personas. */
 const ES_BUSCAR_CONTACTOS = /(buscar|search|find|list)[_-]?(contacto|contact)s?$/i;
 
@@ -44,12 +60,23 @@ export async function resolverContactoEnMcp(
   db: Db,
   botId: string,
   quien: { email?: string | null; telefono?: string | null },
-  /** Solo para pruebas: las tools ya cargadas, para no volver a pedirlas. */
+  /**
+   * Las tools del MCP ya cargadas.
+   *
+   * Importa para el reloj: quien arma el contexto (agent/context.ts) ya las
+   * cargó en la tanda anterior, y volver a pedirlas aquí reconecta con el
+   * servidor MCP — medido en una llamada real, 3 segundos EXTRA antes del
+   * saludo. Con ellas, esto es una ejecución y nada más.
+   */
   toolsYaCargadas?: Record<string, unknown>,
 ): Promise<ContactoResuelto | null> {
   const email = (quien.email ?? "").trim();
   const telefono = (quien.telefono ?? "").trim();
   if (!email && !telefono) return null;
+
+  const clave = `${botId}|${email}|${telefono}`;
+  const enCache = cache.get(clave);
+  if (enCache && Date.now() - enCache.at < VIGENCIA_MS) return enCache.valor;
 
   try {
     const tools = toolsYaCargadas ?? (await (await import("../tools/mcpTools")).loadMcpTools(env, db, botId));
@@ -63,8 +90,13 @@ export async function resolverContactoEnMcp(
     for (const texto of [email, telefono].filter(Boolean)) {
       const hallado = await conTimeout(buscar.execute({ texto }, {}), TIMEOUT_MS).catch(() => null);
       const ids = idsDeLaRespuesta(hallado);
-      if (ids.length > 0) return { id: ids[0], coincidencias: ids.length };
+      if (ids.length > 0) {
+        const valor = { id: ids[0], coincidencias: ids.length };
+        cache.set(clave, { at: Date.now(), valor });
+        return valor;
+      }
     }
+    cache.set(clave, { at: Date.now(), valor: null });
     return null;
   } catch (e) {
     console.warn("[contactoMcp] no se pudo resolver el contacto:", e instanceof Error ? e.message : e);

@@ -8,6 +8,7 @@ import {
   formatDate,
   formatTodayLong,
   proximosDias,
+  desfaseHorario,
 } from "../src/datetime";
 
 describe("resolveTimezone", () => {
@@ -136,5 +137,39 @@ describe("proximosDias — bug real: pidió mover la cita al lunes y la agendó 
     const manana = proximosDias(new Date("2026-09-01T14:00:00Z"), "America/Mexico_City");
     const tarde = proximosDias(new Date("2026-09-01T22:00:00Z"), "America/Mexico_City");
     expect(manana).toBe(tarde);
+  });
+});
+
+/**
+ * Decir la zona no basta: hay herramientas que exigen la fecha con desfase
+ * explícito y rechazan la hora pelada. En una llamada real el agente mandó
+ * "2026-09-24T17:00:00" al CRM, el CRM la rechazó, y la tarea del cliente
+ * nunca se creó. Al modelo hay que darle el número, no el nombre de la zona.
+ */
+describe("desfaseHorario — el número que piden las APIs", () => {
+  const enero = new Date("2026-01-15T12:00:00Z");
+  const julio = new Date("2026-07-15T12:00:00Z");
+
+  it("México da -06:00", () => {
+    expect(desfaseHorario(enero, "America/Mexico_City")).toBe("-06:00");
+  });
+
+  it("UTC da +00:00", () => {
+    expect(desfaseHorario(enero, "UTC")).toBe("+00:00");
+  });
+
+  it("se calcula por fecha: con horario de verano el desfase cambia", () => {
+    expect(desfaseHorario(enero, "Europe/Madrid")).toBe("+01:00");
+    expect(desfaseHorario(julio, "Europe/Madrid")).toBe("+02:00");
+  });
+
+  it("zonas con media hora no se redondean", () => {
+    expect(desfaseHorario(enero, "Asia/Kolkata")).toBe("+05:30");
+  });
+
+  it("siempre sale con dos dígitos de hora — el formato que piden las APIs", () => {
+    for (const z of ["America/Mexico_City", "Europe/Madrid", "Asia/Tokyo", "UTC"]) {
+      expect(desfaseHorario(enero, z)).toMatch(/^[+-]\d{2}:\d{2}$/);
+    }
   });
 });

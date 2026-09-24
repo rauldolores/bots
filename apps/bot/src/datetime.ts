@@ -66,6 +66,33 @@ export function localTimeToUtcMs(localDateTime: string, timeZone: string): numbe
 }
 
 /** epoch ms → "22 de agosto de 2026, 11:00" en la zona del negocio. */
+/**
+ * El desfase de la zona respecto a UTC, en el formato que piden las APIs:
+ * "-06:00", "+02:00".
+ *
+ * Decir la zona ("America/Mexico_City") no basta: hay herramientas —el MCP
+ * del CRM, sin ir más lejos— que exigen la fecha con desfase explícito
+ * (aaaa-mm-ddThh:mm-06:00) y rechazan la hora pelada. Al modelo hay que
+ * darle el número, no el nombre de la zona, porque calcularlo él es justo
+ * donde se equivoca: en una llamada real mandó la hora sin desfase, el CRM
+ * la rechazó, y la tarea del cliente nunca se creó.
+ *
+ * Se calcula para un instante concreto a propósito: con horario de verano el
+ * desfase de una misma zona cambia según la fecha.
+ */
+export function desfaseHorario(now: Date, timeZone: string): string {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    timeZoneName: "longOffset",
+  });
+  const parte = fmt.formatToParts(now).find((p) => p.type === "timeZoneName")?.value ?? "";
+  // Intl devuelve "GMT-6", "GMT-06:00" o "GMT" según entorno y zona.
+  const m = /GMT([+-])(\d{1,2})(?::(\d{2}))?/.exec(parte);
+  if (!m) return "+00:00";
+  const horas = m[2].padStart(2, "0");
+  return `${m[1]}${horas}:${m[3] ?? "00"}`;
+}
+
 export function formatDateTime(ms: number, timeZone: string): string {
   return new Date(ms).toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short", timeZone });
 }

@@ -153,6 +153,9 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
     resolveAgentConfig(env, toolNames, botId, { paraVoz: input.paraVoz }),
     buildCustomerContext(db, botId, {
       env,
+      // Ya cargadas arriba: sin esto, resolver el contacto reconecta con el
+      // MCP y son 3 segundos de más antes de saludar.
+      mcpTools,
       conversationId,
       channelUserId: state?.channelUserId ?? null,
     }),

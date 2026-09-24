@@ -82,6 +82,7 @@ async function resolverContactoDelLead(
   botId: string,
   lead: Lead,
   contactos: LeadContact[],
+  mcpTools?: Record<string, unknown>,
 ): Promise<ContactoResuelto | null | undefined> {
   if (!env) return undefined; // quien llamó no pasó env: sin MCP que consultar
   const email =
@@ -91,12 +92,14 @@ async function resolverContactoDelLead(
     contactos.find((c) => c.kind === "phone")?.address_norm ??
     (lead.contact && !lead.contact.includes("@") ? lead.contact : null);
   if (!email && !telefono) return undefined;
-  return resolverContactoEnMcp(env, db, botId, { email, telefono });
+  return resolverContactoEnMcp(env, db, botId, { email, telefono }, mcpTools);
 }
 
 export interface CustomerContextInput {
   /** Hace falta para consultar el MCP; sin él, el contexto se arma igual pero sin la ficha del CRM. */
   env?: Env;
+  /** Las tools del MCP si quien llama ya las cargó — evita reconectar (3 s antes del saludo). */
+  mcpTools?: Record<string, unknown>;
   /** La conversación actual, si la hay (en el seguimiento puede no haberla). */
   conversationId?: string | null;
   /** Identidad del canal — con esto se encuentra al lead cuando no hay conversación conocida. */
@@ -145,7 +148,7 @@ export async function buildCustomerContext(
     // Con el snapshot del conector nativo ya resuelto no hace falta.
     const contactoMcp = crm?.contactId
       ? undefined
-      : await resolverContactoDelLead(input.env, db, botId, lead, contactos);
+      : await resolverContactoDelLead(input.env, db, botId, lead, contactos, input.mcpTools);
 
     return { lead, contactos, otrosCanales, ticketsAbiertos, citasProximas, seguimiento, crm, contactoMcp };
   } catch (e) {
