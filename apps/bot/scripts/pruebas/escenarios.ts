@@ -26,7 +26,8 @@ export const ESCENARIOS: Escenario[] = [
       "Contestas con naturalidad a las preguntas del asesor. Si te piden tus datos para darte seguimiento, los das. " +
       "Cuando ya tengas el precio y sepas qué sigue, te despides.",
     primerMensaje: "Hola, ¿cuánto cuesta Vinqulia?",
-    maxTurnos: 5,
+    // Con descubrimiento antes de pedir datos, cinco turnos no alcanzaban.
+    maxTurnos: 7,
     criterios: [
       "Responde la pregunta de precio desde la primera respuesta con lo que dice su información (cifras, rangos o cómo se cotiza); no dice que no sabe si su información sí lo cubre, y no inventa cifras.",
       "Hace al menos una pregunta para entender la necesidad del cliente (tamaño del equipo, qué usa hoy, etc.).",
@@ -46,7 +47,9 @@ export const ESCENARIOS: Escenario[] = [
       "Te despides cuando el asesor confirme que alguien te va a contactar o que ya quedó registrada tu solicitud.",
     primerMensaje: "Buen día. Necesito una cotización de un CRM para mi equipo de ventas, ¿me pueden ayudar?",
     asunto: "Cotización CRM para equipo de ventas",
-    maxTurnos: 6,
+    // Ídem: en el run del 2026-09-25 se acabaron los turnos justo cuando la
+    // clienta ofrecía su contacto, y el lead "faltante" era de la prueba.
+    maxTurnos: 8,
     criterios: [
       "Registra el interés comercial como lead/oportunidad (no como ticket de soporte).",
       "Pide el nombre y un medio de contacto antes de registrar, y no vuelve a pedir datos que ya le dieron.",
