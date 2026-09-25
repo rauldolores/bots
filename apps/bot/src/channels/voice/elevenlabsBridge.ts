@@ -33,6 +33,7 @@ import { buildClearMessage, buildMediaMessage } from "./mediaStreamProtocol";
 import { bloqueLlamadaEnCurso, bloqueLimites, bloqueTransferenciaFallida, VOICE_BEHAVIOR_ADDENDUM } from "./voiceInstructions";
 import { resolveVoiceGreeting, resolveTransferFallbackGreeting } from "./voiceGreeting";
 import { motivoDeFallo, camposConValor, pistaAccionable } from "./toolResult";
+import { revisarCumplimiento, notaDeCorreccionEnVivo, type HerramientaDelTurno } from "../../agent/cumplimiento";
 
 import { logVoiceEvent, maskId } from "./log";
 import { createCallMetrics, type CallMetrics } from "./metrics";
@@ -91,6 +92,15 @@ export class ElevenLabsCallBridge implements CallBridge {
   /** Última señal de vida de la llamada — la base del vigilante de silencio. */
   private ultimaActividad = Date.now();
   private vigilanteDeSilencio: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Lo que las herramientas de ESTA llamada de verdad hicieron — contra esto
+   * revisa la guarda de cumplimiento cada cosa que dice el agente. Toda la
+   * llamada y no solo el último turno: en voz es normal decir "ya quedó" una
+   * intervención después de la que lo hizo.
+   */
+  private herramientasDeLaLlamada: HerramientaDelTurno[] = [];
+  /** Cuántas correcciones van en esta llamada — con tope, para no entrar en un ciclo. */
+  private correccionesDeCumplimiento = 0;
 
   private constructor(private readonly deps: CallBridgeDeps) {}
 
@@ -127,7 +137,10 @@ export class ElevenLabsCallBridge implements CallBridge {
       onAudio: (b64) => this.audioHaciaTwilio(b64),
       onInterruption: () => this.interrumpido(),
       onUserTranscript: (t) => void this.persistirTurno("user", t),
-      onAgentResponse: (t) => void this.persistirTurno("assistant", t),
+      onAgentResponse: (t) => {
+        void this.persistirTurno("assistant", t);
+        this.revisarCumplimiento(t);
+      },
       onError: (e) => console.error("[voice-elevenlabs] error:", e),
       onEvento: (tipo, evento) => this.eventoDeElevenLabs(tipo, evento),
       onToolCall: (llamada) => void this.ejecutarHerramienta(llamada),
@@ -431,6 +444,7 @@ export class ElevenLabsCallBridge implements CallBridge {
               motivo,
             });
           }
+          this.herramientasDeLaLlamada.push({ toolName: nombre, ok: !fallo });
           void recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.tool_called", {
             tool: nombre,
             kind: "mcp",
@@ -445,6 +459,7 @@ export class ElevenLabsCallBridge implements CallBridge {
           // puede repetir al modelo (y de ahí, al cliente en voz alta).
           tarea.error = "tool_execution_failed";
           console.error(`[voice-elevenlabs] tool delegada "${nombre}" falló:`, e);
+          this.herramientasDeLaLlamada.push({ toolName: nombre, ok: false });
           void recordCallEvent(this.db(), this.deps.botId, this.callRowId, "call.tool_called", {
             tool: nombre,
             kind: "mcp",
@@ -488,6 +503,17 @@ export class ElevenLabsCallBridge implements CallBridge {
       //    real: scheduleAppointment rechazó los datos, el agente lo leyó como
       //    éxito y le dijo al cliente "ya quedó agendada" — sin cita.
       const motivo = motivoDeFallo(resultado);
+      this.herramientasDeLaLlamada.push({
+        toolName: nombre,
+        ok: motivo === null,
+        output: (() => {
+          try {
+            return JSON.stringify(resultado).slice(0, 400);
+          } catch {
+            return "";
+          }
+        })(),
+      });
 
       // El prefijo de una tool MCP lo elige el dueño por conector (ver
       // connectors/mcpNaming.ts: "Vinqulia" → vinqulia_query) — nunca un
@@ -542,6 +568,7 @@ export class ElevenLabsCallBridge implements CallBridge {
         tool: nombre,
       });
       if (!porTiempo) console.error(`[voice-elevenlabs] tool "${nombre}" falló:`, e);
+      this.herramientasDeLaLlamada.push({ toolName: nombre, ok: false });
       // Motivo corto, nunca el stack: el agente lo lee para decirle algo
       // razonable al cliente, no para recitárselo.
       this.client?.sendToolResult(toolCallId, { error: porTiempo ? "timeout" : "tool_execution_failed" }, true);
@@ -603,6 +630,26 @@ export class ElevenLabsCallBridge implements CallBridge {
     await new MessagesRepo(this.db(), this.deps.botId)
       .append(this.conversationId, role, text)
       .catch((e) => console.error("[voice-elevenlabs] no se pudo persistir el turno:", e));
+  }
+
+  /**
+   * La guarda de cumplimiento en vivo (ver agent/cumplimiento.ts). En chat la
+   * respuesta se corrige ANTES de salir; aquí ya se está diciendo en voz alta,
+   * así que el aviso va como contexto para la siguiente intervención — y el
+   * agente lo corrige con naturalidad en la misma llamada. La revisión de
+   * después de colgar (verificarPromesas.ts) sigue igual: esto no la reemplaza.
+   */
+  private revisarCumplimiento(texto: string): void {
+    if (this.cerrado || this.correccionesDeCumplimiento >= 3) return;
+    const hallazgo = revisarCumplimiento(texto, this.herramientasDeLaLlamada);
+    if (!hallazgo) return;
+    this.correccionesDeCumplimiento++;
+    logVoiceEvent("cumplimiento_corregido", {
+      botId: this.deps.botId,
+      callSid: maskId(this.deps.callSid),
+      tipo: hallazgo.tipo,
+    });
+    this.client?.sendContextualUpdate(notaDeCorreccionEnVivo(hallazgo));
   }
 
   handleTwilioMedia(payloadBase64: string): void {

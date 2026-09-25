@@ -35,8 +35,8 @@ export async function leerEvidencia(env: Env, botId: string, convId: string | nu
     ),
     db.first<{ display_name: string | null }>("SELECT display_name FROM conversations WHERE id = ?", [convId]),
     // En voz las herramientas no pasan por messages: quedan como eventos de la llamada.
-    db.all<{ tool: string | null }>(
-      `SELECT e.payload->>'tool' AS tool FROM voice_call_events e
+    db.all<{ payload: unknown }>(
+      `SELECT e.payload FROM voice_call_events e
        JOIN voice_sessions s ON s.id = e.call_id
        WHERE s.conversation_id = ? AND e.event_type = 'call.tool_called' ORDER BY e.occurred_at`,
       [convId],
@@ -58,7 +58,17 @@ export async function leerEvidencia(env: Env, botId: string, convId: string | nu
       /* formato viejo: se ignora */
     }
   }
-  for (const e of eventosDeVoz) if (e.tool) herramientas.push(e.tool);
+  // El payload puede venir como objeto o como JSON en texto (doble
+  // codificado), según el driver — igual que en verificarPromesas.ts.
+  for (const e of eventosDeVoz) {
+    try {
+      const crudo = typeof e.payload === "string" ? JSON.parse(e.payload) : e.payload;
+      const p = (typeof crudo === "string" ? JSON.parse(crudo) : crudo) as { tool?: string; ok?: boolean };
+      if (p?.tool) herramientas.push(p.ok === false ? `${p.tool} (falló)` : p.tool);
+    } catch {
+      /* evento ilegible: se ignora */
+    }
+  }
 
   return {
     conversacionId: convId,

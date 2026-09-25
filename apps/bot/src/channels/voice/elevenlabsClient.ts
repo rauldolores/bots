@@ -180,6 +180,15 @@ export class ElevenLabsClient {
     this.send({ type: "user_message", text: texto });
   }
 
+  /**
+   * Contexto para el agente que NO interrumpe lo que está diciendo (evento
+   * contextual_update de Agents). Lo usa la guarda de cumplimiento: ver
+   * agent/cumplimiento.ts → notaDeCorreccionEnVivo.
+   */
+  sendContextualUpdate(texto: string): void {
+    this.send({ type: "contextual_update", text: texto });
+  }
+
   private send(payload: unknown): void {
     if (this.cerrado || this.ws?.readyState !== WebSocket.OPEN) return;
     this.ws.send(JSON.stringify(payload));

@@ -27,7 +27,8 @@ import { buildAgentContext } from "./context";
 import type { AgentConfig } from "../settings-loader";
 import type { MessagePart } from "../channels/parts";
 import { desglosarContexto, clasificarFalla, registrarDiagnosticoLlm } from "./llmDiagnostics";
-import { afirmacionSinRespaldo, notaDeCorreccion } from "./cumplimiento";
+import { revisarCumplimiento, notaDeCorreccion } from "./cumplimiento";
+import { esAvisoDeEspera } from "./avisoPrevio";
 
 export interface AgentTurnInput {
   env: Env;
@@ -355,6 +356,8 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
     // manda nada — los turnos rápidos no ganan ruido.
     let completo = "";
     let porEnviar = "";
+    /** Dónde empieza el texto escrito desde la última herramienta — ver la rama sin onInterimMessage. */
+    let inicioSegmento = 0;
     for await (const part of result.fullStream as AsyncIterable<any>) {
       if (part?.type === "text-delta") {
         const delta: string = part.text ?? part.delta ?? "";
@@ -425,6 +428,20 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
         const err = part.error instanceof Error ? part.error : new Error(String(part.error));
         (err as { __llmDiagLogged?: boolean }).__llmDiagLogged = true;
         throw err;
+      } else if (part?.type === "tool-call" && !onInterimMessage) {
+        // Canal de UNA respuesta por turno (correo): no hay aviso que mandar
+        // mientras la herramienta corre. Si lo que escribió antes es solo un
+        // "déjame revisar", se quita — en un correo no significa nada. Si es
+        // contenido, se separa de lo que venga después: antes quedaba pegado
+        // ("…el enlace.He enviado…"). Ver agent/avisoPrevio.ts.
+        const segmento = porEnviar.slice(inicioSegmento);
+        if (esAvisoDeEspera(segmento)) {
+          porEnviar = porEnviar.slice(0, inicioSegmento);
+        } else if (porEnviar.trim() && !/\s$/.test(porEnviar)) {
+          porEnviar += "\n\n";
+        }
+        if (completo && !/\s$/.test(completo)) completo += "\n\n";
+        inicioSegmento = porEnviar.length;
       } else if (part?.type === "tool-call" && onInterimMessage) {
         const aviso = porEnviar.trim();
         if (aviso && aviso === ultimoAvisoEnviado) {
@@ -688,9 +705,11 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
   // corrección falla, sale la respuesta original — nunca se deja al cliente
   // sin contestar por esto.
   if (modeloExitoso) {
-    const sinRespaldo = afirmacionSinRespaldo(assistantText, toolCallsMade);
-    if (sinRespaldo) {
-      console.warn(`[turno] afirmó sin respaldo (${sinRespaldo.motivo}): "${sinRespaldo.dijo}" — corrigiendo`);
+    const hallazgo = revisarCumplimiento(assistantText, toolCallsMade);
+    if (hallazgo) {
+      console.warn(
+        `[turno] cumplimiento: ${hallazgo.tipo === "afirmacion" ? `afirmó sin respaldo "${hallazgo.promesa.dijo}"` : `prometió a futuro "${hallazgo.frase}"`} — corrigiendo`,
+      );
       try {
         const correccion = await generateText({
           model: modeloExitoso,
@@ -698,7 +717,7 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
           messages: [
             ...aiMessages,
             { role: "assistant", content: fullAssistantText || assistantText },
-            { role: "user", content: notaDeCorreccion(sinRespaldo) },
+            { role: "user", content: notaDeCorreccion(hallazgo, toolCallsMade) },
           ],
           tools: enabledTools,
           stopWhen: stepCountIs(4),
