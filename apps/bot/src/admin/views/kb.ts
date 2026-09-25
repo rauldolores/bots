@@ -5,7 +5,9 @@
 // siguiente mensaje. Los fragmentos precargados del repo conviven con estos.
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
-import { KbDocsRepo, FIXTURE_CHUNKS, MAX_DOC_CHARS, chunkContent, type KbDoc } from "../../kb/docs";
+import { KbDocsRepo, FIXTURE_CHUNKS, MAX_DOC_CHARS, type KbDoc } from "../../kb/docs";
+import { MAX_CARPETA_CHARS } from "../../kb/archivos";
+import { esc, arbolDeDocumentos, zonaDeSubida } from "./kbArbol";
 import { MediaAssetsRepo, type MediaAsset } from "../../db/mediaAssets";
 import { BotsRepo } from "../../db/bots";
 import { topeDelPlan, LIMITES } from "../../billing/kontrolia";
@@ -19,22 +21,6 @@ import {
   TIPOS_DE_DOCUMENTO,
 } from "../../media/limites";
 import { layout } from "./layout";
-
-function esc(s: string): string {
-  return s.replace(
-    /[&<>"']/g,
-    (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]!),
-  );
-}
-
-function ago(ms: number): string {
-  const min = Math.floor((Date.now() - ms) / 60_000);
-  if (min < 1) return "ahora";
-  if (min < 60) return `hace ${min} min`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `hace ${h} h`;
-  return `hace ${Math.floor(h / 24)} d`;
-}
 
 /** Callout banner. `tone` picks the token: ok=verde (éxito), bad=rojo (error), neutral=gris (info). */
 function banner(tone: "ok" | "bad" | "neutral", text: string): string {
@@ -281,6 +267,8 @@ export async function renderKbList(
   flash?: {
     saved?: boolean;
     deleted?: boolean;
+    uploaded?: string;
+    folderDeleted?: string;
     reindexed?: string;
     mediaSaved?: boolean;
     mediaDeleted?: boolean;
@@ -306,6 +294,10 @@ export async function renderKbList(
     ? banner("ok", "✓ Guardado e indexado — el bot ya puede usarlo.")
     : flash?.deleted
       ? banner("neutral", "Documento eliminado (también del índice del bot).")
+      : flash?.uploaded
+        ? banner("ok", `✓ ${flash.uploaded === "1" ? "1 archivo subido e indexado" : `${esc(flash.uploaded)} archivos subidos e indexados`} — el bot ya puede usarlos.`)
+      : flash?.folderDeleted
+        ? banner("neutral", `Carpeta «${esc(flash.folderDeleted)}» eliminada con todo lo que tenía (también del índice del bot).`)
       : flash?.reindexed
         ? banner("ok", `✓ Reindexado: ${esc(flash.reindexed)} fragmentos actualizados.`)
         : flash?.mediaSaved
@@ -316,44 +308,26 @@ export async function renderKbList(
               ? banner("bad", esc(flash.mediaError))
               : "";
 
-  const rows = docs.length
-    ? docs
-        .map((d) => {
-          const chunks = chunkContent(d.content).length;
-          return `
-      <div class="kbrow" style="display:flex;align-items:center;gap:12px;padding:13px 18px;border-top:1px solid var(--line);transition:background .12s ease">
-        <div style="min-width:0;flex:1">
-          <a href="/admin/kb/${encodeURIComponent(d.id)}/edit" class="font-display font-semibold text-[13px] text-cream" style="display:block">${esc(d.title)}</a>
-          <div class="text-dim text-[11.5px]" style="margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.content.replace(/\s+/g, " ").slice(0, 90))}</div>
-        </div>
-        <div class="text-dim text-[10.5px]" style="text-align:right;white-space:nowrap;flex:none">
-          <div>${d.content.length.toLocaleString("es-MX")} caracteres · ${chunks} ${chunks === 1 ? "fragmento" : "fragmentos"}</div>
-          <div>${ago(d.updated_at)}</div>
-        </div>
-        <a href="/admin/kb/${encodeURIComponent(d.id)}/edit" class="kbedit" style="border:1px solid var(--line);color:var(--muted);padding:5px 12px;font-size:11px;white-space:nowrap;transition:all .12s ease;flex:none">Editar</a>
-      </div>`;
-        })
-        .join("")
-    : `<div class="text-dim text-[12.5px]" style="padding:40px 18px;text-align:center">
-         Aún no tienes documentos propios. Crea el primero — horarios, precios, políticas, promociones…
-       </div>`;
+  const carpetas = [...new Set(docs.map((d) => d.folder).filter((f): f is string => !!f))].sort((a, b) =>
+    a.localeCompare(b, "es", { sensitivity: "base" }),
+  );
 
   const body = `
     ${bannerHtml}
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:16px">
       <div>
         <h2 class="font-display font-semibold text-[15px] text-cream">📚 Conocimiento del bot</h2>
-        <p class="text-muted text-[12.5px]" style="margin-top:2px">Lo que tu bot sabe del negocio. Cada documento se indexa al guardar y el bot lo usa de inmediato.</p>
+        <p class="text-muted text-[12.5px]" style="margin-top:2px">Lo que tu bot sabe del negocio. Cada documento se indexa al subirlo o guardarlo, y el bot lo usa de inmediato.</p>
       </div>
-      <a href="/admin/kb/new" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
-         style="margin-left:auto;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 16px;display:flex;align-items:center;gap:8px;white-space:nowrap">
-        <i data-lucide="plus" width="14" height="14"></i> Nuevo documento
+      <a href="/admin/kb/new" class="ghostbtn font-display font-semibold text-[12px] cursor-pointer"
+         style="margin-left:auto;background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:8px 14px;display:flex;align-items:center;gap:8px;white-space:nowrap;transition:all .12s ease">
+        <i data-lucide="pencil" width="13" height="13"></i> Escribir uno a mano
       </a>
     </div>
 
-    <div class="bg-panel border border-line" style="margin-bottom:16px;overflow:hidden">
-      ${rows}
-    </div>
+    ${zonaDeSubida(carpetas)}
+
+    ${arbolDeDocumentos(docs)}
 
     ${seccionDeMedios(assets, {
       usadoBytes,
@@ -373,7 +347,12 @@ export async function renderKbList(
   return layout({ title: "Conocimiento", activeTab: "kb", body, visibleNavIds });
 }
 
-export function renderKbEditor(doc: KbDoc | null, env: Env, visibleNavIds: Set<string> | null = null): string {
+export function renderKbEditor(
+  doc: KbDoc | null,
+  env: Env,
+  visibleNavIds: Set<string> | null = null,
+  carpetas: string[] = [],
+): string {
   const isNew = doc === null;
   const body = `
     <div style="margin-bottom:16px">
@@ -391,6 +370,16 @@ export function renderKbEditor(doc: KbDoc | null, env: Env, visibleNavIds: Set<s
         <input type="text" id="title" name="title" required maxlength="200"
                value="${esc(doc?.title ?? "")}" placeholder="Ej. Horarios y ubicación"
                style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none">
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label for="folder" class="font-display font-semibold text-[12.5px] text-cream">Carpeta <span class="text-dim" style="font-weight:400">(opcional)</span></label>
+        <p class="text-dim text-[11px]">Solo organiza la lista. Déjala vacía para sacarlo de su carpeta.</p>
+        <input type="text" id="folder" name="folder" list="kb-carpetas" maxlength="${MAX_CARPETA_CHARS}"
+               value="${esc(doc?.folder ?? "")}" placeholder="Sin carpeta"
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none">
+        <datalist id="kb-carpetas">${carpetas.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>
+        ${doc?.file_name ? `<p class="text-dim text-[11px]">Salió del archivo <b class="text-muted">${esc(doc.file_name)}</b>. Si vuelves a subir ese archivo a la misma carpeta, reemplaza lo que cambies aquí.</p>` : ""}
       </div>
 
       <div style="display:flex;flex-direction:column;gap:6px">

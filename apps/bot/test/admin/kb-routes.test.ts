@@ -62,7 +62,10 @@ describe("KB tab", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Conocimiento del bot");
-    expect(html).toContain("Nuevo documento");
+    expect(html).toContain("Escribir uno a mano");
+    // La zona de subida dice qué acepta: sin esto el dueño arrastra un PDF y no entiende por qué no entra.
+    expect(html).toContain("texto plano");
+    expect(html).toContain(".txt, .md, .markdown, .csv");
   });
 
   it("save persists the doc AND indexes it", async () => {
@@ -145,6 +148,120 @@ describe("KB tab", () => {
   it("requires auth", async () => {
     const res = await adminApp.request("/kb", {}, env);
     expect(res.status).toBe(401);
+  });
+});
+
+describe("subir archivos en lote y carpetas", () => {
+  const JSONH = { ...AUTH, "Content-Type": "application/json" };
+  const subir = (body: Record<string, unknown>) =>
+    adminApp.request("/kb/subir", { method: "POST", headers: JSONH, body: JSON.stringify(body) }, env);
+
+  it("un archivo subido queda como documento en su carpeta, e indexado", async () => {
+    const res = await subir({ carpeta: " Precios ", nombre: "lista_2026.txt", contenido: "Corte: $250\r\nTinte: $600" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, documentos: 1, reemplazados: false });
+
+    const [doc] = await repo.list();
+    expect(doc).toMatchObject({ title: "lista 2026", folder: "Precios", file_name: "lista_2026.txt", content: "Corte: $250\nTinte: $600" });
+    const indexado = await chunks();
+    expect(indexado).toHaveLength(1);
+    expect(indexado[0].content).toContain("Tinte: $600");
+  });
+
+  // Así se actualiza la base: arrastrando otra vez el archivo que cambió.
+  it("volver a subir el mismo archivo a la misma carpeta lo reemplaza, sin duplicar ni dejar vectores viejos", async () => {
+    await subir({ carpeta: "Precios", nombre: "lista.txt", contenido: "Corte: $250" });
+    const res = await subir({ carpeta: "Precios", nombre: "lista.txt", contenido: "Corte: $300" });
+    expect(await res.json()).toMatchObject({ ok: true, reemplazados: true });
+
+    const docs = await repo.list();
+    expect(docs).toHaveLength(1);
+    expect(docs[0].content).toBe("Corte: $300");
+    const indexado = await chunks();
+    expect(indexado).toHaveLength(1);
+    expect(indexado[0].content).toBe("Corte: $300");
+  });
+
+  it("el mismo nombre en OTRA carpeta es otro documento", async () => {
+    await subir({ carpeta: "Sucursal Centro", nombre: "horarios.txt", contenido: "9 a 7" });
+    await subir({ carpeta: "Sucursal Norte", nombre: "horarios.txt", contenido: "10 a 8" });
+    expect(await repo.list()).toHaveLength(2);
+  });
+
+  it("un archivo largo se parte en varios documentos y todos quedan indexados", async () => {
+    const contenido = Array.from({ length: 80 }, (_, i) => `Producto ${i}: ${"detalle ".repeat(80)}`).join("\n\n");
+    const res = await subir({ nombre: "catalogo.md", contenido });
+    const j = (await res.json()) as { documentos: number };
+    expect(j.documentos).toBeGreaterThan(1);
+    const docs = await repo.list();
+    expect(docs).toHaveLength(j.documentos);
+    expect(docs.every((d) => d.file_name === "catalogo.md" && d.folder === null)).toBe(true);
+    const indexado = (await chunks()).map((c) => c.content).join("\n");
+    expect(indexado).toContain("Producto 0:");
+    expect(indexado).toContain("Producto 79:");
+  });
+
+  it("rechaza lo que no es texto plano, y los archivos vacíos", async () => {
+    let res = await subir({ nombre: "menu.pdf", contenido: "%PDF-1.4" });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("texto plano");
+    res = await subir({ nombre: "vacio.txt", contenido: " \n\n " });
+    expect(res.status).toBe(400);
+    expect(await repo.list()).toHaveLength(0);
+  });
+
+  it("si indexar falla, no deja la versión nueva a medias y conserva la anterior", async () => {
+    await subir({ carpeta: "Precios", nombre: "lista.txt", contenido: "Corte: $250" });
+    (env as any).AI.run = vi.fn(async () => {
+      throw new Error("proveedor caído");
+    });
+    const res = await subir({ carpeta: "Precios", nombre: "lista.txt", contenido: "Corte: $300" });
+    expect(res.status).toBe(502);
+    const docs = await repo.list();
+    expect(docs).toHaveLength(1);
+    expect(docs[0].content).toBe("Corte: $250");
+  });
+
+  it("borrar una carpeta se lleva sus documentos y sus vectores, y deja los demás", async () => {
+    await subir({ carpeta: "Promos", nombre: "a.txt", contenido: "2x1 martes" });
+    await subir({ carpeta: "Promos", nombre: "b.txt", contenido: "10% estudiantes" });
+    await subir({ nombre: "horarios.txt", contenido: "9 a 7" });
+    const res = await adminApp.request(
+      "/kb/carpeta/borrar",
+      { method: "POST", headers: FORM, body: new URLSearchParams({ carpeta: "Promos" }) },
+      env,
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/admin/kb?carpetaBorrada=Promos");
+    const docs = await repo.list();
+    expect(docs.map((d) => d.title)).toEqual(["horarios"]);
+    expect(await chunks()).toHaveLength(1);
+  });
+
+  it("la lista agrupa por carpeta y ofrece eliminar sin entrar a editar", async () => {
+    await subir({ carpeta: "Políticas", nombre: "devoluciones.txt", contenido: "30 días" });
+    await subir({ nombre: "horarios.txt", contenido: "9 a 7" });
+    const html = await (await adminApp.request("/kb", { headers: AUTH }, env)).text();
+    expect(html).toContain('data-carpeta="Políticas"');
+    expect(html).toContain("Sin carpeta");
+    const [doc] = await repo.listByFile("Políticas", "devoluciones.txt");
+    expect(html).toContain(`action="/admin/kb/${doc.id}/delete"`);
+    expect(html).toContain('action="/admin/kb/carpeta/borrar"');
+  });
+
+  it("el editor mueve un documento de carpeta y lo saca si se deja vacía, sin desligarlo de su archivo", async () => {
+    await subir({ carpeta: "Viejos", nombre: "faq.txt", contenido: "Pregunta" });
+    const [doc] = await repo.list();
+    const guardar = (folder: string) =>
+      adminApp.request(
+        "/kb/save",
+        { method: "POST", headers: FORM, body: new URLSearchParams({ id: doc.id, title: doc.title, content: "Pregunta", folder }) },
+        env,
+      );
+    await guardar("Nuevos");
+    expect(await repo.getById(doc.id)).toMatchObject({ folder: "Nuevos", file_name: "faq.txt" });
+    await guardar("");
+    expect(await repo.getById(doc.id)).toMatchObject({ folder: null, file_name: "faq.txt" });
   });
 });
 

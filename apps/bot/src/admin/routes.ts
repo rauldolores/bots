@@ -61,6 +61,16 @@ import { NurtureSequencesRepo } from "../db/nurtureSequences";
 import { NURTURE_TEMPLATES } from "../nurture/templates";
 import { enrollLeadInSequence, stopSequenceForLead } from "../nurture/run";
 import { KbDocsRepo, indexDoc, removeDocVectors, reindexAll, MAX_DOC_CHARS } from "../kb/docs";
+import {
+  esArchivoDeTexto,
+  normalizarCarpeta,
+  normalizarNombreDeArchivo,
+  tituloDeArchivo,
+  limpiarTexto,
+  partirEnDocumentos,
+  MAX_ARCHIVO_CHARS,
+  EXTENSIONES_DE_TEXTO,
+} from "../kb/archivos";
 import { CrmProposalsRepo } from "../db/crmProposals";
 import { ejecutarPropuesta } from "../crm/ejecutar";
 import { renderMejoras } from "./views/mejoras";
@@ -984,6 +994,9 @@ adminApp.get("/kb", async (c) =>
       {
         saved: c.req.query("saved") === "1",
         deleted: c.req.query("deleted") === "1",
+        // "0" no es un logro que anunciar (todos fallaron y el dueño ya vio por qué).
+        uploaded: Number(c.req.query("subidos")) > 0 ? c.req.query("subidos") : undefined,
+        folderDeleted: c.req.query("carpetaBorrada") ?? undefined,
         reindexed: c.req.query("reindexed") ?? undefined,
         mediaSaved: c.req.query("archivo") === "1",
         mediaDeleted: c.req.query("archivo") === "0",
@@ -994,13 +1007,16 @@ adminApp.get("/kb", async (c) =>
   ),
 );
 
-adminApp.get("/kb/new", (c) => c.html(renderKbEditor(null, c.env, visibleNavIds(c.get("kontroliaClaims")))));
+adminApp.get("/kb/new", async (c) => {
+  const carpetas = await new KbDocsRepo(new Db(c.env.DB), c.get("botId")).folders();
+  return c.html(renderKbEditor(null, c.env, visibleNavIds(c.get("kontroliaClaims")), carpetas));
+});
 
 adminApp.get("/kb/:id/edit", async (c) => {
-  const db = new Db(c.env.DB);
-  const doc = await new KbDocsRepo(db, c.get("botId")).getById(c.req.param("id"));
+  const repo = new KbDocsRepo(new Db(c.env.DB), c.get("botId"));
+  const [doc, carpetas] = await Promise.all([repo.getById(c.req.param("id")), repo.folders()]);
   if (!doc) return c.redirect("/admin/kb");
-  return c.html(renderKbEditor(doc, c.env, visibleNavIds(c.get("kontroliaClaims"))));
+  return c.html(renderKbEditor(doc, c.env, visibleNavIds(c.get("kontroliaClaims")), carpetas));
 });
 
 // Save = persist in Postgres + index into pgvector immediately (stale vectors for
@@ -1014,10 +1030,83 @@ adminApp.post("/kb/save", async (c) => {
   const id = String(form.get("id") ?? "").trim() || crypto.randomUUID();
   const db = new Db(c.env.DB);
   const repo = new KbDocsRepo(db, c.get("botId"));
-  await repo.upsert({ id, title, content });
+  // El editor siempre manda el campo: vacío = sin carpeta.
+  await repo.upsert({ id, title, content, folder: normalizarCarpeta(form.get("folder")) });
   const doc = (await repo.getById(id))!;
   await indexDoc(c.env, doc, c.get("botId"));
   return c.redirect("/admin/kb?saved=1");
+});
+
+/**
+ * Subida en lote: el navegador lee cada archivo como texto y lo manda AQUÍ,
+ * uno por petición. Uno por petición y no todos juntos por dos razones: cada
+ * archivo muestra su propio avance y su propio error, y el cuerpo nunca se
+ * acerca al tope de 4.5 MB de Vercel por mucho que se arrastre de golpe.
+ *
+ * Reemplaza, no duplica: si esa carpeta ya tenía documentos salidos de un
+ * archivo con el mismo nombre, se borran DESPUÉS de indexar los nuevos — si
+ * indexar falla a medio camino, el bot se queda con la versión anterior en
+ * vez de quedarse sin nada.
+ */
+adminApp.post("/kb/subir", async (c) => {
+  const botId = c.get("botId");
+  const body = (await c.req.json().catch(() => null)) as { carpeta?: unknown; nombre?: unknown; contenido?: unknown } | null;
+  const nombre = normalizarNombreDeArchivo(body?.nombre);
+  if (!nombre) return c.json({ error: "Falta el nombre del archivo." }, 400);
+  if (!esArchivoDeTexto(nombre)) {
+    return c.json({ error: `Solo texto plano (${EXTENSIONES_DE_TEXTO.join(", ")}).` }, 400);
+  }
+  if (typeof body?.contenido !== "string") return c.json({ error: "El archivo llegó sin contenido." }, 400);
+  if (body.contenido.length > MAX_ARCHIVO_CHARS) {
+    return c.json(
+      { error: `Es demasiado largo: el máximo son ${MAX_ARCHIVO_CHARS.toLocaleString("es-MX")} caracteres por archivo. Pártelo en varios.` },
+      400,
+    );
+  }
+  const contenido = limpiarTexto(body.contenido);
+  if (!contenido) return c.json({ error: "El archivo está vacío." }, 400);
+  const carpeta = normalizarCarpeta(body.carpeta);
+
+  const repo = new KbDocsRepo(new Db(c.env.DB), botId);
+  const anteriores = await repo.listByFile(carpeta, nombre);
+  const partes = partirEnDocumentos(tituloDeArchivo(nombre), contenido);
+  const creados: string[] = [];
+  try {
+    for (const parte of partes) {
+      const id = crypto.randomUUID();
+      creados.push(id);
+      await repo.upsert({ id, title: parte.title, content: parte.content, folder: carpeta, fileName: nombre });
+      await indexDoc(c.env, (await repo.getById(id))!, botId);
+    }
+  } catch (e) {
+    // Se deshace lo nuevo: a medias, el bot tendría la versión vieja Y parte
+    // de la nueva, diciendo dos cosas distintas del mismo tema.
+    for (const id of creados) {
+      await repo.delete(id).catch(() => {});
+      await removeDocVectors(c.env, id, botId).catch(() => {});
+    }
+    console.warn(`[kb] no se pudo indexar ${nombre}:`, e);
+    return c.json({ error: "No se pudo indexar. Se quedó la versión anterior; vuelve a intentarlo." }, 502);
+  }
+  for (const viejo of anteriores) {
+    await repo.delete(viejo.id);
+    await removeDocVectors(c.env, viejo.id, botId);
+  }
+  return c.json({ ok: true, documentos: partes.length, reemplazados: anteriores.length > 0 });
+});
+
+/** Borra una carpeta entera: todos sus documentos y lo que el bot tenía indexado de ellos. */
+adminApp.post("/kb/carpeta/borrar", async (c) => {
+  const botId = c.get("botId");
+  const carpeta = normalizarCarpeta((await c.req.formData()).get("carpeta"));
+  if (!carpeta) return c.redirect("/admin/kb");
+  const repo = new KbDocsRepo(new Db(c.env.DB), botId);
+  const docs = await repo.listByFolder(carpeta);
+  for (const d of docs) {
+    await repo.delete(d.id);
+    await removeDocVectors(c.env, d.id, botId);
+  }
+  return c.redirect(`/admin/kb?carpetaBorrada=${encodeURIComponent(carpeta)}`);
 });
 
 adminApp.post("/kb/:id/delete", async (c) => {

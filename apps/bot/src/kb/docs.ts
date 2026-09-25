@@ -21,6 +21,10 @@ export interface KbDoc {
   id: string;
   title: string;
   content: string;
+  /** Carpeta de la pantalla de Conocimiento; null = sin carpeta. Solo organiza, no cambia qué encuentra el bot. */
+  folder: string | null;
+  /** Archivo del que salió, si se subió uno — ver KbDocsRepo.listByFile. */
+  file_name: string | null;
   updated_at: number;
 }
 
@@ -43,16 +47,48 @@ export class KbDocsRepo {
     ]);
   }
 
+  /** Las carpetas en uso, para sugerirlas al subir o editar. */
+  async folders(): Promise<string[]> {
+    const rows = await this.db.all<{ folder: string }>(
+      "SELECT DISTINCT folder FROM kb_docs WHERE bot_id = ? AND folder IS NOT NULL ORDER BY folder",
+      [this.botId],
+    );
+    return rows.map((r) => r.folder);
+  }
+
+  /**
+   * Lo que salió de un archivo subido a una carpeta. Volver a subir el mismo
+   * archivo reemplaza esto — así se actualiza la base: arrastrando otra vez.
+   */
+  async listByFile(folder: string | null, fileName: string): Promise<KbDoc[]> {
+    return this.db.all<KbDoc>(
+      "SELECT * FROM kb_docs WHERE bot_id = ? AND folder IS NOT DISTINCT FROM ? AND file_name = ?",
+      [this.botId, folder, fileName],
+    );
+  }
+
+  async listByFolder(folder: string): Promise<KbDoc[]> {
+    return this.db.all<KbDoc>("SELECT * FROM kb_docs WHERE bot_id = ? AND folder = ?", [this.botId, folder]);
+  }
+
   async getById(id: string): Promise<KbDoc | null> {
     return this.db.first<KbDoc>("SELECT * FROM kb_docs WHERE id = ? AND bot_id = ?", [id, this.botId]);
   }
 
-  async upsert(doc: { id: string; title: string; content: string }): Promise<void> {
+  /**
+   * `folder` ausente = no tocar la carpeta que ya tenía; null = sacarlo de su
+   * carpeta. `fileName` solo se fija al crear desde un archivo: editar el
+   * documento a mano no lo desliga de su archivo.
+   */
+  async upsert(doc: { id: string; title: string; content: string; folder?: string | null; fileName?: string | null }): Promise<void> {
+    const tocaCarpeta = doc.folder !== undefined;
     await this.db.run(
-      `INSERT INTO kb_docs (id, bot_id, title, content, updated_at) VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO kb_docs (id, bot_id, title, content, folder, file_name, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
-         title = excluded.title, content = excluded.content, updated_at = excluded.updated_at`,
-      [doc.id, this.botId, doc.title, doc.content, Date.now()],
+         title = excluded.title, content = excluded.content, updated_at = excluded.updated_at,
+         folder = CASE WHEN ? THEN excluded.folder ELSE kb_docs.folder END,
+         file_name = COALESCE(excluded.file_name, kb_docs.file_name)`,
+      [doc.id, this.botId, doc.title, doc.content, doc.folder ?? null, doc.fileName ?? null, Date.now(), tocaCarpeta],
     );
   }
 
@@ -63,6 +99,11 @@ export class KbDocsRepo {
 
 /** Split content into ~CHUNK_CHARS pieces on paragraph boundaries. */
 export function chunkContent(content: string): string[] {
+  return allChunks(content).slice(0, MAX_CHUNKS);
+}
+
+/** Como chunkContent pero sin el tope: para partir un archivo grande en varios documentos sin perder nada. */
+export function allChunks(content: string): string[] {
   const paras = content.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
   const chunks: string[] = [];
   let current = "";
@@ -80,7 +121,7 @@ export function chunkContent(content: string): string[] {
     current = current ? `${current}\n\n${p}` : p;
   }
   push();
-  return chunks.slice(0, MAX_CHUNKS);
+  return chunks;
 }
 
 function vectorIds(docId: string): string[] {
