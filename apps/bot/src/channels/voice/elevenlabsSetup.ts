@@ -338,7 +338,9 @@ export async function prepararAgenteElevenLabs(
   // guardaba pasara lo que pasara, y eso dejó al bot sin poder agendar
   // durante días — cada arreglo se desplegaba y nunca llegaba a aplicarse.
   if (!faltaronHerramientas) {
-    await repo.set(SETTING_KEYS.voiceElevenLabsConfigHash, huellaDeConfiguracion(voiceId, toolNames));
+    const { formaDeHerramientas } = await import("./elevenlabsTools");
+    const forma = tools && Object.keys(tools).length > 0 ? await formaDeHerramientas(tools) : undefined;
+    await repo.set(SETTING_KEYS.voiceElevenLabsConfigHash, huellaDeConfiguracion(voiceId, toolNames, forma));
   }
   return { ok: true, agentId };
 }
@@ -353,8 +355,8 @@ export async function prepararAgenteElevenLabs(
  * nadie se le dijo que tenía que volver a guardarla. La llamada seguía muda
  * por un arreglo que ya estaba hecho.
  */
-export function huellaDeConfiguracion(voiceId: string, toolNames: string[] = []): string {
-  return [
+export function huellaDeConfiguracion(voiceId: string, toolNames: string[] = [], forma?: string): string {
+  const partes = [
     voiceId,
     MODELO_TTS,
     MODELO_LLM,
@@ -381,7 +383,17 @@ export function huellaDeConfiguracion(voiceId: string, toolNames: string[] = [])
     // exactamente eso con `expects_response`, que estuvo en false durante
     // semanas. Subir este número obliga a volver a registrarlas una vez.
     "tools_shape:v3-nombres",
-  ].join("|");
+  ];
+  // Y la forma REAL (esquema y descripción de cada una) — ver
+  // formaDeHerramientas. Va al final para poder compararla aparte cuando no
+  // se tienen las herramientas a la mano (quitarForma).
+  if (forma) partes.push(`forma:${forma}`);
+  return partes.join("|");
+}
+
+/** La huella sin su parte de forma — para comparar cuando no se resolvieron las herramientas. */
+function quitarForma(huella: string): string {
+  return huella.replace(/\|forma:[0-9a-f]+$/, "");
 }
 
 /** Lee un mapa nombre→id guardado como JSON, tolerante a basura. */
@@ -434,7 +446,14 @@ export async function asegurarAgenteAlDia(
   // todavía no existe— había que resolverlas de todos modos.
   const resueltas = typeof tools === "function" ? await tools() : tools;
   const nombresDeHoy = resueltas ? Object.keys(resueltas) : Object.keys(registradas);
-  if (guardada === huellaDeConfiguracion(voiceId, nombresDeHoy)) return { actualizado: false };
+  if (resueltas && Object.keys(resueltas).length > 0) {
+    const { formaDeHerramientas } = await import("./elevenlabsTools");
+    if (guardada === huellaDeConfiguracion(voiceId, nombresDeHoy, await formaDeHerramientas(resueltas))) {
+      return { actualizado: false };
+    }
+  } else if (guardada && quitarForma(guardada) === huellaDeConfiguracion(voiceId, nombresDeHoy)) {
+    return { actualizado: false };
+  }
 
   // Aquí VIVÍA un candado por conteo: si el conjunto traía menos herramientas
   // de las que el agente ya tenía, se abortaba, por si un servidor MCP no

@@ -3,6 +3,24 @@
 import { Db } from "../../src/db/client";
 import type { Env } from "../../src/env";
 import type { Evidencia } from "./tipos";
+import { searchKbTool } from "../../src/tools/searchKb";
+
+/**
+ * El historial guarda cada resultado de herramienta recortado (1,500
+ * caracteres, ver turn.ts), y con eso el juez reprobó una respuesta
+ * CORRECTA: el precio estaba en la base, pero fuera del recorte. Para la
+ * búsqueda en la base se repite la MISMA consulta que hizo el agente y se le
+ * entrega al juez completa — lo que el agente tuvo a la vista.
+ */
+async function repetirBusqueda(env: Env, botId: string, query: string): Promise<string | null> {
+  try {
+    const t = searchKbTool(env, botId) as unknown as { execute: (i: { query: string }, o: unknown) => Promise<unknown> };
+    const r = await t.execute({ query }, {});
+    return (typeof r === "string" ? r : JSON.stringify(r)).slice(0, 6000);
+  } catch {
+    return null;
+  }
+}
 
 export async function leerEvidencia(env: Env, botId: string, convId: string | null, correo?: string): Promise<Evidencia> {
   const db = new Db(env.DB);
@@ -47,8 +65,15 @@ export async function leerEvidencia(env: Env, botId: string, convId: string | nu
   const resultados: { herramienta: string; salida: string }[] = [];
   for (const m of mensajes) {
     try {
-      for (const t of JSON.parse(m.tool_calls ?? "[]") as { toolName?: string; ok?: boolean; output?: unknown }[]) {
+      for (const t of JSON.parse(m.tool_calls ?? "[]") as { toolName?: string; ok?: boolean; output?: unknown; input?: { query?: string } }[]) {
         if (t.toolName) herramientas.push(t.ok === false ? `${t.toolName} (falló)` : t.toolName);
+        if (t.toolName === "searchKb" && t.input?.query) {
+          const completa = await repetirBusqueda(env, botId, t.input.query);
+          if (completa) {
+            resultados.push({ herramienta: `searchKb("${t.input.query}")`, salida: completa });
+            continue;
+          }
+        }
         if (t.toolName && t.output !== undefined) {
           const salida = typeof t.output === "string" ? t.output : JSON.stringify(t.output);
           resultados.push({ herramienta: t.toolName, salida: salida.slice(0, 1500) });

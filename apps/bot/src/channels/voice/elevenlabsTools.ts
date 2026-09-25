@@ -157,6 +157,33 @@ async function aToolConfig(nombre: string, def: any): Promise<ToolConfig | null>
 }
 
 /**
+ * La FORMA de las herramientas tal como se le declaran a ElevenLabs (nombre,
+ * descripción y parámetros), resumida en una huella corta.
+ *
+ * Existe porque la huella del agente (elevenlabsSetup.ts) solo cambiaba con
+ * los NOMBRES de las herramientas: agregarle un campo a una (pasó con
+ * `naturaleza` en handoffHuman, 2026-09-24) no la movía, el agente de
+ * ElevenLabs se quedaba con la declaración vieja, y cada ticket por teléfono
+ * se rechazaba por "argumentos inválidos". Con esto, cualquier cambio de
+ * esquema o de descripción llega solo a la siguiente llamada.
+ */
+export async function formaDeHerramientas(tools: Record<string, any>): Promise<string> {
+  const partes: string[] = [];
+  for (const nombre of Object.keys(tools).sort()) {
+    const config = await aToolConfig(nombre, tools[nombre]);
+    if (config) partes.push(JSON.stringify([config.name, config.description, config.parameters]));
+  }
+  // FNV-1a de 32 bits: basta para notar que algo cambió; no es seguridad.
+  let h = 0x811c9dc5;
+  const texto = partes.join("\n");
+  for (let i = 0; i < texto.length; i++) {
+    h ^= texto.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+/**
  * Deja registradas en ElevenLabs las herramientas de este bot y devuelve sus
  * ids, listos para `agent.prompt.tool_ids`.
  *

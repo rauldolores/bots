@@ -256,7 +256,8 @@ describe("scheduleAppointmentTool — a nombre de quién, y sin duplicar", () =>
     const a = (await tool.execute!(INPUT, {} as any)) as { appointmentId: string };
     const b = (await tool.execute!(INPUT, {} as any)) as { appointmentId: string; message: string };
     expect(b.appointmentId).toBe(a.appointmentId);
-    expect(b.message).toContain("ya estaba agendada");
+    expect(b.message).toContain("ya quedó agendada");
+    expect(b.message).toContain("No es un choque de horario");
     const todas = await db.all("SELECT id FROM appointments WHERE bot_id = ?", [TEST_BOT_ID]);
     expect(todas).toHaveLength(1);
   });

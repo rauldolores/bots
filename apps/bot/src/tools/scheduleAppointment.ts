@@ -139,7 +139,16 @@ export function scheduleAppointmentTool(env: Env, getConversationId: () => strin
       // "confirmar") no es un cambio: se contesta que ya estaba, sin crear otra
       // ni tocar el calendario. Visto en las pruebas: dos altas para una demo.
       if (anterior && Math.abs(Number(anterior.starts_at) - startsAt) < 60_000) {
-        return { appointmentId: anterior.id, message: "Esa cita ya estaba agendada a esa hora; no se creó otra." };
+        // El texto importa: "ya estaba agendada a esa hora" el modelo lo leyó
+        // como "ese horario está ocupado" y le ofreció al cliente OTRA hora
+        // (pruebas del 2026-09-24). Tiene que decir que es SU cita, confirmada.
+        return {
+          appointmentId: anterior.id,
+          ok: true,
+          yaAgendada: true,
+          message:
+            "Confirmado: la cita de ESTE cliente ya quedó agendada para esa fecha y hora (se registró hace un momento en esta conversación). No es un choque de horario. No la vuelvas a agendar; confírmasela al cliente.",
+        };
       }
 
 

@@ -40,8 +40,12 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
         .describe("Qué tan urgente es: urgent = el cliente no puede operar/pagar; high = afecta bastante; normal = molestia normal; low = duda menor"),
       contact: z.string().optional().describe("Teléfono o correo del cliente — pídeselo si el canal no lo trae ya"),
       name: z.string().max(80).optional().describe("Nombre de la persona, tal como te lo dijo — pídeselo si no lo sabes"),
+      // Opcional con "problema" por defecto: un agente de voz con la
+      // declaración vieja de esta herramienta (sin este campo) no debe quedar
+      // sin poder abrir tickets — pasó el 2026-09-24.
       naturaleza: z
         .enum(["problema", "interes_comercial"])
+        .optional()
         .describe(
           "problema = algo le falla, un cobro, una queja, un reclamo (esto SÍ es un ticket). " +
             "interes_comercial = quiere precio, cotización, una demo, saber si el producto hace algo, o que un asesor lo contacte para comprar (esto NO es un ticket: es captureLead).",
