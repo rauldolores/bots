@@ -24,7 +24,6 @@ import { CrmProposalsRepo } from "../db/crmProposals";
 import { buildCustomerContext } from "../customer/context";
 import { proponerDesdeAnalisis } from "./proponer";
 import { aplicarAutomaticas, crmQueRecibeCambios } from "./ejecutar";
-import { empezarRevisionCrm, anotarRevisionCrm } from "../ai/revisorEnCola";
 
 /** Tras estos intentos se abandona: el cliente ya fue atendido y la conversación sigue en la bandeja. */
 const MAX_INTENTOS = 3;
@@ -153,10 +152,6 @@ export async function analizarConversacion(
       .filter(Boolean)
       .join("; ");
 
-    // Revisor rápido en sombra (ai/revisorEnCola.ts): corre A LA VEZ que el
-    // LLM, sobre la misma transcripción, y no cambia nada de lo de abajo.
-    const revision = empezarRevisionCrm(env, db, botId, transcripcion, conversationId);
-
     const { model, modelId } = createModel(env, "fast", await loadLlmOverrides(env, botId));
     const { object, usage } = await generateObject({
       model,
@@ -184,7 +179,6 @@ Reporta ÚNICAMENTE lo que el cliente dijo de forma explícita. No deduzcas, no 
     // silencio" se veían idénticos desde fuera, y eso costó una tarde de
     // diagnóstico a ciegas.
     console.log(`[crmAnalisis] conv ${conversationId}: ${propuestas} propuesta(s) en cola`);
-    await anotarRevisionCrm(db, botId, conversationId, revision, { propuestas, intencion: object.interaccion.intencion });
     return { propuestas };
   }
 }

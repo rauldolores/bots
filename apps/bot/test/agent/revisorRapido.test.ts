@@ -113,6 +113,11 @@ async function turno(opts: { training?: boolean } = {}) {
   return { r, convId: conv.id };
 }
 const modo = (m: string) => new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.jevModo, m);
+/** Activo y con la casilla de promesas marcada: la única forma de que actúe aquí. */
+const activoEnPromesas = async () => {
+  await modo("activo");
+  await new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.jevActivoEn, "promesas");
+};
 const clasificaciones = () =>
   db.all<{ uso: string; modo: string; ref_id: string; promete_regex: string }>(
     `SELECT uso, modo, ref_id, (regla #>> '{}')::jsonb->>'promete_regex' AS promete_regex FROM clasificaciones`,
@@ -148,7 +153,7 @@ describe("revisor rápido en la guarda de promesas", () => {
   });
 
   it("en activo: si Jev está seguro de una promesa que la regla no vio, se corrige antes de enviar", async () => {
-    await modo("activo");
+    await activoEnPromesas();
     const { r } = await turno();
     expect(generateTextMock).toHaveBeenCalledTimes(1);
     const nota = generateTextMock.mock.calls[0][0].messages.at(-1).content as string;
@@ -159,7 +164,7 @@ describe("revisor rápido en la guarda de promesas", () => {
   });
 
   it("en activo, si Jev NO está seguro (debajo del umbral), no toca la respuesta", async () => {
-    await modo("activo");
+    await activoEnPromesas();
     probDePromesa = 0.6;
     const { r } = await turno();
     expect(generateTextMock).not.toHaveBeenCalled();
@@ -167,12 +172,22 @@ describe("revisor rápido en la guarda de promesas", () => {
   });
 
   it("en activo, si Jev se cae, el turno sigue como si no existiera", async () => {
-    await modo("activo");
+    await activoEnPromesas();
     typesafeCaido = true;
     const { r } = await turno();
     expect(r.text).toBe(PROMESA_QUE_LA_REGLA_NO_VE);
     expect(generateTextMock).not.toHaveBeenCalled();
     expect(await clasificaciones()).toHaveLength(0);
+  });
+
+  it("en activo pero SIN la casilla de promesas: solo observa, no corrige", async () => {
+    await modo("activo");
+    await new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.jevActivoEn, "busqueda");
+    const { r } = await turno();
+    expect(generateTextMock).not.toHaveBeenCalled();
+    expect(r.text).toBe(PROMESA_QUE_LA_REGLA_NO_VE);
+    await Promise.allSettled(r.segundoPlano);
+    expect((await clasificaciones())[0].modo).toBe("sombra");
   });
 
   it("en el sandbox de entrenamiento no se revisa: no es una conversación real", async () => {

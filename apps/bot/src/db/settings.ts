@@ -43,6 +43,10 @@ export const SETTING_KEYS = {
   autonomyLevel: "autonomy_level", // flywheel: manual (default) | copilot (auto-aplica lo seguro de noche)
   // JEV AI (src/ai/jev.ts): apagado (default) | sombra (decide y anota, no cambia nada) | activo.
   jevModo: "jev_modo",
+  // En qué usos puede ACTUAR cuando jev_modo = activo (lista separada por comas,
+  // ver USOS_ACTIVABLES en ai/jev.ts). Vacío = en ninguno: se prende uso por uso,
+  // cuando los datos de sombra lo justifican.
+  jevActivoEn: "jev_activo_en",
   // BYO-LLM (dashboard "Modelo de IA"): the owner plugs their own provider,
   // API key y/o modelo concreto. Empty = the instance's env defaults.
   llmProvider: "llm_provider", // "" (auto) | anthropic | openai

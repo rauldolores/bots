@@ -29,7 +29,6 @@ import { BotsRepo } from "../../db/bots";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
 import { createModel } from "../../llm/provider";
 import { loadLlmOverrides } from "../../settings-loader";
-import { empezarRevisionDeCorreo, anotarRevisionDeCorreo } from "../../ai/revisorEnCola";
 
 export type CategoriaDeCorreo = "cliente" | "vendedor" | "publicidad" | "notificacion" | "spam" | "otro";
 
@@ -92,9 +91,6 @@ export async function clasificarCorreo(
 
     const bot = await new BotsRepo(db).getById(botId);
     const negocio = bot?.business_name ?? env.BUSINESS_NAME ?? "el negocio";
-    // Revisor rápido en sombra (ai/revisorEnCola.ts): a la vez que el LLM, sin
-    // sumar tiempo al webhook ni cambiar la decisión.
-    const revision = empezarRevisionDeCorreo(env, db, botId, correo);
     const { model, modelId } = createModel(env, "fast", await loadLlmOverrides(env, botId));
 
     const { object, usage } = await generateObject({
@@ -117,12 +113,6 @@ ${correo.cuerpo.slice(0, MAX_CARACTERES)}`,
 
     const esCliente = object.categoria === "cliente";
     const seguro = object.confianza >= CONFIANZA_MINIMA_PARA_FILTRAR;
-    await anotarRevisionDeCorreo(db, botId, revision, {
-      categoria: object.categoria,
-      confianza: object.confianza,
-      atender: esCliente || !seguro,
-      asunto: correo.asunto.slice(0, 160),
-    });
     return {
       atender: esCliente || !seguro,
       categoria: object.categoria,

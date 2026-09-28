@@ -19,6 +19,7 @@ import type { Env } from "../env";
 import type { Db } from "../db/client";
 import { clasificar, anotarClasificacion, TIEMPO_EN_SOMBRA_MS, type ModoJev } from "../ai/jev";
 import { PROMETE_FUTURO, AFIRMA_HECHO, PASAJE_AYUDA, UMBRAL_PARA_ACTUAR, type TextoDePregunta } from "../ai/preguntasJev";
+import { UMBRAL_SIN_COINCIDENCIA } from "../kb/umbrales";
 import { promesaAFuturo, afirmacionSinRespaldo, type HerramientaDelTurno } from "./cumplimiento";
 
 type ModoQueRevisa = Exclude<ModoJev, "apagado">;
@@ -106,35 +107,41 @@ export interface PasajeEncontrado {
   score: number;
 }
 
-/** ¿Cada pasaje que trajo la búsqueda sirve para la pregunta? Solo se anota (ver arriba). */
+/**
+ * ¿Cada pasaje que trajo la búsqueda sirve para la pregunta? Anota cada juicio
+ * y devuelve la probabilidad de "sí sirve" por pasaje, en el mismo orden
+ * (undefined donde Jev no contestó). En sombra nadie usa lo devuelto; con la
+ * búsqueda prendida en activo, tools/searchKb.ts filtra con esto.
+ */
 export async function revisarPasajes(
   env: Env,
   db: Db,
   botId: string,
   pregunta: string,
   pasajes: PasajeEncontrado[],
-  opts: { refId: string | null; modo: ModoQueRevisa },
-): Promise<void> {
-  await Promise.all(
-    pasajes.map(async (p, rango) => {
+  opts: { refId: string | null; modo: ModoQueRevisa; timeoutMs?: number },
+): Promise<Array<number | undefined>> {
+  return Promise.all(
+    pasajes.map(async (p, rango): Promise<number | undefined> => {
       // Mismo armado que en la evaluación (scripts/evaluar-jev/relevancia.ts).
       const pasaje = `${p.title ?? ""}\n${p.content}`.slice(0, 1500);
-      // Siempre en sombra (nadie la espera): con el tope holgado.
+      // En sombra nadie la espera: tope holgado. Filtrando, el agente sí espera.
       const c = await clasificar(env, db, { pregunta, pasaje }, PREGUNTAS_DE_PASAJE, {
         botId,
         uso: "relevancia",
         refId: opts.refId,
-        timeoutMs: TIEMPO_EN_SOMBRA_MS,
+        timeoutMs: opts.timeoutMs ?? TIEMPO_EN_SOMBRA_MS,
       });
-      if (!c) return;
+      if (!c) return undefined;
       await anotarClasificacion(db, botId, {
         uso: "relevancia",
         refId: opts.refId,
         modo: opts.modo,
         clasificacion: c,
         // searchKb le dice al agente que abajo de 0.7 no hay nada útil: eso es la "regla" de hoy.
-        regla: { pregunta, titulo: p.title, rango, score_vector: p.score, pasa_umbral: p.score >= 0.7 },
+        regla: { pregunta, titulo: p.title, rango, score_vector: p.score, pasa_umbral: p.score >= UMBRAL_SIN_COINCIDENCIA },
       });
+      return c.respuestas.ayuda.noul;
     }),
   );
 }

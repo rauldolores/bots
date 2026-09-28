@@ -23,7 +23,7 @@ import { LeadsRepo } from "../db/leads";
 import { LeadTouchesRepo } from "../db/leadTouches";
 import { NurtureEnrollmentsRepo } from "../db/nurtureEnrollments";
 import { MessagesRepo } from "../db/messages";
-import { clasificar, anotarClasificacion, modoJev, TIEMPO_EN_SOMBRA_MS } from "./jev";
+import { clasificar, anotarClasificacion, estadoJev, TIEMPO_EN_SOMBRA_MS } from "./jev";
 import { UMBRAL_PARA_ACTUAR } from "./preguntasJev";
 
 const PREGUNTA = {
@@ -45,7 +45,8 @@ export async function revisarRespuestaASeguimiento(
   conversationId: string,
 ): Promise<{ intencion: Intencion; confianza: number; accion: "ninguna" | "aviso" | "perdido" } | null> {
   try {
-    const modo = await modoJev(env, db, botId);
+    const jev = await estadoJev(env, db, botId);
+    const modo = jev.modo;
     if (modo === "apagado") return null;
 
     const lead = await new LeadsRepo(db, botId).findByConversation(conversationId);
@@ -88,7 +89,7 @@ export async function revisarRespuestaASeguimiento(
     const confianza = c.respuestas.intencion.confidence;
 
     let accion: "ninguna" | "aviso" | "perdido" = "ninguna";
-    if (modo === "activo" && confianza >= UMBRAL_PARA_ACTUAR) {
+    if (jev.actuaEn("seguimientos") && confianza >= UMBRAL_PARA_ACTUAR) {
       if (intencion === "interesado") {
         const { notifyOwner } = await import("../tools/handoffHuman");
         await notifyOwner(
@@ -113,7 +114,7 @@ export async function revisarRespuestaASeguimiento(
     await anotarClasificacion(db, botId, {
       uso: "seguimiento",
       refId: conversationId,
-      modo,
+      modo: jev.actuaEn("seguimientos") ? "activo" : "sombra",
       clasificacion: c,
       regla: { toque: toque.id, secuencia: toque.sequence_id, accion },
     });

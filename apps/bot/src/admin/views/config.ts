@@ -18,6 +18,7 @@ import {
   type ControlDef,
 } from "../control-levels";
 import { layout } from "./layout";
+import { leerActivoEn, type UsoActivable } from "../../ai/jev";
 import { VOCES_ELEVENLABS, VOZ_POR_DEFECTO } from "../../channels/voice/elevenlabsSetup";
 
 /** Escape untrusted text before interpolating it into an HTML attribute/body. */
@@ -339,8 +340,27 @@ function renderJevSection(settings: Record<string, string>): string {
   const opciones = [
     { v: "apagado", t: "Apagado", d: "Todo funciona como siempre." },
     { v: "sombra", t: "Observando", d: "Revisa cada caso y lo anota, y pone tus etiquetas a las conversaciones, pero no cambia nada más. Para compararlo antes de confiarle algo." },
-    { v: "activo", t: "Activo", d: "Cuando está seguro, actúa: frena promesas que el bot no puede cumplir y, si alguien contesta un seguimiento, te avisa si le interesa o marca el lead como perdido si no." },
+    { v: "activo", t: "Activo", d: "Cuando está seguro, actúa — solo en lo que marques abajo. En lo demás sigue observando." },
   ];
+  // Cada uso se prende por separado: se justifica (o no) con sus propios datos.
+  const activoEn = leerActivoEn(settings[SETTING_KEYS.jevActivoEn]);
+  const usos: Array<{ v: UsoActivable; t: string; d: string }> = [
+    { v: "busqueda", t: "Elegir qué información de tu base usa el bot", d: "Quita los fragmentos que no responden la pregunta, para que el bot no se confunda con ellos." },
+    { v: "promesas", t: "Frenar promesas que el bot no puede cumplir", d: "Como \"te mando la cotización más tarde\", cuando nada en el sistema lo hará." },
+    { v: "seguimientos", t: "Actuar sobre respuestas a seguimientos", d: "Te avisa si alguien responde con interés; si dice que no le interesa, marca el lead como perdido." },
+  ];
+  const casillas = usos
+    .map(
+      (u) => `
+        <label style="display:flex;gap:9px;align-items:flex-start;cursor:pointer">
+          <input type="checkbox" name="${SETTING_KEYS.jevActivoEn}" value="${u.v}" ${activoEn.has(u.v) ? "checked" : ""} style="margin-top:3px">
+          <span style="display:flex;flex-direction:column;gap:1px">
+            <span class="text-[12.5px] text-cream" style="font-weight:600">${u.t}</span>
+            <span class="text-dim text-[11px] leading-snug">${u.d}</span>
+          </span>
+        </label>`,
+    )
+    .join("");
   const tarjetas = opciones
     .map(
       (o) => `
@@ -360,6 +380,12 @@ function renderJevSection(settings: Record<string, string>): string {
         <p class="text-muted text-[12px]" style="margin:0">Un segundo modelo, especializado en decidir sí o no en milésimas de segundo, que revisa lo que el bot va a hacer. No escribe respuestas y no cambia el modelo de arriba.</p>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">${tarjetas}</div>
+      <div data-testid="jev-activo-en" style="display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:14px">
+        <span class="font-display font-semibold text-[12.5px] text-cream">En "Activo", qué puede cambiar</span>
+        <!-- Marca que la sección se envió: sin ninguna casilla marcada, el formulario no mandaría nada. -->
+        <input type="hidden" name="jev_activo_en_enviado" value="1">
+        ${casillas}
+      </div>
       <style>
         .jev-opcion{border:1px solid var(--line);background:var(--panel2)}
         .jev-opcion:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}

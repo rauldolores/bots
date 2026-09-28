@@ -48,6 +48,43 @@ export function esModoJev(v: unknown): v is ModoJev {
   return v === "apagado" || v === "sombra" || v === "activo";
 }
 
+/**
+ * Dónde puede ACTUAR el revisor en modo activo. Cada uno se prende por
+ * separado porque cada uno se justifica (o no) con sus propios datos de
+ * sombra: que la búsqueda gane mucho no dice nada de las promesas.
+ */
+export const USOS_ACTIVABLES = ["busqueda", "promesas", "seguimientos"] as const;
+export type UsoActivable = (typeof USOS_ACTIVABLES)[number];
+
+export function leerActivoEn(raw: string | null | undefined): Set<UsoActivable> {
+  const validos = new Set<string>(USOS_ACTIVABLES);
+  return new Set(
+    (raw ?? "")
+      .split(",")
+      .map((x) => x.trim())
+      .filter((x): x is UsoActivable => validos.has(x)),
+  );
+}
+
+export interface EstadoJev {
+  modo: ModoJev;
+  /** ¿Puede cambiar algo en este uso? Solo en activo y si ese uso está prendido. */
+  actuaEn(uso: UsoActivable): boolean;
+}
+
+/** El modo del bot y en qué usos actúa, con una sola lectura de ajustes. */
+export async function estadoJev(env: Env, db: Db, botId: string): Promise<EstadoJev> {
+  if (!jevDisponible(env)) return { modo: "apagado", actuaEn: () => false };
+  const settings = new SettingsRepo(db, botId);
+  const [m, lista] = await Promise.all([
+    settings.get(SETTING_KEYS.jevModo).catch(() => null),
+    settings.get(SETTING_KEYS.jevActivoEn).catch(() => null),
+  ]);
+  const modo: ModoJev = esModoJev(m) ? m : "apagado";
+  const activoEn = leerActivoEn(lista);
+  return { modo, actuaEn: (uso) => modo === "activo" && activoEn.has(uso) };
+}
+
 export function jevDisponible(env: Env): boolean {
   return !!env.TYPESAFE_API_KEY?.trim();
 }

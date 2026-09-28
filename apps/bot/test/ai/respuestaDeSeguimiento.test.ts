@@ -67,7 +67,11 @@ async function escenario(respuesta = "Sí, mándame la cotización por favor") {
   await msgs.append(conv.id, "user", respuesta, { createdAt: Date.now() + 1_000 });
   return { convId: conv.id, leadId };
 }
-const modo = (m: string) => new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.jevModo, m);
+const modo = async (m: string) => {
+  await new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.jevModo, m);
+  // En activo, la casilla de seguimientos marcada (salvo que la prueba diga otra cosa).
+  if (m === "activo") await new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.jevActivoEn, "seguimientos");
+};
 
 beforeEach(async () => {
   db = await createTestDb();
@@ -136,6 +140,14 @@ describe("respuesta a un seguimiento", () => {
     const { convId, leadId } = await escenario("mmm no sé");
     expect((await revisarRespuestaASeguimiento(env, db, TEST_BOT_ID, convId))?.accion).toBe("ninguna");
     expect((await new LeadsRepo(db, TEST_BOT_ID).getById(leadId))?.status).toBe("new");
+  });
+
+  it("en activo pero SIN la casilla de seguimientos: solo anota", async () => {
+    await modo("activo");
+    await new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.jevActivoEn, "busqueda");
+    const { convId } = await escenario();
+    expect((await revisarRespuestaASeguimiento(env, db, TEST_BOT_ID, convId))?.accion).toBe("ninguna");
+    expect(notifyOwnerMock).not.toHaveBeenCalled();
   });
 
   it("una sola vez por toque: lo que siga ya es conversación normal", async () => {

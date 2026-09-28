@@ -28,7 +28,7 @@ import type { AgentConfig } from "../settings-loader";
 import type { MessagePart } from "../channels/parts";
 import { desglosarContexto, clasificarFalla, registrarDiagnosticoLlm } from "./llmDiagnostics";
 import { revisarCumplimiento, notaDeCorreccion, type Hallazgo } from "./cumplimiento";
-import { modoJev } from "../ai/jev";
+import { estadoJev } from "../ai/jev";
 import { revisarPromesas, promesaSegura, TIEMPO_EN_SOMBRA_MS } from "./revisorRapido";
 import { esAvisoDeEspera } from "./avisoPrevio";
 
@@ -720,17 +720,23 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
     //   - activo y la regla no vio nada: se espera a Jev (~150 ms) y, si está
     //     seguro de una promesa a futuro, se corrige por el mismo camino;
     //   - en cualquier otro caso se revisa DESPUÉS de enviar, solo para anotar.
-    const modo = input.training ? "apagado" : await modoJev(env, db, botId);
-    if (modo !== "apagado") {
+    const jev = input.training ? null : await estadoJev(env, db, botId);
+    const modo = jev?.modo ?? "apagado";
+    if (jev && modo !== "apagado") {
       const texto = assistantText;
       const herramientas = [...toolCallsMade];
-      if (modo === "activo" && !hallazgo) {
+      if (jev.actuaEn("promesas") && !hallazgo) {
         const revisadas = await revisarPromesas(env, db, botId, texto, herramientas, { refId: convId, modo });
         const frase = promesaSegura(revisadas);
         if (frase) hallazgo = { tipo: "promesa_futura", frase };
       } else {
         ctx.segundoPlano.push(
-          revisarPromesas(env, db, botId, texto, herramientas, { refId: convId, modo, timeoutMs: TIEMPO_EN_SOMBRA_MS }).catch(
+          // "activo" solo si de verdad podía actuar aquí; si no, fue sombra.
+          revisarPromesas(env, db, botId, texto, herramientas, {
+            refId: convId,
+            modo: jev.actuaEn("promesas") ? "activo" : "sombra",
+            timeoutMs: TIEMPO_EN_SOMBRA_MS,
+          }).catch(
             () => undefined,
           ),
         );

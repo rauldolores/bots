@@ -65,41 +65,6 @@ console.log(`- De esos, pasan el umbral 0.7 del vector: ${utiles.filter((p) => p
 const inutilesSeguro = pasajes.filter((p) => p.jev <= 0.1);
 console.log(`- Jev seguro de que NO sirven (≤ 0.1): ${inutilesSeguro.length}`);
 
-// ── Análisis CRM: ¿se podría saltar el LLM? ─────────────────────────────────
-const crm = await db.all<{ bot: string; propuestas: number; senales: Record<string, { noul: number }> }>(
-  `SELECT b.name AS bot,
-          ((c.regla #>> '{}')::jsonb->>'propuestas')::int AS propuestas,
-          (c.jev #>> '{}')::jsonb AS senales
-     FROM clasificaciones c JOIN bots b ON b.id = c.bot_id
-    WHERE c.uso = 'crm' AND c.created_at > ?`,
-  [desde],
-);
-const maxSenal = (s: Record<string, { noul: number }>) => Math.max(...Object.values(s).map((x) => x.noul));
-console.log(`\n## Análisis CRM (${crm.length} análisis)`);
-const nadaSeguro = crm.filter((c) => maxSenal(c.senales) <= 0.1);
-console.log(`- Con propuestas: ${crm.filter((c) => c.propuestas > 0).length}; sin ninguna: ${crm.filter((c) => c.propuestas === 0).length}`);
-console.log(`- Jev seguro de que no hay nada (todas las señales ≤ 0.1): ${nadaSeguro.length} — llamadas al LLM que se ahorrarían`);
-console.log(`- …de esas, las que SÍ dieron propuestas (se perderían): ${nadaSeguro.filter((c) => c.propuestas > 0).length}`);
-
-// ── Filtro de correo: ¿coinciden? ¿se habría tirado a un cliente? ──────────
-const correos = await db.all<{ asunto: string; llm: string; conf: number; atender: boolean; jev: string; jevConf: number }>(
-  `SELECT (c.regla #>> '{}')::jsonb->>'asunto' AS asunto,
-          (c.regla #>> '{}')::jsonb->>'categoria' AS llm,
-          ((c.regla #>> '{}')::jsonb->>'confianza')::float8 AS conf,
-          ((c.regla #>> '{}')::jsonb->>'atender')::boolean AS atender,
-          (c.jev #>> '{}')::jsonb->'categoria'->>'choice' AS jev,
-          ((c.jev #>> '{}')::jsonb->'categoria'->>'confidence')::float8 AS "jevConf"
-     FROM clasificaciones c
-    WHERE c.uso = 'correo' AND c.created_at > ?`,
-  [desde],
-);
-console.log(`\n## Filtro de correo (${correos.length} correos)`);
-console.log(`- Misma categoría: ${correos.filter((c) => c.llm === c.jev).length} de ${correos.length}`);
-const distintos = correos.filter((c) => c.llm !== c.jev);
-// Lo grave: uno de los dos lo descartaría y el otro dice que es un cliente.
-distintos.forEach((c) =>
-  console.log(`  ${c.llm === "cliente" || c.jev === "cliente" ? "⚠" : " "} LLM=${c.llm} (${c.conf}) Jev=${c.jev} (${c.jevConf?.toFixed(2)}) · ${c.atender ? "se atendió" : "se filtró"} · ${corto(c.asunto ?? "")}`),
-);
 // ── Respuestas a seguimientos: qué contestó la gente ───────────────────────
 const seguimientos = await db.all<{ bot: string; intencion: string; conf: number; accion: string; modo: string }>(
   `SELECT b.name AS bot,

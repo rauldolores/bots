@@ -60,7 +60,7 @@ import { renderSeguimientos, renderSequenceForm, renderNurtureTemplatesModal, pa
 import { NurtureSequencesRepo } from "../db/nurtureSequences";
 import { NURTURE_TEMPLATES } from "../nurture/templates";
 import { enrollLeadInSequence, stopSequenceForLead } from "../nurture/run";
-import { jevDisponible, esModoJev } from "../ai/jev";
+import { jevDisponible, esModoJev, leerActivoEn } from "../ai/jev";
 import { EtiquetasRepo, EtiquetaDuplicadaError, DemasiadasEtiquetasError } from "../db/etiquetas";
 import { KbDocsRepo, indexDoc, removeDocVectors, reindexAll, MAX_DOC_CHARS } from "../kb/docs";
 import {
@@ -2864,6 +2864,12 @@ adminApp.post("/config", async (c) => {
   // lo único seguro si alguien manda basura.
   const jevRaw = form.get(SETTING_KEYS.jevModo);
   if (jevRaw !== null) await repo.set(SETTING_KEYS.jevModo, esModoJev(String(jevRaw)) ? String(jevRaw) : "apagado");
+  // En qué usos actúa en "activo". Solo si la sección vino en el formulario:
+  // sin casillas marcadas no llega nada, y eso tiene que poder significar "ninguno".
+  if (form.get("jev_activo_en_enviado") === "1") {
+    const usos = [...leerActivoEn(form.getAll(SETTING_KEYS.jevActivoEn).map(String).join(","))];
+    await repo.set(SETTING_KEYS.jevActivoEn, usos.join(","));
+  }
 
   // Respaldo de otro proveedor (mismo patrón que el BYO-LLM de arriba).
   const backupProvRaw = form.get(SETTING_KEYS.llmBackupProvider);

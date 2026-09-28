@@ -67,6 +67,26 @@ describe("Revisor rápido en /admin/config", () => {
     expect(await modoGuardado()).toBe("apagado");
   });
 
+  it("guarda en qué usos puede actuar, y desmarcarlas todas significa ninguno", async () => {
+    env.TYPESAFE_API_KEY = "ts-prueba";
+    const form = new URLSearchParams();
+    form.append(SETTING_KEYS.jevModo, "activo");
+    form.append("jev_activo_en_enviado", "1");
+    form.append(SETTING_KEYS.jevActivoEn, "busqueda");
+    form.append(SETTING_KEYS.jevActivoEn, "inventado");
+    await adminApp.request(
+      "/config",
+      { method: "POST", headers: { ...AUTH, "Content-Type": "application/x-www-form-urlencoded" }, body: form.toString() },
+      env,
+    );
+    const ajustes = () => new SettingsRepo(db, TEST_BOT_ID).all();
+    expect((await ajustes())[SETTING_KEYS.jevActivoEn]).toBe("busqueda");
+    expect(await verConfig()).toMatch(/name="jev_activo_en" value="busqueda" checked/);
+
+    await guardar({ [SETTING_KEYS.jevModo]: "activo", jev_activo_en_enviado: "1" });
+    expect((await ajustes())[SETTING_KEYS.jevActivoEn]).toBe("");
+  });
+
   it("guardar otra sección no toca el modo", async () => {
     await new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.jevModo, "activo");
     await guardar({ [SETTING_KEYS.botName]: "Otro nombre" });
