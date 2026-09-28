@@ -338,8 +338,8 @@ function renderJevSection(settings: Record<string, string>): string {
   const modo = actual === "sombra" || actual === "activo" ? actual : "apagado";
   const opciones = [
     { v: "apagado", t: "Apagado", d: "Todo funciona como siempre." },
-    { v: "sombra", t: "Observando", d: "Revisa cada caso y lo anota, pero no cambia nada. Para compararlo antes de confiarle algo." },
-    { v: "activo", t: "Activo", d: "Cuando está seguro, actúa: por ejemplo, frena una promesa que el bot no puede cumplir." },
+    { v: "sombra", t: "Observando", d: "Revisa cada caso y lo anota, y pone tus etiquetas a las conversaciones, pero no cambia nada más. Para compararlo antes de confiarle algo." },
+    { v: "activo", t: "Activo", d: "Cuando está seguro, actúa: frena promesas que el bot no puede cumplir y, si alguien contesta un seguimiento, te avisa si le interesa o marca el lead como perdido si no." },
   ];
   const tarjetas = opciones
     .map(

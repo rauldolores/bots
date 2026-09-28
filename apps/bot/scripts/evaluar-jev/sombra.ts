@@ -100,4 +100,23 @@ const distintos = correos.filter((c) => c.llm !== c.jev);
 distintos.forEach((c) =>
   console.log(`  ${c.llm === "cliente" || c.jev === "cliente" ? "⚠" : " "} LLM=${c.llm} (${c.conf}) Jev=${c.jev} (${c.jevConf?.toFixed(2)}) · ${c.atender ? "se atendió" : "se filtró"} · ${corto(c.asunto ?? "")}`),
 );
+// ── Respuestas a seguimientos: qué contestó la gente ───────────────────────
+const seguimientos = await db.all<{ bot: string; intencion: string; conf: number; accion: string; modo: string }>(
+  `SELECT b.name AS bot,
+          (c.jev #>> '{}')::jsonb->'intencion'->>'choice' AS intencion,
+          ((c.jev #>> '{}')::jsonb->'intencion'->>'confidence')::float8 AS conf,
+          (c.regla #>> '{}')::jsonb->>'accion' AS accion,
+          c.modo
+     FROM clasificaciones c JOIN bots b ON b.id = c.bot_id
+    WHERE c.uso = 'seguimiento' AND c.created_at > ?`,
+  [desde],
+);
+console.log(`\n## Respuestas a seguimientos (${seguimientos.length})`);
+for (const i of ["interesado", "no_interesado", "pregunta", "otro"]) {
+  const deEsta = seguimientos.filter((s) => s.intencion === i);
+  const seguras = deEsta.filter((s) => s.conf >= UMBRAL_PARA_ACTUAR).length;
+  console.log(`- ${i}: ${deEsta.length} (seguras ≥ ${UMBRAL_PARA_ACTUAR}: ${seguras})`);
+}
+const acciones = seguimientos.filter((s) => s.accion && s.accion !== "ninguna");
+if (acciones.length) console.log(`- Acciones tomadas en activo: ${acciones.map((s) => `${s.accion} (${s.bot})`).join(", ")}`);
 process.exit(0);

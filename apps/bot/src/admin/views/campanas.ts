@@ -26,6 +26,8 @@ import {
   type FilterCounts,
 } from "../../segments";
 import { configuredChannels } from "../../channels/labels";
+import { EtiquetasRepo, MAX_ETIQUETAS, type Etiqueta } from "../../db/etiquetas";
+import { jevDisponible, modoJev } from "../../ai/jev";
 import {
   listContentTemplates,
   templatesSentLast24h,
@@ -151,6 +153,59 @@ export function renderLivePreview(
     <div id="send-summary-wrap" hx-swap-oob="innerHTML">${renderSendSummary(counts, blockers)}</div>`;
 }
 
+/**
+ * Las etiquetas del dueño: crearlas, verlas y borrarlas. Las asigna solo el
+ * revisor rápido (ai/etiquetar.ts) a cada conversación; aquí solo se definen.
+ */
+function seccionDeEtiquetas(etiquetas: Etiqueta[], revisorPrendido: boolean): string {
+  const campo = "background:var(--panel);border:1px solid var(--line);color:inherit;padding:9px 12px;font-size:12.5px;width:100%";
+  const filas = etiquetas.length
+    ? etiquetas
+        .map(
+          (e) => `
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-top:1px solid var(--line)">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600">${esc(e.nombre)}</div>
+          <div class="text-dim" style="font-size:11.5px;margin-top:2px">${esc(e.descripcion)}</div>
+        </div>
+        <form method="post" action="/admin/campanas/etiquetas/${encodeURIComponent(e.id)}/borrar" style="margin:0;flex:none"
+              onsubmit="return confirm(${esc(JSON.stringify(`¿Borrar la etiqueta «${e.nombre}»? Se quita de todas las conversaciones.`))})">
+          <button type="submit" style="background:none;border:1px solid var(--line);color:var(--dim);padding:5px 10px;font-size:11px;cursor:pointer">Borrar</button>
+        </form>
+      </div>`,
+        )
+        .join("")
+    : `<div class="text-dim" style="font-size:12px;padding:6px 0">Todavía no hay etiquetas.</div>`;
+  const aviso = revisorPrendido
+    ? ""
+    : `<div style="border:1px solid var(--accent-2);background:var(--accent-soft);color:var(--accent-2);padding:9px 12px;font-size:12px">
+         Para que se asignen solas, prende el <b>Revisor rápido</b> en <a href="/admin/config" style="color:inherit">Configuración → Modelo de IA</a>.
+       </div>`;
+  return `
+    <div class="bg-panel border border-line" data-testid="etiquetas" style="padding:18px;display:flex;flex-direction:column;gap:12px;margin-top:16px">
+      <div>
+        <span style="font-size:15px;font-weight:600">🏷️ Etiquetas</span>
+        <p class="text-dim" style="font-size:12px;margin:4px 0 0">
+          Tú las defines y el revisor rápido las pone solo en cada conversación. Luego filtras campañas por ellas.
+          Escribe la descripción como una regla clara: el revisor la lee al pie de la letra.
+        </p>
+      </div>
+      ${aviso}
+      <div>${filas}</div>
+      ${
+        etiquetas.length < MAX_ETIQUETAS
+          ? `<form method="post" action="/admin/campanas/etiquetas" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;gap:8px;align-items:end">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:11.5px">Nombre
+          <input name="nombre" required maxlength="40" placeholder="Preguntó por precios" style="${campo}"></label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:11.5px">Cuándo aplica
+          <input name="descripcion" required maxlength="240" placeholder="El cliente pregunta cuánto cuesta algún producto o plan" style="${campo}"></label>
+        <button type="submit" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;padding:9px 14px;font-size:12.5px;font-weight:700;cursor:pointer">Agregar</button>
+      </form>`
+          : `<div class="text-dim" style="font-size:11.5px">Llegaste al máximo de ${MAX_ETIQUETAS} etiquetas.</div>`
+      }
+    </div>`;
+}
+
 export async function renderCampanas(
   env: Env,
   botId: string,
@@ -158,12 +213,15 @@ export async function renderCampanas(
   visibleNavIds: Set<string> | null = null,
 ): Promise<string> {
   const db = new Db(env.DB);
-  const [counts, templates, spent, history, pending] = await Promise.all([
+  const [counts, templates, spent, history, pending, etiquetas, modo] = await Promise.all([
     segmentCount(db, botId, {}),
     listContentTemplates(env).catch(() => []),
     templatesSentLast24h(db, botId),
     campaignHistory(db, botId),
     pendingByCampaignKey(db, botId),
+    // Sin la llave de Jev nadie asignaría las etiquetas: ni se ofrecen.
+    jevDisponible(env) ? new EtiquetasRepo(db, botId).list() : Promise.resolve([] as Etiqueta[]),
+    modoJev(env, db, botId),
   ]);
   const cap = dailyTemplateCap(env);
   const pct = Math.min(100, Math.round((spent / cap) * 100));
@@ -300,6 +358,7 @@ export async function renderCampanas(
             ${facet("lead_status", "Estado del lead", LEAD_STATUS_OPTIONS)}
             ${facet("sentiment", "Sentimiento detectado por la IA", SENTIMENT_OPTIONS)}
             ${channelOptions.length > 1 ? facet("channels", "Canal", channelOptions) : ""}
+            ${etiquetas.length ? facet("etiquetas", "Etiquetas", etiquetas.map((e) => ({ value: e.id, label: e.nombre }))) : ""}
             ${facet("recency", "Actividad", RECENCY_OPTIONS, true)}
             <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;padding-top:8px;border-top:1px solid var(--line)">
               <input type="hidden" name="exclude_busy" value="0">
@@ -340,6 +399,7 @@ export async function renderCampanas(
           <span class="text-dim" style="font-size:11.5px">Es candado anti-duplicados: reintentar con el mismo nombre no vuelve a enviar a nadie.</span>
         </div>
       </form>
+      ${jevDisponible(env) ? seccionDeEtiquetas(etiquetas, modo !== "apagado") : ""}
     </div>
 
     <!-- DERECHA: resumen fijo -->
@@ -378,7 +438,7 @@ export async function renderCampanas(
         if (!preset) return;
         var f = preset.filters || {};
         var anyFilter = false;
-        form.querySelectorAll('input[type="checkbox"].campaign-filter[name="lead_status"], input[type="checkbox"].campaign-filter[name="sentiment"], input[type="checkbox"].campaign-filter[name="channels"]').forEach(function (box) {
+        form.querySelectorAll('input[type="checkbox"].campaign-filter[name="lead_status"], input[type="checkbox"].campaign-filter[name="sentiment"], input[type="checkbox"].campaign-filter[name="channels"], input[type="checkbox"].campaign-filter[name="etiquetas"]').forEach(function (box) {
           var key = box.name === "lead_status" ? "leadStatus" : box.name;
           var arr = f[key] || [];
           box.checked = arr.indexOf(box.value) !== -1;

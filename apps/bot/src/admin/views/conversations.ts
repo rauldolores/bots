@@ -34,6 +34,7 @@ import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
 import { resolveTimezone } from "../../datetime";
 import { TRAINING_CHANNEL } from "./sandbox";
 import { layout } from "./layout";
+import { EtiquetasRepo } from "../../db/etiquetas";
 
 /** Tiempo relativo corto en español (ej. "hace 5 min", "hace 2 h", "hace 3 d"). */
 function ago(ms: number | null | undefined): string {
@@ -256,6 +257,9 @@ export async function renderInboxList(env: Env, botId: string, p: InboxParams): 
      ORDER BY c.last_message_at DESC LIMIT 50`,
     params,
   );
+  // Las del dueño (db/etiquetas.ts), que asigna el revisor rápido. Una sola
+  // consulta para toda la página, no una por fila.
+  const etiquetasPorConv = await new EtiquetasRepo(db, botId).deConversaciones(rows.map((r) => r.id as string));
 
   const items = rows
     .map((r) => {
@@ -270,6 +274,7 @@ export async function renderInboxList(env: Env, botId: string, p: InboxParams): 
       if (r.lead_count > 0) tags.push(LEAD_TAG[r.lead_status as string] ?? LEAD_TAG.new);
       if (r.open_tickets > 0) tags.push("ticket abierto");
       if (paused) tags.push("bot pausado");
+      tags.push(...(etiquetasPorConv.get(r.id) ?? []));
 
       const selected = r.id === p.selectedId;
       const name = escapeHtml(r.display_name ?? r.channel_user_id ?? "—");

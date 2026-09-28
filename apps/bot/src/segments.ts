@@ -19,6 +19,7 @@
  * aprobada (cuenta contra el tope diario del número).
  */
 import { Db } from "./db/client";
+import { UMBRAL_DE_ETIQUETA } from "./db/etiquetas";
 
 export type LeadStatusFilter = "new" | "contacted" | "sold" | "lost" | "none";
 export type SentimentFilter = "positive" | "neutral" | "frustrated" | "angry" | "none";
@@ -28,6 +29,11 @@ export interface CampaignFilters {
   leadStatus?: LeadStatusFilter[];
   sentiment?: SentimentFilter[];
   channels?: string[];
+  /**
+   * Etiquetas del dueño (db/etiquetas.ts), por id. Como los checkboxes de
+   * arriba: basta con que tenga UNA de las elegidas.
+   */
+  etiquetas?: string[];
   recency?: Recency;
   /** Evita mandarle a alguien con un ticket abierto o con el bot en pausa
    *  (ya hay un humano atendiéndolo) — default true, es la opción segura. */
@@ -148,6 +154,15 @@ function whereFor(filters: CampaignFilters, botId: string, now: number): { sql: 
     params.push(...filters.channels);
   }
 
+  if (filters.etiquetas?.length) {
+    conds.push(
+      `EXISTS (SELECT 1 FROM etiquetas_de_conversacion ec
+                WHERE ec.conversation_id = c.id AND ec.bot_id = c.bot_id AND ec.prob >= ?
+                  AND ec.etiqueta_id::text IN (${filters.etiquetas.map(() => "?").join(",")}))`,
+    );
+    params.push(UMBRAL_DE_ETIQUETA, ...filters.etiquetas);
+  }
+
   if (filters.excludeBusy !== false) {
     conds.push(`(c.paused_until IS NULL OR c.paused_until <= ?)`);
     params.push(now);
@@ -228,7 +243,15 @@ export function parseCampaignFilters(form: FormData): CampaignFilters {
   // marcar, no manda nada al formulario).
   const excludeBusy = form.getAll("exclude_busy").map(String).includes("1");
 
+  // Ids de etiqueta: solo con forma de UUID (la columna lo es, y así un valor
+  // raro no llega a la consulta).
+  const etiquetas = form
+    .getAll("etiquetas")
+    .map(String)
+    .filter((v) => /^[0-9a-f-]{36}$/i.test(v));
+
   const filters: CampaignFilters = { excludeBusy };
+  if (etiquetas.length) filters.etiquetas = etiquetas;
   if (leadStatus.length) filters.leadStatus = leadStatus;
   if (sentiment.length) filters.sentiment = sentiment;
   if (channels.length) filters.channels = channels;

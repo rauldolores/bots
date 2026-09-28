@@ -46,6 +46,9 @@ import { conversationKeyOf, botIdFromKey, channelFromKey } from "./key";
 import { resolveChannelEnv } from "../channels/effectiveEnv";
 import { resolveBotId } from "../tenant";
 import { runAgentTurnCore } from "./turn";
+import { modoJev } from "../ai/jev";
+import { etiquetarConversacion } from "../ai/etiquetar";
+import { revisarRespuestaASeguimiento } from "../ai/respuestaDeSeguimiento";
 
 export { conversationKeyOf };
 
@@ -514,13 +517,20 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
   }
 
   // Lo que el turno dejó para después (el revisor rápido en modo sombra, ver
-  // agent/revisorRapido.ts). Se espera AQUÍ, con la respuesta ya enviada: al
-  // cliente no le cuesta nada, y en plataformas sin proceso fijo (Vercel) la
-  // función sigue viva hasta que termina. Con tope: una anotación nunca vale
-  // alargar el turno — cada llamada a Jev ya se rinde sola a los 800 ms.
-  if ((result.segundoPlano ?? []).length > 0) {
+  // agent/revisorRapido.ts), más lo que el revisor hace con la conversación
+  // ya contestada: etiquetarla y, si respondía a un seguimiento, entender qué
+  // quiso decir (ai/etiquetar.ts, ai/respuestaDeSeguimiento.ts). Se espera
+  // AQUÍ, con la respuesta ya enviada: al cliente no le cuesta nada, y en
+  // plataformas sin proceso fijo (Vercel) la función sigue viva hasta que
+  // termina. Con tope: una anotación nunca vale alargar el turno.
+  const posterior: Promise<unknown>[] = [];
+  if ((result.segundoPlano ?? []).length > 0) posterior.push(segundoPlano);
+  if ((await modoJev(env, db, botId)) !== "apagado") {
+    posterior.push(etiquetarConversacion(env, db, botId, convId), revisarRespuestaASeguimiento(env, db, botId, convId));
+  }
+  if (posterior.length > 0) {
     let tope: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([segundoPlano, new Promise((r) => (tope = setTimeout(r, SEGUNDO_PLANO_TOPE_MS)))]);
+    await Promise.race([Promise.allSettled(posterior), new Promise((r) => (tope = setTimeout(r, SEGUNDO_PLANO_TOPE_MS)))]);
     clearTimeout(tope);
   }
 

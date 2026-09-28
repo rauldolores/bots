@@ -61,6 +61,7 @@ import { NurtureSequencesRepo } from "../db/nurtureSequences";
 import { NURTURE_TEMPLATES } from "../nurture/templates";
 import { enrollLeadInSequence, stopSequenceForLead } from "../nurture/run";
 import { jevDisponible, esModoJev } from "../ai/jev";
+import { EtiquetasRepo, EtiquetaDuplicadaError, DemasiadasEtiquetasError } from "../db/etiquetas";
 import { KbDocsRepo, indexDoc, removeDocVectors, reindexAll, MAX_DOC_CHARS } from "../kb/docs";
 import {
   esArchivoDeTexto,
@@ -2469,6 +2470,29 @@ adminApp.get("/campanas", async (c) => {
     skipped: c.req.query("skipped"),
   };
   return c.html(await renderCampanas(c.env, c.get("botId"), q, visibleNavIds(c.get("kontroliaClaims"))));
+});
+
+// Etiquetas del dueño (db/etiquetas.ts). Viven bajo /campanas porque ahí se
+// usan para segmentar, y así heredan el mismo permiso.
+adminApp.post("/campanas/etiquetas", async (c) => {
+  const form = await c.req.formData();
+  const nombre = String(form.get("nombre") ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+  const descripcion = String(form.get("descripcion") ?? "").replace(/\s+/g, " ").trim().slice(0, 240);
+  if (!nombre || !descripcion) return c.redirect("/admin/campanas?err=" + encodeURIComponent("La etiqueta necesita nombre y descripción."));
+  try {
+    await new EtiquetasRepo(new Db(c.env.DB), c.get("botId")).create(nombre, descripcion);
+  } catch (e) {
+    if (e instanceof EtiquetaDuplicadaError || e instanceof DemasiadasEtiquetasError) {
+      return c.redirect("/admin/campanas?err=" + encodeURIComponent(e.message));
+    }
+    throw e;
+  }
+  return c.redirect("/admin/campanas");
+});
+
+adminApp.post("/campanas/etiquetas/:id/borrar", async (c) => {
+  await new EtiquetasRepo(new Db(c.env.DB), c.get("botId")).delete(c.req.param("id"));
+  return c.redirect("/admin/campanas");
 });
 
 // Vista previa en vivo del conteo de audiencia — se llama con htmx cada vez
