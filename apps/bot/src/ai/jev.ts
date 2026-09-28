@@ -34,6 +34,14 @@ export const MODELO_JEV = "jev-1.13.0";
 /** Suficiente para el p95 medido (~200 ms) más la red desde el despliegue, sin que el cliente note la espera. */
 export const TIEMPO_MAXIMO_MS = 800;
 
+/**
+ * Tope de cada llamada cuando NADIE la espera (sombra, trabajos de cola).
+ * Más holgado que el de arriba: aquí una llamada lenta solo cuesta una
+ * anotación perdida, y perderlas empobrece justo los datos con los que se
+ * decide pasar a "activo".
+ */
+export const TIEMPO_EN_SOMBRA_MS = 2_500;
+
 export type ModoJev = "apagado" | "sombra" | "activo";
 
 export function esModoJev(v: unknown): v is ModoJev {

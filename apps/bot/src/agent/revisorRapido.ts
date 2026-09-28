@@ -17,7 +17,7 @@
 import { noul } from "@typesafe-ai/sdk";
 import type { Env } from "../env";
 import type { Db } from "../db/client";
-import { clasificar, anotarClasificacion, type ModoJev } from "../ai/jev";
+import { clasificar, anotarClasificacion, TIEMPO_EN_SOMBRA_MS, type ModoJev } from "../ai/jev";
 import { PROMETE_FUTURO, AFIRMA_HECHO, PASAJE_AYUDA, UMBRAL_PARA_ACTUAR, type TextoDePregunta } from "../ai/preguntasJev";
 import { promesaAFuturo, afirmacionSinRespaldo, type HerramientaDelTurno } from "./cumplimiento";
 
@@ -29,13 +29,7 @@ function aNoul(p: TextoDePregunta) {
 const PREGUNTAS_DE_PROMESA = { promete_futuro: aNoul(PROMETE_FUTURO), afirma_hecho: aNoul(AFIRMA_HECHO) };
 const PREGUNTAS_DE_PASAJE = { ayuda: aNoul(PASAJE_AYUDA) };
 
-/**
- * Tope de cada llamada cuando NADIE la espera (sombra, después de enviar).
- * Más holgado que el de jev.ts (800 ms, para cuando el cliente sí espera):
- * aquí una llamada lenta solo cuesta una anotación perdida, y perderlas
- * empobrece justo los datos con los que se decide pasar a "activo".
- */
-export const TIEMPO_EN_SOMBRA_MS = 2_500;
+export { TIEMPO_EN_SOMBRA_MS };
 
 /** Una respuesta larga no dispara decenas de llamadas: más allá de esto ya no es un mensaje de chat. */
 const MAX_PARRAFOS = 8;

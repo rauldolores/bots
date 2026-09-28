@@ -36,6 +36,50 @@ export const PASAJE_AYUDA: TextoDePregunta = {
 };
 
 /**
+ * Análisis CRM (crm/analizar.ts): ¿la conversación trae algo para el CRM?
+ *
+ * No se pregunta así, de golpe: "¿hay algo que actualizar?" pide sopesar
+ * muchas cosas a la vez, y Jev rinde en juicios atómicos (ver su guía). Se
+ * pregunta por cada señal por separado y el código las combina. Cada una
+ * corresponde a una parte del esquema que llena el LLM.
+ */
+export const SENALES_CRM: Record<string, TextoDePregunta> = {
+  contacto: {
+    instrucciones: "¿En la `conversacion`, el Cliente dice su nombre, su correo, su teléfono o su puesto?",
+  },
+  empresa: {
+    instrucciones: "¿En la `conversacion`, el Cliente dice el nombre de su empresa, a qué se dedica o de cuántas personas es su equipo?",
+  },
+  interes: {
+    instrucciones: "¿En la `conversacion`, el Cliente muestra interés en comprar o contratar un producto o servicio concreto?",
+  },
+  presupuesto_u_objecion: {
+    instrucciones:
+      "¿En la `conversacion`, el Cliente menciona un presupuesto o un monto, o pone una objeción (el precio, los tiempos, que no es el momento)?",
+  },
+  compromiso: {
+    instrucciones:
+      "¿En la `conversacion`, el Cliente o el Agente se comprometen de forma explícita a algo concreto, como enviar algo, llamar, reunirse o pagar?",
+  },
+};
+
+/**
+ * Filtro de correo (channels/email/triage.ts): las MISMAS categorías y
+ * descripciones que usa el LLM, para que se compare lo mismo.
+ */
+export const CATEGORIA_DE_CORREO = {
+  instrucciones: "¿Qué es este `correo` que llegó al buzón de atención a clientes del negocio?",
+  opciones: {
+    cliente: "Alguien que es o podría ser cliente del negocio: pregunta, cotiza, pide soporte, se queja, quiere agendar.",
+    vendedor: "Alguien que le quiere VENDER algo al negocio: agencias, software, proveedores ofreciendo servicios.",
+    publicidad: "Boletines, promociones, marketing.",
+    notificacion: "Avisos automáticos: facturas, recibos, envíos, alertas de cuenta.",
+    spam: "Fraude, phishing o basura.",
+    otro: "Nada de lo anterior.",
+  },
+} as const;
+
+/**
  * A partir de qué probabilidad se cree un "sí" para ACTUAR. En la evaluación,
  * con prob ≥ 0.9 Jev coincidió con la referencia en el 97% de los casos de
  * promesas; debajo de eso se deja a la regla de siempre.
