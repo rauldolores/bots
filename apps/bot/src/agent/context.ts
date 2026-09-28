@@ -66,6 +66,12 @@ export interface AgentContext {
    * del texto. Vacío en el camino de voz: ahí la tool ni se anuncia.
    */
   adjuntos: MessagePart[];
+  /**
+   * Trabajo que las tools dejaron para DESPUÉS de responder (la revisión del
+   * revisor rápido, ver agent/revisorRapido.ts). El runner lo espera cuando ya
+   * envió; así no le cuesta ni un milisegundo al cliente.
+   */
+  segundoPlano: Promise<unknown>[];
   /** Cuánto costó armar todo esto — ver AgentContextTimings. */
   timings: AgentContextTimings;
 }
@@ -136,6 +142,7 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
   ]);
 
   const adjuntos: MessagePart[] = [];
+  const segundoPlano: Promise<unknown>[] = [];
   const tools = buildTools({
     env,
     getConversationId: () => conversationId,
@@ -145,6 +152,9 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
     // La voz no tiene cómo entregar un archivo, así que no recibe recolector
     // y `enviarArchivo` no se le anuncia (ver tools/index.ts).
     adjuntar: input.paraVoz ? undefined : (part: MessagePart) => adjuntos.push(part),
+    // La voz no pasa por el runner (nadie esperaría el trabajo) y el
+    // entrenamiento no es una conversación real: ninguno lo recibe.
+    enSegundoPlano: input.paraVoz || input.training ? undefined : (p: Promise<unknown>) => segundoPlano.push(p),
   });
   const toolNames = Object.keys(tools);
 
@@ -234,6 +244,7 @@ Todavía no sabes cómo se llama esta persona. Para contestar dudas no hace falt
     state,
     knownCustomerName,
     adjuntos,
+    segundoPlano,
     timings: { totalMs: Date.now() - t0, mcpMs },
   };
 }

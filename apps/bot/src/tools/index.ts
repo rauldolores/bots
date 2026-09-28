@@ -24,6 +24,12 @@ export interface ToolContext {
   /** Dónde deja sus bloques `enviarArchivo`. Lo provee quien vaya a enviarlos. */
   adjuntar?: (part: MessagePart) => void;
   /**
+   * Dónde deja una tool el trabajo que puede terminar DESPUÉS de responder
+   * (hoy: la revisión de la búsqueda con el revisor rápido). El runner lo
+   * espera tras enviar. Sin esto, ese trabajo no se hace.
+   */
+  enSegundoPlano?: (trabajo: Promise<unknown>) => void;
+  /**
    * Sandbox de entrenamiento (/admin/entrenamiento): el dueño conversa con su
    * propio bot para ver cómo responde. Las tools que ESCRIBEN se simulan —
    * ver `simulada` abajo.
@@ -56,7 +62,11 @@ export function buildTools(ctx: ToolContext) {
   // recorta desde /admin/config (disabled_tools), que es una decisión del
   // dueño, no una restricción comercial.
   const tools: Record<string, any> = {
-    searchKb: searchKbTool(ctx.env, ctx.botId),
+    searchKb: searchKbTool(
+      ctx.env,
+      ctx.botId,
+      ctx.enSegundoPlano ? { getConversationId: ctx.getConversationId, enSegundoPlano: ctx.enSegundoPlano } : undefined,
+    ),
     handoffHuman: handoffHumanTool(ctx.env, ctx.getConversationId, ctx.botId),
     pauseBot: pauseBotTool(ctx.env, ctx.getConversationId, ctx.botId),
     snoozeUser: snoozeUserTool(ctx.env, ctx.getConversationId, ctx.botId),

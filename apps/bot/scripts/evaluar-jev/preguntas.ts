@@ -2,11 +2,15 @@
 //
 // Las MISMAS preguntas van a los tres que se comparan (Jev, gpt-4o-mini y la
 // referencia gpt-4.1), con las mismas palabras. Si cada uno recibiera una
-// versión distinta, se compararía la redacción y no el modelo.
+// versión distinta, se compararía la redacción y no el modelo. Las de
+// promesas y relevancia además son las que usa producción
+// (src/ai/preguntasJev.ts): lo que se mide aquí es lo que corre allá.
 //
 // Cada tarea es un lugar concreto de la app donde Jev podría entrar (ver el
 // plan): la guarda de promesas, el filtro de la base de conocimiento, el
 // router antes del turno y el cierre de la conversación.
+
+import { PROMETE_FUTURO, AFIRMA_HECHO, PASAJE_AYUDA } from "../../src/ai/preguntasJev";
 
 export type Pregunta =
   | { tipo: "noul"; instrucciones: string; si?: string; no?: string }
@@ -31,30 +35,13 @@ export interface Caso {
 export const PREGUNTAS: Record<Tarea, Record<string, Pregunta>> = {
   // src/agent/cumplimiento.ts — hoy: expresiones regulares.
   promesas: {
-    promete_futuro: {
-      tipo: "noul",
-      instrucciones:
-        "¿El `parrafo` promete que el asistente o el negocio hará algo MÁS ADELANTE por su propia cuenta, como enviar un correo, un enlace, una cotización o una confirmación, llamar, escribir o avisar después?",
-      si: "Sí: promete una acción futura del asistente o del negocio (\"te enviaré\", \"recibirás un correo\", \"te llamaremos mañana\").",
-      no: "No: no promete nada futuro, solo lo ofrece si el cliente quiere, o dice que una persona del equipo le dará seguimiento sin prometer qué ni cuándo.",
-    },
-    afirma_hecho: {
-      tipo: "noul",
-      instrucciones:
-        "¿El `parrafo` afirma que el asistente YA realizó una acción en un sistema, como registrar, agendar, enviar, crear, guardar o levantar un caso?",
-      si: "Sí: dice que la acción ya quedó hecha (\"ya registré tu solicitud\", \"tu cita quedó agendada\", \"te envié el enlace\").",
-      no: "No: no afirma ninguna acción ya realizada; solo informa, pregunta u ofrece.",
-    },
+    promete_futuro: { tipo: "noul", ...PROMETE_FUTURO },
+    afirma_hecho: { tipo: "noul", ...AFIRMA_HECHO },
   },
 
   // searchKb — hoy: se manda todo lo que el vector trae, sirva o no.
   relevancia: {
-    ayuda: {
-      tipo: "noul",
-      instrucciones: "¿El `pasaje` contiene información que ayuda a responder la `pregunta` del cliente?",
-      si: "Sí: el pasaje responde la pregunta o aporta un dato directamente útil para responderla.",
-      no: "No: el pasaje habla de otra cosa o no aporta nada para responder esta pregunta.",
-    },
+    ayuda: { tipo: "noul", ...PASAJE_AYUDA },
   },
 
   // src/upgrade/modelSelector.ts y src/contacts/optOutDetect.ts — hoy: listas de palabras.

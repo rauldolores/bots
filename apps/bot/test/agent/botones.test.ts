@@ -191,11 +191,13 @@ describe("después de un toque no se espera el buffer", () => {
     );
     expect(tocado.scheduledInMs).toBe(0);
 
-    // Y el trabajo queda vencido de una vez, no dentro de 15s.
-    const fila = await db.first<{ run_after: number }>(
-      "SELECT run_after FROM agent_jobs WHERE conversation_key LIKE ?",
+    // Y el trabajo queda vencido de una vez, no dentro de 15s. Contra el reloj
+    // de POSTGRES, que es el que usa la cola: el de Node puede ir unos ms
+    // atrás del de la base (en Docker pasa) y la prueba fallaba por eso.
+    const fila = await db.first<{ vencido: boolean }>(
+      "SELECT run_after <= (EXTRACT(EPOCH FROM now()) * 1000)::bigint AS vencido FROM agent_jobs WHERE conversation_key LIKE ?",
       ["%u2"],
     );
-    expect(Number(fila!.run_after)).toBeLessThanOrEqual(Date.now());
+    expect(fila!.vencido).toBe(true);
   });
 });

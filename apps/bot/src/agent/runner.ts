@@ -34,6 +34,13 @@ import { WorkJobsRepo } from "../db/workJobs";
  * por mensaje sobre una charla a medias.
  */
 const CRM_ANALYSIS_DELAY_MS = 2 * 60_000;
+
+/**
+ * Cuánto espera runTurn, ya enviada la respuesta, el trabajo de segundo plano
+ * del turno. Un poco más que el tope de cada revisión en sombra (2.5 s, ver
+ * agent/revisorRapido.ts), para que alcancen a anotarse.
+ */
+const SEGUNDO_PLANO_TOPE_MS = 3_000;
 import { AgentStateRepo } from "./state";
 import { conversationKeyOf, botIdFromKey, channelFromKey } from "./key";
 import { resolveChannelEnv } from "../channels/effectiveEnv";
@@ -452,6 +459,11 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
       : undefined,
   });
 
+  // Se ata YA al trabajo de segundo plano (se espera más abajo, tras enviar):
+  // si alguno falla mientras se envía la respuesta, queda atendido en vez de
+  // aparecer como un rechazo sin manejar.
+  const segundoPlano = Promise.allSettled(result.segundoPlano ?? []);
+
   // maxChunks/interChunkDelayMs son config de ENTREGA (no del turno en sí),
   // pero salen de la MISMA config que el turno ya resolvió — así que se
   // reusa en vez de volver a pedirla.
@@ -499,6 +511,17 @@ export async function runTurn(rawEnv: Env, conversationKey: string): Promise<boo
   if (result.text.trim() || result.adjuntos.length > 0) {
     await enviarRespuesta(env, state, result.text, cfg, botId, result.adjuntos);
     await jobs.clearPendingReply(conversationKey);
+  }
+
+  // Lo que el turno dejó para después (el revisor rápido en modo sombra, ver
+  // agent/revisorRapido.ts). Se espera AQUÍ, con la respuesta ya enviada: al
+  // cliente no le cuesta nada, y en plataformas sin proceso fijo (Vercel) la
+  // función sigue viva hasta que termina. Con tope: una anotación nunca vale
+  // alargar el turno — cada llamada a Jev ya se rinde sola a los 800 ms.
+  if ((result.segundoPlano ?? []).length > 0) {
+    let tope: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([segundoPlano, new Promise((r) => (tope = setTimeout(r, SEGUNDO_PLANO_TOPE_MS)))]);
+    clearTimeout(tope);
   }
 
   // Poner el CRM al día: se ENCOLA, no se hace aquí. El cliente ya recibió su

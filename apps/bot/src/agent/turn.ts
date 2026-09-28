@@ -27,7 +27,9 @@ import { buildAgentContext } from "./context";
 import type { AgentConfig } from "../settings-loader";
 import type { MessagePart } from "../channels/parts";
 import { desglosarContexto, clasificarFalla, registrarDiagnosticoLlm } from "./llmDiagnostics";
-import { revisarCumplimiento, notaDeCorreccion } from "./cumplimiento";
+import { revisarCumplimiento, notaDeCorreccion, type Hallazgo } from "./cumplimiento";
+import { modoJev } from "../ai/jev";
+import { revisarPromesas, promesaSegura, TIEMPO_EN_SOMBRA_MS } from "./revisorRapido";
 import { esAvisoDeEspera } from "./avisoPrevio";
 
 export interface AgentTurnInput {
@@ -118,6 +120,12 @@ export interface AgentTurnResult {
   adjuntos: MessagePart[];
   /** La config YA resuelta de este turno — para que el llamador no la vuelva a pedir (ver runner.ts). */
   cfg: AgentConfig;
+  /**
+   * Trabajo que puede terminar DESPUÉS de enviar (el revisor rápido en modo
+   * sombra, ver agent/revisorRapido.ts). runTurn lo espera tras mandar la
+   * respuesta; quien no lo espere solo pierde anotaciones, nunca la respuesta.
+   */
+  segundoPlano: Promise<unknown>[];
 }
 
 /**
@@ -705,7 +713,30 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
   // corrección falla, sale la respuesta original — nunca se deja al cliente
   // sin contestar por esto.
   if (modeloExitoso) {
-    const hallazgo = revisarCumplimiento(assistantText, toolCallsMade);
+    let hallazgo: Hallazgo | null = revisarCumplimiento(assistantText, toolCallsMade);
+
+    // REVISOR RÁPIDO (JEV AI) — ver agent/revisorRapido.ts. Sin llave en el
+    // despliegue, modoJev ni consulta la base: cero costo para quien no lo usa.
+    //   - activo y la regla no vio nada: se espera a Jev (~150 ms) y, si está
+    //     seguro de una promesa a futuro, se corrige por el mismo camino;
+    //   - en cualquier otro caso se revisa DESPUÉS de enviar, solo para anotar.
+    const modo = input.training ? "apagado" : await modoJev(env, db, botId);
+    if (modo !== "apagado") {
+      const texto = assistantText;
+      const herramientas = [...toolCallsMade];
+      if (modo === "activo" && !hallazgo) {
+        const revisadas = await revisarPromesas(env, db, botId, texto, herramientas, { refId: convId, modo });
+        const frase = promesaSegura(revisadas);
+        if (frase) hallazgo = { tipo: "promesa_futura", frase };
+      } else {
+        ctx.segundoPlano.push(
+          revisarPromesas(env, db, botId, texto, herramientas, { refId: convId, modo, timeoutMs: TIEMPO_EN_SOMBRA_MS }).catch(
+            () => undefined,
+          ),
+        );
+      }
+    }
+
     if (hallazgo) {
       console.warn(
         `[turno] cumplimiento: ${hallazgo.tipo === "afirmacion" ? `afirmó sin respaldo "${hallazgo.promesa.dijo}"` : `prometió a futuro "${hallazgo.frase}"`} — corrigiendo`,
@@ -802,6 +833,7 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
     cachedTokens,
     toolCallsMade,
     adjuntos: ctx.adjuntos,
+    segundoPlano: ctx.segundoPlano,
     // Se devuelve para que runTurn NO tenga que volver a resolverlo: es la
     // misma config, y recalcularla cuesta 3 consultas + rearmar el system
     // prompt entero (que además se tira a la basura).
