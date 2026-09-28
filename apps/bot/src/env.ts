@@ -192,6 +192,12 @@ export interface Env {
   SUPABASE_SERVICE_ROLE_KEY?: string;
   /** El bucket donde viven los archivos del bot. "medios" si no se dice otra cosa. */
   SUPABASE_STORAGE_BUCKET?: string;
+  /**
+   * JEV AI (TypeSafe): el clasificador rápido — decide sí/no u opciones con
+   * probabilidad, no escribe texto. Es del DESPLIEGUE, no del dueño: sin ella
+   * todo sigue como antes y el ajuste por bot no aparece. Ver src/ai/jev.ts.
+   */
+  TYPESAFE_API_KEY?: string;
   // client_id que devolvió panel.kontrolia.io → Clientes OAuth al registrar
   // esta app. No es secreto (cliente público, PKCE, sin client_secret).
   OAUTH_CLIENT_ID?: string;

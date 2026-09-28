@@ -22,6 +22,7 @@ import { Db } from "./client";
  *   entrenamiento — convertir una corrección del dueño en regla
  *   panel         — lo que el dueño dispara desde /admin (sugerencias, prueba de IA)
  *   filtro        — el filtro de intención del correo entrante (¿es un cliente?)
+ *   clasificador  — JEV AI: decisiones rápidas de sí/no (src/ai/jev.ts)
  */
 export type AiUsageSource =
   | "skill"
@@ -33,7 +34,8 @@ export type AiUsageSource =
   | "nurture"
   | "entrenamiento"
   | "panel"
-  | "filtro";
+  | "filtro"
+  | "clasificador";
 
 /** Lo que devuelve `usage` en cualquier generateText/generateObject del AI SDK. */
 export interface UsoDelSdk {

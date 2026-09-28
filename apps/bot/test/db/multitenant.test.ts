@@ -104,7 +104,7 @@ describe("las tablas del bot llevan bot_id", () => {
       "followup_sends", "customer_facts", "tracked_links", "keyword_hits",
       "conv_labels", "template_sends", "admin_emails", "magic_links",
       "agent_state", "pending_messages", "agent_jobs", "campaign_jobs",
-      "media_assets",
+      "media_assets", "clasificaciones",
     ];
     const filas = await db.all<{ table_name: string }>(
       `SELECT table_name FROM information_schema.columns

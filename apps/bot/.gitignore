@@ -5,3 +5,7 @@
 # Skill "UI UX Pro Max" (uupm.cc): lo instala cada quien con `uipro init --ai claude`.
 .claude/skills/
 pruebas-resultados/
+
+# Evaluación de JEV AI: los casos traen extractos de la base de conocimiento y
+# de las pruebas del agente. Se regeneran con scripts/evaluar-jev/casos.ts.
+scripts/evaluar-jev/datos/

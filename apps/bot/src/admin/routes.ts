@@ -60,6 +60,7 @@ import { renderSeguimientos, renderSequenceForm, renderNurtureTemplatesModal, pa
 import { NurtureSequencesRepo } from "../db/nurtureSequences";
 import { NURTURE_TEMPLATES } from "../nurture/templates";
 import { enrollLeadInSequence, stopSequenceForLead } from "../nurture/run";
+import { jevDisponible, esModoJev } from "../ai/jev";
 import { KbDocsRepo, indexDoc, removeDocVectors, reindexAll, MAX_DOC_CHARS } from "../kb/docs";
 import {
   esArchivoDeTexto,
@@ -2569,6 +2570,7 @@ adminApp.get("/config", async (c) => {
         const plan = await vozIncluidaEnElPlan(c.env, bot?.organization_id);
         return { incluida: plan.incluida, minutos: plan.minutos, llave: llaveDeElevenLabs(c.env, settings)?.origen ?? null };
       })(),
+      jevDisponible(c.env),
     ),
   );
 });
@@ -2833,6 +2835,11 @@ adminApp.post("/config", async (c) => {
       await repo.setSecret(SETTING_KEYS.llmApiKey, String(keyRaw).trim());
     }
   }
+
+  // Revisor rápido (JEV AI). Un valor desconocido cuenta como apagado: es
+  // lo único seguro si alguien manda basura.
+  const jevRaw = form.get(SETTING_KEYS.jevModo);
+  if (jevRaw !== null) await repo.set(SETTING_KEYS.jevModo, esModoJev(String(jevRaw)) ? String(jevRaw) : "apagado");
 
   // Respaldo de otro proveedor (mismo patrón que el BYO-LLM de arriba).
   const backupProvRaw = form.get(SETTING_KEYS.llmBackupProvider);

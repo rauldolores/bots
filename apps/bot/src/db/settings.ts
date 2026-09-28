@@ -41,6 +41,8 @@ export const SETTING_KEYS = {
   ownerTelegramClaimCode: "owner_telegram_claim_code",
   ownerTelegramClaimExpiresAt: "owner_telegram_claim_expires_at",
   autonomyLevel: "autonomy_level", // flywheel: manual (default) | copilot (auto-aplica lo seguro de noche)
+  // JEV AI (src/ai/jev.ts): apagado (default) | sombra (decide y anota, no cambia nada) | activo.
+  jevModo: "jev_modo",
   // BYO-LLM (dashboard "Modelo de IA"): the owner plugs their own provider,
   // API key y/o modelo concreto. Empty = the instance's env defaults.
   llmProvider: "llm_provider", // "" (auto) | anthropic | openai

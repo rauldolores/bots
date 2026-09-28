@@ -56,6 +56,9 @@ const RATES: Record<string, Rates> = {
   "grok-4-fast-non-reasoning": { input: 0.2, cacheRead: 0.05, output: 0.5 },
   "grok-3-mini": { input: 0.3, cacheRead: 0.075, output: 0.5 },
   "gpt-realtime-2.1-mini": PRICING["gpt-realtime-2.1-mini"],
+  // JEV AI (src/ai/jev.ts): cobra solo la entrada; la salida no se cobra. Sin
+  // esta línea caería en la tarifa de Haiku y en Costos se vería ~20x más caro.
+  "jev-1.13.0": { input: 0.042, cacheRead: 0.042, output: 0 },
 };
 
 // Any concrete model id string (Anthropic or OpenAI). Kept as a string alias so

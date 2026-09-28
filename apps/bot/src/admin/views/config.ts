@@ -326,6 +326,48 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string, ia
 }
 
 /**
+ * "Revisor rápido" (JEV AI, src/ai/jev.ts). Solo aparece si el despliegue
+ * tiene la llave: sin ella no hay nada que prender.
+ *
+ * "Observando" existe para prenderlo SIN riesgo: el revisor decide y se anota
+ * al lado de lo que hizo la lógica de siempre, pero no cambia nada. Con esos
+ * datos se decide si pasar a "Activo".
+ */
+function renderJevSection(settings: Record<string, string>): string {
+  const actual = settings[SETTING_KEYS.jevModo];
+  const modo = actual === "sombra" || actual === "activo" ? actual : "apagado";
+  const opciones = [
+    { v: "apagado", t: "Apagado", d: "Todo funciona como siempre." },
+    { v: "sombra", t: "Observando", d: "Revisa cada caso y lo anota, pero no cambia nada. Para compararlo antes de confiarle algo." },
+    { v: "activo", t: "Activo", d: "Cuando está seguro, actúa: por ejemplo, frena una promesa que el bot no puede cumplir." },
+  ];
+  const tarjetas = opciones
+    .map(
+      (o) => `
+        <label class="jev-opcion" style="display:flex;gap:10px;align-items:flex-start;padding:12px 14px;cursor:pointer">
+          <input type="radio" name="${SETTING_KEYS.jevModo}" value="${o.v}" ${modo === o.v ? "checked" : ""} style="margin-top:3px">
+          <span style="display:flex;flex-direction:column;gap:2px">
+            <span class="font-display font-semibold text-[12.5px] text-cream">${o.t}</span>
+            <span class="text-dim text-[11px] leading-snug">${o.d}</span>
+          </span>
+        </label>`,
+    )
+    .join("");
+  return `
+    <div class="bg-panel border border-line" data-testid="revisor-rapido" style="padding:20px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <h3 class="font-display font-semibold text-[13.5px] text-cream">⚡ Revisor rápido</h3>
+        <p class="text-muted text-[12px]" style="margin:0">Un segundo modelo, especializado en decidir sí o no en milésimas de segundo, que revisa lo que el bot va a hacer. No escribe respuestas y no cambia el modelo de arriba.</p>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">${tarjetas}</div>
+      <style>
+        .jev-opcion{border:1px solid var(--line);background:var(--panel2)}
+        .jev-opcion:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+      </style>
+    </div>`;
+}
+
+/**
  * "Correo saliente" — DECIDIDO APARTE de qué proveedor recibe los correos
  * (eso es /admin/conexiones → Correo entrante). El dueño puede recibir por
  * un proveedor y responder por el otro; esta pantalla es 100% independiente.
@@ -732,6 +774,8 @@ export function renderConfig(
   ia?: PoliticaDeIa,
   /** ¿El plan trae voz, con cuántos minutos, y con qué llave (channels/voice/elevenlabsKey.ts)? */
   voz?: EstadoDeVoz,
+  /** ¿El despliegue tiene la llave de JEV AI? Sin ella, la sección del revisor rápido no aparece. */
+  jevDisponible = false,
 ): string {
   const personalidadCards = CONTROL_LIST.filter((c) => c.key !== SETTING_KEYS.modelOverride)
     .map((c) => renderCardGroup(c, settings))
@@ -808,6 +852,7 @@ export function renderConfig(
               ${modelTierCards}
             </div>
             ${renderLlmSection(settings, llmTest, ia)}
+            ${jevDisponible ? renderJevSection(settings) : ""}
             ${renderVoiceSection(settings, hasEnvOpenAiKey, elevenError, voz)}
           </div>
 
