@@ -74,8 +74,17 @@ describe("GET /admin/config — la sección existe (antes el botón llevaba a un
     await new BotChannelsRepo(db as any).upsert({ botId: TEST_BOT_ID, channel: "telegram", config: {} });
     await settings.set(SETTING_KEYS.ownerTelegramChatId, "12345");
     const html = await (await getConfig()).text();
-    expect(html).toContain("Vinculado");
+    expect(html).toContain("1 persona vinculada");
+    // Se puede sumar a alguien más del equipo sin desvincular a nadie.
+    expect(html).toContain("Agregar otra persona");
     expect(html).not.toContain("Generar código para vincular");
+  });
+
+  it("con varias personas vinculadas, dice cuántas", async () => {
+    await new BotChannelsRepo(db as any).upsert({ botId: TEST_BOT_ID, channel: "telegram", config: {} });
+    await settings.set(SETTING_KEYS.ownerTelegramChatId, "12345,67890");
+    const html = await (await getConfig()).text();
+    expect(html).toContain("2 personas vinculadas");
   });
 
   it("con un código pendiente y vigente: lo muestra en la pantalla", async () => {
