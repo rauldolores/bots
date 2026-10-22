@@ -19,6 +19,7 @@ import {
 } from "../control-levels";
 import { layout } from "./layout";
 import { leerActivoEn, type UsoActivable } from "../../ai/jev";
+import { listaDeDestinatarios } from "../../tools/handoffHuman";
 import { VOCES_ELEVENLABS, VOZ_POR_DEFECTO } from "../../channels/voice/elevenlabsSetup";
 
 /** Escape untrusted text before interpolating it into an HTML attribute/body. */
@@ -508,6 +509,8 @@ function renderAvisoAlDuenoSection(
     (settings[SETTING_KEYS.emailOutboundProvider] ?? "").trim() && (settings[SETTING_KEYS.emailOutboundApiKey] ?? "").trim(),
   );
   const telegramChatId = (settings[SETTING_KEYS.ownerTelegramChatId] ?? "").trim();
+  // Puede haber varias personas: cada una vincula su chat con su propio código.
+  const vinculados = listaDeDestinatarios(telegramChatId).length;
   const waNumber = settings[SETTING_KEYS.ownerWaNumber] ?? "";
   const waTemplateReady = Boolean((settings[SETTING_KEYS.twilioHandoffContentSid] ?? "").trim());
 
@@ -532,19 +535,25 @@ function renderAvisoAlDuenoSection(
             ? ""
             : `<p class="text-[11.5px]" style="color:var(--bad);margin:0">Primero configura arriba, en "Correo saliente", con qué proveedor manda tu bot correos — sin eso este campo no sirve de nada.</p>`
         }
-        <p class="text-dim text-[11px]" style="margin:0">El menos inmediato de los tres (la gente revisa menos el correo), pero el que nunca falla.</p>
-        <input type="text" name="${SETTING_KEYS.ownerEmail}" value="${esc(ownerEmail)}" placeholder="tucorreo@negocio.com" style="${INPUT_STYLE}">
+        <p class="text-dim text-[11px]" style="margin:0">El menos inmediato de los tres (la gente revisa menos el correo), pero el que nunca falla. Para avisarle a varias personas, sepáralas con comas.</p>
+        <input type="text" name="${SETTING_KEYS.ownerEmail}" value="${esc(ownerEmail)}" placeholder="tucorreo@negocio.com, ventas@negocio.com" style="${INPUT_STYLE}">
       </div>
 
       <div style="border-top:1px solid var(--line);padding-top:18px;display:flex;flex-direction:column;gap:10px">
         <label class="font-display font-semibold text-[12.5px] text-cream">✈️ Telegram <span class="text-dim" style="font-weight:400">— el más rápido</span></label>
         <p class="text-dim text-[11px]" style="margin:0">Llega como notificación al instante, y —a diferencia de WhatsApp— no necesita ninguna plantilla aprobada.</p>
         ${
-          telegramChatId
+          telegramChatId && !claimVigente
             ? `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-                 <span class="text-[12px]" style="color:var(--ok)">✓ Vinculado</span>
+                 <span class="text-[12px]" style="color:var(--ok)">✓ ${vinculados === 1 ? "1 persona vinculada" : `${vinculados} personas vinculadas`}</span>
+                 ${
+                   telegramChannelConnected
+                     ? `<button type="submit" formaction="/admin/config/owner-telegram/generate-code" formmethod="POST"
+                         class="text-[11px]" style="border:1px solid var(--line);color:var(--muted);padding:5px 10px;cursor:pointer;background:none">Agregar otra persona</button>`
+                     : ""
+                 }
                  <button type="submit" formaction="/admin/config/owner-telegram/unlink" formmethod="POST"
-                         class="text-[11px]" style="border:1px solid var(--line);color:var(--muted);padding:5px 10px;cursor:pointer;background:none">Desvincular</button>
+                         class="text-[11px]" style="border:1px solid var(--line);color:var(--muted);padding:5px 10px;cursor:pointer;background:none">Desvincular a todas</button>
                </div>`
             : !telegramChannelConnected
               ? `<p class="text-[11.5px]" style="color:var(--bad);margin:0">Primero conecta Telegram como canal en <a href="/admin/conexiones" style="color:var(--accent-2)">Conexiones</a> — el aviso usa ese mismo bot.</p>`

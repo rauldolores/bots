@@ -377,6 +377,63 @@ describe("notifyOwner — resuelve destinos desde settings cuando el entorno no 
   });
 });
 
+describe("notifyOwner — varias personas, y lo del panel del bot gana sobre el entorno", () => {
+  it("Telegram: le avisa a cada chat vinculado, y el aviso dice de qué bot viene", async () => {
+    await new SettingsRepo(new Db(env.DB), TEST_BOT_ID).set(SETTING_KEYS.ownerTelegramChatId, "111,222");
+    const chats: string[] = [];
+    let texto = "";
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      if (String(url).includes("sendMessage")) {
+        const b = JSON.parse(init.body);
+        chats.push(b.chat_id);
+        texto = b.text;
+      }
+      return new Response("{}", { status: 200 });
+    }) as any;
+
+    await notifyOwner({ ...env, TELEGRAM_BOT_TOKEN: "tok", RESEND_API_KEY: undefined, OWNER_EMAIL: undefined }, { reason: "x", summary: "y", ticketId: "t1" }, TEST_BOT_ID);
+
+    expect(chats).toEqual(["111", "222"]);
+    expect(texto).toMatch(/^🚨 .+ · Nuevo ticket/);
+  });
+
+  it("Email: un correo por persona, separadas por comas", async () => {
+    const repo = new SettingsRepo(new Db(env.DB), TEST_BOT_ID);
+    await repo.set(SETTING_KEYS.ownerEmail, "ana@negocio.com, beto@negocio.com");
+    await repo.set(SETTING_KEYS.emailOutboundProvider, "resend");
+    await repo.set(SETTING_KEYS.emailOutboundApiKey, "re_fake");
+    await repo.set(SETTING_KEYS.emailFromAddress, "bot@negocio.com");
+
+    await notifyOwner({ ...env, RESEND_API_KEY: undefined }, { reason: "x", summary: "y", ticketId: "t1" }, TEST_BOT_ID);
+
+    expect(sendOutboundEmailMock.mock.calls.map((c) => c[1])).toEqual(["ana@negocio.com", "beto@negocio.com"]);
+  });
+
+  // Antes ganaba OWNER_EMAIL (una variable de TODO el despliegue): con varios
+  // bots, los avisos de todos iban al mismo correo sin importar el panel.
+  it("el correo puesto en el panel del bot gana sobre OWNER_EMAIL del entorno", async () => {
+    const repo = new SettingsRepo(new Db(env.DB), TEST_BOT_ID);
+    await repo.set(SETTING_KEYS.ownerEmail, "ventas@aduanas.com");
+    await repo.set(SETTING_KEYS.emailOutboundProvider, "resend");
+    await repo.set(SETTING_KEYS.emailOutboundApiKey, "re_fake");
+    await repo.set(SETTING_KEYS.emailFromAddress, "bot@negocio.com");
+
+    // env trae OWNER_EMAIL = hugo@hugohair.com desde el beforeEach.
+    await notifyOwner(env, { reason: "x", summary: "y", ticketId: "t1" }, TEST_BOT_ID);
+
+    expect(sendOutboundEmailMock.mock.calls.map((c) => c[1])).toEqual(["ventas@aduanas.com"]);
+  });
+
+  it("sin nada en el panel, el entorno sigue funcionando como antes", async () => {
+    const repo = new SettingsRepo(new Db(env.DB), TEST_BOT_ID);
+    await repo.set(SETTING_KEYS.emailOutboundProvider, "resend");
+    await repo.set(SETTING_KEYS.emailOutboundApiKey, "re_fake");
+    await repo.set(SETTING_KEYS.emailFromAddress, "bot@negocio.com");
+    await notifyOwner(env, { reason: "x", summary: "y", ticketId: "t1" }, TEST_BOT_ID);
+    expect(sendOutboundEmailMock.mock.calls.map((c) => c[1])).toEqual(["hugo@hugohair.com"]);
+  });
+});
+
 // A nombre de QUIÉN. Pasó por correo el 2026-09-24: alguien escribió "ayuda",
 // el bot abrió dos tickets y el equipo no sabía ni cómo saludarlo.
 describe("handoffHumanTool — sin saber quién es, no hay ticket", () => {

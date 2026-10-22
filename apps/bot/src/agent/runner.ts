@@ -147,7 +147,14 @@ export async function ingestMessage(
       ]);
       const vigente = codigoGuardado === codigoEscrito && Date.now() < Number(expiraStr ?? "0");
       if (vigente) {
-        await settingsRepo.set(SETTING_KEYS.ownerTelegramChatId, payload.channelUserId);
+        // Se AGREGA a los ya vinculados: cada persona del equipo vincula su
+        // propio chat con su propio código (ver listaDeDestinatarios).
+        const { listaDeDestinatarios } = await import("../tools/handoffHuman");
+        const vinculados = listaDeDestinatarios(await settingsRepo.get(SETTING_KEYS.ownerTelegramChatId));
+        await settingsRepo.set(
+          SETTING_KEYS.ownerTelegramChatId,
+          [...new Set([...vinculados, payload.channelUserId])].join(","),
+        );
         await settingsRepo.set(SETTING_KEYS.ownerTelegramClaimCode, "");
         await settingsRepo.set(SETTING_KEYS.ownerTelegramClaimExpiresAt, "");
         await pickAdapter("telegram").sendReply(

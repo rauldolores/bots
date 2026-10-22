@@ -212,47 +212,58 @@ interface HandoffNotice {
 }
 
 /**
+ * "a@x.com, b@x.com" → ["a@x.com", "b@x.com"]. Correos y chats de Telegram
+ * aceptan varios destinatarios separados por comas (o punto y coma, o
+ * espacios): al dueño casi nunca le basta avisarle a una sola persona.
+ */
+export function listaDeDestinatarios(raw: string | undefined | null): string[] {
+  return [...new Set((raw ?? "").split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean))];
+}
+
+/**
  * A dónde manda cada canal, y si tiene TODO lo que necesita para de verdad
  * enviar — una sola vez, la reusan handoffNotifyStatus() (solo lee) y
  * notifyOwner() (manda de verdad), para que las dos nunca se desincronicen
  * sobre qué cuenta como "configurado".
  *
- * `env` primero, `settings` como respaldo — el mismo criterio que ya usaba
- * twilioHandoffContentSid: un despliegue viejo con las variables de entorno
- * puestas a mano sigue funcionando igual, sin que el dueño tenga que volver
- * a capturar nada en el panel.
+ * Lo que el dueño puso en el panel de ESTE bot primero, y las variables de
+ * entorno solo como respaldo. Antes era al revés, y con varios bots en un
+ * despliegue eso significaba que OWNER_EMAIL (una variable de todo el
+ * despliegue) se llevaba los avisos de todos los bots, sin importar lo que
+ * cada uno configurara. Un despliegue viejo que solo tiene las variables
+ * sigue funcionando igual: sin nada en el panel, se usan ellas.
  */
 function resolveNotifyTargets(
   env: Env,
   settings: Record<string, string>,
 ): {
-  telegramChatId: string;
+  telegramChatIds: string[];
   telegramOk: boolean;
   waNumber: string;
   waContentSid: string;
   waOk: boolean;
-  ownerEmail: string;
+  ownerEmails: string[];
   emailOk: boolean;
 } {
   const get = (key: string) => settings[key]?.trim() || "";
 
-  const telegramChatId = env.OWNER_TELEGRAM_CHAT_ID || get(SETTING_KEYS.ownerTelegramChatId);
-  const telegramOk = Boolean(env.TELEGRAM_BOT_TOKEN && telegramChatId);
+  const telegramChatIds = listaDeDestinatarios(get(SETTING_KEYS.ownerTelegramChatId) || env.OWNER_TELEGRAM_CHAT_ID);
+  const telegramOk = Boolean(env.TELEGRAM_BOT_TOKEN && telegramChatIds.length > 0);
 
-  const waNumber = env.OWNER_WA_NUMBER || get(SETTING_KEYS.ownerWaNumber);
+  const waNumber = get(SETTING_KEYS.ownerWaNumber) || env.OWNER_WA_NUMBER || "";
   const waContentSid = env.TWILIO_HANDOFF_CONTENT_SID || get(SETTING_KEYS.twilioHandoffContentSid);
   const waOk = Boolean(waNumber && env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_WA_FROM && waContentSid);
 
-  const ownerEmail = env.OWNER_EMAIL || get(SETTING_KEYS.ownerEmail);
+  const ownerEmails = listaDeDestinatarios(get(SETTING_KEYS.ownerEmail) || env.OWNER_EMAIL);
   // Dos formas de poder mandar el correo: la vieja (RESEND_API_KEY suelto,
   // solo Resend, env-only) o la nueva — reusa lo que ya se configuró en
   // /admin/config → "Correo saliente" (Resend o Mailgun), así el dueño no
   // captura una segunda llave solo para esto.
   const emailViaLegacy = Boolean(env.RESEND_API_KEY);
   const emailViaOutboundSettings = Boolean(get(SETTING_KEYS.emailOutboundProvider) && get(SETTING_KEYS.emailOutboundApiKey) && get(SETTING_KEYS.emailFromAddress));
-  const emailOk = Boolean(ownerEmail && (emailViaLegacy || emailViaOutboundSettings));
+  const emailOk = Boolean(ownerEmails.length > 0 && (emailViaLegacy || emailViaOutboundSettings));
 
-  return { telegramChatId, telegramOk, waNumber, waContentSid, waOk, ownerEmail, emailOk };
+  return { telegramChatIds, telegramOk, waNumber, waContentSid, waOk, ownerEmails, emailOk };
 }
 
 /**
@@ -295,7 +306,10 @@ export async function notifyOwner(rawEnv: Env, notice: HandoffNotice, botIdOverr
     "email",
   );
   const ticketUrl = `${env.ADMIN_BASE_URL ?? env.DASHBOARD_BASE_URL}${notice.ruta ?? "/admin/tickets"}`;
-  const titulo = notice.titulo ?? "Nuevo ticket";
+  // Con varios bots en una organización, el aviso dice de cuál viene: dos
+  // bots pueden compartir el mismo bot de Telegram para avisar.
+  const nombreDelBot = (await new BotsRepo(new Db(env.DB)).getById(notifyBotId).catch(() => null))?.name;
+  const titulo = `${nombreDelBot ? `${nombreDelBot} · ` : ""}${notice.titulo ?? "Nuevo ticket"}`;
 
   const settings = await new SettingsRepo(new Db(env.DB), notifyBotId).all().catch(() => ({}) as Record<string, string>);
   const t = resolveNotifyTargets(env, settings);
@@ -313,17 +327,20 @@ export async function notifyOwner(rawEnv: Env, notice: HandoffNotice, botIdOverr
 
   // --- Telegram DM (default) ------------------------------------------------
   if (t.telegramOk) {
-    try {
-      await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: t.telegramChatId,
-          text: `🚨 ${titulo} [${notice.reason}]\n${notice.summary}\n\nVer: ${ticketUrl}`,
-        }),
-      });
-    } catch (e) {
-      console.error("[notifyOwner] telegram failed:", e);
+    // A cada persona por separado: si un chat falla, los demás igual se enteran.
+    for (const chatId of t.telegramChatIds) {
+      try {
+        await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: `🚨 ${titulo} [${notice.reason}]\n${notice.summary}\n\nVer: ${ticketUrl}`,
+          }),
+        });
+      } catch (e) {
+        console.error("[notifyOwner] telegram failed:", e);
+      }
     }
   }
 
@@ -367,24 +384,41 @@ export async function notifyOwner(rawEnv: Env, notice: HandoffNotice, botIdOverr
   if (t.emailOk) {
     const subject = `[Bot] ${titulo} [${notice.reason}]: ${notice.summary.slice(0, 60)}`;
     const text = `${notice.summary}\n\nVer: ${ticketUrl}`;
-    try {
-      const { sendOutboundEmail } = await import("../channels/email/outbound");
-      const viaOutbound = await sendOutboundEmail(env, t.ownerEmail, subject, text);
-      if (!viaOutbound.ok && env.RESEND_API_KEY) {
-        // El correo saliente no quedó configurado (o falló) pero SÍ hay el
-        // RESEND_API_KEY viejo del entorno — se intenta por ahí antes de
-        // darlo por perdido, igual que se hacía antes de esta función tener
-        // un camino de correo propio.
-        const bot = await new BotsRepo(new Db(env.DB)).getById(notifyBotId);
-        await new Resend(env.RESEND_API_KEY).emails.send({
-          from: `${bot?.business_name ?? env.BUSINESS_NAME} Bot <onboarding@resend.dev>`,
-          to: t.ownerEmail,
-          subject,
-          html: `<p>${notice.summary}</p><p><a href="${ticketUrl}">Ver ticket</a></p>`,
-        });
-      }
-    } catch (e) {
-      console.error("[notifyOwner] email failed:", e);
+    // Uno por persona: así nadie ve los correos de los demás, y un rebote no
+    // se lleva el aviso de todos.
+    for (const ownerEmail of t.ownerEmails) {
+      await enviarAvisoPorCorreo(env, notifyBotId, ownerEmail, subject, text, notice.summary, ticketUrl);
     }
+  }
+}
+
+/** Un correo de aviso a UNA persona. Nunca lanza (ver notifyOwner). */
+async function enviarAvisoPorCorreo(
+  env: Env,
+  notifyBotId: string,
+  ownerEmail: string,
+  subject: string,
+  text: string,
+  summary: string,
+  ticketUrl: string,
+): Promise<void> {
+  try {
+    const { sendOutboundEmail } = await import("../channels/email/outbound");
+    const viaOutbound = await sendOutboundEmail(env, ownerEmail, subject, text);
+    if (!viaOutbound.ok && env.RESEND_API_KEY) {
+      // El correo saliente no quedó configurado (o falló) pero SÍ hay el
+      // RESEND_API_KEY viejo del entorno — se intenta por ahí antes de
+      // darlo por perdido, igual que se hacía antes de esta función tener
+      // un camino de correo propio.
+      const bot = await new BotsRepo(new Db(env.DB)).getById(notifyBotId);
+      await new Resend(env.RESEND_API_KEY).emails.send({
+        from: `${bot?.business_name ?? env.BUSINESS_NAME} Bot <onboarding@resend.dev>`,
+        to: ownerEmail,
+        subject,
+        html: `<p>${summary}</p><p><a href="${ticketUrl}">Ver ticket</a></p>`,
+      });
+    }
+  } catch (e) {
+    console.error("[notifyOwner] email failed:", e);
   }
 }
