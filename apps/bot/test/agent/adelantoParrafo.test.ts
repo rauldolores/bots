@@ -145,3 +145,27 @@ describe("reintentos: no repetirle nada al cliente", () => {
     expect(r.text).not.toContain(P1);
   });
 });
+
+// Bug real (widget de AduaniaX, 2026-10-23): "Un momento, por favor.Parece que…".
+// El aviso previo a una herramienta y lo que el modelo escribe después se
+// guardaban pegados en el historial, que es lo que el widget vuelve a pintar.
+describe("aviso antes de una herramienta", () => {
+  it("el historial separa el aviso del texto de después", async () => {
+    streamTextMock.mockImplementation(() => ({
+      ...stream(""),
+      fullStream: (async function* () {
+        yield { type: "text-delta", text: "Déjame revisar, un momento por favor." };
+        yield { type: "tool-call", toolName: "searchKb", toolCallId: "t1", input: {} };
+        yield { type: "text-delta", text: "Parece que no encontré nada sobre eso." };
+      })(),
+    }));
+    await correr();
+    expect(adelantos).toEqual(["Déjame revisar, un momento por favor."]);
+    const guardado = await db.first<{ content: string }>(
+      "SELECT content FROM messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY created_at DESC LIMIT 1",
+      [convId],
+    );
+    expect(guardado!.content).not.toContain("favor.Parece");
+    expect(guardado!.content).toContain("por favor.\n\nParece");
+  });
+});

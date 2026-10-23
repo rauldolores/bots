@@ -451,6 +451,9 @@ export async function runAgentTurnCore(input: AgentTurnInput): Promise<AgentTurn
         if (completo && !/\s$/.test(completo)) completo += "\n\n";
         inicioSegmento = porEnviar.length;
       } else if (part?.type === "tool-call" && onInterimMessage) {
+        // Lo que se guarda en el historial (y lo que el widget vuelve a
+        // pintar) es `completo`: sin separador quedaba "…por favor.Parece…".
+        if (completo && !/\s$/.test(completo)) completo += "\n\n";
         const aviso = porEnviar.trim();
         if (aviso && aviso === ultimoAvisoEnviado) {
           // Reintento tras un fallo: el modelo volvió a escribir el mismo
