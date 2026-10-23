@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { createTestDb, TEST_BOT_ID } from "../helpers/pgSetup";
 import { adminApp } from "../../src/admin/routes";
 import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
+import { BotChannelsRepo } from "../../src/db/botChannels";
 import type { Env } from "../../src/env";
 
 const PASSWORD = "secret123";
@@ -105,5 +106,28 @@ describe("POST /admin/config — correo saliente", () => {
     expect(html).toContain("soporte@minegocio.com");
     expect(html).not.toContain("re_super_secreta_1234");
     expect(html).toContain("termina en …1234"); // igual que BYO-LLM/Voz: solo los últimos 4
+  });
+});
+
+// El campo existía, pero se llamaba "Dirección a la que reenvías" y vivía
+// dentro de "Correo saliente": el dueño no lo encontraba al buscar cómo
+// separar hola@aduaniax.com de hola@kontrolia.io en la misma cuenta.
+describe("qué correos atiende el bot", () => {
+  it("la pestaña lo dice con todas sus letras, en su propio apartado", async () => {
+    const html = await (await adminApp.request("/config", { headers: AUTH }, env)).text();
+    expect(html).toContain("Qué correos atiende este bot");
+    expect(html).toContain("Dirección que atiende este bot");
+    expect(html).not.toContain("Dirección a la que reenvías");
+  });
+
+  it("Conexiones → Correo entrante muestra la dirección, o avisa que atiende todo", async () => {
+    await new BotChannelsRepo(db as any).upsert({ botId: TEST_BOT_ID, channel: "email", config: { inboundProvider: "resend" } });
+    let html = await (await adminApp.request("/conexiones", { headers: AUTH }, env)).text();
+    expect(html).toContain("Todos los que lleguen a tu cuenta del proveedor");
+
+    await new SettingsRepo(db as any, TEST_BOT_ID).set(SETTING_KEYS.emailInboundAddress, "hola@aduaniax.com");
+    html = await (await adminApp.request("/conexiones", { headers: AUTH }, env)).text();
+    expect(html).toContain("Solo los que llegan a");
+    expect(html).toContain("hola@aduaniax.com");
   });
 });

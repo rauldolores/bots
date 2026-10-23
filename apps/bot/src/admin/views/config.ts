@@ -412,7 +412,7 @@ function renderCorreoSalienteSection(settings: Record<string, string>): string {
       </div>
       <div style="display:flex;align-items:flex-start;gap:9px;background:var(--accent-soft);border:1px solid rgba(245,197,24,.35);border-radius:var(--radius-sm);padding:13px 15px">
         <span style="color:var(--accent-2);flex:none;line-height:1">◆</span>
-        <p class="text-[12px]" style="color:var(--muted);margin:0">Con qué proveedor y desde qué dirección responde tu bot los correos que le lleguen. Es independiente de quién los RECIBE (eso se conecta en <a href="/admin/conexiones" style="color:var(--accent-2)">Conexiones → Correo entrante</a>) — puedes recibir por un proveedor y responder por otro.</p>
+        <p class="text-[12px]" style="color:var(--muted);margin:0">Desde qué dirección y con qué proveedor contesta tu bot, y abajo, qué correos le tocan. Conectar la recepción es aparte, en <a href="/admin/conexiones" style="color:var(--accent-2)">Conexiones → Correo entrante</a> — puedes recibir por un proveedor y responder por otro.</p>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
         <label class="font-display font-semibold text-[12.5px] text-cream">Proveedor de envío</label>
@@ -438,14 +438,18 @@ function renderCorreoSalienteSection(settings: Record<string, string>): string {
           placeholder: "soporte@tunegocio.com",
         })}
       </div>
+      <div style="border-top:1px solid var(--line);padding-top:14px;display:flex;flex-direction:column;gap:2px">
+        <h4 class="font-display font-semibold text-[12.5px] text-cream" style="margin:0">Qué correos atiende este bot</h4>
+        <p class="text-dim text-[11px]" style="margin:0">Tu proveedor le pasa al bot todo lo que llega a tu cuenta, de todas tus direcciones. Aquí decides con cuáles se queda.</p>
+      </div>
       <div style="display:flex;flex-direction:column;gap:6px">
         ${renderTextField({
           name: SETTING_KEYS.emailInboundAddress,
-          label: "Dirección a la que reenvías (opcional)",
+          label: "Dirección que atiende este bot",
           help:
-            "Solo hace falta si tienes MÁS DE UN bot recibiendo correo en la misma cuenta de tu proveedor: sirve para que cada uno se quede con los suyos. Con un solo bot, déjala vacía.",
+            "El bot solo contesta los correos que lleguen a esta dirección (ej. hola@tunegocio.com, o la de tu proveedor a la que reenvías tu buzón); los de tus otras direcciones los ignora. Vacía = contesta todo lo que llegue a la cuenta: déjala así solo si es tu único bot con correo.",
           value: settings[SETTING_KEYS.emailInboundAddress] ?? "",
-          placeholder: "asesor@tucuenta.resend.app",
+          placeholder: "hola@tunegocio.com",
         })}
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">

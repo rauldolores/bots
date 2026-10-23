@@ -371,7 +371,7 @@ export const GUIA: Seccion[] = [
             "**Proveedor de envío**: Resend o Mailgun.",
             "**Nombre del remitente** y **Correo del remitente**: lo que verá el cliente («Clínica Sol <hola@clinicasol.com>»).",
             "**API key** del proveedor y, para Mailgun, el **Dominio de envío**.",
-            "**Dirección a la que reenvías**: solo si recibes correos por el canal de Correo entrante.",
+            "**Dirección que atiende este bot**: el bot solo contesta los correos que lleguen a esa dirección y ignora los de tus otras direcciones. Vacía = contesta todo lo que llegue a tu cuenta del proveedor (solo si es tu único bot con correo).",
           ] },
         ],
       },

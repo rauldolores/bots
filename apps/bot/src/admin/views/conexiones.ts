@@ -442,9 +442,28 @@ async function renderEmailCard(env: Env, db: Db, botId: string): Promise<string>
       <p class="text-dim text-[12px]" style="margin:0">Correos que te escriban tus clientes entran al mismo flujo que cualquier canal — leads, tickets, CRM. Elige un proveedor (solo uno activo a la vez; conectar el otro lo reemplaza). El correo de SALIDA se configura aparte, en <a href="/admin/config" class="text-accent" style="text-decoration:none">/admin/config → Correo saliente</a>.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">${connectButtons}</div>
       ${ok ? copyRow("Webhook activo", emailWebhookUrlFor(env, activeProvider!, botId)) : ""}
+      ${ok ? await renderDireccionQueAtiende(db, botId) : ""}
       ${ok ? await renderCorreosFiltrados(db, botId) : ""}
       ${disconnect}
     </div>`;
+}
+
+/**
+ * Qué correos se queda este bot. El webhook del proveedor es de CUENTA: sin
+ * dirección, el bot contesta lo de todas las direcciones. El dato vive en
+ * /admin/config, pero es aquí donde el dueño lo busca — así que se muestra.
+ */
+async function renderDireccionQueAtiende(db: Db, botId: string): Promise<string> {
+  const direccion = ((await new SettingsRepo(db, botId).get(SETTING_KEYS.emailInboundAddress).catch(() => "")) ?? "").trim();
+  const cambiar = `<a href="/admin/config?section=correo" class="text-accent" style="text-decoration:none">${direccion ? "cambiar" : "elegir una dirección"}</a>`;
+  return `<div style="display:flex;flex-direction:column;gap:4px">
+    <span class="text-[10.5px]" style="color:var(--dim)">Correos que atiende</span>
+    ${
+      direccion
+        ? `<span class="text-[11.5px] text-cream">Solo los que llegan a <span class="font-mono">${esc(direccion)}</span> — ${cambiar}</span>`
+        : `<span class="text-[11.5px]" style="color:var(--accent-2)">Todos los que lleguen a tu cuenta del proveedor, de cualquier dirección. Si tienes más de un buzón o más de un bot con correo, ${cambiar}.</span>`
+    }
+  </div>`;
 }
 
 const CATEGORIA_FILTRADA: Record<string, string> = {
