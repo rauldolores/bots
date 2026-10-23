@@ -68,6 +68,40 @@ interface EsquemaTool {
   inputSchema?: unknown;
 }
 
+/** Llaves cuyo valor es un MAPA de nombre → esquema: sus claves son nombres de campo, no palabras de JSON Schema. */
+const MAPAS_DE_ESQUEMAS = new Set(["properties", "definitions", "$defs"]);
+
+/**
+ * El esquema de una tool MCP sin `pattern` ni `patternProperties`.
+ *
+ * Bug real (bot de AduaniaX, 2026-10-23): al conectar el MCP de Vinqulia, su
+ * tool `enviar_cotizacion` traía el patrón de correo que genera zod — con
+ * lookaheads `(?!…)`. OpenAI, en modo estricto, no lo compila, y en vez de un
+ * error devuelve una respuesta VACÍA (incomplete, 0 tokens). Una sola tool
+ * así tumba TODOS los turnos del bot: los cuatro reintentos fallaban igual y
+ * el cliente recibía "Algo falló de mi lado". El servidor MCP valida sus
+ * propios argumentos de todos modos; el patrón no le aporta nada al modelo.
+ */
+export function esquemaSinPatrones(nodo: unknown, esMapa = false): unknown {
+  if (Array.isArray(nodo)) return nodo.map((n) => esquemaSinPatrones(n));
+  if (!nodo || typeof nodo !== "object") return nodo;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(nodo)) {
+    if (esMapa) {
+      out[k] = esquemaSinPatrones(v);
+      continue;
+    }
+    if (k === "patternProperties" || (k === "pattern" && typeof v === "string")) continue;
+    out[k] = esquemaSinPatrones(v, MAPAS_DE_ESQUEMAS.has(k));
+  }
+  return out;
+}
+
+/** El esquema crudo de una tool, venga del SDK de MCP o del catálogo guardado. */
+function esquemaCrudo(t: any): unknown {
+  return t?.inputSchema?.jsonSchema ?? t?.inputSchema ?? t?.parameters;
+}
+
 /**
  * Una fecha-hora local SIN zona, tal cual la escribe un modelo:
  * "2026-09-28T10:00" o "2026-09-28T10:00:00". Lo que NO trae es el desfase,
@@ -152,7 +186,7 @@ function guardarCache(
   const esquemas: EsquemaTool[] = Object.entries(tools).map(([name, t]) => ({
     name,
     description: t?.description,
-    inputSchema: t?.inputSchema?.jsonSchema ?? t?.inputSchema ?? t?.parameters,
+    inputSchema: esquemaCrudo(t),
   }));
   void repo
     .mergeConfig(botId, c.provider, {
@@ -207,7 +241,7 @@ function toolsDesdeCache(
   for (const e of esquemas) {
     out[e.name] = tool({
       description: e.description ?? "",
-      inputSchema: jsonSchema((e.inputSchema ?? { type: "object", properties: {} }) as any),
+      inputSchema: jsonSchema(esquemaSinPatrones(e.inputSchema ?? { type: "object", properties: {} }) as any),
       execute: async (args: unknown) => {
         const vivas = (await conectarYListarTools(env, db, c)) as Record<string, any>;
         args = conDesfaseHorario(args, await desfaseDelNegocio(db, botId));
@@ -325,8 +359,11 @@ export async function loadMcpTools(env: Env, db: Db, botId: string): Promise<Rec
           limpiarFallo: Boolean(c.config[ERR_AT_KEY]),
         });
         const prefixed: Record<string, unknown> = {};
-        for (const [name, t] of Object.entries(tools)) {
-          prefixed[mcpToolName(prefix, name)] = t;
+        for (const [name, t] of Object.entries(tools as Record<string, any>)) {
+          const crudo = esquemaCrudo(t);
+          prefixed[mcpToolName(prefix, name)] = crudo
+            ? { ...t, inputSchema: jsonSchema(esquemaSinPatrones(crudo) as any) }
+            : t;
         }
         return prefixed;
       } catch (e) {
