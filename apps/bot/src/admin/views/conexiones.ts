@@ -46,6 +46,8 @@ import {
 } from "../../connectors/registry";
 import { layout } from "./layout";
 import { WIDGET_DEFAULTS, widgetConfigFromForm } from "../../widget/config";
+import { almacenamientoDisponible, firmarSubida, tamanoReal, borrarArchivo, urlPublicaDe } from "../../media/storage";
+import { TIPOS_DE_IMAGEN, pesoLegible } from "../../media/limites";
 
 function esc(s: string): string {
   return s.replace(
@@ -952,6 +954,72 @@ export async function saveWidgetConfig(env: Env, botId: string, form: FormData):
   const row = await repo.getByBotAndChannel(botId, "widget");
   if (!row) return;
   await repo.updateConfig(botId, "widget", { ...row.config, ...widgetConfigFromForm(form, row.config) });
+}
+
+// ── Logo del widget: se sube a Storage, no se pega una URL ────────────────
+//
+// Una URL externa se rompe sola (el dueño cambia de hosting, borra la imagen,
+// o la pega de un sitio que bloquea hotlinking) y el widget queda con un
+// ícono roto en SU página. Subido aquí, el archivo es nuestro. Mismo camino
+// en tres pasos que la biblioteca de medios (firmar → el navegador sube
+// directo → registrar), por el tope de 4.5 MB del cuerpo en Vercel.
+
+/**
+ * Tope del logo. Se muestra a 40 px en el encabezado del chat: 1 MB sobra, y
+ * el archivo lo descarga CADA visitante del sitio del cliente al abrir el chat.
+ */
+export const MAX_LOGO_BYTES = 1024 * 1024;
+
+type RespuestaLogo = { ok: true; url?: string; path?: string } | { ok: false; error: string };
+
+export async function firmarLogoDelWidget(
+  env: Env,
+  botId: string,
+  a: { nombre: string; mime: string; bytes: number },
+): Promise<RespuestaLogo> {
+  if (!almacenamientoDisponible(env)) {
+    return { ok: false, error: "Falta configurar el almacenamiento (SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY)." };
+  }
+  const row = await new BotChannelsRepo(new Db(env.DB)).getByBotAndChannel(botId, "widget");
+  if (!row) return { ok: false, error: "Primero conecta el widget." };
+  if (!(TIPOS_DE_IMAGEN as readonly string[]).includes(a.mime)) {
+    return { ok: false, error: "El logo tiene que ser una imagen PNG, JPG, WebP o GIF." };
+  }
+  if (!(a.bytes > 0) || a.bytes > MAX_LOGO_BYTES) {
+    return { ok: false, error: `La imagen pesa ${pesoLegible(a.bytes || 0)} y el máximo son ${pesoLegible(MAX_LOGO_BYTES)}.` };
+  }
+  const firma = await firmarSubida(env, { botId, nombre: a.nombre || "logo" });
+  return firma.ok ? { ok: true, url: firma.url, path: firma.path } : firma;
+}
+
+export async function registrarLogoDelWidget(env: Env, botId: string, path: string): Promise<RespuestaLogo> {
+  if (!path.startsWith(`${botId}/`)) return { ok: false, error: "Petición inválida." };
+  const repo = new BotChannelsRepo(new Db(env.DB));
+  const row = await repo.getByBotAndChannel(botId, "widget");
+  if (!row) return { ok: false, error: "Primero conecta el widget." };
+
+  // El peso lo dice Storage, no el navegador.
+  const bytes = await tamanoReal(env, path);
+  if (bytes === null) return { ok: false, error: "La imagen no llegó completa. Vuelve a intentarlo." };
+  if (bytes > MAX_LOGO_BYTES) {
+    await borrarArchivo(env, path);
+    return { ok: false, error: `La imagen pesa ${pesoLegible(bytes)} y el máximo son ${pesoLegible(MAX_LOGO_BYTES)}.` };
+  }
+
+  const url = urlPublicaDe(env, path)!;
+  await repo.updateConfig(botId, "widget", { ...row.config, avatarUrl: url, avatarPath: path });
+  // Reemplazo: el logo anterior ya no lo usa nadie.
+  if (row.config.avatarPath && row.config.avatarPath !== path) await borrarArchivo(env, row.config.avatarPath);
+  return { ok: true, url };
+}
+
+export async function quitarLogoDelWidget(env: Env, botId: string): Promise<void> {
+  const repo = new BotChannelsRepo(new Db(env.DB));
+  const row = await repo.getByBotAndChannel(botId, "widget");
+  if (!row) return;
+  const { avatarUrl: _u, avatarPath, ...resto } = row.config;
+  await repo.updateConfig(botId, "widget", resto);
+  if (avatarPath) await borrarArchivo(env, avatarPath);
 }
 
 // ── Conectores salientes: CRM / Tickets / Calendario / MCP ────────────────
@@ -2119,8 +2187,87 @@ function widgetText(name: string, value: string | undefined, placeholder: string
   return `<input type="${type}" name="${name}" value="${esc(value ?? "")}" placeholder="${esc(placeholder)}" style="${WIDGET_FIELD_STYLE}">`;
 }
 
+/**
+ * El logo se sube como imagen (ver firmarLogoDelWidget). Va fuera del POST del
+ * formulario: subir y quitar actualizan la vista previa al momento sin
+ * recargar, así no se pierde lo que el dueño ya editó en los demás campos.
+ */
+function widgetLogoField(avatarUrl: string | undefined): string {
+  const url = avatarUrl ?? "";
+  const boton = "border:1px solid var(--line);color:var(--cream);background:var(--bg);padding:6px 10px;font-size:11px;cursor:pointer;font-family:inherit";
+  return `<div class="text-[10.5px]" style="${WIDGET_LABEL_STYLE}" data-widget-logo>
+    Logo / avatar
+    <div style="display:flex;align-items:center;gap:8px">
+      <img data-logo-preview src="${esc(url)}" alt="Logo del widget" style="width:32px;height:32px;object-fit:cover;border-radius:50%;border:1px solid var(--line);${url ? "" : "display:none"}">
+      <label style="${boton}">${url ? "Cambiar imagen" : "Subir imagen"}<input type="file" data-logo-file accept="${TIPOS_DE_IMAGEN.join(",")}" style="display:none"></label>
+      <button type="button" data-logo-quitar style="${boton};${url ? "" : "display:none"}">Quitar</button>
+    </div>
+    <span data-logo-estado style="color:var(--dim)">PNG, JPG, WebP o GIF · hasta ${pesoLegible(MAX_LOGO_BYTES)} · se ve mejor cuadrada</span>
+  </div>`;
+}
+
+/** El JS del logo: delegado en document y con guardia, porque la tarjeta se re-renderiza por htmx. */
+const WIDGET_LOGO_SCRIPT = `<script>
+(function () {
+  if (window.__nodiaWidgetLogo) return;
+  window.__nodiaWidgetLogo = true;
+  var base = location.origin + "/admin/conexiones/widget/logo/";
+  function caja(el) { return el.closest("[data-widget-logo]"); }
+  function pintar(c, url) {
+    var img = c.querySelector("[data-logo-preview]");
+    img.src = url || ""; img.style.display = url ? "" : "none";
+    c.querySelector("[data-logo-quitar]").style.display = url ? "" : "none";
+    c.querySelector("[data-logo-file]").parentNode.firstChild.textContent = url ? "Cambiar imagen" : "Subir imagen";
+  }
+  document.addEventListener("change", async function (e) {
+    var input = e.target;
+    if (!input.matches || !input.matches("[data-logo-file]")) return;
+    var c = caja(input), estado = c.querySelector("[data-logo-estado]");
+    var file = input.files[0];
+    input.value = "";
+    if (!file) return;
+    try {
+      estado.textContent = "Preparando…";
+      var r1 = await fetch(base + "firma", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nombre: file.name, mime: file.type, bytes: file.size }),
+      });
+      var j1 = await r1.json();
+      if (!j1.ok) { estado.textContent = j1.error; return; }
+      estado.textContent = "Subiendo…";
+      var r2 = await fetch(j1.url, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+      if (!r2.ok) { estado.textContent = "No se pudo subir la imagen."; return; }
+      estado.textContent = "Guardando…";
+      var r3 = await fetch(base + "registrar", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: j1.path }),
+      });
+      var j3 = await r3.json();
+      if (!j3.ok) { estado.textContent = j3.error; return; }
+      pintar(c, j3.url);
+      estado.textContent = "Listo — el widget ya muestra este logo.";
+    } catch (err) {
+      estado.textContent = "Algo falló al subir. Vuelve a intentarlo.";
+    }
+  });
+  document.addEventListener("click", async function (e) {
+    var btn = e.target.closest && e.target.closest("[data-logo-quitar]");
+    if (!btn) return;
+    var c = caja(btn), estado = c.querySelector("[data-logo-estado]");
+    try {
+      var r = await fetch(base + "quitar", { method: "POST" });
+      var j = await r.json();
+      if (!j.ok) { estado.textContent = j.error || "No se pudo quitar."; return; }
+      pintar(c, "");
+      estado.textContent = "Logo quitado.";
+    } catch (err) {
+      estado.textContent = "Algo falló. Vuelve a intentarlo.";
+    }
+  });
+})();
+</script>`;
+
 /** Personalización del widget — cada campo es opcional; vacío = el aspecto original. Definición y validación en widget/config.ts. */
-function renderWidgetConfigForm(row: BotChannel): string {
+function renderWidgetConfigForm(row: BotChannel, conAlmacenamiento: boolean): string {
   const c = row.config;
   const d = WIDGET_DEFAULTS;
   const grid = `display:grid;grid-template-columns:1fr 1fr;gap:8px 10px`;
@@ -2131,7 +2278,11 @@ function renderWidgetConfigForm(row: BotChannel): string {
     <div style="${grid}">
       ${field("Título del panel", widgetText("title", c.title, "Nombre de tu negocio"))}
       ${field("Subtítulo", widgetText("subtitle", c.subtitle, "Respondemos en minutos"))}
-      ${field("Logo / avatar (URL https)", widgetText("avatar_url", c.avatarUrl, "https://…/logo.png", "url"))}
+      ${
+        conAlmacenamiento
+          ? widgetLogoField(c.avatarUrl)
+          : field("Logo / avatar (URL https)", widgetText("avatar_url", c.avatarUrl, "https://…/logo.png", "url"))
+      }
       ${field("Texto del campo de escritura", widgetText("placeholder", c.placeholder, d.placeholder))}
       ${field(
         "Color principal",
@@ -2196,7 +2347,7 @@ function renderWidgetConfigForm(row: BotChannel): string {
       <label class="text-[10.5px]" style="color:var(--dim);display:flex;align-items:center;gap:6px"><input type="checkbox" name="hide_on_mobile" ${c.hideOnMobile ? "checked" : ""}> Ocultar en celulares</label>
     </div>
     <button type="submit" class="text-[11px]" style="align-self:flex-start;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:5px 12px;cursor:pointer;font-weight:600">Guardar</button>
-  </form>`;
+  </form>${conAlmacenamiento ? WIDGET_LOGO_SCRIPT : ""}`;
 }
 
 /** Cómo abrir el chat desde los botones del propio sitio (window.nodia) — para el desarrollador del cliente. */
@@ -2239,7 +2390,7 @@ async function renderConnectableCard(env: Env, db: Db, botId: string, meta: Chan
     ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>`
     : `<span style="font-size:10px;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);padding:3px 10px;font-weight:600">○ SIN CONECTAR</span>`;
 
-  const widgetConfigForm = ok && meta.id === "widget" && row ? renderWidgetConfigForm(row) : "";
+  const widgetConfigForm = ok && meta.id === "widget" && row ? renderWidgetConfigForm(row, almacenamientoDisponible(env)) : "";
   const widgetApiDocs = ok && meta.id === "widget" && row ? renderWidgetApiDocs() : "";
 
   // F7 fase 8: desde aquí se descubre el flujo de "conserva tu número

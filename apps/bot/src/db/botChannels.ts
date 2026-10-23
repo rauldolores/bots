@@ -24,6 +24,7 @@ export interface BotChannelConfig {
   title?: string;
   subtitle?: string;
   avatarUrl?: string;
+  avatarPath?: string;
   placeholder?: string;
   launcherLabel?: string;
   launcherIcon?: "chat" | "message" | "help" | "sparkles";

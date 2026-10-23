@@ -34,6 +34,12 @@ export interface WidgetConfig {
   subtitle?: string;
   /** URL de una imagen para el encabezado (logo/avatar). */
   avatarUrl?: string;
+  /**
+   * Ruta en Supabase Storage cuando el logo lo subió el dueño desde el panel
+   * (avatarUrl es entonces su URL pública). Se guarda para poder borrar el
+   * archivo al reemplazarlo o quitarlo; vacío = logo por URL externa o ninguno.
+   */
+  avatarPath?: string;
   placeholder?: string;
   /** Texto junto a la burbuja ("¿Dudas? Escríbenos") — vacío = solo el ícono. */
   launcherLabel?: string;
@@ -151,6 +157,18 @@ export function toPublicWidgetConfig(stored: BotChannelConfig, businessName: str
 }
 
 /**
+ * El logo en el formulario. Con almacenamiento se sube aparte (rutas
+ * /conexiones/widget/logo) y el formulario no trae el campo: guardar lo demás
+ * no debe borrarlo. Sin almacenamiento se escribe una URL, y si cambia, la
+ * ruta del archivo subido antes deja de describir el logo.
+ */
+function logoDelFormulario(form: FormData, previous: BotChannelConfig): Pick<WidgetConfig, "avatarUrl" | "avatarPath"> {
+  if (!form.has("avatar_url")) return { avatarUrl: previous.avatarUrl, avatarPath: previous.avatarPath };
+  const avatarUrl = httpUrl(form.get("avatar_url"));
+  return { avatarUrl, avatarPath: avatarUrl === previous.avatarUrl ? previous.avatarPath : undefined };
+}
+
+/**
  * Formulario de /admin/conexiones → campos del widget a guardar. Devuelve
  * solo claves de widget (el llamador las mezcla sobre el config existente
  * para no pisar nada de otros canales). Un checkbox HTML ausente = false.
@@ -164,7 +182,7 @@ export function widgetConfigFromForm(form: FormData, previous: BotChannelConfig)
     greeting: text(get("greeting"), MAX_GREETING),
     title: text(get("title"), MAX_TEXT),
     subtitle: text(get("subtitle"), MAX_TEXT),
-    avatarUrl: httpUrl(get("avatar_url")),
+    ...logoDelFormulario(form, previous),
     placeholder: text(get("placeholder"), MAX_TEXT),
     launcherLabel: text(get("launcher_label"), 60),
     launcherIcon: oneOf(get("launcher_icon"), WIDGET_ICONS, WIDGET_DEFAULTS.launcherIcon),

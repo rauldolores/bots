@@ -66,3 +66,29 @@ describe("widgetConfigFromForm", () => {
     expect(out.openDelaySec).toBe(7);
   });
 });
+
+describe("widgetConfigFromForm — el logo", () => {
+  const subido = { avatarUrl: "https://p.supabase.co/storage/v1/object/public/medios/b/u/logo.png", avatarPath: "b/u/logo.png" };
+  const form = (campos: Record<string, string>) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(campos)) f.append(k, v);
+    return f;
+  };
+
+  it("sin el campo (se subió aparte) conserva el logo y su ruta", () => {
+    const out = widgetConfigFromForm(form({ title: "x" }), subido);
+    expect(out.avatarUrl).toBe(subido.avatarUrl);
+    expect(out.avatarPath).toBe(subido.avatarPath);
+  });
+
+  it("con el campo de URL y otra dirección, la ruta del archivo subido ya no describe el logo", () => {
+    const out = widgetConfigFromForm(form({ avatar_url: "https://acme.test/otro.png" }), subido);
+    expect(out.avatarUrl).toBe("https://acme.test/otro.png");
+    expect(out.avatarPath).toBeUndefined();
+  });
+
+  it("con la misma URL, la ruta se queda", () => {
+    const out = widgetConfigFromForm(form({ avatar_url: subido.avatarUrl }), subido);
+    expect(out.avatarPath).toBe(subido.avatarPath);
+  });
+});

@@ -132,6 +132,9 @@ import {
   reconnectMcp,
   updateConnectorConfig,
   saveWidgetConfig,
+  firmarLogoDelWidget,
+  registrarLogoDelWidget,
+  quitarLogoDelWidget,
   renderPipelineStageModal,
   renderTaskTypeModal,
   saveTaskType,
@@ -2243,6 +2246,30 @@ adminApp.post("/conexiones/:channel/disconnect", async (c) => {
 adminApp.post("/conexiones/widget/config", async (c) => {
   await saveWidgetConfig(c.env, c.get("botId"), await c.req.formData());
   return c.redirect("/admin/conexiones?ok=1", 302);
+});
+
+// Logo del widget: el navegador lo sube directo a Storage (firma → PUT →
+// registrar), igual que la biblioteca de medios. Ver firmarLogoDelWidget.
+adminApp.post("/conexiones/widget/logo/firma", async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { nombre?: string; mime?: string; bytes?: number } | null;
+  if (!body) return c.json({ ok: false, error: "Petición inválida." }, 400);
+  const r = await firmarLogoDelWidget(c.env, c.get("botId"), {
+    nombre: String(body.nombre ?? "logo"),
+    mime: String(body.mime ?? ""),
+    bytes: Number(body.bytes ?? 0),
+  });
+  return c.json(r, r.ok ? 200 : 400);
+});
+
+adminApp.post("/conexiones/widget/logo/registrar", async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { path?: string } | null;
+  const r = await registrarLogoDelWidget(c.env, c.get("botId"), String(body?.path ?? ""));
+  return c.json(r, r.ok ? 200 : 400);
+});
+
+adminApp.post("/conexiones/widget/logo/quitar", async (c) => {
+  await quitarLogoDelWidget(c.env, c.get("botId"));
+  return c.json({ ok: true });
 });
 
 // Conectores salientes (CRM/Tickets/Calendario/MCP) — mismo diálogo guiado,
