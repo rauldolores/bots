@@ -16,6 +16,7 @@ import { ctxOpcional } from "../hono-utils";
 import { resolveWidgetAuth } from "./auth";
 import { WIDGET_SCRIPT_JS } from "./script";
 import { toPublicWidgetConfig } from "./config";
+import { paginaSegura } from "../agent/canal";
 
 export const WIDGET_NEW_CONV_HOURLY_CAP = 30;
 const MAX_TEXT_LEN = 4000;
@@ -52,7 +53,7 @@ widgetApp.get("/config", async (c) => {
 });
 
 widgetApp.post("/message", async (c) => {
-  let body: { botId?: string; key?: string; sessionId?: string; text?: string; displayName?: string };
+  let body: { botId?: string; key?: string; sessionId?: string; text?: string; displayName?: string; page?: string };
   try {
     body = await c.req.json();
   } catch {
@@ -88,7 +89,7 @@ widgetApp.post("/message", async (c) => {
 
   const r = await ingestMessage(
     c.env,
-    { channel: "widget", channelUserId: sessionId, displayName: body.displayName, text },
+    { channel: "widget", channelUserId: sessionId, displayName: body.displayName, text, widgetPage: paginaSegura(body.page) },
     botId,
   );
   if (r.scheduledInMs !== null) {

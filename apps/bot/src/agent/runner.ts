@@ -64,6 +64,8 @@ export interface AgentIncomingPayload {
   esRespuestaDeBoton?: boolean;
   /** Solo correo: el hilo al que pertenece, para poder responder dentro de él. */
   emailThread?: EmailThread;
+  /** Solo widget: la página (origen + ruta) desde la que escribió — ver agent/canal.ts. */
+  widgetPage?: string;
 }
 
 export interface IngestResult {
@@ -127,6 +129,22 @@ export async function ingestMessage(
     await convs.mergeMetadata(conv.id, { emailThread: payload.emailThread }).catch((e) => {
       console.warn("[email] no se pudo guardar el hilo de la conversación:", e);
     });
+  }
+
+  // La página del sitio desde la que escribe por el widget: se guarda solo si
+  // cambió, para no escribir en cada mensaje.
+  if (payload.widgetPage) {
+    let previa: unknown;
+    try {
+      previa = conv.metadata ? (JSON.parse(conv.metadata) as { widgetPage?: unknown }).widgetPage : undefined;
+    } catch {
+      previa = undefined;
+    }
+    if (previa !== payload.widgetPage) {
+      await convs.mergeMetadata(conv.id, { widgetPage: payload.widgetPage }).catch((e) => {
+        console.warn("[widget] no se pudo guardar la página de la conversación:", e);
+      });
+    }
   }
 
   // Vínculo de Telegram para "Aviso al dueño" (/admin/config): el panel le

@@ -498,7 +498,8 @@ export const WIDGET_SCRIPT_JS = `(function () {
     fetch(API_BASE + "/widget/message", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ botId: botId, key: key, sessionId: sessionId, text: text, displayName: state.displayName || undefined })
+      // page: solo origen + ruta (sin query ni hash, que pueden traer tokens) — ver agent/canal.ts.
+      body: JSON.stringify({ botId: botId, key: key, sessionId: sessionId, text: text, displayName: state.displayName || undefined, page: location.origin + location.pathname })
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {

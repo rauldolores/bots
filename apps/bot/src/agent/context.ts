@@ -22,6 +22,7 @@ import type { MessagePart } from "../channels/parts";
 import { buildCustomerContext, renderCustomerContext } from "../customer/context";
 import { resolveTimezone } from "../datetime";
 import { AgentStateRepo, type AgentState } from "./state";
+import { bloqueDeCanal } from "./canal";
 
 export interface AgentContextInput {
   env: Env;
@@ -135,7 +136,7 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
       console.warn("[buildAgentContext] media assets lookup failed:", e);
       return [];
     }),
-    // Solo por el nombre con el que se presenta (ver <quien_escribe> abajo).
+    // Por el nombre con el que se presenta (<quien_escribe>) y por su canal (<canal>).
     conversationId
       ? new ConversationsRepo(db, botId).getById(conversationId).catch(() => null)
       : Promise.resolve(null),
@@ -201,6 +202,27 @@ export async function buildAgentContext(input: AgentContextInput): Promise<Agent
 
   const memoryBlocks: string[] = [];
   let knownCustomerName: string | undefined;
+
+  // Por dónde escribe y qué contacto trae ese canal (su correo, su número, la
+  // página del sitio). Sin esto el bot le pedía el correo a quien le acababa
+  // de escribir por correo. Ver agent/canal.ts.
+  if (conversacion && !input.training) {
+    let paginaDelWidget: string | null = null;
+    if (conversacion.channel === "widget" && conversacion.metadata) {
+      try {
+        const meta = JSON.parse(conversacion.metadata) as { widgetPage?: unknown };
+        if (typeof meta.widgetPage === "string") paginaDelWidget = meta.widgetPage;
+      } catch {
+        // metadata ilegible: se sigue sin la página.
+      }
+    }
+    const canal = bloqueDeCanal({
+      channel: conversacion.channel,
+      channelUserId: conversacion.channel_user_id,
+      paginaDelWidget,
+    });
+    if (canal) memoryBlocks.push(canal);
+  }
 
   // Memoria del cliente (flywheel): los hechos que extrajo el analizador.
   if (facts.length > 0) {

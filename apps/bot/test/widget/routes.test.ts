@@ -97,6 +97,27 @@ describe("POST /widget/message + GET /widget/messages", () => {
     expect(convs).toEqual([{ channel: "widget", channel_user_id: "visitor-1" }]);
   });
 
+  // El bot sabe desde qué página abrió el chat (ver agent/canal.ts). Solo
+  // origen + ruta: la query puede traer tokens y esto termina en el prompt.
+  it("guarda la página desde la que escribe, sin query ni hash", async () => {
+    const res = await app.fetch(
+      new Request("http://bot.test/widget/message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          botId: TEST_BOT_ID, key: KEY, sessionId: "visitor-pag", text: "hola",
+          page: "https://app.aduaniax.com/dashboard/ayuda?token=SECRETO#x",
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const meta = await new ConversationsRepo(db, TEST_BOT_ID).readMetadata(
+      (await new ConversationsRepo(db, TEST_BOT_ID).findByChannelUserId("widget", "visitor-pag"))!.id,
+    );
+    expect(meta.widgetPage).toBe("https://app.aduaniax.com/dashboard/ayuda");
+  });
+
   it("sin conversación aún (nadie ha escrito), el polling no crea una vacía", async () => {
     const before = await app.fetch(
       new Request(`http://bot.test/widget/messages?bot=${TEST_BOT_ID}&key=${KEY}&sessionId=visitor-2`),
