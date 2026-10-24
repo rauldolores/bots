@@ -284,7 +284,27 @@ const GLOBAL_STYLE = `
     .navlink{white-space:nowrap}
   }
 
+  /* "Estoy trabajando": botón ocupado, barra arriba y, si tarda, una capa que
+     bloquea la pantalla. Ver ESPERA_SCRIPT. */
+  .nb-busy{cursor:progress !important;opacity:.75;pointer-events:none}
+  .nb-spin{display:inline-block;width:12px;height:12px;flex:none;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;
+    vertical-align:-2px;margin-right:7px;animation:nb-girar .7s linear infinite}
+  @keyframes nb-girar{to{transform:rotate(360deg)}}
+  #nb-barra{position:fixed;top:0;left:0;right:0;height:3px;z-index:80;pointer-events:none;overflow:hidden;opacity:0;transition:opacity .15s}
+  #nb-barra.on{opacity:1}
+  #nb-barra::before{content:"";position:absolute;top:0;bottom:0;width:40%;background:var(--accent);animation:nb-barrer 1.1s ease-in-out infinite}
+  @keyframes nb-barrer{from{left:-40%}to{left:100%}}
+  #nb-capa{position:fixed;inset:0;z-index:70;display:none;align-items:center;justify-content:center;
+    background:rgba(243,241,236,.6);backdrop-filter:blur(1.5px);cursor:progress}
+  #nb-capa.on{display:flex}
+  #nb-capa .nb-caja{background:var(--panel);border:1px solid var(--linelit);box-shadow:var(--shadow-lg);padding:18px 22px;min-width:240px;max-width:340px;
+    display:flex;align-items:flex-start;gap:12px;font-size:13px;color:var(--cream)}
+  #nb-capa .nb-caja .nb-spin{width:18px;height:18px;margin:1px 0 0;color:var(--accent-2)}
+  #nb-capa .nb-msg{font-weight:600}
+  #nb-capa .nb-sub{font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.45}
+
   @media (prefers-reduced-motion:reduce){
+    .nb-spin,#nb-barra::before{animation-duration:2.4s}
     .card,.toast,.modal-backdrop,.modal-card{animation:none}
     .bigbtn,.ghostbtn,.convrow,.leadrow,.datarow,.kbrow,.tkcard,.subtab,.chip,.cfgcard,.node,.node-card,.bar,.navlink{transition:none}
     .bigbtn:hover,.node:hover,.node-card:hover,.tkcard:hover{transform:none}
@@ -292,9 +312,133 @@ const GLOBAL_STYLE = `
   }
 </style>`;
 
+// "Estoy trabajando" para TODO el panel, en un solo lugar.
+//
+// El dueño daba clic en Guardar y no pasaba nada visible por uno o varios
+// segundos: no sabía si esperar o volver a dar clic (y el segundo clic
+// guardaba dos veces). Tres capas, de la más inmediata a la más fuerte:
+//   1. Al instante, el botón que se tocó gira y dice "Guardando…" — y deja de
+//      aceptar clics. No se usa `disabled`: un botón deshabilitado durante el
+//      submit sale del formulario y su name/value no se enviaría.
+//   2. Al instante, una barra delgada arriba.
+//   3. Si tarda más de ~0.6 s, una capa sobre la pantalla con el mensaje. No
+//      sale de entrada para que los guardados rápidos no parpadeen.
+// Cubre los formularios normales (POST + redirect) y las peticiones htmx que
+// dispara un clic o un envío. NO cubre el polling ni los `change` de htmx, ni
+// los formularios que ya manejan su propio estado con fetch (preventDefault):
+// esos ya se ven solos. `data-sin-espera` en un form, botón o enlace lo excluye.
+const ESPERA_SCRIPT = `
+<script>
+(function () {
+  if (window.__nbEspera) return;
+  window.__nbEspera = true;
+  var VERBOS = [
+    [/^guardar/i, "Guardando…"], [/^enviar|^mandar/i, "Enviando…"], [/^conectar|^reconectar/i, "Conectando…"],
+    [/^eliminar|^borrar|^quitar/i, "Eliminando…"], [/^desconectar/i, "Desconectando…"], [/^crear|^agregar|^añadir/i, "Creando…"],
+    [/^subir|^importar/i, "Subiendo…"], [/^generar/i, "Generando…"], [/^probar/i, "Probando…"], [/^activar/i, "Activando…"]
+  ];
+  var ocupados = [], timerCapa = null, timerLento = null, timerTope = null;
+  var SUB = "Espera un momento, no hace falta volver a dar clic.";
+
+  function nodo(id, html) {
+    var n = document.getElementById(id);
+    if (!n) { n = document.createElement("div"); n.id = id; n.innerHTML = html || ""; document.body.appendChild(n); }
+    return n;
+  }
+  function textoDe(b) { return (b.textContent || b.value || "").replace(/\\s+/g, " ").trim(); }
+  function verboDe(texto, metodo) {
+    for (var i = 0; i < VERBOS.length; i++) if (VERBOS[i][0].test(texto)) return VERBOS[i][1];
+    return metodo === "GET" ? "Cargando…" : "Guardando…";
+  }
+  function marcar(b, verbo) {
+    if (!b || b.classList.contains("nb-busy")) return;
+    b.classList.add("nb-busy");
+    b.setAttribute("aria-busy", "true");
+    if (b.tagName === "INPUT") { b.dataset.nbOrig = b.value; b.value = verbo; }
+    else { b.dataset.nbOrig = b.innerHTML; b.innerHTML = '<span class="nb-spin" aria-hidden="true"></span>' + verbo; }
+    ocupados.push(b);
+  }
+  function empezar(boton, metodo) {
+    var verbo = verboDe(boton ? textoDe(boton) : "", metodo);
+    if (boton) marcar(boton, verbo);
+    nodo("nb-barra").classList.add("on");
+    clearTimeout(timerCapa); clearTimeout(timerLento); clearTimeout(timerTope);
+    timerCapa = setTimeout(function () {
+      var capa = nodo("nb-capa", '<div class="nb-caja" role="status" aria-live="polite"><span class="nb-spin" aria-hidden="true"></span><div><div class="nb-msg"></div><div class="nb-sub"></div></div></div>');
+      capa.querySelector(".nb-msg").textContent = verbo;
+      capa.querySelector(".nb-sub").textContent = SUB;
+      capa.classList.add("on");
+    }, 600);
+    timerLento = setTimeout(function () {
+      var sub = document.querySelector("#nb-capa .nb-sub");
+      if (sub) sub.textContent = "Está tardando un poco más de lo normal. No cierres ni recargues la página.";
+    }, 8000);
+    // Red de seguridad: si nada navega ni contesta (una descarga, un error de
+    // red silencioso), la pantalla no se queda bloqueada para siempre.
+    timerTope = setTimeout(terminar, 45000);
+  }
+  function terminar() {
+    clearTimeout(timerCapa); clearTimeout(timerLento); clearTimeout(timerTope);
+    var barra = document.getElementById("nb-barra"); if (barra) barra.classList.remove("on");
+    var capa = document.getElementById("nb-capa"); if (capa) capa.classList.remove("on");
+    ocupados.forEach(function (b) {
+      b.classList.remove("nb-busy"); b.removeAttribute("aria-busy");
+      if (b.dataset.nbOrig !== undefined) {
+        if (b.tagName === "INPUT") b.value = b.dataset.nbOrig; else b.innerHTML = b.dataset.nbOrig;
+        delete b.dataset.nbOrig;
+      }
+    });
+    ocupados = [];
+    document.querySelectorAll("form[data-nb-enviando]").forEach(function (f) { f.removeAttribute("data-nb-enviando"); });
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  // 1) Formularios normales. Se escucha en la fase de burbuja del document:
+  // para entonces ya corrieron los onsubmit="return confirm(…)" y los
+  // handlers propios, así que defaultPrevented dice la verdad.
+  document.addEventListener("submit", function (e) {
+    var f = e.target;
+    if (!(f instanceof HTMLFormElement)) return;
+    if (f.hasAttribute("data-nb-enviando")) { e.preventDefault(); return; } // doble clic: ya va en camino
+    if (e.defaultPrevented || f.hasAttribute("data-sin-espera") || f.getAttribute("target") === "_blank") return;
+    var b = e.submitter || f.querySelector("button[type=submit],button:not([type]),input[type=submit]");
+    if (b && b.hasAttribute("data-sin-espera")) return;
+    f.setAttribute("data-nb-enviando", "1");
+    empezar(b, (f.getAttribute("method") || "GET").toUpperCase());
+  });
+
+  // 2) htmx: solo lo que dispara una persona (clic/envío), nunca el polling.
+  document.addEventListener("htmx:beforeRequest", function (e) {
+    var d = e.detail || {}, elt = d.elt, rc = d.requestConfig || {};
+    var ev = rc.triggeringEvent;
+    if (!ev || (ev.type !== "click" && ev.type !== "submit")) return;
+    if (!elt || elt.closest("[data-sin-espera]")) return;
+    var b = elt.tagName === "FORM" ? (ev.submitter || elt.querySelector("button[type=submit],button:not([type])")) : elt;
+    empezar(b, String(rc.verb || "get").toUpperCase());
+  });
+  document.addEventListener("htmx:afterRequest", function () { if (ocupados.length || document.querySelector("#nb-barra.on")) terminar(); });
+
+  // 3) Ir a otra pantalla: solo la barra.
+  document.addEventListener("click", function (e) {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var a = e.target.closest && e.target.closest("a[href]");
+    if (!a || a.target === "_blank" || a.hasAttribute("download") || a.hasAttribute("hx-get") || a.hasAttribute("data-sin-espera")) return;
+    var href = a.getAttribute("href") || "";
+    if (!href || href.charAt(0) === "#" || /^(mailto|tel|javascript):/i.test(href) || /\\.(csv|pdf|xlsx|json|zip)(\\?|$)/i.test(href)) return;
+    if (a.origin !== location.origin) return;
+    nodo("nb-barra").classList.add("on");
+    clearTimeout(timerTope); timerTope = setTimeout(terminar, 15000);
+  });
+
+  // Volver con "atrás": el navegador puede restaurar la página tal como quedó,
+  // con el botón girando. Se limpia.
+  window.addEventListener("pageshow", function () { terminar(); });
+})();
+</script>`;
+
 // Re-run lucide after every htmx swap (fragments bring fresh icons) and close
 // any open modal with Escape.
-const GLOBAL_SCRIPT = `
+const GLOBAL_SCRIPT = `${ESPERA_SCRIPT}
 <script>
   function drawIcons(){ if (window.lucide) window.lucide.createIcons(); }
   document.addEventListener("DOMContentLoaded", drawIcons);
