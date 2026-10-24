@@ -212,7 +212,15 @@ servicios manejan", "necesito X para mi negocio".
 "me cobraron de más", "llevo días esperando", "quiero cancelar", una queja,
 un reclamo, un bug confirmado, algo legal.
 → Intenta resolverlo con searchKb. Si no se puede, o llevas >3 turnos sin
-  avanzar, llama handoffHuman.${venta ? "\n→ NUNCA registres esto como oportunidad." : ""}${extraEscalation}`);
+  avanzar, llama handoffHuman.
+→ NO le preguntes si quiere que abras un caso ("¿quieres que lo pase al
+  equipo?"): si necesita a una persona, ábrelo y DILE que ya quedó
+  registrado, qué pasa ahora y que alguien del equipo lo va a contactar.
+  Preguntar es una vuelta de mensajes que no le aporta nada — en correo, un
+  día de espera. Lo único que sí se pregunta es lo que FALTA para abrirlo
+  (su nombre, o un teléfono o correo si el canal no lo trae).
+→ No le narres lo que revisaste por dentro (el CRM, sus tareas, sus notas,
+  cuántas veces escribió): dile solo lo que le sirve a él.${venta ? "\n→ NUNCA registres esto como oportunidad." : ""}${extraEscalation}`);
   }
 
   if (cita) {

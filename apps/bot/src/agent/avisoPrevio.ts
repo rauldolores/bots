@@ -15,10 +15,16 @@ const INICIO_DE_AVISO =
   /^(d[eé]jame|perm[ií]teme|dame un (momento|segundo|minuto)|un (momento|segundo)|espera un|voy a (revisar|consultar|buscar|registrar|verificar|checar|enviarte|mandarte|agendar)|estoy (revisando|consultando|buscando|registrando|verificando)|en seguida|enseguida|ahora (mismo )?(te |lo )?(reviso|busco|consulto|registro)|un segundito|let me|one moment|give me a (moment|second))/i;
 
 /** ¿Este fragmento es solo un aviso de "espérame" (y no contenido para la persona)? */
+/** Cierra pidiendo que espere: "…un momento, por favor." */
+const CIERRE_DE_AVISO = /(un|dame un|espera un) (momento|segundo|minuto)(,? por favor)?[.!…]*$/i;
+
+/** "Raúl, " al inicio — el modelo suele abrir el aviso con el nombre. */
+const VOCATIVO = /^[\p{L}][\p{L} ]{0,30},\s*/u;
+
 export function esAvisoDeEspera(texto: string): boolean {
   const t = texto.trim();
   if (!t || t.length > 200) return false;
   // Un aviso es una o dos frases cortas; un párrafo con contenido no.
   if (/\n\s*\n/.test(t)) return false;
-  return INICIO_DE_AVISO.test(t);
+  return INICIO_DE_AVISO.test(t) || INICIO_DE_AVISO.test(t.replace(VOCATIVO, "")) || CIERRE_DE_AVISO.test(t);
 }

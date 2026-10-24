@@ -16,7 +16,7 @@ export interface SearchKbResult {
 
 /** Lo que se le dice al agente cuando la base no tiene nada de eso. */
 export const NOTA_SIN_COINCIDENCIA =
-  "La base de conocimiento no tiene información sobre esto. No lo inventes: dilo con naturalidad y ofrece que alguien del equipo lo confirme si hace falta.";
+  "La base de conocimiento no tiene información sobre esto. No lo inventes: dilo con naturalidad. Si es algo que la persona necesita resolver, pásalo al equipo como indica <que_registrar> y dile que ya lo hiciste — no le preguntes si quiere.";
 
 /**
  * Para el revisor rápido (ver agent/revisorRapido.ts). Sin `enSegundoPlano`

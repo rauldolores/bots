@@ -132,6 +132,16 @@ describe("renderSystemPrompt", () => {
 // instrucción de ruteo que existía empujaba todo hacia el ticket, y nada decía
 // cuándo capturar un lead. Estas pruebas fijan el árbol de decisión completo.
 describe("<que_registrar> — venta vs soporte", () => {
+  // Pedido del dueño (2026-10-23): el bot preguntaba "¿quieres que abra un
+  // caso?" — en correo, un día de ida y vuelta para nada. Se abre y se avisa.
+  it("soporte: abre el caso y avisa, no pregunta si quiere", () => {
+    const prompt = renderSystemPrompt(ventas);
+    const soporte = prompt.slice(prompt.indexOf("SOPORTE —"), prompt.indexOf("CITA —"));
+    expect(soporte).toContain("NO le preguntes si quiere que abras un caso");
+    expect(soporte).toContain("ya quedó");
+    expect(soporte).toContain("No le narres lo que revisaste por dentro");
+  });
+
   it("distingue los cuatro caminos, no solo el del ticket", () => {
     const prompt = renderSystemPrompt(ventas);
     expect(prompt).toContain("VENTA");

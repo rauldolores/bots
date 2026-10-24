@@ -28,8 +28,9 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
     description:
       "Abre un ticket de SOPORTE y le avisa al dueño. Es para problemas POST-VENTA: algo no le funciona, un cobro mal hecho, lleva días esperando, una queja o un reclamo, un bug, algo legal. " +
       "NO la uses para pedidos de cotización, precios ni interés comercial — eso es captureLead, aunque tú no puedas dar el precio y haya que pasárselo a alguien del equipo. " +
-      "Necesita un teléfono o correo REAL para poder darle seguimiento — si el canal ya lo trae (WhatsApp, llamada) no hace falta pedirlo, pero si no (Telegram, Messenger, el widget web) pídeselo antes de llamar esta tool: sin eso, el ticket se rechaza. " +
-      "También necesita saber A NOMBRE DE QUIÉN va el caso: si no sabes cómo se llama la persona, pregúntaselo antes y pásalo en `name`.",
+      "Necesita un teléfono o correo REAL para poder darle seguimiento — si el canal ya lo trae (correo, WhatsApp, llamada — ver <canal>) no hace falta pedirlo, pero si no (Telegram, Messenger, el widget web) pídeselo antes de llamar esta tool: sin eso, el ticket se rechaza. " +
+      "También necesita saber A NOMBRE DE QUIÉN va el caso: si no sabes cómo se llama la persona, pregúntaselo antes y pásalo en `name`. " +
+      "No le preguntes si quiere que abras el caso: ábrelo y dile que ya quedó registrado y que alguien del equipo lo va a contactar.",
     inputSchema: z.object({
       reason: z.string().describe("Categoría corta del problema"),
       summary: z.string().max(300).describe("Resumen en 1 frase del contexto"),
