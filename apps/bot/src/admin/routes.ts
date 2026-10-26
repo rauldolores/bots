@@ -186,7 +186,7 @@ import {
   VERIFIER_COOKIE,
   type KontroliaSession,
 } from "./kontroliaAuth";
-import { BAND_TOKEN_PATH, bandAuthServerUrl, bandSnippet, injectBand } from "./kontroliaBand";
+import { BAND_BRANDING_PATH, bandAuthServerUrl, bandSnippet, fetchBranding, injectBand, panelOrigin } from "./kontroliaBand";
 import {
   resolveAdminTenant,
   setBotCookie,
@@ -229,10 +229,11 @@ function isAuthExempt(path: string): boolean {
 // no podría renderizar la página que le explica por qué no tiene acceso.
 // /ayuda también: una organización recién creada, sin bots, tiene que poder
 // leer la guía y pedir soporte antes de crear el primero.
-// BAND_TOKEN_PATH (la banda de KontrolIA) tampoco necesita bot ni permisos de
-// la app: solo devuelve el token de quien ya inició sesión, y la banda se
-// pinta igual en "elige tu plan" o en "acceso restringido".
-const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots", "/access-denied", "/ayuda", "/ayuda/soporte", "/plan/uso", BAND_TOKEN_PATH];
+// BAND_BRANDING_PATH (el proxy de la banda de KontrolIA) tampoco necesita bot
+// ni permisos de la app: solo trae la marca de la organización de quien ya
+// inició sesión, y la banda se pinta igual en "elige tu plan" o en "acceso
+// restringido".
+const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots", "/access-denied", "/ayuda", "/ayuda/soporte", "/plan/uso", BAND_BRANDING_PATH];
 
 // Lo que sigue abierto cuando la organización NO tiene plan vivo (billing.md
 // B2): la pantalla de planes y su compra, la vuelta del pago, cambiarse de
@@ -242,7 +243,7 @@ const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bot
 // pagar — cerrarle eso sería dejarla sin salida.
 // Ayuda sigue abierta sin plan: quien no puede pagar o no entiende cómo,
 // necesita justamente la guía y el formulario de soporte.
-const BILLING_EXEMPT_PATTERNS = [/\/kontrolia\/band-token$/, /\/plan(\/|$)/, /\/billing\/ok$/, /\/switch-org$/, /\/projects$/, /\/logout$/, /\/organizaciones(\/|$)/, /\/usuarios(\/|$)/, /\/ayuda(\/|$)/];
+const BILLING_EXEMPT_PATTERNS = [/\/kontrolia\/api\/branding$/, /\/plan(\/|$)/, /\/billing\/ok$/, /\/switch-org$/, /\/projects$/, /\/logout$/, /\/organizaciones(\/|$)/, /\/usuarios(\/|$)/, /\/ayuda(\/|$)/];
 function isBillingExempt(path: string): boolean {
   return BILLING_EXEMPT_PATTERNS.some((re) => re.test(path));
 }
@@ -428,14 +429,19 @@ adminApp.use("*", async (c, next) => {
   c.res.headers.delete("content-length");
 });
 
-// El token que usa band.v1.js para pedir GET /api/branding al auth-server. Es
-// el access_token de la sesión de KontrolIA de ESTE request — el guard de
-// arriba ya lo verificó y, si estaba vencido, lo refrescó y reescribió la
-// cookie. Sin sesión de KontrolIA (Basic Auth) o con la banda apagada: null.
-adminApp.get(BAND_TOKEN_PATH, (c) => {
+// Proxy de GET /api/branding para band.v1.js (apiBase = /admin/kontrolia).
+// El access_token sale de la cookie httpOnly de la sesión — el guard de arriba
+// ya lo verificó y, si estaba vencido, lo refrescó — y solo viaja de este
+// servidor al auth-server: al navegador nunca llega. El Authorization que
+// manda band.v1.js es un marcador sin valor y se ignora. Banda apagada o sin
+// sesión de KontrolIA (Basic Auth, DASHBOARD_PUBLIC): 404, y la banda no pinta.
+adminApp.get(BAND_BRANDING_PATH, async (c) => {
   c.header("Cache-Control", "no-store");
-  const token = bandAuthServerUrl(c.env) ? (c.get("kontroliaAccessToken") ?? null) : null;
-  return c.json({ token });
+  const authServer = bandAuthServerUrl(c.env);
+  const accessToken = c.get("kontroliaAccessToken");
+  if (!authServer || !accessToken) return c.json({ error: "Banda de KontrolIA no disponible" }, 404);
+  const { status, body } = await fetchBranding(authServer, accessToken, panelOrigin(c.env, c.req.url));
+  return c.json(body as object, status as 200);
 });
 
 // --- Login con KontrolIA Auth (F5) ------------------------------------------
