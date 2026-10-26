@@ -44,12 +44,12 @@ describe("renderCalendario — sin conector", () => {
   it("muestra la agenda local: la cita de hoy aparece en el panel del día seleccionado", async () => {
     const html = await renderCalendario(env, TEST_BOT_ID);
     expect(html).toContain("Cita Local");
-    expect(html).toContain("conectar calendario");
+    expect(html).toContain("Conectar calendario");
   });
 
-  it("sin conector no hay botón de 'gestionar conexión'", async () => {
+  it("sin conector no hay botón de 'Gestionar conexión'", async () => {
     const html = await renderCalendario(env, TEST_BOT_ID);
-    expect(html).not.toContain("gestionar conexión");
+    expect(html).not.toContain("Gestionar conexión");
   });
 });
 
@@ -77,7 +77,7 @@ describe("renderCalendario — con Cal.com conectado", () => {
       ),
     ) as any;
     const html = await renderCalendario(env, TEST_BOT_ID);
-    expect(html).toContain("Calendario — Cal.com");
+    expect(html).toContain("en vivo desde Cal.com");
     expect(html).toContain("Cita Cal.com");
     expect(html).not.toContain("Cita Local");
   });
@@ -171,5 +171,34 @@ describe("renderCalendario — próximas citas", () => {
     for (const a of list) await cancelAppointment(env, TEST_BOT_ID, a.id);
     const html = await renderCalendario(env, TEST_BOT_ID);
     expect(html).toContain("No hay más citas agendadas.");
+  });
+});
+
+describe("renderCalendario — métricas", () => {
+  it("cuenta las citas agendadas de los próximos 7 días sin las canceladas ni las lejanas", async () => {
+    const repo = new AppointmentsRepo(db, TEST_BOT_ID);
+    const now = Date.now();
+    const cancelada = await repo.create({ conversationId: null, customerName: "Cancelada", startsAt: now + 60 * 60_000 });
+    await repo.cancel(cancelada);
+    await repo.create({ conversationId: null, customerName: "Lejana", startsAt: now + 30 * 24 * 60 * 60_000 });
+    expect(await repo.countScheduledBetween(now, now + 7 * 24 * 60 * 60_000)).toBe(1);
+
+    const html = await renderCalendario(env, TEST_BOT_ID);
+    expect(html).toContain("stat-card");
+    expect(html).toContain("Próximos 7 días");
+  });
+
+  it("con el calendario externo conectado no muestra métricas", async () => {
+    await new BotConnectorsRepo(db).upsert({
+      botId: TEST_BOT_ID,
+      category: "calendar",
+      provider: "calcom",
+      secretRef: "11111111-1111-1111-1111-111111111111",
+      config: { eventTypeId: "100" },
+    });
+    readSecretMock.mockResolvedValue("cal-fake-key");
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ bookings: [] }), { status: 200 })) as any;
+    const html = await renderCalendario(env, TEST_BOT_ID);
+    expect(html).not.toContain("stat-card");
   });
 });

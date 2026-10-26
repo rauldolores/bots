@@ -8,6 +8,7 @@ import { CALENDAR_ADAPTERS, CALENDAR_PROVIDERS } from "../../connectors/registry
 import type { AppointmentRecord } from "../../connectors/types";
 import { resolveTimezone, localTimeToUtcMs } from "../../datetime";
 import { layout } from "./layout";
+import { alertRow, heroBtn, heroTag, iconTile, pageHero, sectionCard, statCard, statGrid, statusPill } from "./ui";
 
 function esc(s: string): string {
   return s.replace(
@@ -86,28 +87,78 @@ function timeOf(ms: number, timezone: string): string {
   return new Date(ms).toLocaleTimeString("es-MX", { hour: "numeric", minute: "2-digit", timeZone: timezone });
 }
 
-/** La celda de un día del grid — número + un punto y contador si hay citas. Todo el día es un link
- *  (?month=…&day=…) que lo selecciona; el detalle vive en el panel de la derecha, no en la celda. */
+/** "Lunes 26 de octubre" — solo la primera letra en mayúscula; text-transform:capitalize
+ *  pondría "De Octubre", que no es como se escribe en español. */
+function longDayLabel(dateKey: string): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const raw = new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+function citas(n: number): string {
+  return `${n} ${n === 1 ? "cita" : "citas"}`;
+}
+
+// La grilla y las filas viven en clases (no inline) porque cambian en teléfono:
+// celdas más bajas y solo el número de citas, sin la palabra.
+const CAL_CSS = `<style>
+  .cal-layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start}
+  .cal-side{display:flex;flex-direction:column;gap:24px;min-width:0}
+  .cal-week,.cal-cells{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+  .cal-wd{padding:12px 8px;text-align:center;font-size:10px;font-weight:900;letter-spacing:.15em;text-transform:uppercase;color:var(--dim);border-bottom:1px solid var(--line)}
+  .cal-day,.cal-blank{min-height:92px;padding:10px;display:flex;flex-direction:column;gap:6px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .cal-cells>:nth-child(7n){border-right:none}
+  .cal-cells>:nth-last-child(-n+7){border-bottom:none}
+  .cal-blank{background:var(--row-hover)}
+  .cal-day{color:var(--cream);text-decoration:none;transition:background .12s ease}
+  .cal-day:hover{background:var(--row-hover);color:var(--cream)}
+  .cal-num{width:28px;height:28px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--muted)}
+  .cal-day.is-today .cal-num{background:var(--accent);color:var(--cream);font-weight:900}
+  .cal-day.is-selected,.cal-day.is-selected:hover{background:var(--accent-soft);box-shadow:inset 0 0 0 2px var(--accent)}
+  .cal-count{margin-top:auto;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--muted)}
+  .cal-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none}
+  .cal-btn{height:36px;min-width:36px;padding:0 12px;border-radius:12px;border:1px solid var(--dim);background:var(--panel);color:var(--cream);display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:13px;font-weight:700;text-decoration:none;font-family:inherit;cursor:pointer}
+  .cal-btn:hover{background:var(--row-hover);color:var(--cream)}
+  .cal-btn-sm{height:32px;border-radius:10px;font-size:12px;padding:0 10px}
+  .cal-row{display:flex;gap:14px;align-items:flex-start;padding:16px 24px;border-top:1px solid var(--line);color:var(--cream);text-decoration:none}
+  .cal-row.is-first{border-top:none}
+  a.cal-row{align-items:center}
+  a.cal-row:hover{background:var(--row-hover);color:var(--cream)}
+  @media (max-width:1100px){.cal-layout{grid-template-columns:minmax(0,1fr)}}
+  @media (max-width:640px){
+    .cal-day,.cal-blank{min-height:58px;padding:6px 2px;align-items:center}
+    .cal-num{width:26px;height:26px;font-size:12px}
+    .cal-count{margin-top:0}
+    .cal-count-w{display:none}
+    .cal-wd{padding:10px 2px;letter-spacing:.06em}
+    .cal-row{padding:14px 16px}
+  }
+</style>`;
+
+/** Una celda del mes: número (el de hoy en círculo ámbar) + punto y conteo si hay citas.
+ *  Todo el día es un link (?month=…&day=…) que lo selecciona; el detalle vive en el panel de al lado. */
 function dayCell(items: AgendaItem[], dateKey: string, monthParam: string, isToday: boolean, isSelected: boolean): string {
   const dayNum = Number(dateKey.slice(-2));
   const active = items.filter((i) => !i.cancelled).length;
-  const bg = isSelected ? "var(--accent-soft)" : isToday ? "rgba(245,197,24,.06)" : "var(--panel)";
-  return `<a href="?month=${monthParam}&day=${dateKey}" style="text-decoration:none;display:flex;flex-direction:column;gap:4px;border:1px solid var(--line);min-height:78px;padding:8px;background:${bg}">
-    <span style="font-size:12.5px;font-weight:${isToday ? 700 : 500};color:${isToday ? "var(--accent-2)" : "var(--muted)"}">${dayNum}</span>
-    ${active > 0
-      ? `<span style="display:flex;align-items:center;gap:5px;margin-top:auto">
-          <span style="width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none"></span>
-          <span style="font-size:10.5px;color:var(--muted);font-weight:500">${active} ${active === 1 ? "cita" : "citas"}</span>
-        </span>`
-      : ""}
+  const aria = `${longDayLabel(dateKey)}, ${active ? citas(active) : "sin citas"}${isSelected ? ", seleccionado" : ""}`;
+  const cls = `cal-day${isToday ? " is-today" : ""}${isSelected ? " is-selected" : ""}`;
+  return `<a href="?month=${monthParam}&day=${dateKey}" class="${cls}" aria-label="${esc(aria)}"${isToday ? ' aria-current="date"' : ""}>
+    <span class="cal-num">${dayNum}</span>
+    ${active > 0 ? `<span class="cal-count"><span class="cal-dot"></span>${active}<span class="cal-count-w"> ${active === 1 ? "cita" : "citas"}</span></span>` : ""}
   </a>`;
 }
 
-function blankCell(): string {
-  return `<div style="background:var(--panel2);border:1px solid var(--line);min-height:78px"></div>`;
+/** Botones del mes: anterior, "Hoy" y siguiente — van en la cabecera de la tarjeta del mes. */
+function monthNav(year: number, month: number, todayKey: string): string {
+  const prev = shiftMonth(year, month, -1);
+  const next = shiftMonth(year, month, 1);
+  return `
+    <a href="?month=${prev.year}-${pad2(prev.month)}" class="cal-btn" aria-label="Mes anterior" style="padding:0"><i data-lucide="chevron-left" width="16" height="16"></i></a>
+    <a href="?month=${todayKey.slice(0, 7)}&day=${todayKey}" class="cal-btn">Hoy</a>
+    <a href="?month=${next.year}-${pad2(next.month)}" class="cal-btn" aria-label="Mes siguiente" style="padding:0"><i data-lucide="chevron-right" width="16" height="16"></i></a>`;
 }
 
-/** Grilla del mes: agrupa los items por día (zona del negocio) y arma cada celda + la barra de navegación. */
+/** Grilla del mes: agrupa los items por día (zona del negocio) y arma cada celda. */
 function renderMonthGrid(year: number, month: number, timezone: string, items: AgendaItem[], selectedKey: string | null): string {
   const daysInMonth = new Date(year, month, 0).getDate();
   const monthStr = `${year}-${pad2(month)}`;
@@ -122,128 +173,122 @@ function renderMonthGrid(year: number, month: number, timezone: string, items: A
     byDay.get(key)!.push(item);
   }
 
+  const blank = `<div class="cal-blank" aria-hidden="true"></div>`;
   const cells: string[] = [];
-  for (let i = 0; i < startOffset; i++) cells.push(blankCell());
+  for (let i = 0; i < startOffset; i++) cells.push(blank);
   for (let d = 1; d <= daysInMonth; d++) {
     const key = `${monthStr}-${pad2(d)}`;
     cells.push(dayCell(byDay.get(key) ?? [], key, monthStr, key === todayKey, key === selectedKey));
   }
-  while (cells.length % 7 !== 0) cells.push(blankCell());
+  while (cells.length % 7 !== 0) cells.push(blank);
 
-  const header = WEEKDAY_HEADERS.map(
-    (d) => `<div style="padding:8px;text-align:center;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)">${d}</div>`,
-  ).join("");
+  const header = WEEKDAY_HEADERS.map((d) => `<div class="cal-wd">${d}</div>`).join("");
+  return `<div class="cal-week" aria-hidden="true">${header}</div><div class="cal-cells">${cells.join("")}</div>`;
+}
 
-  const prev = shiftMonth(year, month, -1);
-  const next = shiftMonth(year, month, 1);
-  const nav = `
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
-      <a href="?month=${prev.year}-${pad2(prev.month)}" class="ghostbtn" style="display:inline-flex;align-items:center;padding:6px 9px;background:var(--panel);border:1px solid var(--line);color:var(--muted)">
-        <i data-lucide="chevron-left" width="15" height="15"></i>
-      </a>
-      <h2 class="font-display font-semibold text-[15.5px] text-cream" style="min-width:150px;text-align:center">${MONTH_NAMES[month - 1]} ${year}</h2>
-      <a href="?month=${next.year}-${pad2(next.month)}" class="ghostbtn" style="display:inline-flex;align-items:center;padding:6px 9px;background:var(--panel);border:1px solid var(--line);color:var(--muted)">
-        <i data-lucide="chevron-right" width="15" height="15"></i>
-      </a>
-      <a href="?month=${todayKey.slice(0, 7)}&day=${todayKey}" class="text-[12px]" style="border:1px solid var(--line);color:var(--muted);padding:6px 12px;text-decoration:none">Hoy</a>
-      <a href="/admin/conexiones?cat=calendar" class="text-[12px]" style="margin-left:auto;color:var(--muted)">conectar calendario</a>
+function emptyState(icon: string, text: string, hint?: string): string {
+  return `<div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:32px 24px;text-align:center">
+      ${iconTile(icon, "neutral", 40)}
+      <p style="margin:0;font-size:13px;font-weight:700;color:var(--cream)">${esc(text)}</p>
+      ${hint ? `<p style="margin:0;max-width:260px;font-size:12px;font-weight:500;color:var(--dim)">${esc(hint)}</p>` : ""}
     </div>`;
+}
 
-  return `
-    ${nav}
-    <div class="bg-panel border border-line" style="overflow-x:auto">
-      <div style="min-width:700px">
-        <div style="display:grid;grid-template-columns:repeat(7,1fr)">${header}</div>
-        <div style="display:grid;grid-template-columns:repeat(7,1fr)">${cells.join("")}</div>
+/** Una cita del día seleccionado: hora, nombre, contacto/notas y Cancelar (o "Cancelada"). */
+function appointmentRow(it: AgendaItem, timezone: string, selectedKey: string, first: boolean): string {
+  const name = it.url
+    ? `<a href="${esc(it.url)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">${esc(it.name)} <span style="color:var(--accent-2)">↗</span></a>`
+    : esc(it.name);
+  const action = it.cancelled
+    ? `<div>${statusPill("Cancelada", "var(--dim)")}</div>`
+    : it.cancelUrl
+      ? `<form method="POST" action="${it.cancelUrl}" onsubmit="return confirm('¿Cancelar esta cita?')" style="margin:4px 0 0">
+          <input type="hidden" name="redirect" value="?month=${selectedKey.slice(0, 7)}&day=${selectedKey}">
+          <button type="submit" class="cal-btn cal-btn-sm"><i data-lucide="x" width="14" height="14"></i>Cancelar</button>
+        </form>`
+      : "";
+  return `<div class="cal-row${first ? " is-first" : ""}">
+      <div style="flex:none;min-width:64px;padding-top:1px;font-size:13px;font-weight:800;white-space:nowrap;font-variant-numeric:tabular-nums;color:${it.cancelled ? "var(--dim)" : "var(--cream)"}">${timeOf(it.startsAt, timezone)}</div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
+        <div style="font-size:14px;font-weight:800;line-height:1.35;overflow-wrap:anywhere;${it.cancelled ? "text-decoration:line-through;color:var(--dim)" : "color:var(--cream)"}">${name}</div>
+        ${it.meta ? `<div style="font-size:12px;font-weight:500;color:var(--muted);overflow-wrap:anywhere">${esc(it.meta)}</div>` : ""}
+        ${action}
       </div>
     </div>`;
 }
 
-/** Panel "día seleccionado" — tarjetas doradas con nombre/hora, y Reagendar/Cancelar por cita. */
+/** Tarjeta "día seleccionado": sus citas en orden, con Cancelar por cita. */
 function renderSelectedDayPanel(selectedKey: string | null, items: AgendaItem[], timezone: string): string {
   if (!selectedKey) {
-    return `
-      <div class="bg-panel border border-line" style="padding:16px 18px;display:flex;flex-direction:column;gap:10px;min-height:140px">
-        <span style="font-size:12.5px;color:var(--dim)">Selecciona un día para ver sus citas.</span>
-      </div>`;
+    return sectionCard({
+      icon: "calendar-search",
+      title: "Día seleccionado",
+      body: emptyState("mouse-pointer-click", "Selecciona un día para ver sus citas."),
+    });
   }
-  const [y, m, d] = selectedKey.split("-").map(Number);
-  const rawLabel = new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
-  // Solo la primera letra en mayúscula ("Sábado 22 de agosto") — text-transform:capitalize
-  // pondría mayúscula a cada palabra ("De Agosto"), que no es como se escribe en español.
-  const label = rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1);
   const sorted = items.slice().sort((a, b) => a.startsAt - b.startsAt);
-
-  const cards = sorted
-    .map((it) => {
-      const name = it.url
-        ? `<a href="${esc(it.url)}" target="_blank" rel="noopener" class="text-accent" style="text-decoration:none">${esc(it.name)} ↗</a>`
-        : esc(it.name);
-      return `
-      <div style="border:1px solid ${it.cancelled ? "var(--line)" : "#ead79a"};background:${it.cancelled ? "var(--panel2)" : "var(--accent-soft)"};border-radius:10px;padding:11px 13px;display:flex;flex-direction:column;gap:4px">
-        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px">
-          <span style="font-size:13.5px;font-weight:600;${it.cancelled ? "text-decoration:line-through;color:var(--dim)" : ""}">${name}</span>
-          <span style="font-size:11.5px;font-weight:600;white-space:nowrap;color:${it.cancelled ? "var(--dim)" : "var(--accent-2)"}">${timeOf(it.startsAt, timezone)}</span>
-        </div>
-        ${it.meta ? `<span style="font-size:12px;color:var(--muted)">${esc(it.meta)}</span>` : ""}
-        ${it.cancelled
-          ? `<span style="font-size:11px;color:var(--dim)">Cancelada</span>`
-          : it.cancelUrl
-            ? `<form method="POST" action="${it.cancelUrl}" onsubmit="return confirm('¿Cancelar esta cita?')" style="padding-top:2px">
-                <input type="hidden" name="redirect" value="?month=${selectedKey.slice(0, 7)}&day=${selectedKey}">
-                <button type="submit" style="border:none;background:none;color:#b23b1d;font-size:12px;cursor:pointer;padding:0;font-family:inherit">Cancelar</button>
-              </form>`
-            : ""}
-      </div>`;
-    })
-    .join("");
-
-  return `
-    <div class="bg-panel border border-line" style="padding:16px 18px;display:flex;flex-direction:column;gap:12px;min-height:140px">
-      <span class="font-display font-semibold text-[14px] text-cream">${esc(label)}</span>
-      ${sorted.length ? `<div style="display:flex;flex-direction:column;gap:10px">${cards}</div>` : `<span style="font-size:12.5px;color:var(--dim)">Sin citas este día.</span>`}
-    </div>`;
+  const active = sorted.filter((i) => !i.cancelled).length;
+  return sectionCard({
+    icon: "calendar-check",
+    title: longDayLabel(selectedKey),
+    subtitle: sorted.length ? citas(active) : undefined,
+    body: sorted.length
+      ? sorted.map((it, i) => appointmentRow(it, timezone, selectedKey, i === 0)).join("")
+      : emptyState("calendar", "Sin citas este día."),
+  });
 }
 
-/** Panel "próximas citas" — lista cronológica corta, cada una salta al día correspondiente. */
+/** Tarjeta "próximas citas": lista cronológica corta, cada una salta a su día. */
 function renderUpcomingPanel(upcoming: AgendaItem[], timezone: string): string {
   const rows = upcoming
-    .map((u) => {
+    .map((u, i) => {
       const key = dayKeyOf(u.startsAt, timezone);
-      const [y, m, d] = key.split("-").map(Number);
-      return `<a href="?month=${key.slice(0, 7)}&day=${key}" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);text-decoration:none">
-        <span style="width:38px;flex:none;display:flex;flex-direction:column;align-items:center;background:var(--panel2);border-radius:7px;padding:5px 0">
-          <span style="font-size:9.5px;font-weight:600;color:var(--accent-2);text-transform:uppercase">${MONTH_SHORT[m - 1]}</span>
-          <span style="font-size:12.5px;font-weight:700;color:var(--cream)">${d}</span>
+      const [, m, d] = key.split("-").map(Number);
+      return `<a href="?month=${key.slice(0, 7)}&day=${key}" class="cal-row${i === 0 ? " is-first" : ""}">
+        <span aria-hidden="true" style="flex:none;width:44px;height:44px;border-radius:12px;background:var(--panel2);display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1">
+          <span style="font-size:9px;font-weight:900;letter-spacing:.1em;color:var(--accent-2)">${MONTH_SHORT[m - 1]}</span>
+          <span style="font-size:15px;font-weight:900;color:var(--cream)">${d}</span>
         </span>
-        <span style="display:flex;flex-direction:column;gap:1px;min-width:0">
-          <span style="font-size:12.5px;font-weight:600;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(u.name)}</span>
-          <span style="font-size:11px;color:var(--dim)">${timeOf(u.startsAt, timezone)}${u.meta ? ` · ${esc(u.meta)}` : ""}</span>
+        <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+          <span style="font-size:13px;font-weight:800;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(u.name)}</span>
+          <span style="font-size:12px;font-weight:500;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${timeOf(u.startsAt, timezone)}${u.meta ? ` · ${esc(u.meta)}` : ""}</span>
         </span>
+        <i data-lucide="chevron-right" width="16" height="16" style="flex:none;color:var(--dim)"></i>
       </a>`;
     })
     .join("");
-  return `
-    <div class="bg-panel border border-line" style="padding:16px 18px;display:flex;flex-direction:column;gap:6px">
-      <span class="font-display font-semibold text-[13px] text-cream" style="margin-bottom:2px">Próximas citas</span>
-      ${upcoming.length ? rows : `<span style="font-size:12.5px;color:var(--dim);text-align:center;padding:8px 0">No hay más citas agendadas.</span>`}
-    </div>`;
+  return sectionCard({
+    icon: "clock",
+    title: "Próximas citas",
+    body: upcoming.length ? rows : emptyState("calendar-clock", "No hay más citas agendadas.", "Cuando el bot agende una, aparece aquí."),
+  });
 }
 
-/** Layout de dos columnas compartido por las tres variantes (externa, fallback local, local pura). */
-function renderCalendarLayout(
-  year: number,
-  month: number,
-  timezone: string,
-  monthItems: AgendaItem[],
-  upcoming: AgendaItem[],
-  selectedKey: string | null,
-): string {
+/** Mes + panel lateral — compartido por las tres variantes (externa, fallback local, local pura). */
+function renderCalendarLayout(opts: {
+  year: number;
+  month: number;
+  timezone: string;
+  monthItems: AgendaItem[];
+  upcoming: AgendaItem[];
+  selectedKey: string | null;
+  /** Texto bajo el nombre del mes (ya escapado). */
+  source: string;
+}): string {
+  const { year, month, timezone, monthItems, upcoming, selectedKey } = opts;
+  const todayKey = new Date().toLocaleDateString("en-CA", { timeZone: timezone });
   const selectedItems = selectedKey ? monthItems.filter((i) => dayKeyOf(i.startsAt, timezone) === selectedKey) : [];
-  return `
-    <div style="display:flex;gap:18px;align-items:flex-start;min-width:0">
-      <div style="flex:1;min-width:0">${renderMonthGrid(year, month, timezone, monthItems, selectedKey)}</div>
-      <div style="width:290px;flex:none;display:flex;flex-direction:column;gap:14px">
+  const active = monthItems.filter((i) => !i.cancelled).length;
+  return `${CAL_CSS}
+    <div class="cal-layout">
+      ${sectionCard({
+        icon: "calendar-days",
+        title: `${MONTH_NAMES[month - 1]} ${year}`,
+        subtitle: `${citas(active)} · ${opts.source}`,
+        actions: monthNav(year, month, todayKey),
+        body: renderMonthGrid(year, month, timezone, monthItems, selectedKey),
+      })}
+      <div class="cal-side">
         ${renderSelectedDayPanel(selectedKey, selectedItems, timezone)}
         ${renderUpcomingPanel(upcoming, timezone)}
       </div>
@@ -259,8 +304,12 @@ export async function renderCalendario(
 ): Promise<string> {
   const db = new Db(env.DB);
   const timezone = resolveTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
+  const canSee = (id: string) => !visibleNavIds || visibleNavIds.has(id);
   const { year, month } = resolveMonth(monthParam, timezone);
   const monthStr = `${year}-${pad2(month)}`;
+  const nextMonth = shiftMonth(year, month, 1);
+  const monthStartMs = localTimeToUtcMs(`${monthStr}-01T00:00:00`, timezone);
+  const monthEndMs = localTimeToUtcMs(`${nextMonth.year}-${pad2(nextMonth.month)}-01T00:00:00`, timezone);
   const todayKey = new Date().toLocaleDateString("en-CA", { timeZone: timezone });
   // Día seleccionado: el que venga en ?day=, o "hoy" si se está viendo el mes
   // actual — al navegar a otro mes no se asume ningún día por default.
@@ -270,7 +319,11 @@ export async function renderCalendario(
       : monthStr === todayKey.slice(0, 7)
         ? todayKey
         : null;
+  const description = "Las citas que agenda tu bot, en la hora del negocio. Elige un día para ver el detalle o cancelar una cita.";
 
+  let errorBanner = "";
+  let connectedTag = "";
+  let manageBtn = "";
   const connector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "calendar");
   if (connector) {
     const providerMeta = CALENDAR_PROVIDERS[connector.provider];
@@ -278,47 +331,67 @@ export async function renderCalendario(
     const adapter = CALENDAR_ADAPTERS[connector.provider];
     const creds = adapter ? await resolveConnectorCreds(db, connector, env) : null;
     const result = adapter && creds ? await adapter.listUpcoming(creds, 200) : null;
+    manageBtn = canSee("conexiones") ? heroBtn({ label: "Gestionar conexión", href: "/admin/conexiones?cat=calendar", icon: "plug-zap" }) : "";
     if (result?.ok) {
       const allItems = result.items.map(fromExternal);
-      const nextMonth = shiftMonth(year, month, 1);
-      const monthStartMs = localTimeToUtcMs(`${monthStr}-01T00:00:00`, timezone);
-      const monthEndMs = localTimeToUtcMs(`${nextMonth.year}-${pad2(nextMonth.month)}-01T00:00:00`, timezone);
       const monthItems = allItems.filter((i) => i.startsAt >= monthStartMs && i.startsAt < monthEndMs);
       const upcoming = allItems.filter((i) => i.startsAt > Date.now()).sort((a, b) => a.startsAt - b.startsAt).slice(0, 8);
       const body = `
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <h2 class="font-display font-semibold text-[15px] text-cream">Calendario — ${esc(providerLabel)}</h2>
-          <a href="/admin/conexiones?cat=calendar" class="text-[12px]" style="color:var(--muted)">gestionar conexión</a>
-        </div>
-        ${renderCalendarLayout(year, month, timezone, monthItems, upcoming, selectedKey)}`;
-      return layout({ title: "Calendario", activeTab: "calendario", body, visibleNavIds });
+        ${pageHero({ eyebrow: "Bandeja", title: "Calendario", description, tags: heroTag(`Conectado a ${providerLabel}`), actions: manageBtn })}
+        ${renderCalendarLayout({ year, month, timezone, monthItems, upcoming, selectedKey, source: `en vivo desde ${esc(providerLabel)}` })}`;
+      return layout({ title: "Calendario", activeTab: "calendario", body, visibleNavIds, hero: true });
     }
-    const errorBanner = `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px;margin-bottom:14px">No se pudo consultar ${esc(providerLabel)} (${esc(result?.error ?? "sin credenciales")}) — mostrando la copia local mientras tanto.</div>`;
-    const appts = new AppointmentsRepo(db, botId);
-    const fallbackNextMonth = shiftMonth(year, month, 1);
-    const monthItems = (
-      await appts.listForMonth(
-        localTimeToUtcMs(`${monthStr}-01T00:00:00`, timezone),
-        localTimeToUtcMs(`${fallbackNextMonth.year}-${pad2(fallbackNextMonth.month)}-01T00:00:00`, timezone),
-      )
-    ).map(fromLocal);
-    const upcoming = (await appts.listUpcoming(8)).map(fromLocal);
-    const body = `${errorBanner}${renderCalendarLayout(year, month, timezone, monthItems, upcoming, selectedKey)}`;
-    return layout({ title: "Calendario", activeTab: "calendario", body, visibleNavIds });
+    connectedTag = heroTag(`Conectado a ${providerLabel}`, "var(--bad)");
+    errorBanner = `<div style="margin-bottom:24px">${alertRow({
+      title: `No se pudo consultar ${providerLabel}`,
+      detail: `${result?.error ?? "sin credenciales"} — mostrando la copia local mientras tanto.`,
+      attrs: 'role="status"',
+    })}</div>`;
   }
 
+  // Agenda local: sin conector ES la agenda; con conector caído, es la copia.
   const appts = new AppointmentsRepo(db, botId);
-  const nextMonth = shiftMonth(year, month, 1);
-  const monthItems = (
-    await appts.listForMonth(
-      localTimeToUtcMs(`${monthStr}-01T00:00:00`, timezone),
-      localTimeToUtcMs(`${nextMonth.year}-${pad2(nextMonth.month)}-01T00:00:00`, timezone),
-    )
-  ).map(fromLocal);
+  const monthItems = (await appts.listForMonth(monthStartMs, monthEndMs)).map(fromLocal);
   const upcoming = (await appts.listUpcoming(8)).map(fromLocal);
-  const body = renderCalendarLayout(year, month, timezone, monthItems, upcoming, selectedKey);
-  return layout({ title: "Calendario", activeTab: "calendario", body, visibleNavIds });
+  const todayStartMs = localTimeToUtcMs(`${todayKey}T00:00:00`, timezone);
+  const tomorrowKey = dayKeyOf(todayStartMs + 36 * 60 * 60 * 1000, timezone);
+  const now = Date.now();
+  const [hoy, semana] = await Promise.all([
+    appts.countScheduledBetween(todayStartMs, localTimeToUtcMs(`${tomorrowKey}T00:00:00`, timezone)),
+    appts.countScheduledBetween(now, now + 7 * 24 * 60 * 60 * 1000),
+  ]);
+  const monthLabel = `en ${MONTH_NAMES[month - 1].toLowerCase()} ${year}`;
+  const agendadas = monthItems.filter((i) => !i.cancelled).length;
+  const canceladas = monthItems.length - agendadas;
+
+  const stats = statGrid([
+    statCard({ icon: "calendar-clock", tone: hoy ? "accent" : "neutral", label: "Hoy", value: hoy, note: hoy === 1 ? "cita agendada" : "citas agendadas" }),
+    statCard({ icon: "calendar-range", tone: "neutral", label: "Próximos 7 días", value: semana }),
+    statCard({ icon: "calendar-check", tone: "ok", label: "Agendadas", value: agendadas, note: monthLabel }),
+    statCard({ icon: "calendar-x", tone: "neutral", label: "Canceladas", value: canceladas, note: monthLabel }),
+  ]);
+
+  const hero = pageHero({
+    eyebrow: "Bandeja",
+    title: "Calendario",
+    description,
+    tags: connectedTag,
+    actions: [
+      manageBtn,
+      !connector && canSee("conexiones")
+        ? heroBtn({ label: "Conectar calendario", href: "/admin/conexiones?cat=calendar", icon: "plug-zap" })
+        : "",
+    ].join(""),
+  });
+
+  const body = `
+    ${hero}
+    ${errorBanner}
+    ${stats}
+    ${renderCalendarLayout({ year, month, timezone, monthItems, upcoming, selectedKey, source: `hora de ${esc(timezone)}` })}`;
+  return layout({ title: "Calendario", activeTab: "calendario", body, visibleNavIds, hero: true });
 }
+
 
 export async function cancelAppointment(env: Env, botId: string, id: string): Promise<void> {
   await new AppointmentsRepo(new Db(env.DB), botId).cancel(id);

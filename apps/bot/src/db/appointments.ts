@@ -69,6 +69,15 @@ export class AppointmentsRepo {
     );
   }
 
+  /** Cuántas citas agendadas (no canceladas) caen en [startMs, endMs) — las métricas de /admin/calendario. */
+  async countScheduledBetween(startMs: number, endMs: number): Promise<number> {
+    const row = await this.db.first<{ n: number }>(
+      "SELECT COUNT(*)::int AS n FROM appointments WHERE bot_id = ? AND status = 'scheduled' AND starts_at >= ? AND starts_at < ?",
+      [this.botId, startMs, endMs],
+    );
+    return row?.n ?? 0;
+  }
+
   /**
    * La cita futura que YA tiene esta conversación, si la hay.
    *
