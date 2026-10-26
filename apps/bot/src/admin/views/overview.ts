@@ -18,6 +18,20 @@ import { SuggestionsRepo } from "../../db/suggestions";
 import { BotsRepo } from "../../db/bots";
 import { channelLabel } from "../../channels/labels";
 import { getNiche } from "../../niches";
+import {
+  alertRow,
+  avatarTile,
+  cardLink,
+  heroBtn,
+  heroTag,
+  iconTile,
+  MICRO_LABEL,
+  pageHero,
+  sectionCard,
+  statCard,
+  statGrid,
+  statusPill,
+} from "./ui";
 
 function esc(s: string): string {
   return s.replace(
@@ -35,13 +49,6 @@ function ago(ms: number | null | undefined): string {
   const h = Math.floor(min / 60);
   if (h < 24) return `hace ${h} h`;
   return `hace ${Math.floor(h / 24)} d`;
-}
-
-/** Two-letter avatar initials from a display name (or channel-id fallback). */
-function initialsOf(label: string): string {
-  const parts = label.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  return parts.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
 /** "auto" or the concrete model id the agent is pinned to. */
@@ -155,266 +162,194 @@ export async function renderOverview(
   // --- Mejoras sugeridas -------------------------------------------------------------
   const proposedSuggestions = await new SuggestionsRepo(db, botId).listProposed();
 
-  // --- Markup: actividad + estado del agente -----------------------------------------
-  const activityChart = `
-    <div class="card bg-panel border border-line p-[18px]" style="animation-delay:.22s">
-      <div class="font-display font-semibold text-[15px] text-cream flex items-center gap-2 mb-0.5">
-        <i data-lucide="bar-chart-3" width="16" height="16" class="text-accent"></i>
-        Actividad — últimos 7 días
-      </div>
-      <div class="text-[11px] text-dim mb-1">mensajes procesados por día</div>
-      <div class="flex items-end gap-3" style="height:150px;padding-top:16px">
+  // --- Markup ------------------------------------------------------------------------
+  const botName = bot?.name ?? "tu bot";
+  const canSee = (id: string) => !visibleNavIds || visibleNavIds.has(id);
+
+  const activityChart = sectionCard({
+    icon: "bar-chart-3",
+    title: "Actividad",
+    subtitle: "Mensajes procesados por día · últimos 7 días",
+    body: `<div style="display:flex;align-items:flex-end;gap:12px;height:190px;padding:20px 24px 18px">
         ${activityDays
           .map((d) => {
             const pct = d.msgs === 0 ? 3 : Math.max(8, Math.round((d.msgs / activityMax) * 90));
             const label = d.isToday ? "HOY" : DOW_LETTER[d.dow];
-            const barColor = d.isToday ? "var(--accent)" : "var(--linelit)";
-            const numClass = d.isToday ? "text-accent font-semibold" : "text-muted";
-            const labelClass = d.isToday ? "text-accent font-semibold" : "text-dim";
+            const ink = d.isToday ? "var(--accent-ink)" : "var(--dim)";
             return `
-            <div class="bargrp flex-1 flex flex-col items-center gap-2" style="height:100%;justify-content:flex-end">
-              <div class="text-[10px] ${numClass}">${d.msgs}</div>
-              <div class="bar" style="width:100%;height:${pct}%;background:${barColor}"></div>
-              <div class="text-[10px] ${labelClass}">${label}</div>
+            <div class="bargrp" style="flex:1;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px">
+              <div style="font-size:11px;font-weight:800;color:${d.isToday ? "var(--cream)" : "var(--muted)"}">${d.msgs}</div>
+              <div class="bar" style="width:100%;max-width:44px;height:${pct}%;border-radius:8px 8px 3px 3px;background:${d.isToday ? "var(--accent)" : "var(--linelit)"}"></div>
+              <div style="font-size:10px;font-weight:900;letter-spacing:.15em;color:${ink}">${label}</div>
             </div>`;
           })
           .join("")}
-      </div>
-    </div>`;
+      </div>`,
+  });
 
-  const agentStatus = `
-    <div class="card bg-panel border border-line p-[18px] flex flex-col" style="animation-delay:.26s">
-      <div class="font-display font-semibold text-[15px] text-cream flex items-center gap-2 mb-3.5">
-        <i data-lucide="activity" width="16" height="16" class="text-accent"></i>
-        Estado del agente
-      </div>
-      <div class="flex flex-col gap-[11px] text-[12.5px]">
-        <div class="flex items-center justify-between">
-          <span class="text-muted">Modelo activo</span>
-          <span class="font-semibold font-mono text-[11.5px]">${esc(agentModelLabel(env, agentCfg))}</span>
-        </div>
-        <div style="height:1px;background:var(--line)"></div>
-        <div class="flex items-center justify-between">
-          <span class="text-muted">Tools activas</span>
-          <span class="font-semibold">${agentCfg.enabledToolNames.length} <span class="text-dim font-normal">de ${toolNames.length}</span></span>
-        </div>
-        <div style="height:1px;background:var(--line)"></div>
-        <div class="flex items-center justify-between">
-          <span class="text-muted">Docs de conocimiento</span>
-          <span class="font-semibold">${totalKbDocs} <span class="text-dim font-normal">(${FIXTURE_CHUNKS.length} precargados)</span></span>
-        </div>
-        <div style="height:1px;background:var(--line)"></div>
-        <div class="flex items-center justify-between">
-          <span class="text-muted">Resueltas sin humano</span>
-          <span class="font-semibold ${resolvedPct7d === null ? "text-dim" : "text-ok"}">${resolvedPct7d === null ? "—" : `${resolvedPct7d}%`}</span>
-        </div>
-      </div>
-      <a href="/admin/agente" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer flex items-center justify-center gap-2"
-         style="background:var(--accent);color:#1a1206;border:1px solid var(--accent);box-shadow:var(--shadow-sm);padding:13px;margin-top:18px">
-        <i data-lucide="settings-2" width="16" height="16"></i> Ajustar mi agente
-      </a>
-    </div>`;
+  const statusRow = (label: string, value: string, first = false) => `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 0;${first ? "" : "border-top:1px solid var(--line)"}">
+          <span style="font-size:13px;font-weight:500;color:var(--muted)">${label}</span>
+          <span style="font-size:13px;font-weight:800;color:var(--cream);text-align:right">${value}</span>
+        </div>`;
+  const agentStatus = sectionCard({
+    icon: "activity",
+    title: "Estado del agente",
+    actions: canSee("agente") ? cardLink("Ajustar", "/admin/agente") : "",
+    body: `<div style="padding:6px 24px 10px">
+        ${statusRow("Modelo activo", `<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px">${esc(agentModelLabel(env, agentCfg))}</span>`, true)}
+        ${statusRow("Herramientas activas", `${agentCfg.enabledToolNames.length} <span style="font-weight:500;color:var(--dim)">de ${toolNames.length}</span>`)}
+        ${statusRow("Docs de conocimiento", `${totalKbDocs} <span style="font-weight:500;color:var(--dim)">(${FIXTURE_CHUNKS.length} precargados)</span>`)}
+        ${statusRow("Resueltas sin humano", resolvedPct7d === null ? `<span style="color:var(--dim)">—</span>` : `${resolvedPct7d}% <span style="font-weight:500;color:var(--dim)">· 7 días</span>`)}
+      </div>`,
+  });
 
-  // --- Markup: conversaciones recientes + mejoras sugeridas --------------------------
   const convRows =
     recentConvs
-      .map((c) => {
+      .map((c, i) => {
         const label = c.display_name ?? c.channel_user_id ?? "—";
-        const name = esc(label);
-        const initials = initialsOf(label);
-        const preview = esc((c.last_msg ?? "").replace(/\s+/g, " ").slice(0, 60)) || "—";
-        const chanColor = c.channel === "twilio" || c.channel === "whatsapp" ? "var(--info)" : "var(--accent-2)";
+        const preview = esc((c.last_msg ?? "").replace(/\s+/g, " ").slice(0, 80)) || "—";
         return `
-        <a href="/admin/conversations?c=${encodeURIComponent(c.id)}" class="convrow flex items-center gap-3" style="padding:12px 18px;border-top:1px solid var(--line);cursor:pointer">
-          <div class="flex items-center justify-center flex-none" style="width:36px;height:36px;background:var(--raise);border:1px solid var(--linelit);font-size:12px;font-weight:700;color:var(--accent-2)">${initials}</div>
-          <div class="flex-1" style="min-width:0">
-            <div class="flex items-center gap-2">
-              <span class="text-[13px] font-semibold text-cream">${name}</span>
-              <span style="font-size:9px;letter-spacing:.05em;color:${chanColor};border:1px solid ${chanColor};padding:0 5px">${esc(channelLabel(c.channel))}</span>
+        <a href="/admin/conversations?c=${encodeURIComponent(c.id)}" class="trow" style="display:flex;align-items:center;gap:12px;padding:14px 24px;${i ? "border-top:1px solid var(--line);" : ""}text-decoration:none;color:inherit">
+          ${avatarTile(label)}
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;min-width:0">
+              <span style="font-size:13px;font-weight:800;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(label)}</span>
+              <span style="flex:none;border-radius:999px;background:var(--panel2);padding:2px 8px;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">${esc(channelLabel(c.channel))}</span>
             </div>
-            <div class="text-[12px] text-muted mt-0.5" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${preview}</div>
+            <div style="margin-top:2px;font-size:12px;font-weight:500;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${preview}</div>
           </div>
-          <div class="text-[10px] text-dim flex-none">${ago(c.last_message_at)}</div>
-          <i data-lucide="chevron-right" width="16" height="16" class="arr flex-none" style="color:var(--accent-2);opacity:0;transform:translateX(-4px);transition:all .15s ease"></i>
+          <div style="flex:none;font-size:11px;font-weight:600;color:var(--dim)">${ago(c.last_message_at)}</div>
+          <i data-lucide="chevron-right" width="16" height="16" style="flex:none;color:var(--dim)"></i>
         </a>`;
       })
-      .join("") || `<div class="text-center text-[12.5px] text-dim" style="padding:32px 16px">Aún no hay conversaciones.</div>`;
+      .join("") ||
+    `<div style="padding:40px 24px;text-align:center;font-size:13px;font-weight:500;color:var(--dim)">Aún no hay conversaciones.</div>`;
 
-  const recentConversations = `
-    <div class="card bg-panel border border-line" style="animation-delay:.3s">
-      <div class="flex items-center justify-between" style="padding:16px 18px 12px">
-        <div class="font-display font-semibold text-[15px] text-cream flex items-center gap-2">
-          <i data-lucide="messages-square" width="16" height="16" class="text-accent"></i>
-          Conversaciones recientes
-        </div>
-        <a href="/admin/conversations" class="flex items-center gap-1 text-[11.5px]">ver todas <i data-lucide="arrow-right" width="13" height="13"></i></a>
-      </div>
-      <div>${convRows}</div>
-    </div>`;
+  const recentConversations = sectionCard({
+    icon: "messages-square",
+    title: "Conversaciones recientes",
+    subtitle: "Las últimas 5, la más nueva primero",
+    actions: canSee("conversations") ? cardLink("Ver todas", "/admin/conversations") : "",
+    body: `<div>${convRows}</div>`,
+  });
 
-  const suggestionItems =
-    proposedSuggestions.length === 0
-      ? `<p class="text-[12px] text-dim">Sin mejoras pendientes.</p>`
-      : proposedSuggestions
-          .slice(0, 2)
-          .map(
-            (s) =>
-              `<div class="text-[12.5px] text-cream mb-2" style="border:1px solid var(--linelit);background:var(--panel);padding:10px 12px;line-height:1.45">${esc(s.title)}</div>`,
-          )
-          .join("");
+  const suggestedImprovements = sectionCard({
+    icon: "sparkles",
+    title: "Mejoras sugeridas",
+    subtitle: `${proposedSuggestions.length} ${proposedSuggestions.length === 1 ? "detectada" : "detectadas"} por IA en tus conversaciones`,
+    actions: canSee("mejoras") && proposedSuggestions.length ? cardLink("Ver todas", "/admin/mejoras") : "",
+    body: `<div style="display:flex;flex-direction:column;gap:8px;padding:18px 24px 20px">${
+      proposedSuggestions.length === 0
+        ? `<p style="margin:0;font-size:13px;font-weight:500;color:var(--dim)">Sin mejoras pendientes.</p>`
+        : proposedSuggestions
+            .slice(0, 3)
+            .map(
+              (s) =>
+                `<div style="border-radius:12px;border:1px solid var(--line);background:var(--row-hover);padding:12px 14px;font-size:13px;font-weight:600;line-height:1.45;color:var(--cream)">${esc(s.title)}</div>`,
+            )
+            .join("")
+    }</div>`,
+  });
 
-  const suggestedImprovements = `
-    <div class="card bg-panel border border-line p-[18px] relative overflow-hidden" style="animation-delay:.34s;background:linear-gradient(160deg,var(--panel2),var(--panel));border-color:var(--linelit)">
-      <div class="flex items-center gap-2 mb-1">
-        <i data-lucide="sparkles" width="16" height="16" class="text-accent2"></i>
-        <span class="font-display font-semibold text-[15px] text-cream">Mejoras sugeridas</span>
-      </div>
-      <div class="text-[11px] text-dim mb-3.5">
-        ${proposedSuggestions.length} ${proposedSuggestions.length === 1 ? "sugerencia detectada" : "sugerencias detectadas"} por IA sobre tus conversaciones
-      </div>
-      ${suggestionItems}
-      <a href="/admin/mejoras" class="flex items-center gap-1 text-[11.5px] mt-2.5">ver todas <i data-lucide="arrow-right" width="13" height="13"></i></a>
-    </div>`;
+  // Salud: lo que puede dejar a un cliente sin respuesta, en orden de gravedad.
+  // Sin llave de IA el bot NO contesta a nadie (billing/llaveDeIa.ts): va
+  // primero, por encima del handoff. Y un handoff sin aviso deja tickets
+  // huérfanos — antes fallaba en silencio.
+  const alerts: string[] = [];
+  if (agentCfg.ia.modo === "sin_llave") {
+    const { titulo, detalle } = explicacionDeIa(agentCfg.ia);
+    alerts.push(alertRow({ title: titulo, detail: detalle, action: { label: "Configurar", href: "/admin/config?section=modelo" }, attrs: 'data-testid="alerta-sin-ia"' }));
+  }
+  if (!notify.ok) {
+    alerts.push(
+      alertRow({
+        title: "Handoff sin aviso",
+        detail: "El bot crea tickets pero nadie recibe notificación. Configura Telegram, WhatsApp o email del dueño.",
+        action: { label: "Configurar", href: "/admin/config?section=aviso" },
+      }),
+    );
+  }
+  const ticketsPill = statusPill(`${openTickets} ${openTickets === 1 ? "ticket abierto" : "tickets abiertos"}`, openTickets === 0 ? "var(--ok)" : "var(--bad)");
+  const handoffPill = notify.ok ? statusPill(`Handoff avisa por ${notify.channels.join(" + ")}`, "var(--ok)") : "";
+  const channelsPill = `<a href="/admin/conexiones" style="text-decoration:none">${statusPill(
+    `${conn.connected}/${conn.total} canales conectados`,
+    conn.connected > 0 ? "var(--ok)" : "var(--bad)",
+  )}</a>`;
+  const health = sectionCard({
+    icon: "heart-pulse",
+    title: `Salud de ${botName}`,
+    subtitle: alerts.length ? "Hay algo que puede dejar a un cliente sin respuesta" : "Todo lo que hace falta para atender, en orden",
+    actions: canSee("tickets") ? cardLink("Ver tickets", "/admin/tickets") : "",
+    body: `<div style="display:flex;flex-direction:column;gap:12px;padding:18px 24px 20px">
+        ${alerts.join("")}
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">${ticketsPill}${handoffPill}${channelsPill}</div>
+      </div>`,
+  });
 
   // Primeros pasos: hasta que el bot está operando, la guía va ARRIBA de las
   // métricas — a alguien recién instalado un tablero en ceros no le dice qué
   // hacer. Las dos funciones devuelven "" cuando no aplican, así que no hay
   // condicionales aquí y el panel se ve normal en cuanto sobra la guía.
   const estadoPasos = await calcularPrimerosPasos(env, botId, bot?.config);
-  const guia = renderPrimerosPasos(estadoPasos, bot?.name ?? "tu bot") + renderYaOpera(estadoPasos, bot?.name ?? "tu bot");
+  const guia = renderPrimerosPasos(estadoPasos, botName) + renderYaOpera(estadoPasos, botName);
 
   // El consumo del plan, donde el dueño lo ve sin buscarlo (billing.md,
   // punto 6): solo si la organización tiene plan o límites que mostrar.
   const planCard =
     plan && (plan.subscription || plan.usage.length)
-      ? `<section class="card bg-panel border border-line p-4" style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px">
+      ? `<section style="display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;border-radius:var(--radius);background:var(--panel);border:1px solid var(--line);padding:16px 20px">
+          ${iconTile("credit-card", "neutral", 36)}
           <div style="display:flex;flex-direction:column;gap:2px;margin-right:auto">
-            <div class="text-[9.5px] tracking-[.2em] text-dim uppercase">Tu plan</div>
-            <div class="font-display font-semibold text-[13.5px] text-cream">${esc(plan.subscription?.planName ?? "Sin plan")}${
+            <div style="${MICRO_LABEL}">Tu plan</div>
+            <div style="font-size:14px;font-weight:800;color:var(--cream)">${esc(plan.subscription?.planName ?? "Sin plan")}${
               plan.subscription?.billingInterval === "year" ? " (anual)" : ""
             }${
               plan.subscription && !plan.subscription.isLive ? ` <span style="color:var(--bad)">· sin acceso</span>` : ""
             }</div>
           </div>
           ${tiraDeUso(plan)}
-          <a href="/admin/plan" class="text-[11.5px]" style="color:var(--accent);white-space:nowrap">Ver plan →</a>
+          ${cardLink("Ver plan", "/admin/plan")}
         </section>`
       : "";
 
+  const stats = statGrid([
+    statCard({ icon: "message-circle", tone: "neutral", label: "Mensajes hoy", value: todayMsgs, note: "últimas 24 horas" }),
+    statCard({ icon: "users", tone: "neutral", label: "Clientes únicos", value: todayConvs, note: "conversaciones distintas hoy" }),
+    statCard({ icon: niche.navIcon, tone: "accent", label: niche.kpiLabel, value: todayLeads, note: "nuevos hoy" }),
+    statCard({ icon: "coins", tone: "ok", label: "Costo del mes", value: `$${totalCost.toFixed(2)}`, note: `${monthMsgs} mensajes · 30 días` }),
+  ]);
+
+  const hero = pageHero({
+    eyebrow: "Resumen",
+    title: bot?.name ?? "Tu bot",
+    description: "Lo que atendió tu bot en las últimas 24 horas, quién llegó y lo que necesita tu atención.",
+    tags: heroTag(
+      `${conn.connected} de ${conn.total} canales`,
+      conn.connected > 0 ? "#3fb8c4" : "var(--bad)",
+    ),
+    actions: [
+      canSee("agente") ? heroBtn({ label: "Ajustar mi agente", href: "/admin/agente", icon: "settings-2", primary: true }) : "",
+      canSee("conversations") ? heroBtn({ label: "Ver conversaciones", href: "/admin/conversations", icon: "messages-square" }) : "",
+    ].join(""),
+  });
+
+  const top = [guia, planCard].filter(Boolean).join("");
   const body = `
-    <div class="flex flex-col gap-[22px]">
-      ${guia}
-      ${planCard}
-      <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[14px]">
-        <div class="card bg-panel border border-line p-4 relative overflow-hidden" style="animation-delay:.02s">
-          <div class="absolute top-3 right-3 text-[9.5px] tracking-[.2em] text-dim uppercase">01</div>
-          <div class="flex items-center gap-2 text-muted">
-            <i data-lucide="message-circle" width="15" height="15"></i>
-            <span class="text-[11px] tracking-[.05em]">MENSAJES HOY</span>
-          </div>
-          <div class="glow font-display font-bold text-[38px] leading-none mt-3">${todayMsgs}</div>
-          <div class="text-[11px] text-dim mt-2">últimas 24 horas</div>
-        </div>
-
-        <div class="card bg-panel border border-line p-4 relative overflow-hidden" style="animation-delay:.06s">
-          <div class="absolute top-3 right-3 text-[9.5px] tracking-[.2em] text-dim uppercase">02</div>
-          <div class="flex items-center gap-2 text-muted">
-            <i data-lucide="users" width="15" height="15"></i>
-            <span class="text-[11px] tracking-[.05em]">CLIENTES ÚNICOS</span>
-          </div>
-          <div class="glow font-display font-bold text-[38px] leading-none mt-3">${todayConvs}</div>
-          <div class="text-[11px] text-dim mt-2">conversaciones distintas hoy</div>
-        </div>
-
-        <div class="card bg-panel border border-line p-4 relative overflow-hidden" style="animation-delay:.1s">
-          <div class="absolute top-3 right-3 text-[9.5px] tracking-[.2em] text-dim uppercase">03</div>
-          <div class="flex items-center gap-2 text-muted">
-            <i data-lucide="${niche.navIcon}" width="15" height="15"></i>
-            <span class="text-[11px] tracking-[.05em]">${niche.kpiLabel.toUpperCase()}</span>
-          </div>
-          <div class="glow font-display font-bold text-[38px] leading-none mt-3 text-accent">${todayLeads}</div>
-          <div class="text-[11px] text-dim mt-2">nuevos hoy</div>
-        </div>
-
-        <div class="card bg-panel border border-line p-4 relative overflow-hidden" style="animation-delay:.14s">
-          <div class="absolute top-3 right-3 text-[9.5px] tracking-[.2em] text-dim uppercase">04</div>
-          <div class="flex items-center gap-2 text-muted">
-            <i data-lucide="coins" width="15" height="15"></i>
-            <span class="text-[11px] tracking-[.05em]">COSTO DEL MES</span>
-          </div>
-          <div class="glow font-display font-bold text-[38px] leading-none mt-3">$${totalCost.toFixed(2)}</div>
-          <div class="text-[11px] text-dim mt-2">${monthMsgs} mensajes · Claude · 30 días</div>
-        </div>
-      </section>
-
-      <section class="card bg-panel border border-line p-[18px]" style="animation-delay:.18s">
-        <div class="flex items-center justify-between">
-          <div class="font-display font-semibold text-[15px] text-cream flex items-center gap-2">
-            <i data-lucide="activity" width="16" height="16" class="text-accent"></i>
-            Salud de ${esc(bot?.name ?? "tu bot")}
-          </div>
-          <a href="/admin/tickets" class="flex items-center gap-1 text-[11.5px]">
-            ver tickets <i data-lucide="arrow-right" width="13" height="13"></i>
-          </a>
-        </div>
-        ${(() => {
-          // Sin llave de IA el bot NO contesta a nadie (billing/llaveDeIa.ts):
-          // es la alerta más grave que puede haber aquí, por encima del handoff.
-          if (agentCfg.ia.modo !== "sin_llave") return "";
-          const { titulo, detalle } = explicacionDeIa(agentCfg.ia);
-          return `
-          <div class="mt-3" data-testid="alerta-sin-ia" style="display:flex;align-items:flex-start;gap:10px;background:#fdf4f3;border:1px solid #f0cfc9;border-radius:10px;padding:11px 13px">
-            <span style="width:7px;height:7px;border-radius:50%;background:#c2410c;margin-top:5px;flex:none"></span>
-            <div class="flex flex-col gap-0.5" style="flex:1;min-width:0">
-              <div class="text-[13px] font-semibold" style="color:#7c2d12">${esc(titulo)}</div>
-              <div class="text-[12px]" style="color:#8a5a44;line-height:1.45">${esc(detalle)}</div>
-            </div>
-            <a href="/admin/config?section=modelo" class="flex-none text-[11.5px]" style="background:var(--panel);border:1px solid #e5c9c2;border-radius:8px;padding:6px 10px;color:#7c2d12;white-space:nowrap">Configurar</a>
-          </div>`;
-        })()}
-        ${(() => {
-          // Cuando el bot escala a humano, ¿alguien se entera? Antes esto
-          // fallaba en silencio; ahora es la alerta principal de esta tarjeta
-          // si falta configurar, porque un handoff mudo deja tickets huérfanos.
-          if (notify.ok) return "";
-          return `
-          <div class="mt-3" style="display:flex;align-items:flex-start;gap:10px;background:#fdf4f3;border:1px solid #f0cfc9;border-radius:10px;padding:11px 13px">
-            <span style="width:7px;height:7px;border-radius:50%;background:#c2410c;margin-top:5px;flex:none"></span>
-            <div class="flex flex-col gap-0.5" style="flex:1;min-width:0">
-              <div class="text-[13px] font-semibold" style="color:#7c2d12">Handoff sin aviso</div>
-              <div class="text-[12px]" style="color:#8a5a44;line-height:1.45">El bot crea tickets pero nadie recibe notificación. Configura Telegram, WhatsApp o email del dueño.</div>
-            </div>
-            <a href="/admin/config?section=aviso" class="flex-none text-[11.5px]" style="background:var(--panel);border:1px solid #e5c9c2;border-radius:8px;padding:6px 10px;color:#7c2d12;white-space:nowrap">Configurar</a>
-          </div>`;
-        })()}
-        <div class="mt-3" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          ${(() => {
-            const ok = openTickets === 0;
-            const color = ok ? "var(--ok)" : "var(--bad)";
-            return `<span class="text-[11.5px]" style="display:flex;align-items:center;gap:6px;color:${ok ? "var(--muted)" : color};border:1px solid ${ok ? "var(--line)" : color};border-radius:8px;padding:6px 10px">${ok ? "✓" : "⚠"} ${openTickets} tickets abiertos</span>`;
-          })()}
-          ${(() => {
-            if (!notify.ok) return "";
-            return `<span class="text-[11.5px]" style="display:flex;align-items:center;gap:6px;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:6px 10px">✓ handoff avisa por ${notify.channels.join(" + ")}</span>`;
-          })()}
-          ${(() => {
-            const ok = conn.connected > 0;
-            const color = ok ? "var(--ok)" : "var(--bad)";
-            return `<a href="/admin/conexiones" class="text-[11.5px]" style="display:flex;align-items:center;gap:6px;color:${ok ? "var(--muted)" : color};border:1px solid ${ok ? "var(--line)" : color};border-radius:8px;padding:6px 10px;text-decoration:none">${ok ? "✓" : "⚠"} ${conn.connected}/${conn.total} canales conectados</a>`;
-          })()}
-        </div>
-      </section>
-
-      <section class="grid grid-cols-1 lg:grid-cols-[1.55fr_1fr] gap-[14px]">
+    ${hero}
+    ${top ? `<div style="display:flex;flex-direction:column;gap:24px;margin-bottom:24px">${top}</div>` : ""}
+    ${stats}
+    <div style="display:flex;flex-direction:column;gap:24px">
+      ${health}
+      <div class="grid grid-cols-1 lg:grid-cols-[1.55fr_1fr] gap-6">
         ${activityChart}
         ${agentStatus}
-      </section>
-
-      <section class="grid grid-cols-1 lg:grid-cols-[1.55fr_1fr] gap-[14px]">
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-[1.55fr_1fr] gap-6">
         ${recentConversations}
         ${suggestedImprovements}
-      </section>
+      </div>
     </div>`;
 
-  return layout({ title: "Overview", activeTab: "overview", body, visibleNavIds });
+  return layout({ title: "Resumen", activeTab: "overview", body, visibleNavIds, hero: true });
 }

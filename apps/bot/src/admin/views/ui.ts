@@ -80,7 +80,16 @@ export function heroBtn(opts: { label: string; href: string; icon?: string; prim
   return `<a href="${escUi(opts.href)}" class="hero-btn${opts.primary ? " hero-btn-primary" : ""}" ${opts.attrs ?? ""} style="height:40px;padding:0 16px;border-radius:12px;${look};font-size:13px;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;transition:background .12s ease">${opts.icon ? `<i data-lucide="${opts.icon}" width="15" height="15"></i>` : ""}${escUi(opts.label)}</a>`;
 }
 
-export function statCard(opts: { icon: string; tone?: Tone; label: string; value: string | number; hint?: string }): string {
+export function statCard(opts: {
+  icon: string;
+  tone?: Tone;
+  label: string;
+  value: string | number;
+  /** Pastilla arriba a la derecha (p. ej. "+3 esta semana"). */
+  hint?: string;
+  /** Línea tenue bajo el número (p. ej. "últimas 24 horas"). */
+  note?: string;
+}): string {
   return `<div class="stat-card" style="border-radius:var(--radius);background:var(--panel);border:1px solid var(--line);padding:20px;display:flex;flex-direction:column;gap:14px;min-width:0">
     <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:8px">
       ${iconTile(opts.icon, opts.tone ?? "neutral")}
@@ -89,6 +98,7 @@ export function statCard(opts: { icon: string; tone?: Tone; label: string; value
     <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
       <div style="${MICRO_LABEL};letter-spacing:.14em">${escUi(opts.label)}</div>
       <div style="font-size:28px;font-weight:900;letter-spacing:-.04em;line-height:1.1;color:var(--cream)">${escUi(opts.value)}</div>
+      ${opts.note ? `<div style="font-size:12px;font-weight:500;color:var(--dim)">${escUi(opts.note)}</div>` : ""}
     </div>
   </div>`;
 }
@@ -121,6 +131,25 @@ export function sectionCard(opts: {
     ${opts.body}
     ${opts.footer ? `<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:14px 24px;background:var(--row-hover);border-top:1px solid var(--line)">${opts.footer}</div>` : ""}
   </section>`;
+}
+
+/** Link "ver todas →" para la cabecera de una sectionCard. */
+export function cardLink(label: string, href: string): string {
+  return `<a href="${escUi(href)}" style="display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:700;color:var(--accent-2);text-decoration:none;white-space:nowrap">${escUi(label)}<i data-lucide="arrow-right" width="14" height="14"></i></a>`;
+}
+
+/**
+ * Aviso dentro de una tarjeta: punto de color, título, detalle y un botón
+ * opcional. Neutro por fuera — el color va solo en el punto.
+ */
+export function alertRow(opts: { title: string; detail: string; dot?: string; action?: { label: string; href: string }; attrs?: string }): string {
+  return `<div ${opts.attrs ?? ""} style="display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--row-hover);padding:14px 16px">
+    <div style="display:flex;flex-direction:column;gap:2px;flex:1 1 220px;min-width:0">
+      <div style="display:flex;align-items:center;gap:10px;font-size:13px;font-weight:800;color:var(--cream)"><span style="width:8px;height:8px;border-radius:50%;background:${opts.dot ?? "var(--bad)"};flex:none"></span>${escUi(opts.title)}</div>
+      <div style="padding-left:18px;font-size:12px;font-weight:500;line-height:1.5;color:var(--muted)">${escUi(opts.detail)}</div>
+    </div>
+    ${opts.action ? `<a href="${escUi(opts.action.href)}" style="flex:none;margin-left:auto;height:32px;display:inline-flex;align-items:center;padding:0 12px;border-radius:10px;border:1px solid var(--dim);background:var(--panel);font-size:12px;font-weight:700;color:var(--cream);text-decoration:none;white-space:nowrap">${escUi(opts.action.label)}</a>` : ""}
+  </div>`;
 }
 
 /** Punto de color + palabra sobre fondo neutro. `color` es un color CSS (var(--ok), etc.). */

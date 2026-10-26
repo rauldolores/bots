@@ -114,9 +114,11 @@ demás se pasan una por una:
 | Pieza | Qué es |
 |---|---|
 | `pageHero({ eyebrow, title, description, tags, actions })` | Encabezado oscuro (`--hero-bg`), radio 20, eyebrow ámbar, h1 de 30 px. Acciones con `heroBtn`, etiquetas con `heroTag`. |
-| `statGrid([statCard(...)])` | Fila de métricas 4/2 columnas. `statCard` lleva mosaico de ícono teñido (`tone`: accent, ok, warn, neutral, ink) y número de 28 px. |
+| `statGrid([statCard(...)])` | Fila de métricas 4/2 columnas. `statCard` lleva mosaico de ícono teñido (`tone`: accent, ok, warn, neutral, ink) y número de 28 px; `hint` es la pastilla de arriba, `note` la línea tenue bajo el número. |
 | `sectionCard({ icon, title, subtitle, actions, body, footer })` | Tarjeta blanca radio 16 con cabecera (ícono, título, subtítulo, filtros a la derecha) y pie opcional. |
 | `statusPill(label, color)` | Punto de color + palabra sobre `--panel2`. El color de estado nunca de relleno. |
+| `alertRow({ title, detail, action })` | Aviso dentro de una tarjeta: punto rojo junto al título, fondo neutro, botón opcional que baja de renglón en teléfono. |
+| `cardLink(label, href)` | Link "Ver todas →" para las `actions` de una `sectionCard`. |
 | `TH_STYLE`, `MICRO_LABEL` | Cabeceras de tabla en micro mayúsculas (10 px, 900, .15em). Filas con clase `trow` para el hover. |
 | `avatarTile(name)` | Mosaico de iniciales de 34 px para personas. |
 
