@@ -264,10 +264,33 @@ const GLOBAL_STYLE = `
   .sb-sec{font-size:9px;font-weight:900;letter-spacing:.2em;text-transform:uppercase;padding:14px 12px 6px}
   /* Consumo del plan en el sidebar (se pinta con /admin/plan/uso): un bloque
      apenas más claro que la tinta de la sidebar. Sus colores de texto ya eran
-     para fondo oscuro desde que la sidebar era clara. */
+     para fondo oscuro desde que la sidebar era clara.
+     Cerrado solo dice "PLAN X"; al pasar el mouse (o enfocarlo con teclado) la
+     tarjeta crece HACIA ARRIBA flotando sobre el menú: #sb-uso guarda el alto
+     de la versión cerrada y la tarjeta va anclada a su borde de abajo, así el
+     menú no brinca. --sb-panel es translúcido: se pinta sobre --sb-bg para
+     que el menú no se transparente debajo. En pantallas táctiles no hay
+     hover: el toque lleva a Plan. */
   #sb-uso[hidden]{display:none !important}
-  #sb-uso{background:var(--sb-panel);border:1px solid var(--sb-line);border-radius:12px;padding:11px 12px 12px}
-  .sb-uso-plan{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--accent);padding:0 0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .12s ease}
+  #sb-uso{position:relative;height:40px}
+  .sb-uso-card{position:absolute;left:0;right:0;bottom:0;z-index:2;background:linear-gradient(var(--sb-panel),var(--sb-panel)),var(--sb-bg);border:1px solid var(--sb-line);border-radius:12px;padding:12px;
+    transition:border-color .2s ease,box-shadow .2s ease}
+  .sb-uso-det{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .28s cubic-bezier(.2,.8,.2,1),opacity .2s ease}
+  .sb-uso-det>div{overflow:hidden;min-height:0}
+  .sb-uso-rows{padding-bottom:9px;margin-bottom:9px;border-bottom:1px solid var(--sb-line)}
+  #sb-uso:hover .sb-uso-det,#sb-uso:focus-visible .sb-uso-det{grid-template-rows:1fr;opacity:1}
+  #sb-uso:hover .sb-uso-card,#sb-uso:focus-visible .sb-uso-card{border-color:rgba(242,183,5,.35);box-shadow:0 -12px 32px rgba(0,0,0,.45)}
+  #sb-uso:focus-visible{outline:none}
+  #sb-uso:focus-visible .sb-uso-card{outline:2px solid var(--accent);outline-offset:2px}
+  .sb-uso-plan{display:flex;align-items:center;gap:8px;height:14px;font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--accent);white-space:nowrap;transition:color .12s ease}
+  .sb-uso-plan>span{overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .sb-uso-plan>svg{margin-left:auto;flex:none;color:var(--sb-dim);transition:transform .28s ease}
+  #sb-uso:hover .sb-uso-plan>svg,#sb-uso:focus-visible .sb-uso-plan>svg{transform:rotate(180deg)}
+  /* aviso cerrado: si algún límite va alto o agotado, se nota sin abrir */
+  .sb-uso-dot{width:6px;height:6px;border-radius:999px;flex:none}
+  .sb-uso-dot.alto{background:#e09b2d}
+  .sb-uso-dot.agotado{background:#f6928d}
+  @media (prefers-reduced-motion:reduce){.sb-uso-det,.sb-uso-card,.sb-uso-plan>svg{transition:none}}
   .sb-uso-row{display:flex;flex-direction:column;gap:4px;padding:5px 0}
   .sb-uso-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:11.5px}
   .sb-uso-label{color:#b5ad9d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
@@ -539,16 +562,8 @@ function sidebar(activeTab: string, niche: NichePack | null, visibleIds: Set<str
       </div>
     </div>
     <nav class="sb-nav">${sections}</nav>
-    <div class="sb-foot" style="padding:16px;border-top:1px solid var(--sb-line)">
-      <a id="sb-uso" href="/admin/plan" hidden style="display:block;margin-bottom:12px;color:inherit"></a>
-      <div style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;background:var(--sb-panel)">
-        <div style="width:32px;height:32px;flex:none;border-radius:10px;background:rgba(242,183,5,.18);display:flex;align-items:center;justify-content:center;color:var(--accent)">
-          <i data-lucide="bot" width="16" height="16"></i>
-        </div>
-        <div style="line-height:1.25;overflow:hidden">
-          <div style="font-size:12px;font-weight:700;color:var(--sb-ink);white-space:nowrap;text-overflow:ellipsis;overflow:hidden">Panel del bot</div>
-        </div>
-      </div>
+    <div class="sb-foot" style="padding:12px 16px 16px;border-top:1px solid var(--sb-line)">
+      <a id="sb-uso" href="/admin/plan" hidden style="display:block;color:inherit"></a>
     </div>
   </aside>`;
 }
@@ -648,8 +663,18 @@ export function layout(opts: {
           (l.excedente ? '<div class="sb-uso-extra">' + esc(l.excedente) + '</div>' : '') +
         '</div>';
       }).join('');
-      box.innerHTML = '<div class="sb-uso-plan" title="Ver plan y facturación">' + esc(d.plan) + (d.isLive ? '' : ' · sin acceso') + '</div>' + rows;
+      var lims = d.limites || [];
+      var aviso = lims.some(function (l) { return l.agotado && !l.conExcedente; }) ? 'agotado'
+        : lims.some(function (l) { return l.agotado || (l.limit !== null && l.used / Math.max(l.limit, 1) >= 0.8); }) ? 'alto' : '';
+      box.innerHTML = '<div class="sb-uso-card">' +
+        '<div class="sb-uso-det"><div><div class="sb-uso-rows">' + rows + '</div></div></div>' +
+        '<div class="sb-uso-plan" title="Ver plan y facturación"><span>' + esc(d.plan) + (d.isLive ? '' : ' · sin acceso') + '</span>' +
+        (aviso ? '<i class="sb-uso-dot ' + aviso + '"></i>' : '') +
+        '<i data-lucide="chevron-up" width="14" height="14"></i></div>' +
+      '</div>';
+      box.setAttribute('aria-label', 'Plan ' + d.plan + ': ver consumo y facturación');
       box.hidden = false;
+      if (window.lucide) window.lucide.createIcons();
     }).catch(function () {});
 
     fetch('/admin/projects').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
