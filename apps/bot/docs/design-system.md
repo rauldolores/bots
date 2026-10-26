@@ -246,7 +246,10 @@ The shell renders, for every page, a sticky topbar with the **breadcrumb
   **Excepción (desde 2026-10):** las pantallas migradas a la estructura de
   AduaniaX abren con `pageHero()` de `src/admin/views/ui.ts` (encabezado oscuro
   con el h1) y llaman `layout({ ..., hero: true })`: el topbar se queda solo
-  con la ruta, sin repetir el título.
+  con la ruta, sin repetir el título. Las pantallas de trabajo a toda la altura
+  (Conversaciones, la bandeja de dos paneles) NO llevan hero: se queda el h1
+  del topbar y el armazón usa los mismos tokens (Inter, 40px/12px, tarjeta de
+  16px, avatares cuadrados de iniciales) dentro de su propia hoja `.nds-*`.
 - Start the body with content (filters, stats, the sub-tab strip if the tab has
   sub-views, cards…). Section-level headings inside the body are fine.
 - `<main>` already has `padding:26px 28px`. Add vertical rhythm with a flex
