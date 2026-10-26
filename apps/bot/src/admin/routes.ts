@@ -186,6 +186,7 @@ import {
   VERIFIER_COOKIE,
   type KontroliaSession,
 } from "./kontroliaAuth";
+import { BAND_BRANDING_PATH, bandAuthServerUrl, bandSnippet, fetchBranding, injectBand, panelOrigin } from "./kontroliaBand";
 import {
   resolveAdminTenant,
   setBotCookie,
@@ -228,7 +229,11 @@ function isAuthExempt(path: string): boolean {
 // no podría renderizar la página que le explica por qué no tiene acceso.
 // /ayuda también: una organización recién creada, sin bots, tiene que poder
 // leer la guía y pedir soporte antes de crear el primero.
-const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots", "/access-denied", "/ayuda", "/ayuda/soporte", "/plan/uso"];
+// BAND_BRANDING_PATH (el proxy de la banda de KontrolIA) tampoco necesita bot
+// ni permisos de la app: solo trae la marca de la organización de quien ya
+// inició sesión, y la banda se pinta igual en "elige tu plan" o en "acceso
+// restringido".
+const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots", "/access-denied", "/ayuda", "/ayuda/soporte", "/plan/uso", BAND_BRANDING_PATH];
 
 // Lo que sigue abierto cuando la organización NO tiene plan vivo (billing.md
 // B2): la pantalla de planes y su compra, la vuelta del pago, cambiarse de
@@ -238,7 +243,7 @@ const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bot
 // pagar — cerrarle eso sería dejarla sin salida.
 // Ayuda sigue abierta sin plan: quien no puede pagar o no entiende cómo,
 // necesita justamente la guía y el formulario de soporte.
-const BILLING_EXEMPT_PATTERNS = [/\/plan(\/|$)/, /\/billing\/ok$/, /\/switch-org$/, /\/projects$/, /\/logout$/, /\/organizaciones(\/|$)/, /\/usuarios(\/|$)/, /\/ayuda(\/|$)/];
+const BILLING_EXEMPT_PATTERNS = [/\/kontrolia\/api\/branding$/, /\/plan(\/|$)/, /\/billing\/ok$/, /\/switch-org$/, /\/projects$/, /\/logout$/, /\/organizaciones(\/|$)/, /\/usuarios(\/|$)/, /\/ayuda(\/|$)/];
 function isBillingExempt(path: string): boolean {
   return BILLING_EXEMPT_PATTERNS.some((re) => re.test(path));
 }
@@ -406,6 +411,37 @@ adminApp.use("*", async (c, next) => {
   // pass-public (DASHBOARD_PUBLIC=1): sin sesión, mismo fallback que Basic Auth.
   await setTenantContext(c, null);
   return next();
+});
+
+// Banda superior de KontrolIA (ver admin/kontroliaBand.ts): se agrega al final
+// de cada PÁGINA COMPLETA del panel — nunca a fragmentos de htmx, nunca sin
+// sesión de KontrolIA verificada (Basic Auth, DASHBOARD_PUBLIC) y nunca si el
+// despliegue no puso KONTROLIA_AUTH_SERVER_URL. Fuera de /admin (widget,
+// webhooks, sitio) esto no corre: vive en adminApp.
+adminApp.use("*", async (c, next) => {
+  await next();
+  const authServer = bandAuthServerUrl(c.env);
+  if (!authServer || !c.get("kontroliaAccessToken")) return;
+  if (c.res.status !== 200 || c.req.header("hx-request")) return;
+  if (!(c.res.headers.get("content-type") ?? "").includes("text/html")) return;
+  const html = await c.res.text();
+  c.res = new Response(injectBand(html, bandSnippet(authServer)), c.res);
+  c.res.headers.delete("content-length");
+});
+
+// Proxy de GET /api/branding para band.v1.js (apiBase = /admin/kontrolia).
+// El access_token sale de la cookie httpOnly de la sesión — el guard de arriba
+// ya lo verificó y, si estaba vencido, lo refrescó — y solo viaja de este
+// servidor al auth-server: al navegador nunca llega. El Authorization que
+// manda band.v1.js es un marcador sin valor y se ignora. Banda apagada o sin
+// sesión de KontrolIA (Basic Auth, DASHBOARD_PUBLIC): 404, y la banda no pinta.
+adminApp.get(BAND_BRANDING_PATH, async (c) => {
+  c.header("Cache-Control", "no-store");
+  const authServer = bandAuthServerUrl(c.env);
+  const accessToken = c.get("kontroliaAccessToken");
+  if (!authServer || !accessToken) return c.json({ error: "Banda de KontrolIA no disponible" }, 404);
+  const { status, body } = await fetchBranding(authServer, accessToken, panelOrigin(c.env, c.req.url));
+  return c.json(body as object, status as 200);
 });
 
 // --- Login con KontrolIA Auth (F5) ------------------------------------------

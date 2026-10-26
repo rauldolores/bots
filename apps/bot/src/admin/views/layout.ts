@@ -238,9 +238,14 @@ const GLOBAL_STYLE = `
   .toast{background:var(--cream);border:1px solid var(--cream);color:#fff;border-radius:var(--radius-sm);box-shadow:var(--shadow-lg);
     animation:toastIn .25s cubic-bezier(.16,1,.3,1),toastOut .3s ease-in 2.4s forwards}
 
-  /* app shell */
-  .shell{min-height:100vh;display:grid;grid-template-columns:248px 1fr;background:var(--bg)}
-  .sb{background:var(--sb-bg);color:var(--sb-text);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;
+  /* app shell
+     --kontrolia-band-height: la banda superior de KontrolIA (admin/kontroliaBand.ts)
+     la pone en 56px al montarse. Sin banda la variable no existe y todo vale 0px:
+     el panel queda exactamente igual. Con banda, la banda se queda fija arriba y
+     el sidebar y el header se pegan DEBAJO de ella en vez de taparla. */
+  #kontrolia-band{position:sticky;top:0;z-index:45}
+  .shell{min-height:calc(100vh - var(--kontrolia-band-height,0px));display:grid;grid-template-columns:248px 1fr;background:var(--bg)}
+  .sb{background:var(--sb-bg);color:var(--sb-text);display:flex;flex-direction:column;position:sticky;top:var(--kontrolia-band-height,0px);height:calc(100vh - var(--kontrolia-band-height,0px));
     z-index:1;box-shadow:1px 0 0 var(--sb-line),2px 0 8px rgba(28,25,23,.05)}
   .sb-nav{padding:14px 12px;display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto}
   .sb-nav::-webkit-scrollbar-track{background:var(--sb-bg)}
@@ -276,7 +281,7 @@ const GLOBAL_STYLE = `
 
   @media (max-width:767px){
     .shell{grid-template-columns:1fr}
-    .sb{position:sticky;top:0;height:auto;flex-direction:row;align-items:center;overflow-x:auto}
+    .sb{position:sticky;top:var(--kontrolia-band-height,0px);height:auto;flex-direction:row;align-items:center;overflow-x:auto}
     .sb-brand{flex:none;border-bottom:none !important;border-right:1px solid var(--sb-line)}
     .sb-nav{flex-direction:row;align-items:center;gap:4px;padding:8px 10px;overflow-y:visible;overflow-x:auto}
     .sb-sec{display:none}
@@ -554,7 +559,7 @@ export function layout(opts: {
   <div class="shell">
     ${sidebar(opts.activeTab, niche, visibleNavIds)}
     <div style="display:flex;flex-direction:column;min-width:0">
-      <header style="position:sticky;top:0;z-index:30;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:14px 28px;display:flex;align-items:center;gap:20px">
+      <header style="position:sticky;top:var(--kontrolia-band-height,0px);z-index:30;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:14px 28px;display:flex;align-items:center;gap:20px">
         <div style="min-width:0">
           <div style="display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.2em;color:var(--accent-2);text-transform:uppercase;font-weight:700">
             <i data-lucide="activity" width="12" height="12"></i> ${section.label} / ${item.label}
