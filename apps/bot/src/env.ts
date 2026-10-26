@@ -204,6 +204,8 @@ export interface Env {
   // Dominio público del auth-server de KontrolIA (NO el de Supabase): ahí
   // viven el alta de cuentas por app (/register?app=…) y la API de
   // administración (roles, invitaciones). Vacío = https://auth.kontrolia.io.
+  // La banda superior de KontrolIA (admin/kontroliaBand.ts) es la excepción:
+  // solo aparece si esta variable está puesta EXPLÍCITAMENTE — vacía, no hay banda.
   KONTROLIA_AUTH_SERVER_URL?: string;
   // Slug con el que esta app está registrada en KontrolIA Auth. Vacío =
   // "nodia-agents" (el catálogo de permisos usa el mismo, ver admin/permissions.ts).
