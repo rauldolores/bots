@@ -1,13 +1,14 @@
 // Dashboard shell: a fixed 248px sidebar (grouped navigation) + a topbar,
 // wrapping each tab's server-rendered body.
 //
-// Tema "Kontrolia" en clave papel: contenido crema con tarjetas blancas
-// redondeadas de sombra suave, y la sidebar como una hoja blanca apoyada sobre
-// ese escritorio (las otras apps del ecosistema la llevan oscura; aquí se
-// decidió clara a propósito). El acento es ÁMBAR en lugar del verde de las
-// otras apps. Los token NAMES no cambian con cada rediseño — solo sus valores —
-// así que las 15 vistas se re-tematizan sin tocarlas. Ver docs/design-system.md,
-// el contrato que toda vista sigue.
+// Tema "Kontrolia" con la paleta nodia.agents: la ESTRUCTURA de las demás apps
+// del ecosistema (AduaniaX, Faqturia: sidebar oscura de 256px, encabezado de
+// 64px, Inter, controles de 40px con esquinas de 12px) y los COLORES de Nodia
+// (tinta cálida en vez de pizarra, lienzo beige, ámbar con texto oscuro).
+// Hasta 2026-10 la sidebar fue clara; se volvió oscura para que el panel se
+// sienta parte del ecosistema. Los token NAMES no cambian con cada rediseño —
+// solo sus valores — así que las vistas se re-tematizan sin tocarlas. Ver
+// docs/design-system.md, el contrato que toda vista sigue.
 //
 // The layout() API is unchanged: views keep their own activeTab id; the group,
 // breadcrumb and page title are derived here.
@@ -89,7 +90,7 @@ const HEAD_ASSETS = `
   <link rel="apple-touch-icon" href="/nodia-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -97,24 +98,25 @@ const HEAD_ASSETS = `
       theme: {
         extend: {
           colors: {
-            bg: "#f3f1ec",
+            bg: "#efeae1",
             panel: "#ffffff",
-            panel2: "#f5f3ee",
-            raise: "#efece3",
-            line: "#e4e0d6",
-            linelit: "#dcd8cd",
-            accent: { DEFAULT: "#f5c518", soft: "rgba(245,197,24,.13)" },
+            panel2: "#f3eee6",
+            raise: "#ebe4d8",
+            line: "#e3dacb",
+            linelit: "#d3c7b4",
+            accent: { DEFAULT: "#f2b705", soft: "#fdf0c8" },
             accent2: "#8a6a00",
-            cream: "#1c1b18",
-            muted: "#4a463d",
-            dim: "#a39c8e",
-            ok: "#1f9d55",
+            cream: "#1c1815",
+            muted: "#5c534a",
+            dim: "#8c7f6d",
+            ok: "#0b6e7a",
             info: "#2563eb",
-            bad: "#dc2626",
+            bad: "#b3261e",
             violet: "#7c3aed",
           },
           fontFamily: {
-            display: ["'Archivo'", "ui-sans-serif", "system-ui", "sans-serif"],
+            sans: ["'Inter'", "ui-sans-serif", "system-ui", "sans-serif"],
+            display: ["'Inter'", "ui-sans-serif", "system-ui", "sans-serif"],
             mono: ["'JetBrains Mono'", "ui-monospace", "monospace"],
           },
         },
@@ -131,27 +133,28 @@ const HEAD_ASSETS = `
 const GLOBAL_STYLE = `
 <style>
   :root{
-    --bg:#f3f1ec; --panel:#ffffff; --panel2:#f5f3ee; --raise:#efece3;
-    --line:#e4e0d6; --linelit:#dcd8cd;
-    --accent:#f5c518; --accent-hover:#e8b00a; --accent-2:#8a6a00; --accent-soft:rgba(245,197,24,.13);
-    --cream:#1c1b18; --muted:#4a463d; --dim:#a39c8e;
-    --ok:#1f9d55; --ok-soft:rgba(31,157,85,.14); --info:#2563eb; --bad:#dc2626; --violet:#7c3aed;
-    /* sombras y radios del sistema (Kontrolia): suaves, nunca offset duro */
-    --shadow-sm:0 1px 2px rgba(28,25,23,.05);
-    --shadow-md:0 2px 8px rgba(28,25,23,.06),0 1px 2px rgba(28,25,23,.05);
-    --shadow-lg:0 24px 52px -14px rgba(28,27,24,.30);
-    --radius:13px; --radius-sm:10px;
-    /* sidebar clara: hoja blanca sobre el escritorio crema. Los valores son los
-       mismos --panel/--panel2/--line/--muted del contenido; siguen siendo tokens
-       aparte para poder volver a separarla del contenido sin tocar las vistas. */
-    --sb-bg:#ffffff; --sb-panel:#f5f3ee; --sb-line:#e4e0d6;
-    --sb-text:#4a463d; --sb-dim:#8b8578;
+    /* Paleta nodia.agents (lienzo beige, tinta cálida, ámbar). Los colores de
+       estado van como punto o texto, nunca de relleno grande. */
+    --bg:#efeae1; --panel:#ffffff; --panel2:#f3eee6; --raise:#ebe4d8;
+    --line:#e3dacb; --linelit:#d3c7b4;
+    --accent:#f2b705; --accent-hover:#d9a404; --accent-2:#8a6a00; --accent-soft:#fdf0c8; --accent-ink:#5c4400;
+    --cream:#1c1815; --muted:#5c534a; --dim:#8c7f6d;
+    --ok:#0b6e7a; --ok-soft:rgba(11,110,122,.12); --warn:#8a5a00; --info:#2563eb; --bad:#b3261e; --violet:#7c3aed;
+    /* sombras y radios (medidas de AduaniaX): suaves, nunca offset duro */
+    --shadow-sm:0 1px 2px rgba(28,24,21,.05);
+    --shadow-md:0 12px 32px -12px rgba(28,24,21,.14);
+    --shadow-lg:0 24px 52px -14px rgba(28,24,21,.30);
+    --radius:16px; --radius-sm:12px; --radius-lg:20px;
+    /* sidebar oscura en tinta cálida (no la pizarra de AduaniaX). Solo la usa
+       este archivo; las vistas no deberían necesitarla. */
+    --sb-bg:#1c1815; --sb-panel:rgba(255,255,255,.05); --sb-active:rgba(255,255,255,.08); --sb-line:rgba(255,255,255,.07);
+    --sb-text:#b6ab9c; --sb-dim:#968c7d; --sb-ink:#fbf8f3; --sb-label:#c99a0a;
     /* legacy aliases kept so mockup-derived snippets keep working */
-    --border:#e4e0d6; --border-lit:#dcd8cd; --green:#1f9d55; --blue:#2563eb; --red:#dc2626;
+    --border:#e3dacb; --border-lit:#d3c7b4; --green:#0b6e7a; --blue:#2563eb; --red:#b3261e;
   }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;background:var(--bg);color:var(--cream);
-    font-family:'Archivo',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+    font-family:'Inter',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
   a{color:var(--accent-2);text-decoration:none}
   a:hover{color:var(--cream)}
   ::-webkit-scrollbar{width:10px;height:10px}
@@ -161,6 +164,11 @@ const GLOBAL_STYLE = `
   input,textarea,select{font-family:inherit}
   input::placeholder,textarea::placeholder{color:var(--dim)}
   input[type="range"]{accent-color:var(--accent);height:4px}
+  /* Foco igual en todo el panel (patrón AduaniaX): borde ámbar y halo suave.
+     !important porque casi todos los campos fijan su borde inline. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,select:focus,textarea:focus{
+    outline:none;border-color:var(--accent-2) !important;box-shadow:0 0 0 3px var(--accent-soft) !important}
+  button:focus-visible,a:focus-visible{outline:2px solid var(--accent-2);outline-offset:2px}
 
   /* El tema anterior era cuadrado, así que casi ningún estilo inline fija
      border-radius: estas reglas globales redondean todo el sistema de una vez.
@@ -185,17 +193,17 @@ const GLOBAL_STYLE = `
   /* keyframes */
   @keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
   @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.82)}}
-  @keyframes ring{0%{box-shadow:0 0 0 0 rgba(22,163,74,.45)}100%{box-shadow:0 0 0 8px rgba(22,163,74,0)}}
+  @keyframes ring{0%{box-shadow:0 0 0 0 rgba(11,110,122,.4)}100%{box-shadow:0 0 0 7px rgba(11,110,122,0)}}
   @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
   @keyframes fadeIn{from{opacity:0}to{opacity:1}}
   @keyframes popIn{from{opacity:0;transform:scale(.94) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
   @keyframes toastIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
   @keyframes toastOut{to{opacity:0;transform:translateY(8px);visibility:hidden}}
 
-  /* sidebar nav (fondo blanco: hover en el crema del contenido) */
-  .navlink{border-radius:var(--radius-sm)}
-  .navlink:hover{background:var(--sb-panel);color:var(--cream)}
-  .navlink:hover [data-lucide]{color:var(--accent-2)}
+  /* sidebar nav (fondo tinta: hover en blanco translúcido, ícono ámbar) */
+  .navlink{border-radius:var(--radius-sm);transition:background .12s ease,color .12s ease}
+  .navlink:hover{background:var(--sb-panel);color:var(--sb-ink) !important}
+  .navlink:hover [data-lucide],.navlink:hover svg{color:var(--accent) !important}
 
   /* entrance + botones (estilo Kontrolia: relieve suave, nada brutalista) */
   .card{animation:rise .4s cubic-bezier(.16,1,.3,1) both}
@@ -233,7 +241,7 @@ const GLOBAL_STYLE = `
   /* modal + toast (class names kept from prior layout for existing views) */
   .modal-backdrop{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;
     padding:1rem;background:rgba(28,25,23,.45);animation:fadeIn .15s ease-out}
-  .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-lg);
+  .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);
     animation:popIn .18s cubic-bezier(.16,1,.3,1);transform-origin:center}
   .toast{background:var(--cream);border:1px solid var(--cream);color:#fff;border-radius:var(--radius-sm);box-shadow:var(--shadow-lg);
     animation:toastIn .25s cubic-bezier(.16,1,.3,1),toastOut .3s ease-in 2.4s forwards}
@@ -244,20 +252,18 @@ const GLOBAL_STYLE = `
      el panel queda exactamente igual. Con banda, la banda se queda fija arriba y
      el sidebar y el header se pegan DEBAJO de ella en vez de taparla. */
   #kontrolia-band{position:sticky;top:0;z-index:45}
-  .shell{min-height:calc(100vh - var(--kontrolia-band-height,0px));display:grid;grid-template-columns:248px 1fr;background:var(--bg)}
+  .shell{min-height:calc(100vh - var(--kontrolia-band-height,0px));display:grid;grid-template-columns:256px 1fr;background:var(--bg)}
   .sb{background:var(--sb-bg);color:var(--sb-text);display:flex;flex-direction:column;position:sticky;top:var(--kontrolia-band-height,0px);height:calc(100vh - var(--kontrolia-band-height,0px));
-    z-index:1;box-shadow:1px 0 0 var(--sb-line),2px 0 8px rgba(28,25,23,.05)}
-  .sb-nav{padding:14px 12px;display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto}
+    z-index:1;border-right:1px solid var(--sb-line)}
+  .sb-nav{padding:12px;display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto}
   .sb-nav::-webkit-scrollbar-track{background:var(--sb-bg)}
-  .sb-nav::-webkit-scrollbar-thumb{background:var(--linelit)}
-  .sb-sec{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;padding:16px 12px 6px}
-  /* Consumo del plan en el sidebar (se pinta con /admin/plan/uso).
-     Bloque de TINTA dentro de una sidebar clara: es lo único que no es
-     navegación ahí abajo, y en papel sobre papel se perdía. Los colores van
-     fijos aquí, no por los tokens --sb-* (que son claros a propósito desde
-     el rediseño): mismo patrón que "Resumen del envío" en campanas.ts. */
+  .sb-nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12)}
+  .sb-sec{font-size:9px;font-weight:900;letter-spacing:.2em;text-transform:uppercase;padding:14px 12px 6px}
+  /* Consumo del plan en el sidebar (se pinta con /admin/plan/uso): un bloque
+     apenas más claro que la tinta de la sidebar. Sus colores de texto ya eran
+     para fondo oscuro desde que la sidebar era clara. */
   #sb-uso[hidden]{display:none !important}
-  #sb-uso{background:#1b1815;border-radius:12px;padding:11px 12px 12px}
+  #sb-uso{background:var(--sb-panel);border:1px solid var(--sb-line);border-radius:12px;padding:11px 12px 12px}
   .sb-uso-plan{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--accent);padding:0 0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .12s ease}
   .sb-uso-row{display:flex;flex-direction:column;gap:4px;padding:5px 0}
   .sb-uso-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:11.5px}
@@ -277,10 +283,14 @@ const GLOBAL_STYLE = `
   /* El nombre del plan ya nace ámbar (es el título del bloque, no un enlace
      que haya que descubrir); al pasar el mouse aclara para acusar recibo. */
   #sb-uso:hover .sb-uso-plan{color:#ffd95e}
-  .live-pill{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:7px 14px;box-shadow:var(--shadow-sm)}
+  .live-pill{display:flex;align-items:center;gap:8px;height:32px;background:var(--panel2);border-radius:999px;padding:0 12px;white-space:nowrap}
+  .hdr-btn{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-sm);color:var(--muted)}
+  .hdr-btn:hover{background:var(--panel2);color:var(--cream)}
 
   @media (max-width:767px){
-    .shell{grid-template-columns:1fr}
+    /* rows auto+1fr: sin esto, en pantallas con poco contenido la fila de la
+       barra se estira para llenar el 100vh y queda un bloque oscuro enorme. */
+    .shell{grid-template-columns:1fr;grid-template-rows:auto 1fr}
     .sb{position:sticky;top:var(--kontrolia-band-height,0px);height:auto;flex-direction:row;align-items:center;overflow-x:auto}
     .sb-brand{flex:none;border-bottom:none !important;border-right:1px solid var(--sb-line)}
     .sb-nav{flex-direction:row;align-items:center;gap:4px;padding:8px 10px;overflow-y:visible;overflow-x:auto}
@@ -300,9 +310,9 @@ const GLOBAL_STYLE = `
   #nb-barra::before{content:"";position:absolute;top:0;bottom:0;width:40%;background:var(--accent);animation:nb-barrer 1.1s ease-in-out infinite}
   @keyframes nb-barrer{from{left:-40%}to{left:100%}}
   #nb-capa{position:fixed;inset:0;z-index:70;display:none;align-items:center;justify-content:center;
-    background:rgba(243,241,236,.6);backdrop-filter:blur(1.5px);cursor:progress}
+    background:rgba(239,234,225,.6);backdrop-filter:blur(1.5px);cursor:progress}
   #nb-capa.on{display:flex}
-  #nb-capa .nb-caja{background:var(--panel);border:1px solid var(--linelit);box-shadow:var(--shadow-lg);padding:18px 22px;min-width:240px;max-width:340px;
+  #nb-capa .nb-caja{background:var(--panel);border:1px solid var(--linelit);border-radius:var(--radius);box-shadow:var(--shadow-lg);padding:18px 22px;min-width:240px;max-width:340px;
     display:flex;align-items:flex-start;gap:12px;font-size:13px;color:var(--cream)}
   #nb-capa .nb-caja .nb-spin{width:18px;height:18px;margin:1px 0 0;color:var(--accent-2)}
   #nb-capa .nb-msg{font-weight:600}
@@ -462,14 +472,13 @@ const GLOBAL_SCRIPT = `${ESPERA_SCRIPT}
 function navItem(item: Item, active: boolean): string {
   const base =
     "display:flex;align-items:center;gap:11px;padding:9px 12px;font-size:13px;";
-  // Activo = tinte ámbar suave con texto tinta e ícono ámbar oscuro: sobre la
-  // sidebar blanca, la píldora ámbar sólida de las otras apps gritaba más que
-  // el contenido. Inactivo = texto tenue.
+  // Activo = blanco translúcido con texto claro e ícono ámbar (como AduaniaX,
+  // con tinta cálida). La píldora ámbar sólida gritaba más que el contenido.
   const style = active
-    ? base + "color:var(--cream);background:var(--accent-soft);font-weight:700"
-    : base + "color:var(--sb-text);font-weight:500";
-  const iconColor = active ? "var(--accent-2)" : "var(--sb-dim)";
-  return `<a href="${item.href}" class="navlink" style="${style}">
+    ? base + "color:var(--sb-ink);background:var(--sb-active);font-weight:700"
+    : base + "color:var(--sb-text);font-weight:600";
+  const iconColor = active ? "var(--accent)" : "var(--sb-dim)";
+  return `<a href="${item.href}" class="navlink" style="${style}"${active ? ' aria-current="page"' : ""}>
     <i data-lucide="${item.icon}" width="17" height="17" style="color:${iconColor}"></i> ${item.label}
   </a>`;
 }
@@ -497,8 +506,8 @@ function sidebar(activeTab: string, niche: NichePack | null, visibleIds: Set<str
     const shown = sec.items.filter((i) => visible(i.id));
     if (shown.length === 0) return "";
     const hasActive = shown.some((i) => i.id === activeTab);
-    // El ámbar vivo no se lee como texto sobre blanco (ver .text-accent).
-    const labelColor = hasActive ? "var(--accent-2)" : "var(--sb-dim)";
+    // Títulos de sección en ámbar apagado; el de la sección activa, vivo.
+    const labelColor = hasActive ? "var(--accent)" : "var(--sb-label)";
     const items = shown
       .map((raw) => {
         const i = applyNiche(raw, niche);
@@ -509,24 +518,24 @@ function sidebar(activeTab: string, niche: NichePack | null, visibleIds: Set<str
   }).join("");
 
   return `<aside class="sb">
-    <div class="sb-brand" style="padding:20px 18px 16px;border-bottom:1px solid var(--sb-line)">
-      <div style="display:flex;align-items:center;gap:11px">
-        <img src="/nodia-icon.png" alt="" width="36" height="36" style="width:36px;height:36px;flex:none;border-radius:12px;display:block">
+    <div class="sb-brand" style="height:64px;flex:none;display:flex;align-items:center;padding:0 20px;border-bottom:1px solid var(--sb-line)">
+      <div style="display:flex;align-items:center;gap:10px">
+        <img src="/nodia-icon.png" alt="" width="34" height="34" style="width:34px;height:34px;flex:none;border-radius:12px;display:block">
         <div style="line-height:1.1">
-          <div style="font-family:'Archivo';font-weight:800;font-size:15px;letter-spacing:-.01em;color:var(--cream)">nodia<span style="color:var(--accent)">.</span>agents</div>
-          <div style="font-size:9px;letter-spacing:.24em;color:var(--accent);text-transform:uppercase;font-weight:600">by Kontrolia</div>
+          <div style="font-weight:800;font-size:16px;letter-spacing:-.03em;color:var(--sb-ink)">nodia<span style="color:var(--accent)">.</span>agents</div>
+          <div style="font-size:8px;letter-spacing:.2em;color:var(--sb-dim);text-transform:uppercase;font-weight:800;margin-top:2px">by Kontrolia</div>
         </div>
       </div>
     </div>
     <nav class="sb-nav">${sections}</nav>
-    <div class="sb-foot" style="padding:14px;border-top:1px solid var(--sb-line)">
+    <div class="sb-foot" style="padding:16px;border-top:1px solid var(--sb-line)">
       <a id="sb-uso" href="/admin/plan" hidden style="display:block;margin-bottom:12px;color:inherit"></a>
-      <div style="display:flex;align-items:center;gap:10px;padding:9px 10px;border:1px solid var(--sb-line);border-radius:12px;background:var(--sb-panel)">
-        <div style="width:30px;height:30px;flex:none;border-radius:9px;background:rgba(234,179,8,.16);display:flex;align-items:center;justify-content:center;color:var(--accent)">
+      <div style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;background:var(--sb-panel)">
+        <div style="width:32px;height:32px;flex:none;border-radius:10px;background:rgba(242,183,5,.18);display:flex;align-items:center;justify-content:center;color:var(--accent)">
           <i data-lucide="bot" width="16" height="16"></i>
         </div>
         <div style="line-height:1.25;overflow:hidden">
-          <div style="font-size:12px;font-weight:600;color:var(--cream);white-space:nowrap;text-overflow:ellipsis;overflow:hidden">Panel del bot</div>
+          <div style="font-size:12px;font-weight:700;color:var(--sb-ink);white-space:nowrap;text-overflow:ellipsis;overflow:hidden">Panel del bot</div>
         </div>
       </div>
     </div>
@@ -559,12 +568,12 @@ export function layout(opts: {
   <div class="shell">
     ${sidebar(opts.activeTab, niche, visibleNavIds)}
     <div style="display:flex;flex-direction:column;min-width:0">
-      <header style="position:sticky;top:var(--kontrolia-band-height,0px);z-index:30;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:14px 28px;display:flex;align-items:center;gap:20px">
+      <header style="position:sticky;top:var(--kontrolia-band-height,0px);z-index:30;min-height:64px;background:rgba(255,255,255,.82);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:8px 28px;display:flex;align-items:center;gap:16px">
         <div style="min-width:0">
-          <div style="display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.2em;color:var(--accent-2);text-transform:uppercase;font-weight:700">
-            <i data-lucide="activity" width="12" height="12"></i> ${section.label} / ${item.label}
+          <div style="font-size:10px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;font-weight:800">
+            ${section.label} / ${item.label}
           </div>
-          <h1 style="font-family:'Archivo';font-weight:800;font-size:22px;margin:2px 0 0;letter-spacing:-.02em">${item.label}</h1>
+          <h1 style="font-weight:900;font-size:19px;margin:1px 0 0;letter-spacing:-.03em;line-height:1.2">${item.label}</h1>
         </div>
         <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
           <div id="ctx-switcher" style="position:relative"></div>
@@ -572,15 +581,15 @@ export function layout(opts: {
           <div id="account-divider" style="display:none;width:1px;height:28px;background:var(--line)"></div>
           <div id="account-switcher" style="position:relative"></div>
         </div>
-        <a href="/admin/ayuda" title="Ayuda y soporte" aria-label="Ayuda y soporte" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--muted);box-shadow:var(--shadow-sm)">
-          <i data-lucide="circle-help" width="17" height="17"></i>
-        </a>
         <div class="live-pill">
-          <span style="width:8px;height:8px;border-radius:50%;background:var(--ok);animation:pulse 1.8s ease-in-out infinite,ring 2s infinite"></span>
-          <span style="font-size:11.5px;font-weight:700">Bot en línea</span>
+          <span style="width:7px;height:7px;border-radius:50%;background:var(--ok);animation:ring 2s infinite"></span>
+          <span style="font-size:12px;font-weight:600;color:var(--muted)">Bot en línea</span>
         </div>
+        <a href="/admin/ayuda" class="hdr-btn" title="Ayuda y soporte" aria-label="Ayuda y soporte">
+          <i data-lucide="circle-help" width="18" height="18"></i>
+        </a>
       </header>
-      <main style="padding:26px 28px;min-width:0">${opts.body}</main>
+      <main style="padding:28px;min-width:0">${opts.body}</main>
     </div>
   </div>
   <div id="modal-root"></div>
@@ -676,7 +685,7 @@ export function layout(opts: {
                   '</div>' +
                   '<div style="padding:0 8px 8px;display:flex;flex-direction:column;gap:2px;max-height:250px;overflow:auto">' + orgRows + '</div>' +
                   '<div style="border-top:1px solid var(--line);padding:9px;margin-top:auto">' +
-                    '<a href="/admin/organizaciones" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;font-size:12.5px;color:var(--accent);text-decoration:none"><i data-lucide="building-2" width="14" height="14"></i> Gestionar organizaciones</a>' +
+                    '<a href="/admin/organizaciones" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;font-size:12.5px;color:var(--accent-2);text-decoration:none"><i data-lucide="building-2" width="14" height="14"></i> Gestionar organizaciones</a>' +
                   '</div>' +
                 '</div>' +
                 '<div style="display:flex;flex-direction:column">' +
@@ -845,11 +854,11 @@ export function layout(opts: {
 export function renderAccessDenied(feature?: string, visibleNavIds: Set<string> | null = new Set()): string {
   const body = `
     <div class="card" style="max-width:560px">
-      <div style="border:1px solid var(--linelit);background:var(--panel);box-shadow:var(--shadow-md);padding:28px">
-        <div style="display:inline-flex;align-items:center;gap:8px;border:1px solid var(--bad);color:var(--bad);font-size:10px;letter-spacing:.16em;padding:4px 10px;text-transform:uppercase">
+      <div style="border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow-md);padding:28px">
+        <div style="display:inline-flex;align-items:center;gap:8px;border:1px solid var(--bad);color:var(--bad);font-size:10px;letter-spacing:.16em;padding:4px 10px;text-transform:uppercase;border-radius:999px;font-weight:800">
           <i data-lucide="shield-alert" width="13" height="13"></i> Acceso restringido
         </div>
-        <h2 style="font-family:'Archivo';font-weight:700;font-size:22px;letter-spacing:-.02em;margin:14px 0 6px">
+        <h2 style="font-weight:700;font-size:22px;letter-spacing:-.02em;margin:14px 0 6px">
           ${feature ? `No tienes acceso a "${feature}"` : "Tu cuenta no tiene acceso a Nodia Agents"}
         </h2>
         <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin:0 0 20px;max-width:480px">
@@ -880,21 +889,21 @@ export function loginPage(error?: string): string {
   ${GLOBAL_STYLE}
 </head>
 <body style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem">
-  <form method="POST" action="/admin/auth/request" style="background:var(--panel);border:1px solid var(--linelit);box-shadow:var(--shadow-lg);padding:32px;max-width:360px;width:100%">
+  <form method="POST" action="/admin/auth/request" style="background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);padding:32px;max-width:360px;width:100%">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
-      <div style="width:34px;height:34px;flex:none;border:1.5px solid var(--accent);display:flex;align-items:center;justify-content:center;background:var(--accent-soft);box-shadow:var(--shadow-sm)">
-        <i data-lucide="terminal" width="18" height="18" style="color:var(--accent)"></i>
+      <div style="width:34px;height:34px;flex:none;border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--accent-soft)">
+        <i data-lucide="terminal" width="18" height="18" style="color:var(--accent-ink)"></i>
       </div>
       <div>
-        <h1 style="font-family:'Archivo';font-weight:700;font-size:18px;margin:0;letter-spacing:-.02em">Dashboard del bot</h1>
+        <h1 style="font-weight:700;font-size:18px;margin:0;letter-spacing:-.02em">Dashboard del bot</h1>
         <p style="font-size:11px;color:var(--dim);margin:2px 0 0">Te mandamos un link a tu email para entrar.</p>
       </div>
     </div>
     ${error ? `<p style="color:var(--bad);font-size:12px;margin:0 0 12px">${error}</p>` : ""}
     <input name="email" type="email" required placeholder="tu@email.com"
-      style="width:100%;background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:13px;outline:none;margin-bottom:14px">
+      style="width:100%;background:var(--bg);border:1px solid var(--line);color:var(--cream);height:40px;padding:0 12px;font-size:13px;outline:none;margin-bottom:14px">
     <button class="bigbtn" type="submit"
-      style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:11px;font-family:'Archivo';font-weight:700;font-size:13px;cursor:pointer">
+      style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);height:40px;font-weight:800;font-size:13px;cursor:pointer">
       Mandar link
     </button>
   </form>

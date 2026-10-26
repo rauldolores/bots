@@ -1,8 +1,10 @@
 # Nodia Agents Admin — Design System
 
-Tema **Kontrolia**: el mismo lenguaje visual del resto del ecosistema (sidebar
-oscura, contenido claro, tarjetas blancas redondeadas con sombra suave), con el
-acento en **ámbar** en lugar del verde de las otras apps. This is the
+Tema **Kontrolia** con la paleta **nodia.agents**: la ESTRUCTURA del resto del
+ecosistema (AduaniaX, Faqturia — sidebar oscura de 256px, encabezado de 64px,
+Inter, controles de 40px con esquinas de 12px, tarjetas de 16px) y los COLORES
+de Nodia (tinta cálida en vez de pizarra, lienzo beige, acento **ámbar** con
+texto oscuro encima). This is the
 **contract** for every view under `src/admin/views/`. The shell (`layout.ts`)
 already loads the fonts, Tailwind config, tokens, lucide, htmx and all the
 component classes below. Views only render the **body** — write it to match
@@ -26,44 +28,53 @@ color** (for `class="…"`). Use whichever fits; they resolve to the same hex.
 
 | CSS var | Tailwind | Hex | Use |
 |---|---|---|---|
-| `--bg` | `bg-bg` | `#f7f7f5` | page background (already on `<body>`) |
+| `--bg` | `bg-bg` | `#efeae1` | lienzo beige (already on `<body>`) |
 | `--panel` | `bg-panel` | `#ffffff` | card / panel surface |
-| `--panel2` | `bg-panel2` | `#f4f4f2` | nested surface, row hover, inputs-on-panel |
-| `--raise` | `bg-raise` | `#fafaf9` | raised chips / avatars |
-| `--line` | `border-line` | `#e7e5e4` | default border / divider |
-| `--linelit` | `border-linelit` | `#d6d3d1` | stronger border |
-| `--accent` | `text-accent` `bg-accent` `border-accent` | `#eab308` | primary accent (ámbar) |
-| `--accent-soft` | `bg-accent-soft` | `rgba(234,179,8,.13)` | accent wash / active bg |
-| `--accent-2` | `text-accent2` | `#a16207` | ámbar oscuro: acento LEGIBLE sobre blanco (links, texto acentuado) |
-| `--cream` | `text-cream` | `#1c1917` | primary text (nombre histórico, ver arriba) |
-| `--muted` | `text-muted` | `#57534e` | secondary text |
-| `--dim` | `text-dim` | `#a8a29e` | tertiary text, labels, captions |
-| `--ok` | `text-ok` `border-ok` | `#16a34a` | success / green (resolved, online) |
+| `--panel2` | `bg-panel2` | `#f3eee6` | superficie hundida: row hover, píldoras, inputs-on-panel |
+| `--raise` | `bg-raise` | `#ebe4d8` | raised chips / avatars |
+| `--line` | `border-line` | `#e3dacb` | default border / divider |
+| `--linelit` | `border-linelit` | `#d3c7b4` | stronger border |
+| `--accent` | `text-accent` `bg-accent` `border-accent` | `#f2b705` | primary accent (ámbar) |
+| `--accent-soft` | `bg-accent-soft` | `#fdf0c8` | accent wash / active bg / tile de ícono |
+| `--accent-2` | `text-accent2` | `#8a6a00` | ámbar oscuro: acento LEGIBLE sobre blanco (links, texto acentuado) |
+| `--accent-ink` | — | `#5c4400` | texto/ícono sobre `--accent-soft` |
+| `--cream` | `text-cream` | `#1c1815` | primary text — tinta cálida (nombre histórico, ver arriba) |
+| `--muted` | `text-muted` | `#5c534a` | secondary text |
+| `--dim` | `text-dim` | `#8c7f6d` | tertiary text, labels, captions |
+| `--ok` | `text-ok` `border-ok` | `#0b6e7a` | positivo (teal): resuelto, en línea. Sobre tinta usa `#3fb8c4` |
+| `--warn` | — | `#8a5a00` | atención (como punto o texto) |
 | `--info` | `text-info` `border-info` | `#2563eb` | info / blue (WhatsApp, escalated) |
-| `--bad` | `text-bad` `border-bad` | `#dc2626` | danger / red (angry, handoff, errors) |
+| `--bad` | `text-bad` `border-bad` | `#b3261e` | danger / red (angry, handoff, errors) |
 | `--violet` | `text-violet` | `#7c3aed` | model/memory accents in the flow canvas |
 
 **Regla del ámbar:** `--accent` (amarillo vivo) es para FONDOS y trazos —
 botones, píldoras, barras, gráficas. Para TEXTO sobre superficie clara usa
 `--accent-2` (ámbar oscuro): el amarillo vivo no contrasta sobre blanco.
-Texto sobre fondo `--accent`: `#1a1206` (casi negro; no hay token, escribe el hex).
+Texto sobre fondo `--accent`: siempre oscuro (`#1a1206` o `var(--cream)`), **nunca
+blanco**. Los colores de estado (`--ok`, `--warn`, `--bad`) van como PUNTO o
+TEXTO sobre fondo neutro, nunca como relleno grande: un azul o gris de dashboard
+rompe la identidad.
 
 Sombras y radios (nuevos, para inline styles):
 
 | Var | Uso |
 |---|---|
 | `--shadow-sm` | tarjetas en reposo |
-| `--shadow-md` | hover de tarjetas y botones |
+| `--shadow-md` | hover de tarjetas y botones, tarjeta de sección |
 | `--shadow-lg` | modales y dropdowns |
-| `--radius` (14px) | tarjetas y paneles |
-| `--radius-sm` (10px) | botones, inputs, chips cuadrados |
+| `--radius-sm` (12px) | botones, inputs, chips cuadrados (controles de 40px de alto) |
+| `--radius` (16px) | tarjetas y paneles |
+| `--radius-lg` (20px) | encabezado de página, modales |
 
-La sidebar es CLARA (una hoja blanca sobre el escritorio crema — en las otras
-apps del ecosistema va oscura; aquí es decisión de producto) y tiene su propia
-mini-paleta (`--sb-bg`, `--sb-panel`, `--sb-line`, `--sb-text`, `--sb-dim`) —
-solo `layout.ts` la usa; las vistas nunca deberían necesitarla. En particular,
-**no la uses para pintar un bloque oscuro**: ya no lo es. Si necesitas una
-tarjeta oscura (Campañas → "Resumen del envío"), fija sus colores en la vista.
+El foco de cualquier campo es global (borde `--accent-2` + halo `--accent-soft`):
+no lo repitas en la vista.
+
+La sidebar es OSCURA, en tinta cálida `#1c1815` (no la pizarra de AduaniaX),
+como en el resto del ecosistema — fue clara de 2026-09 a 2026-10. Tiene su
+propia mini-paleta (`--sb-bg`, `--sb-panel`, `--sb-active`, `--sb-line`,
+`--sb-text`, `--sb-dim`, `--sb-ink`, `--sb-label`) que solo usa `layout.ts`; las
+vistas no deberían necesitarla. Si necesitas una tarjeta oscura (Campañas →
+"Resumen del envío"), fija sus colores en la vista.
 
 Legacy aliases (`--border`, `--border-lit`, `--green`, `--blue`, `--red`) are
 still defined so pasted mockup snippets don't break, but **prefer the names in
@@ -73,10 +84,10 @@ the table above** in new code.
 
 ## 2. Typography
 
-- Body / default: **Plus Jakarta Sans** (already the `<body>` font). Clean sans,
-  igual que el resto del ecosistema Kontrolia.
+- Body / default: **Inter** (already the `<body>` font), igual que AduaniaX y
+  Faqturia.
 - Headings / numbers / buttons: same family, bolder → `font-display` (Tailwind)
-  or `style="font-family:'Plus Jakarta Sans'"` with weight 700–800.
+  with weight 800–900 y `letter-spacing` negativo (`-.02em` a `-.04em`).
 - **JetBrains Mono** sigue disponible (`font-mono`) para ejes de gráficas,
   tokens, IDs y valores técnicos — úsala como condimento, no como base.
 
