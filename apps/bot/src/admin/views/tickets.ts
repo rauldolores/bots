@@ -8,6 +8,7 @@ import { TICKET_ADAPTERS, TICKET_PROVIDERS } from "../../connectors/registry";
 import type { TicketRecord } from "../../connectors/types";
 import { resolveTimezone } from "../../datetime";
 import { layout } from "./layout";
+import { alertRow, heroBtn, heroTag, iconTile, pageHero, sectionCard, statCard, statGrid, statusPill } from "./ui";
 
 function esc(s: string): string {
   return s.replace(
@@ -16,16 +17,17 @@ function esc(s: string): string {
   );
 }
 
-const STATUS_PILL: Record<string, string> = {
-  open: "var(--bad)",
-  in_progress: "var(--info)",
+// Estado y prioridad: punto de color + palabra (statusPill), nunca de relleno.
+const STATUS: Record<string, { label: string; color: string }> = {
+  open: { label: "Abierto", color: "var(--accent)" },
+  in_progress: { label: "En proceso", color: "var(--info)" },
 };
 
-const PRIORITY_PILL: Record<string, string> = {
+const PRIORITY_COLOR: Record<string, string> = {
   urgent: "var(--bad)",
-  high: "var(--accent-2)",
-  normal: "var(--muted)",
-  low: "var(--dim)",
+  high: "var(--warn)",
+  normal: "var(--dim)",
+  low: "var(--linelit)",
 };
 
 const PRIORITY_LABEL: Record<string, string> = {
@@ -34,6 +36,72 @@ const PRIORITY_LABEL: Record<string, string> = {
   normal: "Normal",
   low: "Baja",
 };
+
+const CONTROL = "height:36px;border-radius:12px;border:1px solid var(--dim);background:var(--panel);font-size:13px;color:var(--cream)";
+
+/** Fecha corta en la zona del bot: "26 oct, 12:41". */
+function shortDate(ms: number, timezone: string): string {
+  return new Date(ms).toLocaleString("es-MX", { timeZone: timezone, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * Cabecera de un ticket. Si hay transcripción, se abre y cierra con clic o
+ * con Enter/Espacio (role=button), como las filas de Leads.
+ */
+function ticketHead(opts: { title: string; pills: string; date: string; expandable: boolean }): string {
+  const toggle = opts.expandable
+    ? ` role="button" tabindex="0" aria-expanded="false" style="cursor:pointer"
+        onclick="var d=this.parentNode.querySelector('.tk-detail');var open=d.style.display==='block';d.style.display=open?'none':'block';this.setAttribute('aria-expanded',String(!open));this.querySelector('.chev').style.transform=open?'':'rotate(180deg)'"
+        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"`
+    : "";
+  return `<div class="tk-head"${toggle}>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+        <div style="flex:1;min-width:0;font-size:14px;font-weight:800;line-height:1.35;color:var(--cream);overflow-wrap:anywhere">${opts.title}</div>
+        <div style="display:flex;align-items:center;gap:8px;flex:none">
+          <span style="font-size:12px;font-weight:600;color:var(--dim);white-space:nowrap">${opts.date}</span>
+          ${opts.expandable ? `<i data-lucide="chevron-down" width="16" height="16" class="chev" style="color:var(--dim);transition:transform .15s ease"></i>` : ""}
+        </div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${opts.pills}</div>
+    </div>`;
+}
+
+function requesterLine(name: string | null, contact: string | null): string {
+  if (!name && !contact) return "";
+  return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:13px;font-weight:600;color:var(--cream)">
+      ${esc(name ?? "(sin nombre)")}
+      ${contact ? `<span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:500;color:var(--muted)">${esc(contact)}</span>` : ""}
+    </div>`;
+}
+
+function transcriptBlock(transcript: string | null): string {
+  if (!transcript) return "";
+  return `<div class="tk-detail" style="display:none;padding:12px 14px;border-radius:12px;background:var(--row-hover);border:1px solid var(--line);max-height:280px;overflow-y:auto;white-space:pre-wrap;font-size:12.5px;line-height:1.6;color:var(--muted)">${esc(transcript)}</div>`;
+}
+
+/** Prioridad + resolver: actúan sobre la copia local aunque haya plataforma conectada. */
+function ticketActions(t: Ticket): string {
+  return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <form method="POST" action="/admin/tickets/${t.id}/priority">
+        <select name="priority" onchange="this.form.submit()" aria-label="Prioridad del ticket" style="${CONTROL};padding:0 10px;font-weight:600;cursor:pointer">
+          ${(["low", "normal", "high", "urgent"] as const)
+            .map((p) => `<option ${t.priority === p ? "selected" : ""} value="${p}">${PRIORITY_LABEL[p]}</option>`)
+            .join("")}
+        </select>
+      </form>
+      <form method="POST" action="/admin/tickets/${t.id}/resolve" style="display:flex;gap:8px;flex:1;min-width:240px">
+        <input name="resolved_by" placeholder="tu email" required aria-label="Quién lo resuelve (tu email)"
+               style="flex:1;min-width:0;${CONTROL};padding:0 12px;font-weight:500">
+        <button style="height:36px;padding:0 16px;border-radius:12px;border:none;background:var(--accent);color:var(--cream);font-size:13px;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+          <i data-lucide="check" width="15" height="15"></i>Resolver
+        </button>
+      </form>
+    </div>`;
+}
+
+function ticketRow(inner: string, first: boolean): string {
+  return `<div class="tkrow" style="display:flex;flex-direction:column;gap:12px;padding:18px 24px;${first ? "" : "border-top:1px solid var(--line)"}">${inner}</div>`;
+}
 
 /**
  * Lista para cuando hay una plataforma de tickets conectada. El ticket
@@ -50,125 +118,75 @@ function renderTicketsExternalList(
   timezone: string,
   localByExternalId: Map<string, Ticket>,
 ): string {
-  const rows = items
-    .map((t) => {
-      const date = new Date(t.createdAt).toLocaleString("es-MX", { timeZone: timezone });
-      const subject = t.url
-        ? `<a href="${esc(t.url)}" target="_blank" rel="noopener" class="text-accent" style="text-decoration:none">${esc(t.subject)} ↗</a>`
-        : `<span class="text-cream">${esc(t.subject)}</span>`;
-      const prio = t.priority
-        ? `<span style="font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:${PRIORITY_PILL[t.priority.toLowerCase()] ?? "var(--muted)"};border:1px solid ${PRIORITY_PILL[t.priority.toLowerCase()] ?? "var(--muted)"};padding:1px 6px;flex:none">${esc(t.priority)}</span>`
-        : "";
+  if (!items.length) return emptyState(`Aún no hay tickets abiertos en ${providerLabel}.`);
+  return items
+    .map((t, i) => {
       const local = localByExternalId.get(t.id);
-      const header = `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:${local || t.requesterName ? "6px" : "0"}">
-          <div style="display:flex;align-items:center;gap:8px;min-width:0">
-            ${local ? `<i data-lucide="chevron-right" width="13" height="13" class="chev" style="flex:none;color:var(--dim);transition:transform .12s ease"></i>` : ""}
-            <span style="font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line);padding:1px 6px;flex:none">${esc(t.status.toUpperCase())}</span>
-            ${prio}
-            <span class="font-display font-semibold text-[13px]">${subject}</span>
-          </div>
-          <span class="text-dim text-[11px]" style="flex:none">${date}</span>
-        </div>`;
+      const title = t.url
+        ? `<a href="${esc(t.url)}" target="_blank" rel="noopener" style="color:var(--cream);text-decoration:none">${esc(t.subject)} <span style="color:var(--accent-2)">↗</span></a>`
+        : esc(t.subject);
+      const prioKey = t.priority?.toLowerCase() ?? "";
+      const pills =
+        statusPill(t.status.toLowerCase(), "var(--dim)") +
+        (t.priority ? statusPill(PRIORITY_LABEL[prioKey] ?? t.priority, PRIORITY_COLOR[prioKey] ?? "var(--dim)") : "");
+      const head = ticketHead({
+        title,
+        pills,
+        date: shortDate(new Date(t.createdAt).getTime(), timezone),
+        expandable: Boolean(local?.transcript),
+      });
 
       if (!local) {
-        return `<div class="tkcard bg-panel border border-line" style="padding:16px 18px;margin-bottom:12px">
-          ${header}
-          ${t.requesterName ? `<div class="text-muted text-[12px]">${esc(t.requesterName)}</div>` : ""}
-        </div>`;
+        return ticketRow(head + requesterLine(t.requesterName ?? null, null), i === 0);
       }
 
-      const requesterLine =
-        local.requester_name || local.requester_contact
-          ? `<div class="text-muted text-[12px]" style="margin-bottom:8px">${esc(local.requester_name ?? "(sin nombre)")}${local.requester_contact ? ` · ${esc(local.requester_contact)}` : ""}</div>`
-          : "";
       const convLink = local.conversation_id
-        ? `<a href="/admin/conversations?c=${encodeURIComponent(local.conversation_id)}" class="text-accent" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;text-decoration:none;margin-bottom:10px">
-             <i data-lucide="messages-square" width="13" height="13"></i> Ver conversación completa
+        ? `<a href="/admin/conversations?c=${encodeURIComponent(local.conversation_id)}" style="align-self:flex-start;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--accent-2);text-decoration:none">
+             <i data-lucide="messages-square" width="14" height="14"></i> Ver conversación completa
            </a>`
         : "";
-      const transcriptBlock = local.transcript
-        ? `<div class="tk-detail" style="display:none;margin:0 0 12px;padding:10px 12px;background:var(--bg);border:1px solid var(--line);max-height:260px;overflow-y:auto;white-space:pre-wrap;font-size:12px;line-height:1.6;color:var(--muted)">${esc(local.transcript)}</div>`
-        : "";
-      return `<div class="tkcard bg-panel border border-line" style="padding:16px 18px;margin-bottom:12px">
-        <div style="cursor:pointer"
-             onclick="var d=this.parentNode.querySelector('.tk-detail');if(!d)return;var open=d.style.display==='block';d.style.display=open?'none':'block';this.querySelector('.chev').style.transform=open?'rotate(0deg)':'rotate(90deg)'">
-          ${header}
-        </div>
-        ${requesterLine}
-        ${convLink}
-        ${transcriptBlock}
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <form method="POST" action="/admin/tickets/${local.id}/priority" onclick="event.stopPropagation()">
-            <select name="priority" onchange="this.form.submit()"
-                    style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:8px 10px;font-size:12px;outline:none;cursor:pointer">
-              ${(["low", "normal", "high", "urgent"] as const)
-                .map((p) => `<option ${local.priority === p ? "selected" : ""} value="${p}">${PRIORITY_LABEL[p]}</option>`)
-                .join("")}
-            </select>
-          </form>
-          <form method="POST" action="/admin/tickets/${local.id}/resolve" style="display:flex;gap:8px;flex:1;min-width:220px" onclick="event.stopPropagation()">
-            <input name="resolved_by" placeholder="tu email" required
-                   style="flex:1;background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 12px;font-size:12.5px;outline:none">
-            <button class="bigbtn font-display font-bold text-[11.5px] cursor-pointer"
-                    style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 16px">Resolver</button>
-          </form>
-        </div>
-      </div>`;
+      return ticketRow(
+        head + requesterLine(local.requester_name, local.requester_contact) + convLink + transcriptBlock(local.transcript) + ticketActions(local),
+        i === 0,
+      );
     })
     .join("");
-  return items.length
-    ? rows
-    : `<div class="bg-panel border border-line" style="padding:40px 18px;text-align:center"><p class="text-dim text-[12.5px]">Aún no hay tickets abiertos en ${esc(providerLabel)}.</p></div>`;
 }
 
-/** Una tarjeta de ticket LOCAL — igual estén todos (sin conector) o solo los que no se sincronizaron (con conector). */
-function renderLocalTicketCard(t: Ticket, timezone: string): string {
-  const date = new Date(t.created_at).toLocaleString("es-MX", { timeZone: timezone });
-  const pillColor = STATUS_PILL[t.status] ?? "var(--muted)";
-  const prioColor = PRIORITY_PILL[t.priority] ?? "var(--muted)";
-  const requesterLine =
-    t.requester_name || t.requester_contact
-      ? `<div class="text-muted text-[12px]" style="margin-bottom:8px">${esc(t.requester_name ?? "(sin nombre)")}${t.requester_contact ? ` · ${esc(t.requester_contact)}` : ""}</div>`
-      : "";
-  const transcriptBlock = t.transcript
-    ? `<div class="tk-detail" style="display:none;margin:0 0 12px;padding:10px 12px;background:var(--bg);border:1px solid var(--line);max-height:260px;overflow-y:auto;white-space:pre-wrap;font-size:12px;line-height:1.6;color:var(--muted)">${esc(t.transcript)}</div>`
+/** Un ticket LOCAL — igual estén todos (sin conector) o solo los que no se sincronizaron (con conector). */
+function renderLocalTicket(t: Ticket, timezone: string, first: boolean): string {
+  const st = STATUS[t.status] ?? { label: t.status, color: "var(--dim)" };
+  const pills =
+    statusPill(st.label, st.color) + statusPill(PRIORITY_LABEL[t.priority] ?? t.priority, PRIORITY_COLOR[t.priority] ?? "var(--dim)");
+  const convLink = t.conversation_id
+    ? `<a href="/admin/conversations?c=${encodeURIComponent(t.conversation_id)}" style="align-self:flex-start;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--accent-2);text-decoration:none">
+         <i data-lucide="messages-square" width="14" height="14"></i> Ver conversación
+       </a>`
     : "";
-  return `<div class="tkcard bg-panel border border-line" style="padding:16px 18px;margin-bottom:12px">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;cursor:pointer"
-         onclick="var d=this.parentNode.querySelector('.tk-detail');if(!d)return;var open=d.style.display==='block';d.style.display=open?'none':'block';this.querySelector('.chev').style.transform=open?'rotate(0deg)':'rotate(90deg)'">
-      <div style="display:flex;align-items:center;gap:8px;min-width:0">
-        <i data-lucide="chevron-right" width="13" height="13" class="chev" style="flex:none;color:var(--dim);transition:transform .12s ease"></i>
-        <span style="font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:${pillColor};border:1px solid ${pillColor};padding:1px 6px;flex:none">${esc(t.status.toUpperCase())}</span>
-        <span style="font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:${prioColor};border:1px solid ${prioColor};padding:1px 6px;flex:none">${esc(PRIORITY_LABEL[t.priority] ?? t.priority)}</span>
-        <span class="font-display font-semibold text-[13px] text-cream truncate">${esc(t.category)}</span>
-      </div>
-      <span class="text-dim text-[11px]" style="flex:none">${date}</span>
-    </div>
-    ${requesterLine}
-    <p class="text-muted text-[12.5px] leading-relaxed" style="margin:0 0 12px">${esc(t.summary)}</p>
-    ${transcriptBlock}
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <form method="POST" action="/admin/tickets/${t.id}/priority" onclick="event.stopPropagation()">
-        <select name="priority" onchange="this.form.submit()"
-                style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:8px 10px;font-size:12px;outline:none;cursor:pointer">
-          ${(["low", "normal", "high", "urgent"] as const)
-            .map((p) => `<option ${t.priority === p ? "selected" : ""} value="${p}">${PRIORITY_LABEL[p]}</option>`)
-            .join("")}
-        </select>
-      </form>
-      <form method="POST" action="/admin/tickets/${t.id}/resolve" style="display:flex;gap:8px;flex:1;min-width:220px" onclick="event.stopPropagation()">
-        <input name="resolved_by" placeholder="tu email" required
-               style="flex:1;background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 12px;font-size:12.5px;outline:none">
-        <button class="bigbtn font-display font-bold text-[11.5px] cursor-pointer"
-                style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 16px">Resolver</button>
-      </form>
-    </div>
-  </div>`;
+  return ticketRow(
+    ticketHead({ title: esc(t.category), pills, date: shortDate(t.created_at, timezone), expandable: Boolean(t.transcript) }) +
+      requesterLine(t.requester_name, t.requester_contact) +
+      `<p style="margin:0;font-size:13px;font-weight:500;line-height:1.6;color:var(--muted)">${esc(t.summary)}</p>` +
+      convLink +
+      transcriptBlock(t.transcript) +
+      ticketActions(t),
+    first,
+  );
+}
+
+function emptyState(text: string): string {
+  return `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:48px 24px;text-align:center">
+      ${iconTile("circle-check", "ok", 44)}
+      <p style="margin:0;font-size:14px;font-weight:800;color:var(--cream)">${esc(text)}</p>
+      <p style="margin:0;max-width:360px;font-size:13px;font-weight:500;color:var(--dim)">Cuando el bot necesite a una persona, el caso aparece aquí con la conversación y los datos del cliente.</p>
+    </div>`;
 }
 
 export async function renderTickets(env: Env, botId: string, visibleNavIds: Set<string> | null = null): Promise<string> {
   const db = new Db(env.DB);
   const timezone = resolveTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
+  const canSee = (id: string) => !visibleNavIds || visibleNavIds.has(id);
+  const description = "Lo que el bot le pasó a una persona. Ábrelo para leer la conversación, ponle prioridad y márcalo como resuelto.";
 
   // Igual que leads: si hay una plataforma de tickets conectada, se consulta
   // ahí en vivo — el equipo humano de soporte ya vive ahí. El bot sigue
@@ -177,6 +195,8 @@ export async function renderTickets(env: Env, botId: string, visibleNavIds: Set<
   const repo = new TicketsRepo(db, botId);
 
   let ticketsErrorBanner = "";
+  let connectedTag = "";
+  let manageBtn = "";
   const ticketsConnector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "tickets");
   if (ticketsConnector) {
     const providerMeta = TICKET_PROVIDERS[ticketsConnector.provider];
@@ -184,6 +204,7 @@ export async function renderTickets(env: Env, botId: string, visibleNavIds: Set<
     const adapter = TICKET_ADAPTERS[ticketsConnector.provider];
     const creds = adapter ? await resolveConnectorCreds(db, ticketsConnector, env) : null;
     const result = adapter && creds ? await adapter.listOpen(creds, 50) : null;
+    manageBtn = canSee("conexiones") ? heroBtn({ label: "Gestionar conexión", href: "/admin/conexiones?cat=tickets", icon: "plug-zap" }) : "";
     if (result?.ok) {
       const localTickets = await repo.listAll(200);
       const localByExternalId = new Map(
@@ -198,39 +219,80 @@ export async function renderTickets(env: Env, botId: string, visibleNavIds: Set<
       // ningún lado, aunque sí existiera.
       const unsynced = localTickets.filter((t) => t.status === "open" && t.exported_to !== ticketsConnector.provider);
       const unsyncedBlock = unsynced.length
-        ? `<div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--line)">
-             <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
-               <h3 class="font-display font-semibold text-[13.5px] text-cream">Sin sincronizar con ${esc(providerLabel)}</h3>
-               <span style="font-size:10px;letter-spacing:.1em;color:var(--bad);border:1px solid var(--bad);padding:2px 8px;font-weight:600">${unsynced.length}</span>
-             </div>
-             <p class="text-dim text-[11.5px]" style="margin:0 0 14px">Se crearon aquí pero no llegaron a ${esc(providerLabel)} — revisa la conexión. Se pueden atender igual desde aquí mientras tanto.</p>
-             ${unsynced.map((t) => renderLocalTicketCard(t, timezone)).join("")}
-           </div>`
+        ? sectionCard({
+            icon: "cloud-off",
+            title: `Sin sincronizar con ${providerLabel}`,
+            subtitle: `Se crearon aquí pero no llegaron a ${esc(providerLabel)} — revisa la conexión. Se pueden atender igual desde aquí mientras tanto.`,
+            actions: statusPill(`${unsynced.length} ${unsynced.length === 1 ? "pendiente" : "pendientes"}`, "var(--bad)"),
+            body: unsynced.map((t, i) => renderLocalTicket(t, timezone, i === 0)).join(""),
+          })
         : "";
       const body = `
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <h2 class="font-display font-semibold text-[15px] text-cream">Tickets — ${esc(providerLabel)}</h2>
-          <a href="/admin/conexiones?cat=tickets" class="text-[12px]" style="color:var(--muted)">gestionar conexión</a>
-        </div>
-        ${renderTicketsExternalList(providerLabel, result.items, timezone, localByExternalId)}
-        ${unsyncedBlock}`;
-      return layout({ title: "Tickets", activeTab: "tickets", body, visibleNavIds });
+        ${pageHero({
+          eyebrow: "Bandeja",
+          title: "Tickets",
+          description,
+          tags: heroTag(`Conectado a ${providerLabel}`),
+          actions: manageBtn,
+        })}
+        <div style="display:flex;flex-direction:column;gap:24px">
+          ${sectionCard({
+            icon: "life-buoy",
+            title: `Tickets — ${providerLabel}`,
+            subtitle: `${result.items.length} ${result.items.length === 1 ? "abierto" : "abiertos"} · en vivo desde ${esc(providerLabel)}`,
+            body: renderTicketsExternalList(providerLabel, result.items, timezone, localByExternalId),
+          })}
+          ${unsyncedBlock}
+        </div>`;
+      return layout({ title: "Tickets", activeTab: "tickets", body, visibleNavIds, hero: true });
     }
-    ticketsErrorBanner = `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px;margin-bottom:14px">No se pudo consultar ${esc(providerLabel)} (${esc(result?.error ?? "sin credenciales")}) — mostrando la copia local mientras tanto.</div>`;
+    connectedTag = heroTag(`Conectado a ${providerLabel}`, "var(--bad)");
+    ticketsErrorBanner = `<div style="margin-bottom:24px">${alertRow({
+      title: `No se pudo consultar ${providerLabel}`,
+      detail: `${result?.error ?? "sin credenciales"} — mostrando la copia local mientras tanto.`,
+      attrs: 'role="status"',
+    })}</div>`;
   }
 
   const open = await repo.listOpen();
-  const list = open.map((t) => renderLocalTicketCard(t, timezone)).join("");
+  const semana = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const resueltos = await repo.countResolvedSince(semana);
+  const nuevosSemana = open.filter((t) => t.created_at >= semana).length;
+  const urgentes = open.filter((t) => t.priority === "urgent" || t.priority === "high").length;
+  const enProceso = open.filter((t) => t.status === "in_progress").length;
 
-  const body =
-    ticketsErrorBanner +
-    (open.length === 0
-      ? `<div class="bg-panel border border-line" style="padding:40px 18px;text-align:center">
-           <p class="text-dim text-[12.5px]">No hay tickets abiertos.</p>
-         </div>`
-      : list);
+  const stats = statGrid([
+    statCard({ icon: "life-buoy", tone: "warn", label: "Abiertos", value: open.length, hint: nuevosSemana ? `+${nuevosSemana} esta semana` : undefined }),
+    statCard({ icon: "flame", tone: urgentes ? "warn" : "neutral", label: "Urgentes o alta", value: urgentes }),
+    statCard({ icon: "loader", tone: "neutral", label: "En proceso", value: enProceso }),
+    statCard({ icon: "circle-check", tone: "ok", label: "Resueltos", value: resueltos, note: "últimos 7 días" }),
+  ]);
 
-  return layout({ title: "Tickets", activeTab: "tickets", body, visibleNavIds });
+  const hero = pageHero({
+    eyebrow: "Bandeja",
+    title: "Tickets",
+    description,
+    tags: connectedTag,
+    actions: [
+      manageBtn,
+      !ticketsConnector && canSee("conexiones")
+        ? heroBtn({ label: "Conectar Zendesk o Jira", href: "/admin/conexiones?cat=tickets", icon: "plug-zap" })
+        : "",
+    ].join(""),
+  });
+
+  const body = `
+    ${hero}
+    ${ticketsErrorBanner}
+    ${stats}
+    ${sectionCard({
+      icon: "life-buoy",
+      title: "Tickets abiertos",
+      subtitle: `${open.length} ${open.length === 1 ? "ticket" : "tickets"} · los más recientes primero`,
+      body: open.length ? open.map((t, i) => renderLocalTicket(t, timezone, i === 0)).join("") : emptyState("No hay tickets abiertos."),
+    })}`;
+
+  return layout({ title: "Tickets", activeTab: "tickets", body, visibleNavIds, hero: true });
 }
 
 const VALID_PRIORITIES = ["low", "normal", "high", "urgent"] as const;

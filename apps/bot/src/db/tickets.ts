@@ -86,6 +86,15 @@ export class TicketsRepo {
     );
   }
 
+  /** Cuántos se resolvieron desde `sinceMs` — la métrica "resueltos esta semana" del panel. */
+  async countResolvedSince(sinceMs: number): Promise<number> {
+    const row = await this.db.first<{ n: number }>(
+      "SELECT COUNT(*)::int AS n FROM tickets WHERE bot_id = ? AND status = 'resolved' AND resolved_at >= ?",
+      [this.botId, sinceMs],
+    );
+    return row?.n ?? 0;
+  }
+
   /** Todos los tickets (abiertos y resueltos) — para cruzar contra la plataforma externa, que puede seguir mostrando uno ya resuelto localmente. */
   async listAll(limit = 200): Promise<Ticket[]> {
     return this.db.all<Ticket>(

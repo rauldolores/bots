@@ -188,3 +188,19 @@ describe("updateTicketPriority", () => {
     expect((await new TicketsRepo(db, otherBotId).getById(theirId))?.priority).toBe("normal");
   });
 });
+
+describe("renderTickets — métricas", () => {
+  it("cuenta los resueltos de la semana (y no los viejos) y muestra las tarjetas sin plataforma conectada", async () => {
+    const repo = new TicketsRepo(db, TEST_BOT_ID);
+    const reciente = await repo.create({ conversationId: null, category: "x", summary: "resuelto hoy", transcript: "" });
+    const viejo = await repo.create({ conversationId: null, category: "x", summary: "resuelto hace un mes", transcript: "" });
+    await repo.resolve(reciente, "yo@x.com");
+    await repo.resolve(viejo, "yo@x.com");
+    await db.run("UPDATE tickets SET resolved_at = ? WHERE id = ?", [Date.now() - 30 * 86_400_000, viejo]);
+
+    expect(await repo.countResolvedSince(Date.now() - 7 * 86_400_000)).toBe(1);
+    const html = await renderTickets(env, TEST_BOT_ID);
+    expect(html).toContain("stat-card");
+    expect(html).toContain("Resueltos");
+  });
+});
