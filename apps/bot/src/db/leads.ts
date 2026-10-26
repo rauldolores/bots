@@ -101,6 +101,30 @@ export class LeadsRepo {
     );
   }
 
+  /**
+   * Cuántos leads hay en cada estado, y cuántos de cada uno entraron desde
+   * `sinceMs` — las tarjetas de arriba de /admin/leads. Los estados sin
+   * leads no vienen en el resultado; quien lo use pone 0.
+   */
+  async countsByStatus(sinceMs: number): Promise<Record<Lead["status"], { total: number; recent: number }>> {
+    const rows = await this.db.all<{ status: Lead["status"]; total: number; recent: number }>(
+      `SELECT status, COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE created_at >= ?)::int AS recent
+       FROM leads WHERE bot_id = ? GROUP BY status`,
+      [sinceMs, this.botId],
+    );
+    const out = {
+      new: { total: 0, recent: 0 },
+      contacted: { total: 0, recent: 0 },
+      sold: { total: 0, recent: 0 },
+      lost: { total: 0, recent: 0 },
+    };
+    for (const r of rows) {
+      if (r.status in out) out[r.status] = { total: Number(r.total), recent: Number(r.recent) };
+    }
+    return out;
+  }
+
   async setStatus(id: string, status: Lead["status"]): Promise<void> {
     await this.db.run(
       "UPDATE leads SET status = ?, updated_at = ? WHERE id = ? AND bot_id = ?",

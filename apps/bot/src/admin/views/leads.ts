@@ -12,6 +12,7 @@ import { resolveTimezone } from "../../datetime";
 import { NurtureSequencesRepo, type NurtureSequence } from "../../db/nurtureSequences";
 import { NurtureEnrollmentsRepo, type NurtureEnrollment } from "../../db/nurtureEnrollments";
 import { layout } from "./layout";
+import { avatarTile, heroBtn, heroTag, pageHero, sectionCard, statCard, statGrid, statusPill, TH_STYLE } from "./ui";
 
 // Escapa texto del LLM/cliente antes de meterlo en HTML (el intent y las notas
 // pueden traer <, &, links pegados por el cliente, etc.).
@@ -51,11 +52,11 @@ function nurtureBlock(
   const filas = activas
     .map(
       (e) => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <span class="text-[11.5px]" style="color:var(--ok);border:1px solid var(--ok);padding:3px 9px">${esc(nombre(e.sequence_id))}</span>
-      <span class="text-dim text-[11.5px]">próximo toque: ${esc(fecha(e.next_touch_at))}</span>
+      ${statusPill(nombre(e.sequence_id), "var(--ok)")}
+      <span class="text-dim text-[12px]">próximo toque: ${esc(fecha(e.next_touch_at))}</span>
       <form method="POST" action="/admin/leads/${lead.id}/seguimiento/detener" onclick="event.stopPropagation()">
         <input type="hidden" name="sequence_id" value="${esc(e.sequence_id)}">
-        <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);background:none;padding:4px 10px;cursor:pointer">Detener</button>
+        <button type="submit" style="height:32px;padding:0 12px;border-radius:12px;border:1px solid var(--line);color:var(--bad);background:var(--panel);font-size:12px;font-weight:700;cursor:pointer">Detener</button>
       </form>
     </div>`,
     )
@@ -77,23 +78,24 @@ function nurtureBlock(
   const disponibles = sequences.filter((s) => !yaInscrito.has(s.id));
   const selector = disponibles.length
     ? `<form method="POST" action="/admin/leads/${lead.id}/seguimiento/iniciar" onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <select name="sequence_id" style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:6px 8px;font-size:11.5px;outline:none">${disponibles
+        <select name="sequence_id" aria-label="Secuencia de seguimiento" style="height:36px;border-radius:12px;background:var(--panel);border:1px solid var(--dim);color:var(--cream);padding:0 10px;font-size:12.5px;font-weight:600">${disponibles
           .map((s) => `<option value="${s.id}">${esc(s.name)}</option>`)
           .join("")}</select>
-        <button type="submit" class="text-[11px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:5px 10px;cursor:pointer;font-weight:600">${activas.length ? "Agregar otro" : "Iniciar seguimiento"}</button>
+        <button type="submit" style="height:36px;padding:0 14px;border-radius:12px;border:none;color:var(--cream);background:var(--accent);font-size:12.5px;font-weight:800;cursor:pointer">${activas.length ? "Agregar otro" : "Iniciar seguimiento"}</button>
       </form>`
     : sequences.length === 0
-      ? `<span class="text-dim text-[11.5px]">Sin secuencias activas — créalas en <a href="/admin/seguimientos" class="text-accent">Seguimientos</a>.</span>`
-      : `<span class="text-dim text-[11.5px]">Ya está en todas tus secuencias.</span>`;
+      ? `<span class="text-dim text-[12px]">Sin secuencias activas — créalas en <a href="/admin/seguimientos" style="color:var(--accent-2);font-weight:700">Seguimientos</a>.</span>`
+      : `<span class="text-dim text-[12px]">Ya está en todas tus secuencias.</span>`;
 
   return `<div style="display:flex;flex-direction:column;gap:8px">${filas}${selector}${historial ? `<div style="display:flex;flex-direction:column;gap:2px">${historial}</div>` : ""}</div>`;
 }
 
+// Solo como punto junto a la palabra (statusPill), nunca de relleno.
 const LEAD_STATUS_COLOR: Record<Lead["status"], string> = {
-  new: "var(--accent-2)",
+  new: "var(--warn)",
   contacted: "var(--info)",
   sold: "var(--ok)",
-  lost: "var(--dim)",
+  lost: "var(--bad)",
 };
 
 /**
@@ -140,6 +142,8 @@ function displayFromCrmOnly(r: CrmRecord, botId: string, provider: string): Disp
   };
 }
 
+const DETAIL_LABEL = "font-size:10px;font-weight:900;letter-spacing:.15em;text-transform:uppercase;color:var(--dim);margin-bottom:6px";
+
 interface Col {
   h: string;
   w: string;
@@ -161,50 +165,66 @@ function buildLeadColumns(
 ): Col[] {
   const cols: Col[] = [
     {
-      h: "Fecha",
-      w: "94px",
-      cell: (l) => `<span class="text-dim">${new Date(l.created_at).toLocaleDateString("es-MX", { timeZone: timezone })}</span>`,
-    },
-    {
       h: "Nombre",
-      w: "minmax(120px,1.1fr)",
+      w: "minmax(170px,1.2fr)",
       cell: (l) => {
         const label = esc(l.name) || "(sin nombre)";
         const inner = l.crmUrl
-          ? `<a href="${esc(l.crmUrl)}" target="_blank" rel="noopener" class="text-accent" style="text-decoration:none" onclick="event.stopPropagation()">${label} ↗</a>`
-          : `<span class="text-cream">${label}</span>`;
-        return `<span style="display:flex;align-items:center;gap:7px"><i data-lucide="chevron-right" width="13" height="13" class="chev" style="flex:none;transition:transform .12s ease"></i>${inner}</span>`;
+          ? `<a href="${esc(l.crmUrl)}" target="_blank" rel="noopener" style="color:var(--cream);font-weight:800;letter-spacing:-.01em;text-decoration:none" onclick="event.stopPropagation()">${label} <span style="color:var(--accent-2)">↗</span></a>`
+          : `<span style="color:var(--cream);font-weight:800;letter-spacing:-.01em">${label}</span>`;
+        return `<span style="display:flex;align-items:center;gap:12px;min-width:0">${avatarTile(l.name, l.status === "new")}<span class="truncate">${inner}</span></span>`;
       },
     },
-    { h: "Contacto", w: "minmax(110px,1fr)", cell: (l) => `<span class="text-muted">${esc(l.contact) || "—"}</span>` },
+    {
+      h: "Contacto",
+      w: "minmax(130px,1fr)",
+      cell: (l) => `<span class="truncate" style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:var(--muted)">${esc(l.contact) || "—"}</span>`,
+    },
   ];
   if (niche.columns.length) {
     for (const c of niche.columns) {
       cols.push({ h: c.label, w: "minmax(78px,.85fr)", cell: (_l, meta) => `<span class="text-muted truncate">${esc(meta[c.key]) || "—"}</span>` });
     }
   } else {
-    cols.push({ h: "Resumen · click para ver detalle", w: "minmax(200px,1.8fr)", cell: (l) => `<span class="text-muted truncate">${esc(l.intent) || "—"}</span>` });
+    cols.push({ h: "Resumen", w: "minmax(200px,1.8fr)", cell: (l) => `<span class="text-muted truncate">${esc(l.intent) || "—"}</span>` });
   }
   cols.push({
     h: "Estado",
-    w: "132px",
-    align: "right",
+    w: "150px",
     cell: (l) => {
       if (!opts.statusEditable) {
-        if (l.status == null) return `<span class="text-dim" style="font-size:11.5px">—</span>`;
-        return `<span style="display:inline-flex;align-items:center;gap:5px;justify-content:flex-end;width:100%;color:${LEAD_STATUS_COLOR[l.status]};font-weight:600;font-size:11.5px" title="El estado se administra desde ${esc(opts.providerLabel ?? "el CRM conectado")} — aquí es de solo lectura.">
-          <i data-lucide="lock" width="11" height="11"></i>${esc(niche.statusLabels[l.status])}
-        </span>`;
+        if (l.status == null) return `<span class="text-dim" style="font-size:12px">—</span>`;
+        return `<span title="El estado se administra desde ${esc(opts.providerLabel ?? "el CRM conectado")} — aquí es de solo lectura.">${statusPill(
+          niche.statusLabels[l.status],
+          LEAD_STATUS_COLOR[l.status],
+          `<i data-lucide="lock" width="11" height="11" style="color:var(--dim)"></i>`,
+        )}</span>`;
       }
-      return `<form method="POST" action="/admin/leads/${l.id}/status" onclick="event.stopPropagation()" style="display:flex;justify-content:flex-end">
-        <select name="status" onchange="this.form.submit()"
-                style="background:var(--bg);border:1px solid var(--line);color:${LEAD_STATUS_COLOR[l.status!]};font-weight:600;padding:6px 8px;font-size:11px;outline:none;cursor:pointer">
+      // Mismo aspecto que statusPill, pero con el selector adentro: cambia y
+      // se guarda solo (la página recarga con el punto del color nuevo).
+      return `<form method="POST" action="/admin/leads/${l.id}/status" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:6px;border-radius:999px;background:var(--panel2);padding:0 4px 0 10px;height:28px">
+        <span style="width:7px;height:7px;border-radius:50%;background:${LEAD_STATUS_COLOR[l.status!]};flex:none"></span>
+        <select name="status" onchange="this.form.submit()" aria-label="Estado de ${esc(l.name) || "este registro"}"
+                style="background:transparent;border:none;color:var(--cream);font-weight:700;font-size:12px;padding:0 2px;height:26px;cursor:pointer;box-shadow:none">
           ${(["new", "contacted", "sold", "lost"] as const)
             .map((s) => `<option ${l.status === s ? "selected" : ""} value="${s}">${esc(niche.statusLabels[s])}</option>`)
             .join("")}
         </select>
       </form>`;
     },
+  });
+  cols.push({
+    h: "Fecha",
+    w: "96px",
+    cell: (l) => `<span style="color:var(--muted)">${new Date(l.created_at).toLocaleDateString("es-MX", { timeZone: timezone })}</span>`,
+  });
+  // Sin título: el chevrón que abre el detalle (la fila entera es clicable).
+  cols.push({
+    h: "",
+    w: "36px",
+    align: "right",
+    cell: () =>
+      `<span aria-hidden="true" style="display:flex;justify-content:flex-end;color:var(--dim)"><i data-lucide="chevron-down" width="16" height="16" class="chev" style="transition:transform .12s ease"></i></span>`,
   });
   return cols;
 }
@@ -231,7 +251,7 @@ function renderLeadRow(
   if (matchedLocal) {
     const fullDate = new Date(matchedLocal.created_at).toLocaleString("es-MX", { timeZone: timezone });
     const convLink = matchedLocal.conversation_id
-      ? `<a href="/admin/conversations?c=${encodeURIComponent(matchedLocal.conversation_id)}" class="text-accent" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;text-decoration:none">
+      ? `<a href="/admin/conversations?c=${encodeURIComponent(matchedLocal.conversation_id)}" style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:var(--accent-2);text-decoration:none">
            <i data-lucide="messages-square" width="13" height="13"></i> Ver conversación completa
          </a>`
       : `<span class="text-dim" style="font-size:11.5px">Sin conversación ligada</span>`;
@@ -239,13 +259,13 @@ function renderLeadRow(
       .map(([k, v]) => `<span class="text-muted" style="font-size:12px"><span class="text-dim">${esc(k)}:</span> ${esc(v)}</span>`)
       .join("");
     detail = `
-      ${metaRows ? `<div><div style="font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Datos</div><div style="display:flex;flex-wrap:wrap;gap:6px 18px">${metaRows}</div></div>` : ""}
+      ${metaRows ? `<div><div style="${DETAIL_LABEL}">Datos</div><div style="display:flex;flex-wrap:wrap;gap:6px 18px">${metaRows}</div></div>` : ""}
       <div>
-        <div style="font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Resumen de la IA</div>
+        <div style="${DETAIL_LABEL}">Resumen de la IA</div>
         <div class="text-cream" style="font-size:13px;line-height:1.55;white-space:pre-wrap">${esc(matchedLocal.intent)}</div>
       </div>
       ${matchedLocal.notes ? `<div>
-        <div style="font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">Notas</div>
+        <div style="${DETAIL_LABEL}">Notas</div>
         <div class="text-muted" style="font-size:12.5px;line-height:1.5;white-space:pre-wrap">${esc(matchedLocal.notes)}</div>
       </div>` : ""}
       <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding-top:2px">
@@ -256,18 +276,23 @@ function renderLeadRow(
     `;
   } else {
     const crmLink = display.crmUrl
-      ? ` <a href="${esc(display.crmUrl)}" target="_blank" rel="noopener" class="text-accent">Abrir en el CRM ↗</a>`
+      ? ` <a href="${esc(display.crmUrl)}" target="_blank" rel="noopener" style="color:var(--accent-2);font-weight:700">Abrir en el CRM ↗</a>`
       : "";
     detail = `<div class="text-dim text-[12.5px]">Este contacto se creó directamente en el CRM — no hay conversación del bot que mostrar.${crmLink}</div>`;
   }
 
-  return `<div class="lead" style="border-top:1px solid var(--line)">
-    <div class="leadrow" onclick="var d=this.parentNode.querySelector('.lead-detail');var open=d.style.display==='block';d.style.display=open?'none':'block';this.querySelector('.chev').style.transform=open?'rotate(0deg)':'rotate(90deg)'"
-         style="display:grid;grid-template-columns:${gridCols};gap:12px;padding:13px 18px;font-size:12.5px;align-items:center;cursor:pointer">
+  // data-q / data-status alimentan el buscador y el filtro de arriba (solo
+  // filtran lo ya cargado en la página, sin ir al servidor).
+  const q = [display.name, display.contact, display.intent, ...Object.values(meta)].join(" ").toLowerCase();
+  return `<div class="lead" data-q="${esc(q)}" data-status="${display.status ?? ""}" style="border-top:1px solid var(--line)">
+    <div class="leadrow trow" role="button" tabindex="0" aria-expanded="false"
+         onclick="var d=this.parentNode.querySelector('.lead-detail');var open=d.style.display==='block';d.style.display=open?'none':'block';this.setAttribute('aria-expanded',String(!open));this.querySelector('.chev').style.transform=open?'rotate(0deg)':'rotate(180deg)'"
+         onkeydown="if((event.key==='Enter'||event.key===' ')&&event.target===this){event.preventDefault();this.click()}"
+         style="display:grid;grid-template-columns:${gridCols};gap:16px;padding:12px 24px;font-size:13px;align-items:center;cursor:pointer">
       ${cellsHtml}
     </div>
-    <div class="lead-detail" style="display:none;padding:4px 18px 20px 18px;background:var(--bg)">
-      <div style="max-width:760px;display:flex;flex-direction:column;gap:14px;padding-top:14px">
+    <div class="lead-detail" style="display:none;padding:4px 24px 22px 70px;background:var(--row-hover)">
+      <div style="max-width:760px;display:flex;flex-direction:column;gap:16px;padding-top:14px">
         ${detail}
       </div>
     </div>
@@ -300,11 +325,12 @@ export async function renderLeads(env: Env, botId: string, visibleNavIds: Set<st
   const statusEditable = !crmConnector;
   const cols = buildLeadColumns(niche, timezone, { statusEditable, providerLabel });
   const gridCols = cols.map((c) => c.w).join(" ");
-  const minWidth = 640 + niche.columns.length * 90; // asegura el scroll horizontal cuando hay muchas columnas
+  const minWidth = 760 + niche.columns.length * 90; // asegura el scroll horizontal cuando hay muchas columnas
 
   let crmErrorBanner = "";
   let crmLiveNote = "";
   let rowsHtml = "";
+  let rowCount = 0;
   let emptyMessage = `Aún no hay ${esc(niche.recordPlural.toLowerCase())}.`;
 
   if (crmConnector) {
@@ -326,6 +352,7 @@ export async function renderLeads(env: Env, botId: string, visibleNavIds: Set<st
           .filter((l) => l.exported_to === crmConnector.provider && l.external_id)
           .map((l) => [l.external_id as string, l] as const),
       );
+      rowCount = result.items.length;
       rowsHtml = result.items
         .map((r) => {
           const local = localByExternalId.get(r.id) ?? null;
@@ -334,47 +361,119 @@ export async function renderLeads(env: Env, botId: string, visibleNavIds: Set<st
         })
         .join("");
       emptyMessage = `Aún no hay registros en ${esc(providerLabel!)}.`;
-      crmLiveNote = ` <span class="text-dim text-[11px]" style="font-weight:400">· vía ${esc(providerLabel!)}</span>`;
+      crmLiveNote = ` · vía ${esc(providerLabel!)}`;
     } else {
       // Cayó a local — se avisa arriba de la tabla de siempre. El estado
       // SIGUE siendo de solo lectura: el CRM conectado no dejó de ser la
       // fuente de verdad solo porque ahora mismo no responde.
-      crmErrorBanner = `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px;margin-bottom:14px">No se pudo consultar ${esc(providerLabel!)} (${esc(result?.error ?? "sin credenciales")}) — mostrando la copia local mientras tanto.</div>`;
+      crmErrorBanner = `<div role="status" style="display:flex;align-items:center;gap:10px;border-radius:12px;border:1px solid var(--line);background:var(--panel);padding:12px 16px;margin-bottom:16px;font-size:13px;font-weight:600;color:var(--cream)"><span style="width:8px;height:8px;border-radius:50%;background:var(--bad);flex:none"></span>No se pudo consultar ${esc(providerLabel!)} (${esc(result?.error ?? "sin credenciales")}) — mostrando la copia local mientras tanto.</div>`;
       const list = await leads.list(100);
       const inscripciones = await inscripcionesDe(list);
+      rowCount = list.length;
       rowsHtml = list.map((l) => renderLeadRow(displayFromLocal(l), l, cols, gridCols, timezone, sequences, inscripciones)).join("");
     }
   } else {
     const list = await leads.list(100);
     const inscripciones = await inscripcionesDe(list);
+    rowCount = list.length;
     rowsHtml = list.map((l) => renderLeadRow(displayFromLocal(l), l, cols, gridCols, timezone, sequences, inscripciones)).join("");
   }
 
-  const empty = `<div style="padding:40px 18px;text-align:center" class="text-dim text-[12.5px]">${emptyMessage}</div>`;
+  const empty = `<div style="padding:48px 24px;text-align:center;font-size:13px;font-weight:500;color:var(--dim)">${emptyMessage}</div>`;
   const header = cols
     .map((c) => `<span${c.align === "right" ? ' style="text-align:right"' : ""}>${esc(c.h)}</span>`)
     .join("");
 
+  // Métricas: solo sin CRM. Con un CRM conectado el pipeline vive allá y el
+  // estado de la copia local no se sincroniza de regreso — contar desde aquí
+  // daría números que no cuadran con lo que el equipo ve en su CRM.
+  let stats = "";
+  if (!crmConnector) {
+    const semana = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const c = await leads.countsByStatus(semana);
+    const total = c.new.total + c.contacted.total + c.sold.total + c.lost.total;
+    const nuevos = c.new.recent + c.contacted.recent + c.sold.recent + c.lost.recent;
+    stats = statGrid([
+      statCard({ icon: "user-plus", tone: "accent", label: `Total de ${niche.recordPlural.toLowerCase()}`, value: total, hint: nuevos ? `+${nuevos} esta semana` : undefined }),
+      statCard({ icon: "clock", tone: "warn", label: niche.statusLabels.new, value: c.new.total }),
+      statCard({ icon: "message-circle", tone: "neutral", label: niche.statusLabels.contacted, value: c.contacted.total }),
+      statCard({ icon: "circle-check", tone: "ok", label: niche.statusLabels.sold, value: c.sold.total }),
+    ]);
+  }
+
+  const hero = pageHero({
+    eyebrow: "Bandeja",
+    title: niche.recordPlural,
+    description: `Quienes le dejaron sus datos a ${bot?.name ?? "tu bot"}. Abre cada uno para ver el resumen de la IA, la conversación y su seguimiento.`,
+    tags: crmConnector ? heroTag(`Conectado a ${providerLabel}`, crmErrorBanner ? "var(--bad)" : "#3fb8c4") : "",
+    actions: [
+      heroBtn({ label: "Exportar CSV", href: "/admin/leads/export.csv", icon: "download", primary: true }),
+      crmConnector ? heroBtn({ label: "Gestionar conexión", href: "/admin/conexiones?cat=crm", icon: "plug-zap" }) : "",
+    ].join(""),
+  });
+
+  // Buscador y filtro: solo sobre lo que ya está en la página (hasta 100).
+  const statusOptions = (["new", "contacted", "sold", "lost"] as const)
+    .map((st) => `<option value="${st}">${esc(niche.statusLabels[st])}</option>`)
+    .join("");
+  const filters = rowCount
+    ? `<label style="position:relative;display:flex;align-items:center;width:240px;max-width:100%">
+        <span style="position:absolute;left:12px;display:flex;color:var(--dim)"><i data-lucide="search" width="16" height="16"></i></span>
+        <input id="lead-q" type="search" placeholder="Nombre, contacto o resumen" aria-label="Buscar ${esc(niche.recordPlural.toLowerCase())}"
+               style="width:100%;height:40px;padding:0 12px 0 36px;border-radius:12px;border:1px solid var(--dim);background:var(--panel);font-size:13px;font-weight:500;color:var(--cream)">
+      </label>
+      ${statusEditable ? `<select id="lead-st" aria-label="Filtrar por estado" style="height:40px;border-radius:12px;border:1px solid var(--dim);background:var(--panel);padding:0 12px;font-size:13px;font-weight:600;color:var(--cream)">
+        <option value="">Todos los estados</option>${statusOptions}
+      </select>` : ""}`
+    : "";
+  const rowsLabel = `${rowCount} ${rowCount === 1 ? "registro" : "registros"}`;
+
   const body = `
+    ${hero}
     ${crmErrorBanner}
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-      <h2 class="font-display font-semibold text-[15px] text-cream">${esc(niche.recordPlural)} de ${esc(bot?.name ?? "tu bot")}${crmLiveNote}</h2>
-      <div style="display:flex;align-items:center;gap:14px">
-        ${crmConnector ? `<a href="/admin/conexiones?cat=crm" class="text-[12px]" style="color:var(--muted)">gestionar conexión</a>` : ""}
-        <a href="/admin/leads/export.csv" class="ghostbtn" style="display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:9px 14px;font-size:12.5px;transition:all .12s ease">
-          <i data-lucide="download" width="14" height="14"></i> Exportar CSV
-        </a>
-      </div>
-    </div>
-    <div class="bg-panel border border-line" style="overflow-x:auto">
-      <div style="min-width:${minWidth}px">
-        <div style="display:grid;grid-template-columns:${gridCols};gap:12px;padding:10px 18px;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)">
-          ${header}
+    ${stats}
+    ${sectionCard({
+      icon: "users",
+      title: `Listado de ${niche.recordPlural.toLowerCase()}`,
+      subtitle: `${rowsLabel} · los más recientes primero${crmLiveNote}`,
+      actions: filters,
+      body: `<div style="overflow-x:auto">
+        <div id="lead-list" style="min-width:${minWidth}px">
+          <div style="display:grid;grid-template-columns:${gridCols};gap:16px;${TH_STYLE};border-bottom:none">
+            ${header}
+          </div>
+          ${rowsHtml || empty}
+          <div id="lead-none" style="display:none;padding:40px 24px;text-align:center;font-size:13px;font-weight:500;color:var(--dim);border-top:1px solid var(--line)">Nada coincide con tu búsqueda.</div>
         </div>
-        ${rowsHtml || empty}
-      </div>
-    </div>`;
-  return layout({ title: niche.recordPlural, activeTab: "leads", body, visibleNavIds });
+      </div>`,
+      footer: rowCount
+        ? `<span id="lead-count" style="font-size:10px;font-weight:900;letter-spacing:.15em;text-transform:uppercase;color:var(--dim)">Mostrando ${rowCount} de ${rowCount}</span>`
+        : "",
+    })}
+    <script>
+    (function () {
+      var q = document.getElementById("lead-q"), st = document.getElementById("lead-st");
+      if (!q) return;
+      var rows = Array.prototype.slice.call(document.querySelectorAll("#lead-list .lead"));
+      var none = document.getElementById("lead-none"), count = document.getElementById("lead-count");
+      // Sin acentos: "ramirez" encuentra a "Ramírez".
+      function norm(s) { return s.normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase(); }
+      var texts = rows.map(function (r) { return norm(r.getAttribute("data-q")); });
+      function apply() {
+        var term = norm(q.value.trim()), want = st ? st.value : "", shown = 0;
+        rows.forEach(function (r, i) {
+          var ok = (!term || texts[i].indexOf(term) !== -1) && (!want || r.getAttribute("data-status") === want);
+          r.style.display = ok ? "" : "none";
+          if (ok) shown++;
+        });
+        none.style.display = shown ? "none" : "block";
+        if (count) count.textContent = "Mostrando " + shown + " de " + rows.length;
+      }
+      q.addEventListener("input", apply);
+      if (st) st.addEventListener("change", apply);
+    })();
+    </script>`;
+  return layout({ title: niche.recordPlural, activeTab: "leads", body, visibleNavIds, hero: true });
 }
 
 export async function exportLeadsCsv(env: Env, botId: string): Promise<string> {

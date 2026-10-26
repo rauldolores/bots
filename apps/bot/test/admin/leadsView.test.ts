@@ -151,16 +151,16 @@ describe("renderLeads — el estado es de solo lectura cuando hay un CRM conecta
     expect(html).toContain("se administra desde");
   });
 
-  it("el mismo diseño de columnas (Fecha/Nombre/Contacto/Resumen/Estado) aparece con o sin CRM conectado", async () => {
+  it("el mismo diseño de columnas (Nombre/Contacto/Resumen/Estado/Fecha) aparece con o sin CRM conectado", async () => {
     const sinCrm = await renderLeads(env, TEST_BOT_ID);
-    expect(sinCrm).toContain("Resumen · click para ver detalle");
+    expect(sinCrm).toContain(">Resumen<");
     expect(sinCrm).toContain(">Estado<");
 
     await new BotConnectorsRepo(db).upsert({ botId: TEST_BOT_ID, category: "crm", provider: "hubspot", secretRef: "11111111-1111-1111-1111-111111111111" });
     readSecretMock.mockResolvedValue("pat-fake");
     global.fetch = vi.fn(async () => new Response(JSON.stringify({ results: [] }), { status: 200 })) as any;
     const conCrm = await renderLeads(env, TEST_BOT_ID);
-    expect(conCrm).toContain("Resumen · click para ver detalle");
+    expect(conCrm).toContain(">Resumen<");
     expect(conCrm).toContain(">Estado<");
   });
 });
@@ -179,5 +179,33 @@ describe("aislamiento por bot", () => {
 
     const html = await renderLeads(env, otherBotId);
     expect(html).not.toContain("Leads — HubSpot");
+  });
+});
+
+// Las tarjetas de arriba cuentan con SQL propio (countsByStatus): COUNT(*)
+// llega como bigint y el FILTER por fecha es fácil de romper.
+describe("renderLeads — métricas", () => {
+  it("countsByStatus cuenta por estado y separa lo reciente", async () => {
+    const repo = new LeadsRepo(db, TEST_BOT_ID);
+    const vendido = await repo.create({ conversationId: null, channelUserId: null, name: "Vendido", intent: "x" });
+    await repo.setStatus(vendido, "sold");
+    await db.run("UPDATE leads SET created_at = ? WHERE id = ?", [Date.now() - 30 * 24 * 60 * 60 * 1000, vendido]);
+
+    const c = await repo.countsByStatus(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    expect(c.new).toEqual({ total: 1, recent: 1 });
+    expect(c.sold).toEqual({ total: 1, recent: 0 });
+    expect(c.lost).toEqual({ total: 0, recent: 0 });
+  });
+
+  it("sin CRM muestra las tarjetas; con CRM no (el pipeline vive allá)", async () => {
+    const sinCrm = await renderLeads(env, TEST_BOT_ID);
+    expect(sinCrm).toContain("stat-card");
+    expect(sinCrm).toContain("+1 esta semana");
+
+    await new BotConnectorsRepo(db).upsert({ botId: TEST_BOT_ID, category: "crm", provider: "hubspot", secretRef: "11111111-1111-1111-1111-111111111111" });
+    readSecretMock.mockResolvedValue("pat-fake");
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ results: [] }), { status: 200 })) as any;
+    const conCrm = await renderLeads(env, TEST_BOT_ID);
+    expect(conCrm).not.toContain("stat-card");
   });
 });

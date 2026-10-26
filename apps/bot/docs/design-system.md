@@ -107,6 +107,19 @@ Hierarchy:
 
 Copy these. Sizes are the mockup's; keep them consistent.
 
+**Antes de copiar, usa las piezas de `src/admin/views/ui.ts`** (estructura de
+AduaniaX, colores de nodia.agents). Leads es la primera pantalla migrada; las
+demás se pasan una por una:
+
+| Pieza | Qué es |
+|---|---|
+| `pageHero({ eyebrow, title, description, tags, actions })` | Encabezado oscuro (`--hero-bg`), radio 20, eyebrow ámbar, h1 de 30 px. Acciones con `heroBtn`, etiquetas con `heroTag`. |
+| `statGrid([statCard(...)])` | Fila de métricas 4/2 columnas. `statCard` lleva mosaico de ícono teñido (`tone`: accent, ok, warn, neutral, ink) y número de 28 px. |
+| `sectionCard({ icon, title, subtitle, actions, body, footer })` | Tarjeta blanca radio 16 con cabecera (ícono, título, subtítulo, filtros a la derecha) y pie opcional. |
+| `statusPill(label, color)` | Punto de color + palabra sobre `--panel2`. El color de estado nunca de relleno. |
+| `TH_STYLE`, `MICRO_LABEL` | Cabeceras de tabla en micro mayúsculas (10 px, 900, .15em). Filas con clase `trow` para el hover. |
+| `avatarTile(name)` | Mosaico de iniciales de 34 px para personas. |
+
 ### Card / panel
 ```html
 <div class="card bg-panel border border-line p-[18px]"> … </div>
@@ -228,6 +241,10 @@ The shell renders, for every page, a sticky topbar with the **breadcrumb
 
 - **Do not render your own top-level page title** (`<h1>`/`<h2>` naming the tab)
   or your own "bot online" indicator — the shell already shows both.
+  **Excepción (desde 2026-10):** las pantallas migradas a la estructura de
+  AduaniaX abren con `pageHero()` de `src/admin/views/ui.ts` (encabezado oscuro
+  con el h1) y llaman `layout({ ..., hero: true })`: el topbar se queda solo
+  con la ruta, sin repetir el título.
 - Start the body with content (filters, stats, the sub-tab strip if the tab has
   sub-views, cards…). Section-level headings inside the body are fine.
 - `<main>` already has `padding:26px 28px`. Add vertical rhythm with a flex

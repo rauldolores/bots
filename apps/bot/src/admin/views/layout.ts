@@ -139,7 +139,10 @@ const GLOBAL_STYLE = `
     --line:#e3dacb; --linelit:#d3c7b4;
     --accent:#f2b705; --accent-hover:#d9a404; --accent-2:#8a6a00; --accent-soft:#fdf0c8; --accent-ink:#5c4400;
     --cream:#1c1815; --muted:#5c534a; --dim:#8c7f6d;
-    --ok:#0b6e7a; --ok-soft:rgba(11,110,122,.12); --warn:#8a5a00; --info:#2563eb; --bad:#b3261e; --violet:#7c3aed;
+    --ok:#0b6e7a; --ok-soft:rgba(11,110,122,.12); --warn:#8a5a00; --warn-soft:#f6e7c8; --info:#2563eb; --bad:#b3261e; --violet:#7c3aed;
+    /* encabezado oscuro de página (ui.ts pageHero) y fila resaltada de tabla */
+    --hero-bg:#26211b; --hero-ink:#fbf8f3; --hero-muted:#cfc5b6; --hero-line:rgba(255,255,255,.14);
+    --row-hover:#fbf8f3;
     /* sombras y radios (medidas de AduaniaX): suaves, nunca offset duro */
     --shadow-sm:0 1px 2px rgba(28,24,21,.05);
     --shadow-md:0 12px 32px -12px rgba(28,24,21,.14);
@@ -286,8 +289,16 @@ const GLOBAL_STYLE = `
   .live-pill{display:flex;align-items:center;gap:8px;height:32px;background:var(--panel2);border-radius:999px;padding:0 12px;white-space:nowrap}
   .hdr-btn{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-sm);color:var(--muted)}
   .hdr-btn:hover{background:var(--panel2);color:var(--cream)}
+  /* piezas de ui.ts */
+  .stat-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+  @media (max-width:1100px){.stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .hero-btn:hover{background:rgba(255,255,255,.1) !important}
+  .hero-btn-primary:hover{background:var(--accent-hover) !important}
+  .trow:hover{background:var(--row-hover)}
 
   @media (max-width:767px){
+    .stat-grid{gap:10px}
+    .page-hero{padding:22px 20px !important}
     /* rows auto+1fr: sin esto, en pantallas con poco contenido la fila de la
        barra se estira para llenar el 100vh y queda un bloque oscuro enorme. */
     .shell{grid-template-columns:1fr;grid-template-rows:auto 1fr}
@@ -549,6 +560,12 @@ export function layout(opts: {
   niche?: NichePack | null;
   /** visibleNavIds(claims) de admin/permissions.ts — null (default) = sin sesión de KontrolIA, todo visible. */
   visibleNavIds?: Set<string> | null;
+  /**
+   * La vista trae su propio encabezado oscuro con el h1 (ui.ts pageHero):
+   * el header de arriba se queda solo con la ruta, para no repetir el título
+   * ni tener dos h1 en la página.
+   */
+  hero?: boolean;
 }): string {
   const niche = opts.niche ?? null;
   const visibleNavIds = opts.visibleNavIds ?? null;
@@ -573,7 +590,7 @@ export function layout(opts: {
           <div style="font-size:10px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;font-weight:800">
             ${section.label} / ${item.label}
           </div>
-          <h1 style="font-weight:900;font-size:19px;margin:1px 0 0;letter-spacing:-.03em;line-height:1.2">${item.label}</h1>
+          ${opts.hero ? "" : `<h1 style="font-weight:900;font-size:19px;margin:1px 0 0;letter-spacing:-.03em;line-height:1.2">${item.label}</h1>`}
         </div>
         <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
           <div id="ctx-switcher" style="position:relative"></div>
