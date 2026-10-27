@@ -354,7 +354,7 @@ export async function renderSeguimientos(env: Env, botId: string, opts: { error?
   const pct = Math.round((sent24h / cap) * 100);
 
   const hero = pageHero({
-    eyebrow: "Bandeja",
+    eyebrow: "Campañas",
     title: "Seguimientos",
     description:
       "Guiones de varios pasos para perseguir una venta durante días. Inscribe un lead desde su ficha en Leads, o deja que entren solos. Nunca se contacta en frío: solo se manda un toque si ya existe una conversación con esa persona.",
