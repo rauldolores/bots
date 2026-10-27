@@ -249,6 +249,21 @@ describe("subir archivos en lote y carpetas", () => {
     expect(html).toContain('action="/admin/kb/carpeta/borrar"');
   });
 
+  it("trae el hero, las métricas y un solo h1 (lista y editor)", async () => {
+    await subir({ carpeta: "Precios", nombre: "lista.txt", contenido: "Corte: $250" });
+    const html = await (await adminApp.request("/kb", { headers: AUTH }, env)).text();
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    expect(html).toContain("Entrenar");
+    expect(html).toContain("Fragmentos indexados");
+    expect(html).toContain("Archivos para enviar");
+    expect(html).toContain("1 documento");
+
+    const nuevo = await (await adminApp.request("/kb/new", { headers: AUTH }, env)).text();
+    expect(nuevo.match(/<h1[\s>]/g)).toHaveLength(1);
+    expect(nuevo).toContain("Nuevo documento");
+    expect(nuevo).toContain('action="/admin/kb/save"');
+  });
+
   it("el editor mueve un documento de carpeta y lo saca si se deja vacía, sin desligarlo de su archivo", async () => {
     await subir({ carpeta: "Viejos", nombre: "faq.txt", contenido: "Pregunta" });
     const [doc] = await repo.list();

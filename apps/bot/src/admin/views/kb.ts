@@ -5,9 +5,9 @@
 // siguiente mensaje. Los fragmentos precargados del repo conviven con estos.
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
-import { KbDocsRepo, FIXTURE_CHUNKS, MAX_DOC_CHARS, type KbDoc } from "../../kb/docs";
+import { KbDocsRepo, FIXTURE_CHUNKS, MAX_DOC_CHARS, chunkContent, type KbDoc } from "../../kb/docs";
 import { MAX_CARPETA_CHARS } from "../../kb/archivos";
-import { esc, arbolDeDocumentos, zonaDeSubida } from "./kbArbol";
+import { esc, ago, arbolDeDocumentos, zonaDeSubida } from "./kbArbol";
 import { MediaAssetsRepo, type MediaAsset } from "../../db/mediaAssets";
 import { BotsRepo } from "../../db/bots";
 import { topeDelPlan, LIMITES } from "../../billing/kontrolia";
@@ -21,13 +21,55 @@ import {
   TIPOS_DE_DOCUMENTO,
 } from "../../media/limites";
 import { layout } from "./layout";
+import { alertRow, heroBtn, heroTag, iconTile, MICRO_LABEL, pageHero, sectionCard, statCard, statGrid } from "./ui";
 
-/** Callout banner. `tone` picks the token: ok=verde (éxito), bad=rojo (error), neutral=gris (info). */
+const KB_CSS = `<style>
+  .kb-body{padding:20px 24px;display:flex;flex-direction:column;gap:16px}
+  .kb-help{margin:0;font-size:12px;font-weight:500;line-height:1.5;color:var(--dim)}
+  .kb-label{display:flex;flex-direction:column;gap:6px;min-width:0}
+  .kb-label>span{${MICRO_LABEL}}
+  .kb-field{width:100%;height:40px;padding:0 14px;border:1px solid var(--linelit);background:var(--panel);color:var(--cream);font-size:13px;min-width:0}
+  textarea.kb-field{height:auto;min-height:280px;padding:12px 14px;line-height:1.6;resize:vertical}
+  input[type="file"].kb-field{padding:7px 10px}
+  .kb-btn{height:40px;padding:0 16px;border-radius:12px;border:0;background:var(--accent);color:var(--cream);font-size:13px;font-weight:800;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;white-space:nowrap;text-decoration:none}
+  .kb-btn:hover:not(:disabled){background:var(--accent-hover)}
+  .kb-btn:disabled{cursor:not-allowed}
+  .kb-btn-ghost{height:40px;padding:0 14px;border-radius:12px;border:1px solid var(--linelit);background:var(--panel);color:var(--cream);font-size:13px;font-weight:700;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;white-space:nowrap;text-decoration:none}
+  .kb-btn-ghost:hover{background:var(--row-hover)}
+  .kb-btn-sm{height:32px;padding:0 12px;border-radius:10px;border:1px solid var(--dim);background:var(--panel);color:var(--cream);font-size:12px;font-weight:700;font-family:inherit;display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;text-decoration:none;flex:none}
+  .kb-btn-sm:hover{background:var(--row-hover)}
+  .kb-icon-btn{width:32px;height:32px;border-radius:10px;border:1px solid var(--linelit);background:var(--panel);color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .kb-row{display:flex;align-items:center;gap:12px;padding:14px 24px;min-width:0}
+  .kb-title{display:block;font-size:14px;font-weight:800;color:var(--cream);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none;min-width:0}
+  a.kb-title:hover{color:var(--accent-2)}
+  .kb-sub{margin-top:2px;font-size:12.5px;font-weight:500;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kb-meta{text-align:right;white-space:nowrap;flex:none;font-size:12px;font-weight:600;color:var(--dim);line-height:1.5}
+  .kb-chip{display:inline-flex;align-items:center;border-radius:8px;background:var(--panel2);padding:2px 8px;font-size:11px;font-weight:700;color:var(--muted);white-space:nowrap}
+  .kb-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .kb-drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:28px 16px;border-radius:var(--radius);border:1.5px dashed var(--linelit);background:var(--row-hover);cursor:pointer;transition:all .12s ease}
+  .kb-drop:hover,.kb-drop:focus-visible,.kb-drop.encima{border-color:var(--accent);background:var(--accent-soft)}
+  .kb-queue{border-radius:12px;border:1px solid var(--line);max-height:280px;overflow-y:auto}
+  .kb-meter{flex:1;min-width:120px;height:8px;border-radius:999px;background:var(--panel2);overflow:hidden}
+  .kb-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+  .kb-form-grid .full{grid-column:1 / -1}
+  .kb-danger summary{list-style:none;cursor:pointer;font-size:13px;font-weight:700;color:var(--bad)}
+  .kb-danger summary::-webkit-details-marker{display:none}
+  @media (max-width:640px){
+    .kb-body{padding:16px}
+    .kb-row{padding:12px 16px}
+    .kb-form-grid{grid-template-columns:minmax(0,1fr)}
+    .kb-form-grid #campos-enlace{grid-template-columns:minmax(0,1fr)!important}
+  }
+</style>`;
+
+/** Aviso tras una acción. `tone` decide solo el color del punto: el recuadro es neutro. */
 function banner(tone: "ok" | "bad" | "neutral", text: string): string {
-  const color = tone === "ok" ? "var(--ok)" : tone === "bad" ? "var(--bad)" : "var(--dim)";
-  const bg = tone === "ok" ? "rgba(127,183,126,.1)" : tone === "bad" ? "rgba(217,122,106,.1)" : "var(--panel2)";
-  return `<div style="border:1px solid ${color};background:${bg};color:${tone === "neutral" ? "var(--muted)" : color};padding:10px 14px;font-size:12.5px;margin-bottom:16px">${text}</div>`;
+  const dot = tone === "ok" ? "var(--ok)" : tone === "bad" ? "var(--bad)" : "var(--dim)";
+  const title = tone === "ok" ? "Listo" : tone === "bad" ? "No se pudo" : "Hecho";
+  return `<div style="margin-bottom:24px">${alertRow({ title, detail: text, dot, attrs: tone === "bad" ? 'role="alert"' : 'role="status"' })}</div>`;
 }
+
+const ICONO_DE_TIPO: Record<string, string> = { imagen: "image", documento: "file-text", enlace: "link" };
 
 /**
  * "Archivos que el bot puede enviar" — la biblioteca de medios.
@@ -52,100 +94,120 @@ function seccionDeMedios(
     ? assets
         .map(
           (a) => `
-      <div class="kbrow" style="display:flex;align-items:center;gap:12px;padding:13px 18px;border-top:1px solid var(--line);transition:background .12s ease">
+      <div class="kbrow kb-row" style="border-top:1px solid var(--line)">
+        ${iconTile(ICONO_DE_TIPO[a.tipo] ?? "file", "neutral", 32)}
         <div style="min-width:0;flex:1">
-          <div style="display:flex;align-items:center;gap:8px">
-            <code class="text-cream text-[12.5px]" style="font-family:ui-monospace,Menlo,monospace">${esc(a.clave)}</code>
-            <span class="text-dim text-[10.5px]" style="border:1px solid var(--line);padding:1px 7px">${a.tipo}</span>
-            ${a.size_bytes ? `<span class="text-dim text-[10.5px]">${pesoLegible(Number(a.size_bytes))}</span>` : ""}
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+            <code class="kb-mono" style="font-size:13px;font-weight:700;color:var(--cream)">${esc(a.clave)}</code>
+            <span class="kb-chip">${a.tipo}</span>
+            ${a.size_bytes ? `<span style="font-size:12px;font-weight:600;color:var(--dim)">${pesoLegible(Number(a.size_bytes))}</span>` : ""}
           </div>
-          <div class="text-muted text-[11.5px]" style="margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.descripcion)}</div>
-          <div class="text-dim text-[10.5px]" style="margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-            <a href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">${esc(a.titulo ?? a.nombre_archivo ?? a.url)}</a>
+          <div class="kb-sub" style="color:var(--muted)">${esc(a.descripcion)}</div>
+          <div class="kb-sub">
+            <a href="${esc(a.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-2)">${esc(a.titulo ?? a.nombre_archivo ?? a.url)}</a>
           </div>
         </div>
-        <form method="POST" action="/admin/kb/archivos/${encodeURIComponent(a.id)}/delete" style="flex:none">
-          <button class="kbedit cursor-pointer" style="background:none;border:1px solid var(--line);color:var(--muted);padding:5px 12px;font-size:11px;transition:all .12s ease">Quitar</button>
+        <form method="POST" action="/admin/kb/archivos/${encodeURIComponent(a.id)}/delete" style="flex:none;margin:0">
+          <button class="kbedit kb-btn-sm" aria-label="Quitar ${esc(a.clave)}"><i data-lucide="x" width="14" height="14"></i>Quitar</button>
         </form>
       </div>`,
         )
         .join("")
-    : `<div class="text-dim text-[12.5px]" style="padding:34px 18px;text-align:center">
-         Todavía no hay archivos. Mientras esta lista esté vacía, tu bot no puede enviar nada — ni siquiera lo intenta.
+    : `<div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:32px 24px;text-align:center;border-top:1px solid var(--line)">
+         ${iconTile("paperclip", "neutral")}
+         <div style="font-size:13px;font-weight:700;color:var(--cream)">Todavía no hay archivos.</div>
+         <p class="kb-help" style="max-width:420px">Mientras esta lista esté vacía, tu bot no puede enviar nada — ni siquiera lo intenta.</p>
        </div>`;
-
-  const campo = "background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;outline:none;width:100%";
 
   // Sin Storage no se pueden subir archivos, pero un enlace no se sube: se
   // sigue ofreciendo, solo que con "enlace" como única opción.
   const aviso = espacio.disponible
     ? ""
-    : `<div class="bg-panel border border-line" style="padding:14px 18px;margin-bottom:12px">
-         <p class="text-muted text-[12px]" style="margin:0">
-           Para subir archivos falta configurar el almacenamiento:
-           <code class="text-cream">SUPABASE_URL</code> y <code class="text-cream">SUPABASE_SERVICE_ROLE_KEY</code>.
-           Mientras tanto puedes guardar enlaces, y lo ya cargado sigue funcionando.
-         </p>
-       </div>`;
+    : alertRow({
+        title: "Falta configurar el almacenamiento",
+        detail:
+          "Para subir archivos se necesitan SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY. Mientras tanto puedes guardar enlaces, y lo ya cargado sigue funcionando.",
+        dot: "var(--warn)",
+      });
 
-  const formulario = `${aviso}
-    <form id="form-archivo" class="bg-panel border border-line" style="padding:18px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:16px">
-      <div style="display:flex;flex-direction:column;gap:5px">
-        <label for="clave" class="font-display font-semibold text-[12px] text-cream">Clave</label>
-        <p class="text-dim text-[11px]">Corta y en minúsculas. Es lo que el bot escribe para pedirlo.</p>
-        <input type="text" id="clave" name="clave" required maxlength="40" placeholder="menu" style="${campo}">
+  const biblioteca = sectionCard({
+    icon: "paperclip",
+    title: "Archivos que el bot puede enviar",
+    subtitle: "Tu menú en PDF, la foto del local, el catálogo",
+    body: `
+      <div class="kb-body" style="gap:10px">
+        <p class="kb-help" style="color:var(--muted)">El bot los manda cuando el cliente los pide — y solo puede mandar los que estén aquí: nunca escribe enlaces por su cuenta.</p>
+        <p class="kb-help">Quien reciba el enlace puede abrirlo sin contraseña, igual que si se lo mandaras por WhatsApp. Esto es para material que ya le compartes a tus clientes, no para documentos confidenciales.</p>
       </div>
+      ${filas}`,
+    footer: `
+      <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
+        <span style="${MICRO_LABEL}">Espacio</span>
+        <div class="kb-meter" role="progressbar" aria-label="Espacio usado" aria-valuenow="${porcentaje}" aria-valuemin="0" aria-valuemax="100">
+          <div style="height:100%;width:${porcentaje}%;border-radius:999px;background:${porcentaje >= 90 ? "var(--bad)" : "var(--accent)"}"></div>
+        </div>
+        <span style="font-size:12.5px;font-weight:700;color:var(--muted);white-space:nowrap">${pesoLegible(espacio.usadoBytes)} de ${espacio.espacioMb} MB</span>
+      </div>`,
+  });
 
-      <div style="display:flex;flex-direction:column;gap:5px">
-        <label for="tipo" class="font-display font-semibold text-[12px] text-cream">Tipo</label>
-        <p class="text-dim text-[11px]">Una imagen se ve en el chat; un documento se descarga; un enlace sale como tarjeta.</p>
-        <select id="tipo" name="tipo" style="${campo}">
+  const formulario = sectionCard({
+    icon: "plus",
+    title: "Agregar un archivo o enlace",
+    subtitle: "Se guarda con una clave corta que el bot usa para pedirlo",
+    body: `
+    <div class="kb-body">
+    ${aviso}
+    <form id="form-archivo" class="kb-form-grid">
+      <label class="kb-label" for="clave"><span>Clave</span>
+        <input type="text" id="clave" name="clave" required maxlength="40" placeholder="menu" class="kb-field kb-mono" aria-describedby="clave-help">
+        <p id="clave-help" class="kb-help">Corta y en minúsculas. Es lo que el bot escribe para pedirlo.</p>
+      </label>
+
+      <label class="kb-label" for="tipo"><span>Tipo</span>
+        <select id="tipo" name="tipo" class="kb-field" aria-describedby="tipo-help">
           ${espacio.disponible ? `<option value="documento">Documento</option>
           <option value="imagen">Imagen</option>` : ""}
           <option value="enlace">Enlace (ubicación, reservas, una página)</option>
         </select>
-      </div>
+        <p id="tipo-help" class="kb-help">Una imagen se ve en el chat; un documento se descarga; un enlace sale como tarjeta.</p>
+      </label>
 
-      <div style="display:flex;flex-direction:column;gap:5px;grid-column:1/-1">
-        <label for="descripcion" class="font-display font-semibold text-[12px] text-cream">¿Qué es?</label>
-        <p class="text-dim text-[11px]">Lo único que el bot lee para decidir si este archivo responde lo que le preguntaron. Sé concreto.</p>
+      <label class="kb-label full" for="descripcion"><span>¿Qué es?</span>
         <input type="text" id="descripcion" name="descripcion" required maxlength="200"
-               placeholder="El menú de la semana, con precios" style="${campo}">
-      </div>
+               placeholder="El menú de la semana, con precios" class="kb-field" aria-describedby="descripcion-help">
+        <p id="descripcion-help" class="kb-help">Lo único que el bot lee para decidir si este archivo responde lo que le preguntaron. Sé concreto.</p>
+      </label>
 
-      <div id="campos-enlace" style="display:none;grid-column:1/-1;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px">
-        <div style="display:flex;flex-direction:column;gap:5px">
-          <label for="url" class="font-display font-semibold text-[12px] text-cream">El enlace</label>
-          <p class="text-dim text-[11px]">La dirección completa, con https://</p>
+      <div id="campos-enlace" class="full" style="display:none;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px">
+        <label class="kb-label" for="url"><span>El enlace</span>
           <input type="url" id="url" name="url" maxlength="1000"
-                 placeholder="https://maps.google.com/…" style="${campo}">
-        </div>
-        <div style="display:flex;flex-direction:column;gap:5px">
-          <label for="titulo" class="font-display font-semibold text-[12px] text-cream">Título de la tarjeta</label>
-          <p class="text-dim text-[11px]">Lo que tu cliente lee. Si lo dejas vacío, se muestra el dominio.</p>
+                 placeholder="https://maps.google.com/…" class="kb-field" aria-describedby="url-help">
+          <p id="url-help" class="kb-help">La dirección completa, con https://</p>
+        </label>
+        <label class="kb-label" for="titulo"><span>Título de la tarjeta</span>
           <input type="text" id="titulo" name="titulo" maxlength="80"
-                 placeholder="Sucursal Roma — cómo llegar" style="${campo}">
-        </div>
+                 placeholder="Sucursal Roma — cómo llegar" class="kb-field" aria-describedby="titulo-help">
+          <p id="titulo-help" class="kb-help">Lo que tu cliente lee. Si lo dejas vacío, se muestra el dominio.</p>
+        </label>
       </div>
 
-      <div id="campo-archivo" style="display:flex;flex-direction:column;gap:5px;grid-column:1/-1">
-        <label for="archivo" class="font-display font-semibold text-[12px] text-cream">El archivo</label>
-        <p class="text-dim text-[11px]">
+      <label id="campo-archivo" class="kb-label full" for="archivo"><span>El archivo</span>
+        <input type="file" id="archivo" name="archivo" required
+               accept="${[...TIPOS_DE_IMAGEN, ...TIPOS_DE_DOCUMENTO].join(",")}" class="kb-field" aria-describedby="archivo-help">
+        <p id="archivo-help" class="kb-help">
           Imágenes hasta ${pesoLegible(MAX_IMAGEN_BYTES)} (JPG, PNG, WEBP, GIF) y documentos hasta ${pesoLegible(MAX_DOCUMENTO_BYTES)} (PDF, Word, Excel, texto).
           El tope no es nuestro: arriba de eso hay canales que no lo entregan.
         </p>
-        <input type="file" id="archivo" name="archivo" required
-               accept="${[...TIPOS_DE_IMAGEN, ...TIPOS_DE_DOCUMENTO].join(",")}" style="${campo}">
-      </div>
+      </label>
 
-      <div style="grid-column:1/-1;display:flex;align-items:center;gap:12px">
-        <span id="archivo-estado" class="text-dim text-[11.5px]" style="flex:1"></span>
-        <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
-                style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 16px">
-          <span id="texto-boton">Subir archivo</span>
+      <div class="full" style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+        <span id="archivo-estado" role="status" style="flex:1;min-width:160px;font-size:12.5px;font-weight:600;color:var(--muted)"></span>
+        <button type="submit" class="kb-btn">
+          <i data-lucide="upload" width="15" height="15"></i><span id="texto-boton">Subir archivo</span>
         </button>
       </div>
     </form>
+    </div>
 
     <script>
     (function () {
@@ -230,35 +292,10 @@ function seccionDeMedios(
         }
       });
     })();
-    </script>`;
+    </script>`,
+  });
 
-  return `
-    <div style="margin:28px 0 16px">
-      <h2 class="font-display font-semibold text-[15px] text-cream">Archivos que el bot puede enviar</h2>
-      <p class="text-muted text-[12.5px]" style="margin-top:2px">
-        Tu menú en PDF, la foto del local, el catálogo. El bot los manda cuando el cliente los pide —
-        y solo puede mandar los que estén aquí: nunca escribe enlaces por su cuenta.
-      </p>
-      <p class="text-dim text-[11.5px]" style="margin-top:6px">
-        Quien reciba el enlace puede abrirlo sin contraseña, igual que si se lo mandaras por WhatsApp.
-        Esto es para material que ya le compartes a tus clientes, no para documentos confidenciales.
-      </p>
-    </div>
-
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
-      <div style="flex:1;height:6px;background:var(--panel2);border:1px solid var(--line);overflow:hidden">
-        <div style="height:100%;width:${porcentaje}%;background:${porcentaje >= 90 ? "var(--bad)" : "var(--accent)"}"></div>
-      </div>
-      <span class="text-dim text-[11.5px]" style="white-space:nowrap">
-        ${pesoLegible(espacio.usadoBytes)} de ${espacio.espacioMb} MB
-      </span>
-    </div>
-
-    <div class="bg-panel border border-line" style="margin-bottom:16px;overflow:hidden">
-      ${filas}
-    </div>
-
-    ${formulario}`;
+  return `${biblioteca}${formulario}`;
 }
 
 export async function renderKbList(
@@ -291,60 +328,109 @@ export async function renderKbList(
     ESPACIO_POR_DEFECTO_MB;
 
   const bannerHtml = flash?.saved
-    ? banner("ok", "✓ Guardado e indexado — el bot ya puede usarlo.")
+    ? banner("ok", "Guardado e indexado — el bot ya puede usarlo.")
     : flash?.deleted
       ? banner("neutral", "Documento eliminado (también del índice del bot).")
       : flash?.uploaded
-        ? banner("ok", `✓ ${flash.uploaded === "1" ? "1 archivo subido e indexado" : `${esc(flash.uploaded)} archivos subidos e indexados`} — el bot ya puede usarlos.`)
+        ? banner("ok", `${flash.uploaded === "1" ? "1 archivo subido e indexado" : `${flash.uploaded} archivos subidos e indexados`} — el bot ya puede usarlos.`)
       : flash?.folderDeleted
-        ? banner("neutral", `Carpeta «${esc(flash.folderDeleted)}» eliminada con todo lo que tenía (también del índice del bot).`)
+        ? banner("neutral", `Carpeta «${flash.folderDeleted}» eliminada con todo lo que tenía (también del índice del bot).`)
       : flash?.reindexed
-        ? banner("ok", `✓ Reindexado: ${esc(flash.reindexed)} fragmentos actualizados.`)
+        ? banner("ok", `Reindexado: ${flash.reindexed} fragmentos actualizados.`)
         : flash?.mediaSaved
-          ? banner("ok", "✓ Archivo guardado — el bot ya puede enviarlo.")
+          ? banner("ok", "Archivo guardado — el bot ya puede enviarlo.")
           : flash?.mediaDeleted
             ? banner("neutral", "Archivo quitado. El bot ya no puede enviarlo.")
             : flash?.mediaError
-              ? banner("bad", esc(flash.mediaError))
+              ? banner("bad", flash.mediaError)
               : "";
 
   const carpetas = [...new Set(docs.map((d) => d.folder).filter((f): f is string => !!f))].sort((a, b) =>
     a.localeCompare(b, "es", { sensitivity: "base" }),
   );
+  const fragmentos = docs.reduce((n, d) => n + chunkContent(d.content).length, 0);
+  const ultimo = docs.reduce((m, d) => Math.max(m, d.updated_at), 0);
+  const espacioPct = Math.min(100, Math.round((usadoBytes / (espacioMb * 1024 * 1024)) * 100));
 
-  const body = `
+  const hero = pageHero({
+    eyebrow: "Entrenar",
+    title: "Conocimiento",
+    description:
+      "Lo que tu bot sabe del negocio. Cada documento se indexa al subirlo o guardarlo, y el bot lo usa desde el siguiente mensaje.",
+    tags: docs.length
+      ? heroTag(`${docs.length} ${docs.length === 1 ? "documento" : "documentos"}`, "#3fb8c4")
+      : heroTag("Sin documentos propios", "#f0a88a"),
+    actions: heroBtn({ label: "Escribir uno a mano", href: "/admin/kb/new", icon: "pencil", primary: true }),
+  });
+
+  const stats = statGrid([
+    statCard({
+      icon: "file-text",
+      tone: "accent",
+      label: "Documentos",
+      value: docs.length,
+      note: carpetas.length ? `en ${carpetas.length} ${carpetas.length === 1 ? "carpeta" : "carpetas"}` : "sin carpetas",
+    }),
+    statCard({
+      icon: "layers",
+      tone: "neutral",
+      label: "Fragmentos indexados",
+      value: fragmentos,
+      note: `+ ${FIXTURE_CHUNKS.length} precargados del repo`,
+    }),
+    statCard({
+      icon: "paperclip",
+      tone: "ok",
+      label: "Archivos para enviar",
+      value: assets.length,
+      note: `${pesoLegible(usadoBytes)} de ${espacioMb} MB`,
+      hint: `${espacioPct}%`,
+    }),
+    statCard({
+      icon: "clock",
+      tone: "neutral",
+      label: "Última actualización",
+      value: ultimo ? ago(ultimo) : "—",
+      note: ultimo ? "del documento más reciente" : "todavía ninguna",
+    }),
+  ]);
+
+  const subida = sectionCard({
+    icon: "upload-cloud",
+    title: "Subir archivos",
+    subtitle: "Se indexan al subirlos, de dos en dos",
+    body: zonaDeSubida(carpetas),
+  });
+
+  const documentos = sectionCard({
+    icon: "book-open",
+    title: "Conocimiento del bot",
+    subtitle: docs.length
+      ? `${docs.length} ${docs.length === 1 ? "documento" : "documentos"}${carpetas.length ? ` en ${carpetas.length} ${carpetas.length === 1 ? "carpeta" : "carpetas"}` : ""}`
+      : "Todavía no hay documentos propios",
+    body: arbolDeDocumentos(docs),
+    footer: `
+      <span style="font-size:12.5px;font-weight:500;color:var(--muted)">Además, tu bot trae <b style="color:var(--cream)">${FIXTURE_CHUNKS.length}</b> fragmentos precargados del repo.</span>
+      <form method="POST" action="/admin/kb/reindex" style="margin:0">
+        <button class="kb-btn-sm"><i data-lucide="refresh-cw" width="14" height="14"></i>Reindexar todo</button>
+      </form>`,
+  });
+
+  const body = `${KB_CSS}
+    ${hero}
     ${bannerHtml}
-    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:16px">
-      <div>
-        <h2 class="font-display font-semibold text-[15px] text-cream">📚 Conocimiento del bot</h2>
-        <p class="text-muted text-[12.5px]" style="margin-top:2px">Lo que tu bot sabe del negocio. Cada documento se indexa al subirlo o guardarlo, y el bot lo usa de inmediato.</p>
-      </div>
-      <a href="/admin/kb/new" class="ghostbtn font-display font-semibold text-[12px] cursor-pointer"
-         style="margin-left:auto;background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:8px 14px;display:flex;align-items:center;gap:8px;white-space:nowrap;transition:all .12s ease">
-        <i data-lucide="pencil" width="13" height="13"></i> Escribir uno a mano
-      </a>
-    </div>
-
-    ${zonaDeSubida(carpetas)}
-
-    ${arbolDeDocumentos(docs)}
-
-    ${seccionDeMedios(assets, {
-      usadoBytes,
-      espacioMb,
-      disponible: almacenamientoDisponible(env),
-    })}
-
-    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px" class="text-dim text-[11.5px]">
-      <span>Además, tu bot trae <b class="text-cream">${FIXTURE_CHUNKS.length}</b> fragmentos precargados del repo.</span>
-      <form method="POST" action="/admin/kb/reindex" style="margin-left:auto">
-        <button class="ghostbtn cursor-pointer" style="display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:8px 14px;font-size:11.5px;transition:all .12s ease">
-          <i data-lucide="refresh-cw" width="13" height="13"></i> Reindexar todo
-        </button>
-      </form>
+    ${stats}
+    <div style="display:flex;flex-direction:column;gap:24px">
+      ${subida}
+      ${documentos}
+      ${seccionDeMedios(assets, {
+        usadoBytes,
+        espacioMb,
+        disponible: almacenamientoDisponible(env),
+      })}
     </div>`;
 
-  return layout({ title: "Conocimiento", activeTab: "kb", body, visibleNavIds });
+  return layout({ title: "Conocimiento", activeTab: "kb", body, visibleNavIds, hero: true });
 }
 
 export function renderKbEditor(
@@ -354,56 +440,61 @@ export function renderKbEditor(
   carpetas: string[] = [],
 ): string {
   const isNew = doc === null;
-  const body = `
-    <div style="margin-bottom:16px">
-      <a href="/admin/kb" style="font-size:12.5px;display:inline-flex;align-items:center;gap:6px">
-        <i data-lucide="arrow-left" width="14" height="14"></i> Volver a Conocimiento
-      </a>
-    </div>
-    <form method="POST" action="/admin/kb/save" class="bg-panel border border-line" style="padding:22px;display:flex;flex-direction:column;gap:18px">
-      <h2 class="font-display font-semibold text-[15px] text-cream">${isNew ? "＋ Nuevo documento" : "Editar documento"}</h2>
+  const hero = pageHero({
+    eyebrow: "Conocimiento",
+    title: isNew ? "Nuevo documento" : "Editar documento",
+    description: "Escríbelo en lenguaje natural, como se lo explicarías a un empleado nuevo. Al guardar se indexa y el bot lo usa desde el siguiente mensaje.",
+    tags: doc?.folder ? heroTag(doc.folder, "#3fb8c4") : undefined,
+    actions: heroBtn({ label: "Volver a Conocimiento", href: "/admin/kb", icon: "arrow-left" }),
+  });
+
+  const card = sectionCard({
+    icon: "file-text",
+    title: "El documento",
+    subtitle: `Máximo ${MAX_DOC_CHARS.toLocaleString("es-MX")} caracteres`,
+    body: `<div class="kb-body">
       ${isNew ? "" : `<input type="hidden" name="id" value="${esc(doc.id)}">`}
-
-      <div style="display:flex;flex-direction:column;gap:6px">
-        <label for="title" class="font-display font-semibold text-[12.5px] text-cream">Título</label>
-        <p class="text-dim text-[11px]">Un nombre claro del tema (el bot lo ve como contexto).</p>
-        <input type="text" id="title" name="title" required maxlength="200"
-               value="${esc(doc?.title ?? "")}" placeholder="Ej. Horarios y ubicación"
-               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none">
+      <div class="kb-form-grid">
+        <label class="kb-label" for="title"><span>Título</span>
+          <input type="text" id="title" name="title" required maxlength="200"
+                 value="${esc(doc?.title ?? "")}" placeholder="Ej. Horarios y ubicación" class="kb-field" aria-describedby="title-help">
+          <p id="title-help" class="kb-help">Un nombre claro del tema (el bot lo ve como contexto).</p>
+        </label>
+        <label class="kb-label" for="folder"><span>Carpeta (opcional)</span>
+          <input type="text" id="folder" name="folder" list="kb-carpetas" maxlength="${MAX_CARPETA_CHARS}"
+                 value="${esc(doc?.folder ?? "")}" placeholder="Sin carpeta" class="kb-field" aria-describedby="folder-help">
+          <p id="folder-help" class="kb-help">Solo organiza la lista. Déjala vacía para sacarlo de su carpeta.</p>
+        </label>
       </div>
+      <datalist id="kb-carpetas">${carpetas.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>
+      ${doc?.file_name ? alertRow({ title: `Salió del archivo ${doc.file_name}`, detail: "Si vuelves a subir ese archivo a la misma carpeta, reemplaza lo que cambies aquí.", dot: "var(--accent)" }) : ""}
+      <label class="kb-label" for="content"><span>Contenido</span>
+        <textarea id="content" name="content" rows="14" required maxlength="${MAX_DOC_CHARS}" class="kb-field"
+                  placeholder="Ej. Abrimos de lunes a sábado de 9am a 7pm. Los domingos cerramos. Estamos en Av. Reforma 123, a dos cuadras del metro…">${esc(doc?.content ?? "")}</textarea>
+      </label>
+    </div>`,
+  });
 
-      <div style="display:flex;flex-direction:column;gap:6px">
-        <label for="folder" class="font-display font-semibold text-[12.5px] text-cream">Carpeta <span class="text-dim" style="font-weight:400">(opcional)</span></label>
-        <p class="text-dim text-[11px]">Solo organiza la lista. Déjala vacía para sacarlo de su carpeta.</p>
-        <input type="text" id="folder" name="folder" list="kb-carpetas" maxlength="${MAX_CARPETA_CHARS}"
-               value="${esc(doc?.folder ?? "")}" placeholder="Sin carpeta"
-               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none">
-        <datalist id="kb-carpetas">${carpetas.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>
-        ${doc?.file_name ? `<p class="text-dim text-[11px]">Salió del archivo <b class="text-muted">${esc(doc.file_name)}</b>. Si vuelves a subir ese archivo a la misma carpeta, reemplaza lo que cambies aquí.</p>` : ""}
-      </div>
+  const body = `${KB_CSS}
+    <div style="max-width:920px">
+      ${hero}
+      <form method="POST" action="/admin/kb/save" style="display:flex;flex-direction:column;gap:24px">
+        ${card}
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+          <button type="submit" class="kb-btn"><i data-lucide="save" width="15" height="15"></i>Guardar e indexar</button>
+          <a href="/admin/kb" class="kb-btn-ghost">Cancelar</a>
+          ${isNew ? "" : `
+          <details class="kb-danger" style="margin-left:auto">
+            <summary>Eliminar documento…</summary>
+            <span style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:8px">
+              <span class="kb-help">¿Seguro? El bot dejará de saber esto.</span>
+              <button type="submit" formaction="/admin/kb/${encodeURIComponent(doc.id)}/delete" formnovalidate
+                      class="kb-btn-sm" style="border-color:var(--bad);color:var(--bad)"><i data-lucide="trash-2" width="14" height="14"></i>Sí, eliminar</button>
+            </span>
+          </details>`}
+        </div>
+      </form>
+    </div>`;
 
-      <div style="display:flex;flex-direction:column;gap:6px">
-        <label for="content" class="font-display font-semibold text-[12.5px] text-cream">Contenido</label>
-        <p class="text-dim text-[11px]">Escribe en lenguaje natural, como se lo explicarías a un empleado nuevo. Máximo ${MAX_DOC_CHARS.toLocaleString("es-MX")} caracteres.</p>
-        <textarea id="content" name="content" rows="14" required maxlength="${MAX_DOC_CHARS}"
-                  placeholder="Ej. Abrimos de lunes a sábado de 9am a 7pm. Los domingos cerramos. Estamos en Av. Reforma 123, a dos cuadras del metro…"
-                  style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;resize:vertical">${esc(doc?.content ?? "")}</textarea>
-      </div>
-
-      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
-        <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
-                style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:11px 20px">Guardar e indexar</button>
-        ${isNew ? "" : `
-        <details style="margin-left:auto">
-          <summary class="text-bad text-[12px]" style="cursor:pointer;list-style:none">Eliminar documento…</summary>
-          <span style="display:inline-flex;align-items:center;gap:10px;margin-top:8px">
-            <span class="text-dim text-[11px]">¿Seguro? El bot dejará de saber esto.</span>
-            <button type="submit" formaction="/admin/kb/${encodeURIComponent(doc.id)}/delete" formnovalidate
-                    style="background:transparent;border:1px solid var(--bad);color:var(--bad);padding:6px 12px;font-size:11px;cursor:pointer">Sí, eliminar</button>
-          </span>
-        </details>`}
-      </div>
-    </form>`;
-
-  return layout({ title: isNew ? "Nuevo documento" : "Editar documento", activeTab: "kb", body, visibleNavIds });
+  return layout({ title: isNew ? "Nuevo documento" : "Editar documento", activeTab: "kb", body, visibleNavIds, hero: true });
 }
