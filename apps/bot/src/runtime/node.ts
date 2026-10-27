@@ -6,7 +6,7 @@
 // (o `npm run start:node`)
 
 import { serve } from "@hono/node-server";
-import app, { runScheduledJobs, DAILY_CRON } from "../app";
+import app, { runScheduledJobs, DAILY_CRON, ESTADO_CRON } from "../app";
 import { prepareEnv, closeDrivers } from "./env";
 import { tick } from "../queue/tick";
 import { attachVoiceGateway } from "../channels/voice/gateway";
@@ -75,10 +75,19 @@ const periodicos = VOICE_ONLY
       }
     }, UNA_HORA);
 
+// El estado del servicio (src/estado/), cada 5 minutos como en las plataformas.
+const CINCO_MINUTOS = 300_000;
+const estado = VOICE_ONLY
+  ? null
+  : setInterval(() => {
+      runScheduledJobs(env, ESTADO_CRON).catch((e) => console.error("[estado]", e));
+    }, CINCO_MINUTOS);
+
 async function apagar(senal: string) {
   console.log(`\n${senal} — cerrando…`);
   if (latido) clearInterval(latido);
   if (periodicos) clearInterval(periodicos);
+  if (estado) clearInterval(estado);
   server.close();
   await closeDrivers();
   process.exit(0);

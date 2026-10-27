@@ -19,6 +19,14 @@ export interface Novedad {
 export const NOVEDADES: Novedad[] = [
   {
     fecha: "2026-10-27",
+    titulo: "Te avisamos si algo de la plataforma falla",
+    texto:
+      "Revisamos cada 5 minutos los servicios de los que depende tu bot (WhatsApp, Telegram, la IA, el correo, las llamadas…). Si alguno falla, verás un aviso arriba del panel mientras lo resolvemos, y en Ayuda → Estado del servicio puedes ver cómo está cada uno y lo que pasó en los últimos 30 días.",
+    tipo: "Nuevo",
+    ruta: "/admin/ayuda#estado",
+  },
+  {
+    fecha: "2026-10-27",
     titulo: "El menú ahora tiene secciones",
     texto:
       "El menú de la izquierda separa las pantallas en cuatro secciones con su título: Operación (Bandeja y Campañas), Tu agente (Mi Agente, Entrenar y Canales), Negocio (Análisis y Cuenta) y Sistema (Ayuda). Así encuentras más rápido lo que buscas.",

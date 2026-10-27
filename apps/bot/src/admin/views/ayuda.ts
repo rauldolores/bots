@@ -10,6 +10,7 @@ import { FAQ, GLOSARIO, GUIA } from "../help/contenido";
 import { NOVEDADES, type Novedad } from "../help/novedades";
 import { ayudaParaRuta, buscarAyuda } from "../help/contexto";
 import type { Articulo, Bloque, Pregunta } from "../help/tipos";
+import type { Estado, EstadoPublico, Incidencia } from "../../estado/revisar";
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]!));
@@ -134,7 +135,85 @@ export const ULTIMA_NOVEDAD = NOVEDADES[0]?.fecha ?? "";
  * al abrirlo). Sin búsqueda: la guía y las preguntas de la pantalla `ruta`
  * y lo último nuevo. Con búsqueda: resultados de toda la ayuda.
  */
-export function renderPanelAyuda(ruta: string, q: string): string {
+// ── Estado del servicio (src/estado/) ──────────────────────────────
+
+const ESTADO_TEXTO: Record<Estado, { texto: string; color: string }> = {
+  OPERANDO: { texto: "Funcionando", color: "var(--ok)" },
+  DEGRADADO: { texto: "Lento o con intermitencias", color: "var(--warn)" },
+  CAIDO: { texto: "Con falla", color: "var(--bad)" },
+  SIN_DATOS: { texto: "Sin revisar todavía", color: "var(--dim)" },
+};
+
+/** Fecha y hora en la zona del navegador: el script de abajo la reescribe; el texto es el respaldo. */
+function cuando(ms: number): string {
+  return `<time data-ts="${ms}">${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC</time>`;
+}
+
+function duracion(ms: number): string {
+  const min = Math.max(1, Math.round(ms / 60000));
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  return min % 60 ? `${h} h ${min % 60} min` : `${h} h`;
+}
+
+/** Caja ámbar con lo que está fallando ahora. La usan Ayuda y el panel lateral. */
+function avisoIncidencias(abiertas: Incidencia[], conEnlace: boolean): string {
+  if (!abiertas.length) return "";
+  return abiertas
+    .map(
+      (i) => `<div class="text-[12.5px]" role="status" style="display:flex;gap:10px;align-items:flex-start;background:var(--warn-soft);border:1px solid #ecd49c;border-radius:var(--radius-sm);padding:10px 12px;color:var(--cream);line-height:1.55">
+      <i data-lucide="triangle-alert" width="16" height="16" style="color:var(--warn);flex:none;margin-top:2px"></i>
+      <span><b>${esc(i.titulo)}.</b> ${esc(i.mensaje)}${conEnlace ? ` <a href="/admin/ayuda#estado" style="color:var(--accent-2);font-weight:600;text-decoration:underline;text-underline-offset:2px">Ver estado del servicio</a>` : ""}</span>
+    </div>`,
+    )
+    .join("");
+}
+
+function seccionEstado(e: EstadoPublico, now: number): string {
+  const ultima = Math.max(0, ...e.servicios.map((s) => s.ultimaRevision ?? 0));
+  const resumen = e.abiertas.length
+    ? avisoIncidencias(e.abiertas, false)
+    : `<div class="text-[13px]" style="display:flex;align-items:center;gap:10px;border:1px solid var(--line);background:var(--panel);border-radius:var(--radius-sm);padding:12px 14px">
+        <span style="width:9px;height:9px;border-radius:50%;background:var(--ok);flex:none"></span>
+        <span class="font-semibold text-cream">Todo funciona con normalidad.</span>
+      </div>`;
+  const filas = e.servicios
+    .map((s) => {
+      const t = ESTADO_TEXTO[s.estado];
+      return `<div style="display:flex;align-items:flex-start;gap:12px;padding:11px 14px;border-top:1px solid var(--line)">
+        <span style="width:8px;height:8px;border-radius:50%;background:${t.color};flex:none;margin-top:6px"></span>
+        <span style="flex:1;min-width:0">
+          <span class="font-semibold text-[13px] text-cream" style="display:block">${esc(s.nombre)}</span>
+          <span class="text-[12px]" style="color:var(--dim);display:block;margin-top:1px">${esc(s.descripcion)}</span>
+        </span>
+        <span class="text-[12px]" style="color:${t.color};font-weight:700;white-space:nowrap;text-align:right">${t.texto}</span>
+      </div>`;
+    })
+    .join("");
+  const historial = e.historial.length
+    ? e.historial
+        .map(
+          (i) => `<div style="padding:10px 14px;border-top:1px solid var(--line)">
+          <div style="display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline">
+            <span class="font-semibold text-[13px] text-cream">${esc(i.titulo)}</span>
+            <span class="text-[11.5px]" style="color:var(--dim)">${cuando(i.inicio)} · duró ${duracion((i.fin ?? now) - i.inicio)}</span>
+          </div>
+          ${i.cierre ? `<p class="text-[12px]" style="color:var(--muted);margin:3px 0 0">${esc(i.cierre)}</p>` : ""}
+        </div>`,
+        )
+        .join("")
+    : `<p class="text-[12.5px]" style="color:var(--dim);margin:0;padding:11px 14px;border-top:1px solid var(--line)">Sin incidencias en los últimos 30 días.</p>`;
+  const caja = (titulo: string, cuerpoHtml: string) =>
+    `<div style="border:1px solid var(--line);background:var(--panel);border-radius:var(--radius-sm);overflow:hidden">
+      <div class="text-[10.5px]" style="letter-spacing:.16em;text-transform:uppercase;color:var(--dim);font-weight:800;padding:10px 14px">${titulo}</div>${cuerpoHtml}
+    </div>`;
+  return `${resumen}
+    ${e.servicios.length ? caja("Servicios", filas) : ""}
+    ${caja("Últimos 30 días", historial)}
+    <p class="text-[12px]" style="color:var(--dim);margin:0">Revisamos cada servicio cada 5 minutos${ultima ? ` (la última revisión fue hace ${duracion(now - ultima)})` : ""}. Si algo falla, te lo avisamos arriba del panel y ya le estamos dando seguimiento.</p>`;
+}
+
+export function renderPanelAyuda(ruta: string, q: string, abiertas: Incidencia[] = []): string {
   const titulo = (t: string) =>
     `<div class="text-[10.5px]" style="letter-spacing:.16em;text-transform:uppercase;color:var(--dim);font-weight:800;margin:4px 0 2px">${t}</div>`;
   const lista = (html: string) => `<div style="display:flex;flex-direction:column;gap:8px">${html}</div>`;
@@ -150,7 +229,7 @@ export function renderPanelAyuda(ruta: string, q: string): string {
 
   const { articulos, preguntas } = ayudaParaRuta(ruta);
   const nuevas = NOVEDADES.slice(0, 2);
-  return `${titulo("De esta pantalla")}${lista(articulos.map((a, i) => articulo(a, { panel: true, abierto: i === 0 })).join(""))}
+  return `${avisoIncidencias(abiertas, true)}${titulo("De esta pantalla")}${lista(articulos.map((a, i) => articulo(a, { panel: true, abierto: i === 0 })).join(""))}
     ${preguntas.length ? titulo("Preguntas frecuentes") + lista(preguntas.map((p) => pregunta(p, true)).join("")) : ""}
     ${
       nuevas.length
@@ -167,6 +246,8 @@ export interface AyudaContexto {
   correoSoporte: string;
   notice?: { ok?: string; err?: string };
   visibleNavIds: Set<string> | null;
+  /** Estado del servicio; sin él (p. ej. en pruebas) la sección dice que todo funciona. */
+  estado?: EstadoPublico;
 }
 
 export function renderAyuda(ctx: AyudaContexto): string {
@@ -179,6 +260,7 @@ export function renderAyuda(ctx: AyudaContexto): string {
       ["#novedades", "Novedades", "sparkles"],
       ["#preguntas", "Preguntas frecuentes", "message-circle-question"],
       ["#glosario", "Glosario", "spell-check"],
+      ["#estado", "Estado del servicio", "activity"],
       ["#soporte", "Pedir ayuda", "life-buoy"],
     ]
       .map(
@@ -295,6 +377,11 @@ export function renderAyuda(ctx: AyudaContexto): string {
           <p class="text-[12.5px]" style="color:var(--dim);margin:0">Las palabras que salen en el panel y que no tienen por qué sonarte.</p>
           ${glosario}
         </section>
+        <section id="estado" style="scroll-margin-top:80px;display:flex;flex-direction:column;gap:10px">
+          <div class="font-display font-bold text-[17px] text-cream">Estado del servicio</div>
+          <p class="text-[12.5px]" style="color:var(--dim);margin:0">Los servicios de los que depende tu bot y si están funcionando ahora mismo.</p>
+          ${seccionEstado(ctx.estado ?? { servicios: [], abiertas: [], historial: [] }, Date.now())}
+        </section>
         <section id="soporte" style="scroll-margin-top:80px">${soporte}</section>
       </div>
     </div>
@@ -319,6 +406,8 @@ export function renderAyuda(ctx: AyudaContexto): string {
         vacio.classList.toggle("ayuda-oculto",!t||hay>0);
       }
       q.addEventListener("input",filtrar);
+      // Las fechas del estado del servicio, en la hora de quien mira.
+      document.querySelectorAll("time[data-ts]").forEach(function(t){var d=new Date(Number(t.getAttribute("data-ts")));t.textContent=d.toLocaleString("es-MX",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});});
       // Llegar con #id (desde el panel de ayuda u otra pantalla) abre ese artículo.
       function abrirHash(){if(!location.hash)return;var d=document.getElementById(location.hash.slice(1));if(!d)return;if(d.tagName==="DETAILS")d.open=true;d.scrollIntoView({block:"start"});}
       abrirHash();

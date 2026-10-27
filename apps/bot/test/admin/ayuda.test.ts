@@ -42,7 +42,9 @@ beforeEach(async () => {
 
 describe("el contenido está íntegro", () => {
   const articulos = GUIA.flatMap((s) => s.articulos);
-  const ids = new Set([...articulos.map((a) => a.id), ...FAQ.map((p) => p.id), ...GUIA.map((s) => `guia-${s.id}`)]);
+  // Las secciones fijas de la página también son destino válido de un enlace.
+  const secciones = ["guia", "novedades", "preguntas", "glosario", "estado", "soporte"];
+  const ids = new Set([...articulos.map((a) => a.id), ...FAQ.map((p) => p.id), ...GUIA.map((s) => `guia-${s.id}`), ...secciones]);
 
   it("hay guía, preguntas y glosario de verdad (no una pantalla vacía)", () => {
     expect(GUIA.length).toBeGreaterThanOrEqual(5);
@@ -146,6 +148,30 @@ describe("GET /admin/ayuda/panel", () => {
     const res = await adminApp.request("/ayuda/panel?ruta=https%3A%2F%2Fevil.test", { headers: AUTH }, env);
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("Resumen");
+  });
+});
+
+describe("estado del servicio en Ayuda", () => {
+  it("la sección existe y, sin revisiones, dice que todo funciona", async () => {
+    const html = await (await adminApp.request("/ayuda", { headers: AUTH }, env)).text();
+    expect(html).toContain('id="estado"');
+    expect(html).toContain("Todo funciona con normalidad");
+    expect(html).toContain("Sin revisar todavía");
+  });
+
+  it("/ayuda/estado da las incidencias abiertas para la franja, y la sección las enseña", async () => {
+    await (env.DB as any).query(
+      "INSERT INTO estado_incidentes (id, servicio, titulo, mensaje, origen, inicio) VALUES ($1, 'telegram', 'Falla en Telegram', 'Los mensajes pueden tardar. Ya estamos dando seguimiento.', 'AUTOMATICA', $2)",
+      [crypto.randomUUID(), Date.now()],
+    );
+    const res = await adminApp.request("/ayuda/estado", { headers: AUTH }, env);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { abiertas: { titulo: string }[] };
+    expect(json.abiertas.map((i) => i.titulo)).toEqual(["Falla en Telegram"]);
+
+    const html = await (await adminApp.request("/ayuda", { headers: AUTH }, env)).text();
+    expect(html).toContain("Falla en Telegram");
+    expect(html).not.toContain("Todo funciona con normalidad");
   });
 });
 

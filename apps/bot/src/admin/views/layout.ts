@@ -419,6 +419,14 @@ const GLOBAL_STYLE = `
   .ayp-item[open] .ayuda-chev{transform:rotate(90deg)}
   .ayp-item>div{padding-left:16px !important}
   @media (prefers-reduced-motion:reduce){#ay-panel .ay-hoja,#ay-panel .ay-velo{transition:none !important}}
+  /* Franja del estado del servicio (src/estado/): algo de la plataforma falla. */
+  .nb-aviso{display:flex;align-items:flex-start;gap:10px;background:var(--warn-soft);border-bottom:1px solid #ecd49c;padding:10px 28px;font-size:13px;line-height:1.5;color:var(--cream)}
+  .nb-aviso>svg{color:var(--warn);flex:none;margin-top:2px}
+  .nb-aviso p{margin:0;flex:1;min-width:0}
+  .nb-aviso a{color:var(--accent-ink);font-weight:700;text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
+  .nb-aviso button{border:0;background:none;color:var(--warn);cursor:pointer;padding:2px;border-radius:6px;display:flex}
+  .nb-aviso button:hover{background:rgba(138,90,0,.1)}
+  @media (max-width:767px){.nb-aviso{padding:10px 16px}}
   /* piezas de ui.ts */
   .stat-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
   @media (max-width:1100px){.stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -869,7 +877,47 @@ const AYUDA_SCRIPT = `
 
 // Re-run lucide after every htmx swap (fragments bring fresh icons) and close
 // any open modal with Escape.
-const GLOBAL_SCRIPT = `${ESPERA_SCRIPT}${NAV_SCRIPT}${AYUDA_SCRIPT}
+// Franja de aviso: si hay una incidencia abierta en el estado del servicio
+// (src/estado/), sale arriba de todas las pantallas. Se pide al cargar y cada
+// 5 minutos; vive fuera de #nb-main, así que cambiar de pantalla sin recargar
+// no la borra. "Ocultar" vale hasta que cambie lo que está abierto.
+const AVISO_SCRIPT = `
+<script>
+(function () {
+  if (window.__nbAviso) return;
+  window.__nbAviso = true;
+  var slot = document.getElementById("nb-aviso");
+  if (!slot || !window.fetch) return;
+  var CLAVE = "nb-aviso-oculto";
+  function oculta() { try { return localStorage.getItem(CLAVE) || ""; } catch (e) { return ""; } }
+  function pintar(abiertas) {
+    var firma = abiertas.map(function (i) { return i.id; }).join(",");
+    var punto = document.querySelector("#ay-btn .ay-punto");
+    if (punto && abiertas.length) punto.hidden = false;
+    if (!abiertas.length || firma === oculta()) { slot.hidden = true; slot.innerHTML = ""; return; }
+    var i = abiertas[0];
+    slot.innerHTML = '<div class="nb-aviso" role="status"><i data-lucide="triangle-alert" width="16" height="16"></i><p><b></b> <span></span> <a href="/admin/ayuda#estado">Ver estado del servicio</a></p><button type="button" aria-label="Ocultar aviso" title="Ocultar"><i data-lucide="x" width="16" height="16"></i></button></div>';
+    slot.querySelector("b").textContent = i.titulo + ".";
+    slot.querySelector("span").textContent = i.mensaje + (abiertas.length > 1 ? " (y " + (abiertas.length - 1) + " aviso" + (abiertas.length > 2 ? "s" : "") + " más)" : "");
+    slot.querySelector("button").addEventListener("click", function () {
+      try { localStorage.setItem(CLAVE, firma); } catch (e) {}
+      slot.hidden = true;
+    });
+    slot.hidden = false;
+    if (window.lucide) window.lucide.createIcons();
+  }
+  function leer() {
+    fetch("/admin/ayuda/estado", { credentials: "same-origin", redirect: "manual" })
+      .then(function (r) { return r.ok && r.type !== "opaqueredirect" ? r.json() : null; })
+      .then(function (d) { if (d && Array.isArray(d.abiertas)) pintar(d.abiertas); })
+      .catch(function () {});
+  }
+  leer();
+  setInterval(leer, 300000);
+})();
+</script>`;
+
+const GLOBAL_SCRIPT = `${ESPERA_SCRIPT}${NAV_SCRIPT}${AYUDA_SCRIPT}${AVISO_SCRIPT}
 <script>
   function drawIcons(){ if (window.lucide) window.lucide.createIcons(); }
   document.addEventListener("DOMContentLoaded", drawIcons);
@@ -1012,6 +1060,7 @@ export function layout(opts: {
           <i data-lucide="circle-help" width="18" height="18"></i><span class="ay-punto" hidden></span>
         </button>
       </header>
+      <div id="nb-aviso" hidden></div>
       <main id="nb-main" tabindex="-1" style="padding:28px;min-width:0;outline:none">${opts.body}</main>
     </div>
   </div>

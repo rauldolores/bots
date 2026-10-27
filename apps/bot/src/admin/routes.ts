@@ -199,6 +199,7 @@ import {
 import { PERMISSION_GATE, hasAnyAppAccess, hasPermission, requirePermission, visibleNavIds } from "./permissions";
 import type { KontroliaTokenClaims } from "@kontrolia/shared";
 import { renderCreateBotPage } from "./views/onboarding";
+import { incidenciasAbiertas, leerEstado } from "../estado/revisar";
 
 export const adminApp = new Hono<AdminBindings>();
 
@@ -235,7 +236,7 @@ function isAuthExempt(path: string): boolean {
 // ni permisos de la app: solo trae la marca de la organización de quien ya
 // inició sesión, y la banda se pinta igual en "elige tu plan" o en "acceso
 // restringido".
-const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots", "/access-denied", "/ayuda", "/ayuda/soporte", "/ayuda/panel", "/plan/uso", BAND_BRANDING_PATH];
+const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots", "/access-denied", "/ayuda", "/ayuda/soporte", "/ayuda/panel", "/ayuda/estado", "/plan/uso", BAND_BRANDING_PATH];
 
 // Lo que sigue abierto cuando la organización NO tiene plan vivo (billing.md
 // B2): la pantalla de planes y su compra, la vuelta del pago, cambiarse de
@@ -2061,6 +2062,7 @@ adminApp.get("/ayuda", async (c) => {
       correoSoporte: correoSoporte(c.env),
       notice: { ok: c.req.query("ok") ?? undefined, err: c.req.query("err") ?? undefined },
       visibleNavIds: navDeAyuda(c),
+      estado: await leerEstado(c.env),
     }),
   );
 });
@@ -2072,7 +2074,19 @@ adminApp.get("/ayuda/panel", async (c) => {
   const denied = accesoAyudaDenegado(c);
   if (denied) return denied;
   const ruta = c.req.query("ruta") ?? "";
-  return c.html(renderPanelAyuda(ruta.startsWith("/admin") ? ruta : "/admin/overview", (c.req.query("q") ?? "").slice(0, 120)));
+  const abiertas = await incidenciasAbiertas(new Db(c.env.DB)).catch(() => []);
+  return c.html(renderPanelAyuda(ruta.startsWith("/admin") ? ruta : "/admin/overview", (c.req.query("q") ?? "").slice(0, 120), abiertas));
+});
+
+// Lo que pide la franja de aviso del layout al cargar cada pantalla: solo las
+// incidencias abiertas del estado del servicio (src/estado/), en lenguaje
+// del dueño. Sin nada abierto, una lista vacía y la franja no aparece.
+adminApp.get("/ayuda/estado", async (c) => {
+  const denied = accesoAyudaDenegado(c);
+  if (denied) return denied;
+  const abiertas = await incidenciasAbiertas(new Db(c.env.DB)).catch(() => []);
+  c.header("Cache-Control", "no-store");
+  return c.json({ abiertas: abiertas.map((i) => ({ id: i.id, titulo: i.titulo, mensaje: i.mensaje })) });
 });
 
 adminApp.post("/ayuda/soporte", async (c) => {

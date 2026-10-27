@@ -66,6 +66,11 @@ export interface Env {
   SUPPORT_EMAIL?: string;
   SUPPORT_EMAIL_FROM?: string;
   SUPPORT_EMAIL_FROM_NAME?: string;
+  // Estado del servicio (src/estado/): a quién avisar por correo cuando un
+  // servicio de la plataforma se cae o se recupera, separado por comas. Es para
+  // el EQUIPO (lleva el detalle técnico); el dueño lo ve en el panel. Vacío =
+  // no se manda correo. Sale por RESEND_API_KEY con SUPPORT_EMAIL_FROM.
+  ESTADO_AVISOS_CORREO?: string;
   // Canal "email" — SOLO para responder (sendReply); nunca se leen de
   // despliegue, resolveChannelEnv() los mete aquí desde settings.email_*
   // (/admin/config → Correo saliente) para el bot de cada turno. Distinto

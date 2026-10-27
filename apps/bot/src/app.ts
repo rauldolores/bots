@@ -53,6 +53,13 @@ export const DAILY_CRON = "0 3 * * *";
  */
 export const TICK_CRON = "* * * * *";
 
+/**
+ * Cron de 5 minutos: el estado del servicio (src/estado/). Pregunta a cada
+ * servicio de la plataforma si contesta y abre o cierra incidencias. No mira
+ * la cola: para eso ya está el de cada minuto, que coincide con este.
+ */
+export const ESTADO_CRON = "*/5 * * * *";
+
 const app = new Hono<{ Bindings: Env }>();
 
 app.get("/health", (c) => c.text("ok", 200));
@@ -639,6 +646,13 @@ app.on(["GET", "POST"], "/cron/tick", async (c) => {
   return c.json({ ok: true, ...(await tick(c.env)) }, 200);
 });
 
+// El estado del servicio, cada 5 minutos.
+app.on(["GET", "POST"], "/cron/estado", async (c) => {
+  if (!cronAutorizado(c)) return c.json({ ok: false, error: "unauthorized" }, 401);
+  await runScheduledJobs(c.env, ESTADO_CRON);
+  return c.json({ ok: true }, 200);
+});
+
 // Los trabajos nocturnos completos (purga, insights, flywheel).
 app.on(["GET", "POST"], "/cron/nightly", async (c) => {
   if (!cronAutorizado(c)) return c.json({ ok: false, error: "unauthorized" }, 401);
@@ -668,6 +682,12 @@ app.onError((err, c) => {
  * disparador más frecuente no debe purgar ni analizar de más.
  */
 export async function runScheduledJobs(env: Env, cron?: string): Promise<void> {
+  if (cron === ESTADO_CRON) {
+    const { revisarEstadoServicio } = await import("./estado/revisar");
+    await revisarEstadoServicio(env).catch((e) => console.error("estado:", e));
+    return;
+  }
+
   // La cola se mira SIEMPRE: es lo único que no puede esperar.
   await tick(env).catch((e) => console.error("tick:", e));
 

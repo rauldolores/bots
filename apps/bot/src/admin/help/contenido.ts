@@ -691,6 +691,7 @@ export const FAQ: Pregunta[] = [
       "¿El canal sigue conectado? En Conexiones debe decir **● CONECTADO**. Con Twilio y Meta, revisa que el webhook siga pegado en su sitio.",
       "¿La llave de IA funciona? Configuración → Modelo de IA → **⚡ Probar mi configuración**. Si el proveedor se quedó sin saldo, el bot no puede pensar.",
       "¿Llegaste al límite de conversaciones del mes? Lo ves en [Plan y facturación](/admin/plan).",
+      "¿Hay un aviso amarillo arriba del panel? Puede que un servicio del que depende tu bot (WhatsApp, la IA…) esté fallando; en [Estado del servicio](/admin/ayuda#estado) ves cuál y ya le estamos dando seguimiento.",
       "Si nada de esto es, escríbenos abajo con el nombre del cliente y la hora aproximada.",
     ] },
   ] },
