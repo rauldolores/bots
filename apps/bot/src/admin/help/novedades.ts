@@ -1,0 +1,125 @@
+// Novedades del panel: lo que cambia y le sirve al dueño del negocio, en
+// lenguaje sencillo. Lo interno (base de datos, pruebas, correcciones que el
+// dueño no nota) no va aquí.
+//
+// Regla (CLAUDE.md): todo cambio que el dueño vea agrega aquí su novedad, la
+// más reciente primero. Se ven en Ayuda → Novedades y en el panel lateral de
+// ayuda; el punto en el botón "?" aparece cuando hay una que no ha visto.
+
+export interface Novedad {
+  /** AAAA-MM-DD */
+  fecha: string;
+  titulo: string;
+  texto: string;
+  tipo: "Nuevo" | "Mejora" | "Corrección";
+  /** Pantalla donde se ve, para el botón "Ir". */
+  ruta?: string;
+}
+
+export const NOVEDADES: Novedad[] = [
+  {
+    fecha: "2026-10-27",
+    titulo: "Ayuda en cada pantalla y esta lista de novedades",
+    texto:
+      "El botón de ayuda (el signo ? de arriba a la derecha) ahora abre un panel con la guía y las preguntas frecuentes de la pantalla donde estás, sin salirte de ella. Y aquí te contamos cada cambio del panel: cuando haya algo nuevo verás un punto en ese botón.",
+    tipo: "Nuevo",
+  },
+  {
+    fecha: "2026-10-27",
+    titulo: "Menú ordenado por temas y pantallas que abren al instante",
+    texto:
+      "El menú de la izquierda ahora agrupa las pantallas en Bandeja, Campañas, Mi Agente, Entrenar, Canales, Análisis y Cuenta; cada grupo se abre con un clic. Y al cambiar de pantalla ya no se recarga toda la página: solo cambia el contenido.",
+    tipo: "Mejora",
+    ruta: "/admin/overview",
+  },
+  {
+    fecha: "2026-10-27",
+    titulo: "Pantallas renovadas para entender todo de un vistazo",
+    texto:
+      "Flujo, Habilidades, Conocimiento, Entrenamiento, Campañas, Seguimientos y Configuración estrenan diseño: arriba ves los números importantes y abajo cada cosa en su tarjeta.",
+    tipo: "Mejora",
+    ruta: "/admin/agente",
+  },
+  {
+    fecha: "2026-10-27",
+    titulo: "Si un conector pierde el permiso, te lo decimos",
+    texto:
+      "Cuando una herramienta conectada (por ejemplo tu CRM) deja de estar autorizada, el panel ya lo marca en Conexiones en lugar de fallar sin avisar, y puedes reconectarla con un token.",
+    tipo: "Corrección",
+    ruta: "/admin/conexiones",
+  },
+  {
+    fecha: "2026-10-26",
+    titulo: "Nuevo diseño del panel",
+    texto:
+      "El panel tiene una cara nueva, igual a la del resto de las apps de Kontrolia. Resumen, Conversaciones, Leads, Tickets y Calendario ya la usan. Tu plan ahora ocupa menos lugar en el menú: pasa el mouse por encima para ver cuánto llevas de cada límite.",
+    tipo: "Mejora",
+    ruta: "/admin/overview",
+  },
+  {
+    fecha: "2026-10-23",
+    titulo: "El panel te avisa mientras guarda",
+    texto: "Al guardar algo, el botón muestra que está trabajando y no se puede presionar dos veces, en todas las pantallas.",
+    tipo: "Mejora",
+  },
+  {
+    fecha: "2026-10-23",
+    titulo: "El logo de tu widget se sube directo",
+    texto: "En el widget para tu página web ya no tienes que conseguir la dirección de tu logo: súbelo desde tu computadora.",
+    tipo: "Mejora",
+    ruta: "/admin/conexiones",
+  },
+  {
+    fecha: "2026-10-23",
+    titulo: "El bot sabe por dónde le escriben",
+    texto:
+      "El bot ya sabe si la persona le escribe por WhatsApp, Telegram, correo o tu página, y con qué dato de contacto llegó, así que no se lo vuelve a pedir.",
+    tipo: "Mejora",
+    ruta: "/admin/agente",
+  },
+  {
+    fecha: "2026-10-22",
+    titulo: "Avisos a varias personas",
+    texto:
+      "Cuando el bot necesita que alguien intervenga, ahora puede avisarle a varias personas de tu equipo, y cada bot decide a quién.",
+    tipo: "Nuevo",
+    ruta: "/admin/config?section=aviso",
+  },
+  {
+    fecha: "2026-09-24",
+    titulo: "Sube muchos documentos de una vez",
+    texto: "En Conocimiento puedes arrastrar varios archivos o carpetas completas, y borrar los que ya no sirvan desde la misma lista.",
+    tipo: "Nuevo",
+    ruta: "/admin/kb",
+  },
+  {
+    fecha: "2026-09-24",
+    titulo: "Cuánto te cuesta cada conversación",
+    texto: "En Costos ves lo que de verdad gastó la IA en cada conversación, no un estimado.",
+    tipo: "Nuevo",
+    ruta: "/admin/costs",
+  },
+  {
+    fecha: "2026-09-23",
+    titulo: "El bot manda fotos, PDF y botones",
+    texto:
+      "Además de texto, el bot puede mandar las fotos y documentos que tú subas (catálogos, menús, listas de precios) y botones para elegir. Lo que mandó lo ves también en la conversación.",
+    tipo: "Nuevo",
+    ruta: "/admin/conversations",
+  },
+  {
+    fecha: "2026-09-22",
+    titulo: "Paquetes para no quedarte sin conversaciones",
+    texto:
+      "Si llegas al límite de tu plan, el bot puede seguir atendiendo: compra un paquete de conversaciones extra desde Plan, sin cambiar de plan.",
+    tipo: "Nuevo",
+    ruta: "/admin/plan",
+  },
+  {
+    fecha: "2026-09-21",
+    titulo: "La voz del bot, incluida en tu plan",
+    texto: "Para que el bot conteste llamadas ya no necesitas tu propia cuenta del servicio de voz: va incluida en tu plan.",
+    tipo: "Nuevo",
+    ruta: "/admin/telefono",
+  },
+];

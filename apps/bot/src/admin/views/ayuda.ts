@@ -7,6 +7,8 @@
 // soporte para cuando la documentación no alcanzó.
 import { layout } from "./layout";
 import { FAQ, GLOSARIO, GUIA } from "../help/contenido";
+import { NOVEDADES, type Novedad } from "../help/novedades";
+import { ayudaParaRuta, buscarAyuda } from "../help/contexto";
 import type { Articulo, Bloque, Pregunta } from "../help/tipos";
 
 function esc(s: string): string {
@@ -62,31 +64,100 @@ function textoDeBusqueda(titulo: string, resumen: string, bloques: Bloque[]): st
     .replace(/\s+/g, " ");
 }
 
-function articulo(a: Articulo): string {
-  return `<details id="${esc(a.id)}" class="ayuda-item" data-busca="${esc(textoDeBusqueda(a.titulo, a.resumen, a.cuerpo))}" style="border:1px solid var(--line);background:var(--panel);border-radius:var(--radius-sm);scroll-margin-top:80px">
+/**
+ * `panel`: se pinta dentro del panel lateral de ayuda (layout), que convive
+ * con la pantalla: sin ids (no chocan con los de /admin/ayuda) y con su
+ * propia clase, para que el buscador de esta página no los tome.
+ */
+function articulo(a: Articulo, opts: { abierto?: boolean; panel?: boolean } = {}): string {
+  const attrs = opts.panel
+    ? `class="ayp-item"${opts.abierto ? " open" : ""}`
+    : `id="${esc(a.id)}" class="ayuda-item" data-busca="${esc(textoDeBusqueda(a.titulo, a.resumen, a.cuerpo))}" style="border:1px solid var(--line);background:var(--panel);border-radius:var(--radius-sm);scroll-margin-top:80px"`;
+  return `<details ${attrs}>
     <summary style="cursor:pointer;list-style:none;padding:12px 16px;display:flex;align-items:center;gap:12px">
       <span class="ayuda-chev" style="color:var(--dim);flex:none;transition:transform .15s ease"><i data-lucide="chevron-right" width="15" height="15"></i></span>
       <span style="min-width:0;flex:1">
         <span class="font-display font-semibold text-[13.5px] text-cream" style="display:block">${esc(a.titulo)}</span>
         <span class="text-[12px]" style="color:var(--dim);display:block;margin-top:1px">${esc(a.resumen)}</span>
       </span>
-      ${a.ruta ? `<a href="${esc(a.ruta)}" class="text-[11.5px]" style="flex:none;color:var(--accent-2);white-space:nowrap" onclick="event.stopPropagation()">Ir a la pantalla →</a>` : ""}
+      ${a.ruta && !opts.panel ? `<a href="${esc(a.ruta)}" class="text-[11.5px]" style="flex:none;color:var(--accent-2);white-space:nowrap" onclick="event.stopPropagation()">Ir a la pantalla →</a>` : ""}
     </summary>
     <div style="padding:2px 16px 16px 43px">${cuerpo(a.cuerpo)}</div>
   </details>`;
 }
 
-function pregunta(p: Pregunta): string {
-  const enlace = p.articulo
-    ? `<a href="#${esc(p.articulo)}" class="text-[12px]" style="color:var(--accent-2);text-decoration:underline;text-underline-offset:2px" onclick="var d=document.getElementById('${esc(p.articulo)}');if(d){d.open=true}">Ver la guía completa →</a>`
-    : "";
-  return `<details id="${esc(p.id)}" class="ayuda-item" data-busca="${esc(textoDeBusqueda(p.pregunta, p.categoria, p.respuesta))}" style="border:1px solid var(--line);background:var(--panel);border-radius:var(--radius-sm)">
+function pregunta(p: Pregunta, panel = false): string {
+  const enlace = !p.articulo
+    ? ""
+    : panel
+      ? `<a href="/admin/ayuda#${esc(p.articulo)}" class="text-[12px]" style="color:var(--accent-2);text-decoration:underline;text-underline-offset:2px">Ver la guía completa →</a>`
+      : `<a href="#${esc(p.articulo)}" class="text-[12px]" style="color:var(--accent-2);text-decoration:underline;text-underline-offset:2px" onclick="var d=document.getElementById('${esc(p.articulo)}');if(d){d.open=true}">Ver la guía completa →</a>`;
+  const attrs = panel
+    ? `class="ayp-item"`
+    : `id="${esc(p.id)}" class="ayuda-item" data-busca="${esc(textoDeBusqueda(p.pregunta, p.categoria, p.respuesta))}" style="border:1px solid var(--line);background:var(--panel);border-radius:var(--radius-sm)"`;
+  return `<details ${attrs}>
     <summary style="cursor:pointer;list-style:none;padding:11px 16px;display:flex;align-items:center;gap:12px">
       <span class="ayuda-chev" style="color:var(--dim);flex:none;transition:transform .15s ease"><i data-lucide="chevron-right" width="15" height="15"></i></span>
       <span class="font-display font-semibold text-[13px] text-cream" style="flex:1">${esc(p.pregunta)}</span>
     </summary>
     <div style="padding:2px 16px 14px 43px;display:flex;flex-direction:column;gap:10px">${cuerpo(p.respuesta)}${enlace}</div>
   </details>`;
+}
+
+const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+function fechaCorta(iso: string): string {
+  const [a, m, d] = iso.split("-").map(Number);
+  return `${d} ${MESES[m - 1]} ${a}`;
+}
+
+function etiquetaTipo(t: Novedad["tipo"]): string {
+  const color = t === "Nuevo" ? "var(--accent-2)" : t === "Mejora" ? "var(--ok)" : "var(--muted)";
+  return `<span class="text-[10.5px]" style="font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:${color}">${t}</span>`;
+}
+
+function novedad(n: Novedad, compacta = false): string {
+  const clase = compacta ? `class="ayp-nov"` : `class="ayuda-item" data-busca="${esc((n.titulo + " " + n.texto).toLowerCase())}"`;
+  const ir = n.ruta ? `<a href="${esc(n.ruta)}" class="text-[12px]" style="color:var(--accent-2);font-weight:600;white-space:nowrap">Ir →</a>` : "";
+  return `<article ${clase} style="border:1px solid var(--line);background:var(--panel);border-radius:var(--radius-sm);padding:${compacta ? "11px 13px" : "13px 16px"};display:flex;flex-direction:column;gap:5px">
+    <div style="display:flex;align-items:center;gap:10px">${etiquetaTipo(n.tipo)}<span class="text-[11.5px]" style="color:var(--dim)">${fechaCorta(n.fecha)}</span><span style="margin-left:auto">${ir}</span></div>
+    <div class="font-display font-semibold text-[13.5px] text-cream">${esc(n.titulo)}</div>
+    ${compacta ? "" : `<p class="text-[12.5px]" style="color:var(--muted);margin:0;line-height:1.6">${esc(n.texto)}</p>`}
+  </article>`;
+}
+
+/** Fecha de la novedad más reciente: el botón de ayuda pone un punto si no se ha visto. */
+export const ULTIMA_NOVEDAD = NOVEDADES[0]?.fecha ?? "";
+
+/**
+ * Lo que va dentro del panel lateral de ayuda (lo pide el layout por fetch
+ * al abrirlo). Sin búsqueda: la guía y las preguntas de la pantalla `ruta`
+ * y lo último nuevo. Con búsqueda: resultados de toda la ayuda.
+ */
+export function renderPanelAyuda(ruta: string, q: string): string {
+  const titulo = (t: string) =>
+    `<div class="text-[10.5px]" style="letter-spacing:.16em;text-transform:uppercase;color:var(--dim);font-weight:800;margin:4px 0 2px">${t}</div>`;
+  const lista = (html: string) => `<div style="display:flex;flex-direction:column;gap:8px">${html}</div>`;
+
+  if (q.trim()) {
+    const r = buscarAyuda(q);
+    if (r.articulos.length === 0 && r.preguntas.length === 0) {
+      return `<p class="text-[13px]" style="color:var(--muted);margin:6px 0;line-height:1.6">No encontramos esa duda. Prueba con otras palabras o escríbenos abajo.</p>`;
+    }
+    return `${r.preguntas.length ? titulo("Preguntas") + lista(r.preguntas.map((p) => pregunta(p, true)).join("")) : ""}
+      ${r.articulos.length ? titulo("Guía") + lista(r.articulos.map((a) => articulo(a, { panel: true })).join("")) : ""}`;
+  }
+
+  const { articulos, preguntas } = ayudaParaRuta(ruta);
+  const nuevas = NOVEDADES.slice(0, 2);
+  return `${titulo("De esta pantalla")}${lista(articulos.map((a, i) => articulo(a, { panel: true, abierto: i === 0 })).join(""))}
+    ${preguntas.length ? titulo("Preguntas frecuentes") + lista(preguntas.map((p) => pregunta(p, true)).join("")) : ""}
+    ${
+      nuevas.length
+        ? `${titulo("Lo nuevo")}${lista(nuevas.map((n) => novedad(n, true)).join(""))}
+      <a href="/admin/ayuda#novedades" class="text-[12px]" style="color:var(--accent-2);font-weight:600;align-self:flex-start">Ver todas las novedades →</a>`
+        : ""
+    }`;
 }
 
 export interface AyudaContexto {
@@ -105,6 +176,7 @@ export function renderAyuda(ctx: AyudaContexto): string {
     ${[
       ["#guia", "Guía de uso", "book-open"],
       ...GUIA.map((s) => [`#guia-${s.id}`, s.titulo, ""] as const),
+      ["#novedades", "Novedades", "sparkles"],
       ["#preguntas", "Preguntas frecuentes", "message-circle-question"],
       ["#glosario", "Glosario", "spell-check"],
       ["#soporte", "Pedir ayuda", "life-buoy"],
@@ -124,7 +196,7 @@ export function renderAyuda(ctx: AyudaContexto): string {
         <div class="font-display font-bold text-[15px] text-cream">${esc(s.titulo)}</div>
         <p class="text-[12.5px]" style="color:var(--dim);margin:2px 0 0">${esc(s.descripcion)}</p>
       </div>
-      ${s.articulos.map(articulo).join("")}
+      ${s.articulos.map((a) => articulo(a)).join("")}
     </section>`,
   ).join("");
 
@@ -133,7 +205,7 @@ export function renderAyuda(ctx: AyudaContexto): string {
       (cat) => `<div style="display:flex;flex-direction:column;gap:8px" class="ayuda-cat">
         <div class="text-[10.5px]" style="letter-spacing:.2em;text-transform:uppercase;color:var(--dim);margin-top:8px">${esc(cat)}</div>
         ${FAQ.filter((p) => p.categoria === cat)
-          .map(pregunta)
+          .map((p) => pregunta(p))
           .join("")}
       </div>`,
     )
@@ -209,6 +281,11 @@ export function renderAyuda(ctx: AyudaContexto): string {
           <div class="font-display font-bold text-[17px] text-cream">Guía de uso</div>
           ${guia}
         </section>
+        <section id="novedades" style="scroll-margin-top:80px;display:flex;flex-direction:column;gap:8px">
+          <div class="font-display font-bold text-[17px] text-cream">Novedades</div>
+          <p class="text-[12.5px]" style="color:var(--dim);margin:0">Lo que cambió en tu panel, lo más reciente primero.</p>
+          ${NOVEDADES.map((n) => novedad(n)).join("")}
+        </section>
         <section id="preguntas" style="scroll-margin-top:80px;display:flex;flex-direction:column;gap:6px">
           <div class="font-display font-bold text-[17px] text-cream">Preguntas frecuentes</div>
           ${preguntas}
@@ -242,8 +319,10 @@ export function renderAyuda(ctx: AyudaContexto): string {
         vacio.classList.toggle("ayuda-oculto",!t||hay>0);
       }
       q.addEventListener("input",filtrar);
-      // Llegar con #id (desde el enlace "Ayuda" de una pantalla) abre ese artículo.
-      if(location.hash){var d=document.getElementById(location.hash.slice(1));if(d&&d.tagName==="DETAILS")d.open=true;}
+      // Llegar con #id (desde el panel de ayuda u otra pantalla) abre ese artículo.
+      function abrirHash(){if(!location.hash)return;var d=document.getElementById(location.hash.slice(1));if(!d)return;if(d.tagName==="DETAILS")d.open=true;d.scrollIntoView({block:"start"});}
+      abrirHash();
+      if(!window.__ayudaHash){window.__ayudaHash=true;window.addEventListener("hashchange",function(){if(document.getElementById("ayuda-buscar"))abrirHash();});}
     })();
   </script>`;
 

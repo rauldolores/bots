@@ -14,6 +14,7 @@
 // breadcrumb and page title are derived here.
 
 import type { NichePack } from "../../niches";
+import { NOVEDADES } from "../help/novedades";
 // Qué entradas del NAV se ven lo decide visibleNavIds() en admin/permissions.ts
 // (permisos del token + Resumen + Plan), o la ruta que renderiza cuando el
 // criterio no son los permisos (sin plan vivo: solo Plan). Aquí no se opina.
@@ -380,6 +381,30 @@ const GLOBAL_STYLE = `
   .live-pill{display:flex;align-items:center;gap:8px;height:32px;background:var(--panel2);border-radius:999px;padding:0 12px;white-space:nowrap}
   .hdr-btn{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-sm);color:var(--muted)}
   .hdr-btn:hover{background:var(--panel2);color:var(--cream)}
+  .hdr-btn{position:relative;border:0;background:none;cursor:pointer}
+  .hdr-btn[aria-expanded="true"]{background:var(--panel2);color:var(--cream)}
+  .ay-punto{position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px #fff}
+  /* Panel lateral de ayuda (botón "?"): la ayuda de la pantalla actual sin
+     salir de ella, como el de AduaniaX. */
+  #ay-panel{position:fixed;inset:0;z-index:70;pointer-events:none}
+  #ay-panel .ay-velo{position:absolute;inset:0;background:rgba(28,24,21,.32);opacity:0;transition:opacity .2s ease}
+  #ay-panel .ay-hoja{position:absolute;top:0;right:0;bottom:0;width:min(440px,100%);background:var(--bg);border-left:1px solid var(--line);box-shadow:var(--shadow-lg);display:flex;flex-direction:column;transform:translateX(100%);visibility:hidden;transition:transform .26s cubic-bezier(.2,.8,.2,1),visibility 0s linear .26s}
+  #ay-panel.on{pointer-events:auto}
+  #ay-panel.on .ay-velo{opacity:1}
+  #ay-panel.on .ay-hoja{transform:none;visibility:visible;transition:transform .26s cubic-bezier(.2,.8,.2,1),visibility 0s}
+  .ay-cab{padding:18px 20px 14px;border-bottom:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;gap:12px}
+  .ay-cuerpo{flex:1;overflow-y:auto;padding:14px 20px 20px;display:flex;flex-direction:column;gap:8px}
+  .ay-cuerpo[aria-busy="true"]{opacity:.55;transition:opacity .15s}
+  .ay-pie{border-top:1px solid var(--line);background:var(--panel);padding:14px 20px;display:flex;flex-direction:column;gap:8px}
+  .ay-accion{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel);font-size:13px;font-weight:600;color:var(--cream)}
+  .ay-accion:hover{border-color:var(--linelit);background:var(--row-hover)}
+  .ay-accion svg{color:var(--accent-2)}
+  .ayp-item{border:1px solid var(--line);background:var(--panel);border-radius:var(--radius-sm)}
+  .ayp-item summary::-webkit-details-marker{display:none}
+  .ayp-item summary:hover{background:var(--row-hover);border-radius:var(--radius-sm)}
+  .ayp-item[open] .ayuda-chev{transform:rotate(90deg)}
+  .ayp-item>div{padding-left:16px !important}
+  @media (prefers-reduced-motion:reduce){#ay-panel .ay-hoja,#ay-panel .ay-velo{transition:none !important}}
   /* piezas de ui.ts */
   .stat-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
   @media (max-width:1100px){.stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -643,7 +668,8 @@ const NAV_SCRIPT = `
     return traer(url);
   }
 
-  function ir(url, empujar, y) {
+  function ir(url, empujar, y, hash) {
+    hash = hash || "";
     var mio = ++turno;
     var barra = document.getElementById("nb-barra");
     if (barra) barra.classList.add("on");
@@ -652,7 +678,7 @@ const NAV_SCRIPT = `
       var doc = new DOMParser().parseFromString(html, "text/html");
       var nuevo = doc.getElementById("nb-main");
       if (!nuevo) throw new Error("sin-layout");
-      if (empujar) history.pushState({ nb: 1 }, "", url);
+      if (empujar) history.pushState({ nb: 1 }, "", url + hash);
       actual = location.pathname + location.search;
       document.title = doc.title;
       var t = doc.getElementById("nb-hdr-title"), tv = document.getElementById("nb-hdr-title");
@@ -677,11 +703,14 @@ const NAV_SCRIPT = `
 
       if (window.htmx) window.htmx.process(main);
       if (window.lucide) window.lucide.createIcons();
-      window.scrollTo(0, y || 0);
+      // Con #ancla (p. ej. /admin/ayuda#soporte) se baja hasta ella, como haría
+      // el navegador; si no, arriba (o donde estaba, al volver con "atrás").
+      var ancla = hash ? document.getElementById(decodeURIComponent(hash.slice(1))) : null;
+      if (ancla) ancla.scrollIntoView({ block: "start" }); else window.scrollTo(0, y || 0);
       try { main.focus({ preventScroll: true }); } catch (e) {}
     }).catch(function () {
       if (mio !== turno) return;
-      if (empujar) location.assign(url); else location.reload();
+      if (empujar) location.assign(url + hash); else location.reload();
     }).then(function () {
       if (mio === turno && window.__nbTerminar) window.__nbTerminar();
     });
@@ -693,7 +722,7 @@ const NAV_SCRIPT = `
     if (!sirve(a)) return;
     e.preventDefault();
     try { history.replaceState(Object.assign({}, history.state, { nb: 1, y: window.scrollY }), ""); } catch (err) {}
-    ir(a.pathname + a.search, true, 0);
+    ir(a.pathname + a.search, true, 0, a.hash);
   });
 
   // Al pasar el mouse por el MENÚ se adelanta la petición: al dar clic ya
@@ -721,9 +750,112 @@ const NAV_SCRIPT = `
 })();
 </script>`;
 
+// ── Panel lateral de ayuda ─────────────────────────────────────────
+// El botón "?" de la cabecera abre la ayuda de la pantalla actual (artículos
+// y preguntas de help/contenido.ts que dicen pertenecerle) sin salir de ella.
+// El contenido lo trae /admin/ayuda/panel al abrir, con la ruta de ESE
+// momento: así sirve igual después de cambiar de pantalla sin recargar. El
+// punto ámbar del botón = hay una novedad (help/novedades.ts) que este
+// navegador no ha visto; abrir el panel la da por vista.
+const ULTIMA_NOVEDAD = NOVEDADES[0]?.fecha ?? "";
+
+const PANEL_AYUDA = `<div id="ay-panel" aria-hidden="true">
+  <div class="ay-velo" data-ay-cerrar></div>
+  <aside class="ay-hoja" role="dialog" aria-modal="true" aria-labelledby="ay-tit">
+    <div class="ay-cab">
+      <div style="display:flex;align-items:flex-start;gap:12px">
+        <div style="flex:1;min-width:0">
+          <div id="ay-tit" style="font-weight:900;font-size:17px;letter-spacing:-.02em;display:flex;align-items:center;gap:8px">
+            <i data-lucide="life-buoy" width="18" height="18" style="color:var(--accent-2)"></i>¿En qué te ayudamos?
+          </div>
+          <p style="font-size:12.5px;color:var(--muted);margin:3px 0 0">Primero revisa la ayuda de la pantalla donde estás.</p>
+        </div>
+        <button type="button" class="hdr-btn" data-ay-cerrar aria-label="Cerrar la ayuda" title="Cerrar (Esc)"><i data-lucide="x" width="18" height="18"></i></button>
+      </div>
+      <div style="position:relative">
+        <i data-lucide="search" width="15" height="15" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--dim);pointer-events:none"></i>
+        <input id="ay-q" type="search" autocomplete="off" aria-label="Buscar en la ayuda" placeholder="Busca tu duda: WhatsApp, citas, factura…" style="width:100%;height:40px;border:1px solid var(--line);border-radius:var(--radius-sm);padding:0 12px 0 36px;font-size:13px;background:var(--panel);color:var(--cream)">
+      </div>
+    </div>
+    <div id="ay-cuerpo" class="ay-cuerpo" aria-live="polite"></div>
+    <div class="ay-pie">
+      <div style="font-size:13px;font-weight:800">¿No encontraste la respuesta?</div>
+      <a href="/admin/ayuda#soporte" class="ay-accion"><i data-lucide="mail" width="16" height="16"></i>Escribir a soporte</a>
+      <a href="/admin/ayuda" class="ay-accion"><i data-lucide="book-open" width="16" height="16"></i>Ir al Centro de ayuda</a>
+    </div>
+  </aside>
+</div>`;
+
+const AYUDA_SCRIPT = `
+<script>
+(function () {
+  if (window.__nbAyuda) return;
+  window.__nbAyuda = true;
+  var panel = document.getElementById("ay-panel"), btn = document.getElementById("ay-btn");
+  var cuerpo = document.getElementById("ay-cuerpo"), q = document.getElementById("ay-q");
+  if (!panel || !btn || !cuerpo || !q) return;
+  var punto = btn.querySelector(".ay-punto"), ultima = btn.getAttribute("data-ultima") || "";
+  var CLAVE = "nb-novedades-vistas";
+  try { if (ultima && (localStorage.getItem(CLAVE) || "") < ultima) punto.hidden = false; } catch (e) {}
+
+  var turno = 0, cargada = null, previo = null, espera = null;
+  function clave() { return location.pathname + location.search + "|" + q.value.trim(); }
+  function cargar() {
+    var mio = ++turno, k = clave(), t = q.value.trim();
+    cuerpo.setAttribute("aria-busy", "true");
+    fetch("/admin/ayuda/panel?ruta=" + encodeURIComponent(location.pathname + location.search) + (t ? "&q=" + encodeURIComponent(t) : ""), { credentials: "same-origin", redirect: "manual" })
+      .then(function (r) { if (r.type === "opaqueredirect" || !r.ok) throw new Error("ayuda"); return r.text(); })
+      .then(function (html) {
+        if (mio !== turno) return;
+        cuerpo.innerHTML = html; cuerpo.scrollTop = 0; cargada = k;
+        if (window.lucide) window.lucide.createIcons();
+      })
+      .catch(function () {
+        if (mio !== turno) return;
+        cargada = null;
+        cuerpo.innerHTML = '<p style="font-size:13px;color:var(--muted);line-height:1.6;margin:6px 0">No pudimos cargar la ayuda. Intenta de nuevo o abre el <a href="/admin/ayuda" style="color:var(--accent-2);text-decoration:underline">Centro de ayuda</a>.</p>';
+      })
+      .then(function () { if (mio === turno) cuerpo.removeAttribute("aria-busy"); });
+  }
+  function abierto() { return panel.classList.contains("on"); }
+  function abrir() {
+    previo = document.activeElement;
+    panel.classList.add("on"); panel.setAttribute("aria-hidden", "false"); btn.setAttribute("aria-expanded", "true");
+    if (clave() !== cargada) cargar();
+    try { localStorage.setItem(CLAVE, ultima); } catch (e) {}
+    punto.hidden = true;
+    setTimeout(function () { try { q.focus({ preventScroll: true }); } catch (e) {} }, 80);
+  }
+  function cerrar(devolver) {
+    if (!abierto()) return;
+    panel.classList.remove("on"); panel.setAttribute("aria-hidden", "true"); btn.setAttribute("aria-expanded", "false");
+    if (devolver && previo && previo.focus) try { previo.focus({ preventScroll: true }); } catch (e) {}
+  }
+  btn.addEventListener("click", function () { if (abierto()) cerrar(true); else abrir(); });
+  // Un enlace del panel lleva a otra pantalla (o a otra parte de Ayuda): el
+  // panel se cierra y la navegación sigue su curso normal.
+  panel.addEventListener("click", function (e) {
+    if (e.target.closest("[data-ay-cerrar]")) { cerrar(true); return; }
+    if (e.target.closest("a[href]")) cerrar(false);
+  });
+  q.addEventListener("input", function () { clearTimeout(espera); espera = setTimeout(cargar, 220); });
+  document.addEventListener("keydown", function (e) {
+    if (!abierto()) return;
+    if (e.key === "Escape") { cerrar(true); return; }
+    if (e.key !== "Tab") return;
+    // El foco no se escapa del panel mientras está abierto.
+    var f = Array.prototype.filter.call(panel.querySelectorAll("a[href],button,input,summary"), function (el) { return el.offsetParent !== null; });
+    if (!f.length) return;
+    var primero = f[0], ultimo = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === primero) { e.preventDefault(); ultimo.focus(); }
+    else if (!e.shiftKey && document.activeElement === ultimo) { e.preventDefault(); primero.focus(); }
+  });
+})();
+</script>`;
+
 // Re-run lucide after every htmx swap (fragments bring fresh icons) and close
 // any open modal with Escape.
-const GLOBAL_SCRIPT = `${ESPERA_SCRIPT}${NAV_SCRIPT}
+const GLOBAL_SCRIPT = `${ESPERA_SCRIPT}${NAV_SCRIPT}${AYUDA_SCRIPT}
 <script>
   function drawIcons(){ if (window.lucide) window.lucide.createIcons(); }
   document.addEventListener("DOMContentLoaded", drawIcons);
@@ -857,14 +989,15 @@ export function layout(opts: {
           <span style="width:7px;height:7px;border-radius:50%;background:var(--ok);animation:ring 2s infinite"></span>
           <span style="font-size:12px;font-weight:600;color:var(--muted)">Bot en línea</span>
         </div>
-        <a href="/admin/ayuda" class="hdr-btn" title="Ayuda y soporte" aria-label="Ayuda y soporte">
-          <i data-lucide="circle-help" width="18" height="18"></i>
-        </a>
+        <button type="button" id="ay-btn" class="hdr-btn" title="Ayuda y soporte" aria-label="Ayuda y soporte" aria-haspopup="dialog" aria-expanded="false" aria-controls="ay-panel" data-ultima="${ULTIMA_NOVEDAD}">
+          <i data-lucide="circle-help" width="18" height="18"></i><span class="ay-punto" hidden></span>
+        </button>
       </header>
       <main id="nb-main" tabindex="-1" style="padding:28px;min-width:0;outline:none">${opts.body}</main>
     </div>
   </div>
   <div id="modal-root"></div>
+  ${PANEL_AYUDA}
   <script>
   // Selector de organización/bot (F5) — patrón "un solo botón": un trigger
   // combinado abre un panel de dos columnas (organizaciones | bots de la

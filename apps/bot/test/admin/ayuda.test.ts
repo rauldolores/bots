@@ -112,10 +112,40 @@ describe("GET /admin/ayuda", () => {
     expect(html).toContain('href="/admin/overview"');
   });
 
+  it("pinta las Novedades y el botón de ayuda abre el panel lateral", async () => {
+    const html = await (await adminApp.request("/ayuda", { headers: AUTH }, env)).text();
+    expect(html).toContain('id="novedades"');
+    expect(html).toContain('id="ay-btn"');
+    expect(html).toContain('id="ay-panel"');
+  });
+
   it("SUPPORT_EMAIL cambia el destino que se muestra", async () => {
     const html = await (await adminApp.request("/ayuda", { headers: AUTH }, { ...env, SUPPORT_EMAIL: "ayuda@mi-empresa.com" } as Env)).text();
     expect(html).toContain("ayuda@mi-empresa.com");
     expect(html).not.toContain("asesor@kontrolia.io");
+  });
+});
+
+describe("GET /admin/ayuda/panel", () => {
+  it("trae la ayuda de la pantalla que se le indica", async () => {
+    const res = await adminApp.request("/ayuda/panel?ruta=" + encodeURIComponent("/admin/leads"), { headers: AUTH }, env);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("De esta pantalla");
+    expect(html).toContain("Leads");
+    expect(html).not.toContain("<html");
+  });
+
+  it("con q busca en toda la ayuda", async () => {
+    const html = await (await adminApp.request("/ayuda/panel?ruta=%2Fadmin%2Fleads&q=whatsapp", { headers: AUTH }, env)).text();
+    expect(html).not.toContain("De esta pantalla");
+    expect(html.toLowerCase()).toContain("whatsapp");
+  });
+
+  it("una ruta que no es del panel no rompe: cae en Resumen", async () => {
+    const res = await adminApp.request("/ayuda/panel?ruta=https%3A%2F%2Fevil.test", { headers: AUTH }, env);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("Resumen");
   });
 });
 

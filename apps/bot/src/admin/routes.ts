@@ -85,7 +85,7 @@ import { renderTelefono } from "./views/telefono";
 import { renderUsuarios } from "./views/usuarios";
 import { renderOrganizaciones } from "./views/organizaciones";
 import { renderPlan } from "./views/plan";
-import { renderAyuda } from "./views/ayuda";
+import { renderAyuda, renderPanelAyuda } from "./views/ayuda";
 import { correoSoporte, enviarSoporte } from "./help/soporte";
 import {
   entitlementsDe,
@@ -235,7 +235,7 @@ function isAuthExempt(path: string): boolean {
 // ni permisos de la app: solo trae la marca de la organización de quien ya
 // inició sesión, y la banda se pinta igual en "elige tu plan" o en "acceso
 // restringido".
-const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots", "/access-denied", "/ayuda", "/ayuda/soporte", "/plan/uso", BAND_BRANDING_PATH];
+const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots", "/access-denied", "/ayuda", "/ayuda/soporte", "/ayuda/panel", "/plan/uso", BAND_BRANDING_PATH];
 
 // Lo que sigue abierto cuando la organización NO tiene plan vivo (billing.md
 // B2): la pantalla de planes y su compra, la vuelta del pago, cambiarse de
@@ -2063,6 +2063,16 @@ adminApp.get("/ayuda", async (c) => {
       visibleNavIds: navDeAyuda(c),
     }),
   );
+});
+
+// Contenido del panel lateral de ayuda (el botón "?" de la cabecera): la
+// ayuda de la pantalla `ruta`, o resultados si viene `q`. Es un fragmento,
+// no una página: lo inserta el layout.
+adminApp.get("/ayuda/panel", async (c) => {
+  const denied = accesoAyudaDenegado(c);
+  if (denied) return denied;
+  const ruta = c.req.query("ruta") ?? "";
+  return c.html(renderPanelAyuda(ruta.startsWith("/admin") ? ruta : "/admin/overview", (c.req.query("q") ?? "").slice(0, 120)));
 });
 
 adminApp.post("/ayuda/soporte", async (c) => {

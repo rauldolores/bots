@@ -46,6 +46,11 @@ Cómo desplegar en cada destino: [`docs/despliegue.md`](docs/despliegue.md).
   literals y las cierra.
 - **Un test que use un driver simulado no prueba el SQL.** Si tocas una consulta,
   cúbrela contra la base real (mira `test/helpers/pgSetup.ts`).
+- **Todo cambio que el dueño vea en el panel o en el bot agrega su novedad** en
+  `src/admin/help/novedades.ts` (la más reciente primero), en lenguaje sencillo y sin
+  tecnicismos. Lo interno (base, pruebas, refactors) no va. Si cambias una pantalla,
+  revisa también que su artículo en `src/admin/help/contenido.ts` siga siendo cierto:
+  es lo que muestra el panel de ayuda de esa pantalla.
 - Antes de dar algo por terminado: `npm test` y `npm run typecheck`, ambos limpios.
 
 Los tests necesitan un Postgres. Por defecto usan `TEST_DATABASE_URL`, o la Supabase
