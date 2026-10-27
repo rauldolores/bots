@@ -10,9 +10,11 @@
 // que nunca se conectó). Los presets de abajo solo prellenan filtros; el
 // dueño los puede ajustar en "Filtros avanzados" antes de mandar.
 //
-// Layout: wizard de 4 pasos numerados a la izquierda + un resumen fijo (sticky)
-// a la derecha que se actualiza en vivo (htmx, out-of-band) y bloquea el envío
-// mientras falten datos (nombre de campaña, o plantilla para quien la necesita).
+// Layout: hero + métricas, y debajo los 4 pasos numerados a la izquierda con
+// un resumen fijo (sticky) a la derecha que se actualiza en vivo (htmx,
+// out-of-band) y bloquea el envío mientras falten datos (nombre de campaña, o
+// plantilla para quien la necesita). En teléfono el resumen baja justo debajo
+// del formulario, antes de las etiquetas, para que el botón quede cerca.
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { layout } from "./layout";
@@ -22,7 +24,6 @@ import {
   RECENCY_OPTIONS,
   FILTER_PRESETS,
   segmentCount,
-  type CampaignFilters,
   type FilterCounts,
 } from "../../segments";
 import { configuredChannels } from "../../channels/labels";
@@ -35,6 +36,7 @@ import {
   campaignHistory,
   pendingByCampaignKey,
 } from "../../campaigns";
+import { alertRow, heroBtn, heroTag, iconTile, MICRO_LABEL, pageHero, sectionCard, statCard, statGrid, statusPill } from "./ui";
 
 function esc(s: string): string {
   return s.replace(
@@ -51,32 +53,95 @@ function fmtAgo(ms: number): string {
   return `hace ${Math.floor(h / 24)} d`;
 }
 
-const SENTIMENT_ICON: Record<string, string> = {
-  positive: "🙂",
-  neutral: "😐",
-  frustrated: "😤",
-  angry: "😠",
-  none: "❔",
-};
+function personas(n: number): string {
+  return `${n} ${n === 1 ? "persona" : "personas"}`;
+}
+
+const CMP_CSS = `<style>
+  .cmp-layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;grid-template-areas:"form side" "tags side";gap:24px;align-items:start}
+  .cmp-form{grid-area:form;display:flex;flex-direction:column;gap:24px;min-width:0}
+  .cmp-tags{grid-area:tags;min-width:0}
+  .cmp-side{grid-area:side;position:sticky;top:20px;display:flex;flex-direction:column;gap:24px;min-width:0}
+  .cmp-step-body{padding:20px 24px;display:flex;flex-direction:column;gap:14px}
+  .cmp-num{flex:none;width:40px;height:40px;border-radius:12px;background:var(--accent-soft);color:var(--accent-ink);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900}
+  .cmp-chips{display:flex;flex-wrap:wrap;gap:8px}
+  .cmp-chip{height:40px;padding:0 14px;border-radius:12px;border:1px solid var(--linelit);background:var(--panel);color:var(--muted);font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap;transition:background .12s ease}
+  .cmp-chip:hover{background:var(--row-hover);color:var(--cream)}
+  .cmp-chip[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink)}
+  .cmp-link-btn{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 4px;background:none;border:0;font-size:13px;font-weight:700;font-family:inherit;color:var(--accent-2);cursor:pointer}
+  .cmp-link-btn:hover{color:var(--cream)}
+  .cmp-chev{transition:transform .15s ease}
+  .cmp-link-btn[aria-expanded="true"] .cmp-chev{transform:rotate(90deg)}
+  .cmp-adv{display:flex;flex-direction:column;gap:18px;padding:16px;border-radius:12px;background:var(--row-hover);border:1px solid var(--line)}
+  .cmp-adv[hidden]{display:none}
+  .cmp-facet{border:0;margin:0;padding:0;min-width:0}
+  .cmp-facet legend{padding:0;margin-bottom:8px;${MICRO_LABEL}}
+  .cmp-opts{display:flex;flex-wrap:wrap;gap:8px}
+  .cmp-opt{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel);font-size:13px;font-weight:600;color:var(--cream);cursor:pointer}
+  .cmp-opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+  .cmp-opt input{margin:0;accent-color:var(--accent-2)}
+  .cmp-check{display:flex;align-items:flex-start;gap:10px;padding-top:14px;border-top:1px solid var(--line);font-size:13px;font-weight:500;line-height:1.5;color:var(--cream);cursor:pointer}
+  .cmp-check input{margin:3px 0 0;accent-color:var(--accent-2);flex:none}
+  .cmp-field{width:100%;height:40px;padding:0 14px;border:1px solid var(--linelit);background:var(--panel);color:var(--cream);font-size:13px}
+  textarea.cmp-field{height:auto;padding:12px 14px;line-height:1.5;resize:vertical}
+  .cmp-label{display:flex;flex-direction:column;gap:6px;min-width:0}
+  .cmp-label>span{${MICRO_LABEL}}
+  .cmp-help{margin:0;font-size:12px;font-weight:500;line-height:1.5;color:var(--dim)}
+  .cmp-aud{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;border-radius:12px;background:var(--accent-soft);padding:14px 16px}
+  .cmp-sum-row{display:flex;justify-content:space-between;gap:12px;font-size:13px;font-weight:500;color:var(--muted)}
+  .cmp-sum-row b{font-weight:800;color:var(--cream)}
+  .cmp-send{height:44px;width:100%;border:0;border-radius:12px;background:var(--accent);color:var(--cream);font-size:14px;font-weight:800;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;transition:background .12s ease}
+  .cmp-send:hover{background:var(--accent-hover)}
+  .cmp-send:disabled{background:var(--panel2);color:var(--dim);cursor:not-allowed}
+  .cmp-btn{height:40px;padding:0 16px;border-radius:12px;border:0;background:var(--accent);color:var(--cream);font-size:13px;font-weight:800;font-family:inherit;cursor:pointer;white-space:nowrap}
+  .cmp-btn:hover{background:var(--accent-hover)}
+  .cmp-btn-sm{height:32px;padding:0 10px;border-radius:10px;border:1px solid var(--dim);background:var(--panel);color:var(--cream);font-size:12px;font-weight:700;font-family:inherit;display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
+  .cmp-btn-sm:hover{background:var(--row-hover)}
+  .cmp-row{display:flex;align-items:flex-start;gap:12px;padding:14px 24px;border-top:1px solid var(--line)}
+  .cmp-row.is-first{border-top:none}
+  .cmp-tag-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;gap:12px;align-items:end}
+  @media (max-width:1100px){
+    .cmp-layout{grid-template-columns:minmax(0,1fr);grid-template-areas:"form" "side" "tags"}
+    .cmp-side{position:static}
+  }
+  @media (max-width:640px){
+    .cmp-step-body{padding:16px}
+    .cmp-row{padding:14px 16px}
+    .cmp-tag-form{grid-template-columns:minmax(0,1fr)}
+  }
+</style>`;
+
+/** Una tarjeta de paso: número en mosaico ámbar, título y una línea de ayuda. Misma caja que sectionCard. */
+function stepCard(n: number, title: string, hint: string, body: string): string {
+  return `<section style="border-radius:var(--radius);background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-md);overflow:hidden">
+    <div style="display:flex;align-items:center;gap:14px;padding:20px 24px;border-bottom:1px solid var(--line)">
+      <span class="cmp-num" aria-hidden="true">${n}</span>
+      <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+        <h2 style="margin:0;font-size:16px;font-weight:900;letter-spacing:-.02em;color:var(--cream)"><span class="sr-only">Paso ${n}: </span>${esc(title)}</h2>
+        <div style="font-size:13px;font-weight:500;color:var(--dim)">${esc(hint)}</div>
+      </div>
+    </div>
+    <div class="cmp-step-body">${body}</div>
+  </section>`;
+}
 
 /** Un grupo de checkboxes (facet de filtro), o radios si `radio` es true. */
 function facet(name: string, title: string, options: { value: string; label: string }[], radio = false): string {
   const inputs = options
-    .map((o) => {
-      const icon = SENTIMENT_ICON[o.value] ? `${SENTIMENT_ICON[o.value]} ` : "";
-      return `
-      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;white-space:nowrap">
+    .map(
+      (o) => `
+      <label class="cmp-opt">
         <input type="${radio ? "radio" : "checkbox"}" name="${esc(name)}" value="${esc(o.value)}" class="campaign-filter"
                ${radio && o.value === "any" ? "checked" : ""}>
-        ${icon}${esc(o.label)}
-      </label>`;
-    })
+        ${esc(o.label)}
+      </label>`,
+    )
     .join("");
   return `
-    <div style="display:flex;flex-direction:column;gap:7px">
-      <span class="font-mono" style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)">${esc(title)}</span>
-      <div style="display:flex;gap:14px;flex-wrap:wrap">${inputs}</div>
-    </div>`;
+    <fieldset class="cmp-facet">
+      <legend>${esc(title)}</legend>
+      <div class="cmp-opts">${inputs}</div>
+    </fieldset>`;
 }
 
 interface BlockersInput {
@@ -100,46 +165,47 @@ function computeBlockers(b: BlockersInput): string[] {
   return blockers;
 }
 
-/** El bloque de audiencia (banner dorado) — se re-renderiza en vivo por htmx. */
+/** El bloque de audiencia — se re-renderiza en vivo por htmx (outerHTML, por eso conserva el id). */
 function renderAudienceBanner(counts: FilterCounts): string {
   return `
-    <div id="audience-banner" style="display:flex;align-items:center;gap:10px;background:var(--accent-soft);border:1px solid #ead79a;border-radius:10px;padding:12px 14px;flex-wrap:wrap">
-      <span style="font-size:14px;font-weight:700">${counts.total}</span>
-      <span style="font-size:12.5px;color:var(--muted)">${counts.total === 1 ? "persona" : "personas"} con estos filtros</span>
-      <span style="margin-left:auto;display:flex;gap:10px;font-size:11.5px;white-space:nowrap">
-        <span style="color:#186c3b">${counts.inWindow} en ventana (gratis)</span>
-        <span style="color:#b23b1d">${counts.outWindow} necesitan plantilla</span>
-      </span>
+    <div id="audience-banner" class="cmp-aud" role="status" aria-live="polite">
+      <div style="display:flex;align-items:baseline;gap:8px">
+        <span data-testid="audiencia-total" style="font-size:24px;font-weight:900;letter-spacing:-.03em;color:var(--cream)">${counts.total}</span>
+        <span style="font-size:13px;font-weight:600;color:var(--accent-ink)">${counts.total === 1 ? "persona" : "personas"} con estos filtros</span>
+      </div>
+      <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:8px">
+        ${statusPill(`${counts.inWindow} en ventana · gratis`, "var(--ok)")}
+        ${statusPill(`${counts.outWindow} necesitan plantilla`, "var(--warn)")}
+      </div>
     </div>`;
 }
 
-/** El resumen fijo de la derecha (tarjeta oscura) — también se refresca en vivo. */
+/** El resumen fijo de la derecha — también se refresca en vivo (out-of-band). */
 function renderSendSummary(counts: FilterCounts, blockers: string[]): string {
   const disabled = blockers.length > 0;
-  const btnStyle = disabled
-    ? "background:#3a382f;color:#8b8578;cursor:not-allowed"
-    : "background:var(--accent);color:#1b1a16;cursor:pointer";
-  // Tarjeta oscura a propósito: sus colores van fijos aquí (el --ok del
-  // contenido es un teal pensado para fondo claro y no se lee sobre tinta).
-  return `
-    <div id="send-summary" style="background:#1b1a16;border-radius:13px;padding:18px;display:flex;flex-direction:column;gap:12px">
-      <span class="font-mono" style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8b8578">Resumen del envío</span>
-      <div style="display:flex;flex-direction:column;gap:9px">
-        <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:#c3beb2">Audiencia</span><span style="color:#f7f5ef;font-weight:600">${counts.total}</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:#c3beb2">Free-form</span><span style="color:#3fb8c4;font-weight:600">${counts.inWindow}</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:#c3beb2">Con plantilla</span><span style="color:${counts.outWindow > 0 ? "#f0a88a" : "#f7f5ef"};font-weight:600">${counts.outWindow}</span></div>
+  const body = `
+    <div style="padding:20px 24px;display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div class="cmp-sum-row"><span>Audiencia</span><b>${counts.total}</b></div>
+        <div class="cmp-sum-row"><span>Mensaje libre (en ventana)</span><b>${counts.inWindow}</b></div>
+        <div class="cmp-sum-row"><span>Con plantilla</span><b>${counts.outWindow}</b></div>
       </div>
       ${
         blockers.length
-          ? `<div style="display:flex;flex-direction:column;gap:6px;padding-top:6px;border-top:1px solid #35322a">
-              ${blockers.map((b) => `<span style="font-size:11.5px;color:#f0a88a">⚠ ${esc(b)}</span>`).join("")}
-            </div>`
+          ? `<ul style="list-style:none;margin:0;padding:14px 0 0;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:8px">
+              ${blockers
+                .map(
+                  (b) =>
+                    `<li style="display:flex;gap:10px;font-size:12.5px;font-weight:600;line-height:1.45;color:var(--cream)"><span aria-hidden="true" style="width:7px;height:7px;border-radius:50%;background:var(--warn);flex:none;margin-top:6px"></span>${esc(b)}</li>`,
+                )
+                .join("")}
+            </ul>`
           : ""
       }
-      <button type="submit" form="campaign-form" ${disabled ? "disabled" : ""} class="font-display font-bold text-[13.5px]"
-              style="border:0;border-radius:10px;padding:12px;white-space:nowrap;${btnStyle}">⚡ Enviar campaña</button>
-      <span style="font-size:11px;color:#8b8578;text-align:center">Puede tardar ~1 min con audiencias grandes.</span>
+      <button type="submit" form="campaign-form" class="cmp-send" ${disabled ? "disabled" : ""}><i data-lucide="send" width="16" height="16"></i>Enviar campaña</button>
+      <p class="cmp-help" style="text-align:center">Puede tardar ~1 min con audiencias grandes.</p>
     </div>`;
+  return `<div id="send-summary">${sectionCard({ icon: "send", title: "Resumen del envío", body })}</div>`;
 }
 
 /** Fragmento completo que /campanas/preview intercambia: banner + resumen (out-of-band). */
@@ -158,52 +224,90 @@ export function renderLivePreview(
  * revisor rápido (ai/etiquetar.ts) a cada conversación; aquí solo se definen.
  */
 function seccionDeEtiquetas(etiquetas: Etiqueta[], revisorPrendido: boolean): string {
-  const campo = "background:var(--panel);border:1px solid var(--line);color:inherit;padding:9px 12px;font-size:12.5px;width:100%";
   const filas = etiquetas.length
     ? etiquetas
         .map(
-          (e) => `
-      <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-top:1px solid var(--line)">
+          (e, i) => `
+      <div class="cmp-row${i === 0 ? " is-first" : ""}">
         <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:600">${esc(e.nombre)}</div>
-          <div class="text-dim" style="font-size:11.5px;margin-top:2px">${esc(e.descripcion)}</div>
+          <div style="font-size:13px;font-weight:800;color:var(--cream)">${esc(e.nombre)}</div>
+          <div style="font-size:12px;font-weight:500;line-height:1.5;color:var(--muted);margin-top:2px">${esc(e.descripcion)}</div>
         </div>
         <form method="post" action="/admin/campanas/etiquetas/${encodeURIComponent(e.id)}/borrar" style="margin:0;flex:none"
               onsubmit="return confirm(${esc(JSON.stringify(`¿Borrar la etiqueta «${e.nombre}»? Se quita de todas las conversaciones.`))})">
-          <button type="submit" style="background:none;border:1px solid var(--line);color:var(--dim);padding:5px 10px;font-size:11px;cursor:pointer">Borrar</button>
+          <button type="submit" class="cmp-btn-sm" aria-label="Borrar la etiqueta ${esc(e.nombre)}"><i data-lucide="trash-2" width="14" height="14"></i>Borrar</button>
         </form>
       </div>`,
         )
         .join("")
-    : `<div class="text-dim" style="font-size:12px;padding:6px 0">Todavía no hay etiquetas.</div>`;
+    : `<div style="padding:20px 24px;font-size:13px;font-weight:500;color:var(--dim)">Todavía no hay etiquetas.</div>`;
+  // Hecho a mano y no con alertRow: lleva negrita y un link dentro del texto.
   const aviso = revisorPrendido
     ? ""
-    : `<div style="border:1px solid var(--accent-2);background:var(--accent-soft);color:var(--accent-2);padding:9px 12px;font-size:12px">
-         Para que se asignen solas, prende el <b>Revisor rápido</b> en <a href="/admin/config" style="color:inherit">Configuración → Modelo de IA</a>.
-       </div>`;
+    : `<div style="padding:12px 24px 0">
+        <div style="display:flex;align-items:flex-start;gap:10px;border-radius:12px;border:1px solid var(--line);background:var(--row-hover);padding:12px 16px;font-size:12.5px;font-weight:500;line-height:1.5;color:var(--muted)">
+          <span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:var(--accent);flex:none;margin-top:6px"></span>
+          <span>Para que se asignen solas, prende el <b>Revisor rápido</b> en <a href="/admin/config?section=modelo" style="font-weight:700">Configuración → Modelo de IA</a>.</span>
+        </div>
+      </div>`;
+  const alta =
+    etiquetas.length < MAX_ETIQUETAS
+      ? `<form method="post" action="/admin/campanas/etiquetas" class="cmp-tag-form">
+          <label class="cmp-label"><span>Nombre</span>
+            <input name="nombre" required maxlength="40" placeholder="Preguntó por precios" class="cmp-field"></label>
+          <label class="cmp-label"><span>Cuándo aplica</span>
+            <input name="descripcion" required maxlength="240" placeholder="El cliente pregunta cuánto cuesta algún producto o plan" class="cmp-field"></label>
+          <button type="submit" class="cmp-btn">Agregar</button>
+        </form>`
+      : `<p class="cmp-help">Llegaste al máximo de ${MAX_ETIQUETAS} etiquetas.</p>`;
   return `
-    <div class="bg-panel border border-line" data-testid="etiquetas" style="padding:18px;display:flex;flex-direction:column;gap:12px;margin-top:16px">
-      <div>
-        <span style="font-size:15px;font-weight:600">🏷️ Etiquetas</span>
-        <p class="text-dim" style="font-size:12px;margin:4px 0 0">
-          Tú las defines y el revisor rápido las pone solo en cada conversación. Luego filtras campañas por ellas.
-          Escribe la descripción como una regla clara: el revisor la lee al pie de la letra.
-        </p>
-      </div>
-      ${aviso}
-      <div>${filas}</div>
-      ${
-        etiquetas.length < MAX_ETIQUETAS
-          ? `<form method="post" action="/admin/campanas/etiquetas" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;gap:8px;align-items:end">
-        <label style="display:flex;flex-direction:column;gap:4px;font-size:11.5px">Nombre
-          <input name="nombre" required maxlength="40" placeholder="Preguntó por precios" style="${campo}"></label>
-        <label style="display:flex;flex-direction:column;gap:4px;font-size:11.5px">Cuándo aplica
-          <input name="descripcion" required maxlength="240" placeholder="El cliente pregunta cuánto cuesta algún producto o plan" style="${campo}"></label>
-        <button type="submit" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;padding:9px 14px;font-size:12.5px;font-weight:700;cursor:pointer">Agregar</button>
-      </form>`
-          : `<div class="text-dim" style="font-size:11.5px">Llegaste al máximo de ${MAX_ETIQUETAS} etiquetas.</div>`
-      }
+    <div class="cmp-tags" data-testid="etiquetas">
+      ${sectionCard({
+        icon: "tags",
+        title: "Etiquetas",
+        subtitle: `${etiquetas.length} de ${MAX_ETIQUETAS}`,
+        body: `<p class="cmp-help" style="padding:16px 24px 0;font-size:13px;color:var(--muted)">Tú las defines y el revisor rápido las pone solo en cada conversación. Luego filtras campañas por ellas.</p>
+          ${aviso}<div style="padding-top:8px">${filas}</div>`,
+        footer: `<div style="display:flex;flex-direction:column;gap:10px;width:100%">${alta}
+          <p class="cmp-help">Escribe la descripción como una regla clara: el revisor la lee al pie de la letra.</p></div>`,
+      })}
     </div>`;
+}
+
+type HistoryRow = { campaign_key: string; freeform: number; template: number; last_at: number };
+
+function renderHistory(rows: HistoryRow[], pending: Map<string, number>): string {
+  if (rows.length === 0) {
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:28px 24px;text-align:center">
+      ${iconTile("megaphone", "neutral")}
+      <div style="font-size:13px;font-weight:700;color:var(--cream)">Sin campañas todavía.</div>
+      <p class="cmp-help">Cuando mandes una, aquí ves cuántos mensajes salieron.</p>
+    </div>`;
+  }
+  const th = `padding:12px 20px;${MICRO_LABEL};border-bottom:1px solid var(--line)`;
+  const filas = rows
+    .map((h) => {
+      const enCurso = pending.get(h.campaign_key) ?? 0;
+      return `<tr style="border-top:1px solid var(--line)">
+        <td style="padding:12px 20px;min-width:0">
+          <div class="font-mono" style="font-size:12.5px;font-weight:700;color:var(--cream);overflow-wrap:anywhere">${esc(h.campaign_key)}</div>
+          <div style="margin-top:4px;font-size:11.5px;font-weight:500;color:var(--dim)">${
+            enCurso > 0 ? statusPill(`${enCurso} en curso`, "var(--accent)") : h.last_at ? fmtAgo(h.last_at) : ""
+          }</div>
+        </td>
+        <td style="padding:12px 0;font-size:13px;font-weight:700;text-align:right;vertical-align:top;color:var(--cream)">${h.freeform}</td>
+        <td style="padding:12px 20px 12px 16px;font-size:13px;font-weight:700;text-align:right;vertical-align:top;color:var(--cream)">${h.template}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<table style="width:100%;border-collapse:collapse">
+    <thead><tr>
+      <th scope="col" style="${th};text-align:left">Campaña</th>
+      <th scope="col" style="${th};padding-left:0;padding-right:0;text-align:right" title="Mensajes libres (gratis, en ventana)">Libres</th>
+      <th scope="col" style="${th};padding-left:16px;text-align:right">Plant.</th>
+    </tr></thead>
+    <tbody>${filas}</tbody>
+  </table>`;
 }
 
 export async function renderCampanas(
@@ -213,7 +317,8 @@ export async function renderCampanas(
   visibleNavIds: Set<string> | null = null,
 ): Promise<string> {
   const db = new Db(env.DB);
-  const [counts, templates, spent, history, pending, etiquetas, modo] = await Promise.all([
+  const canSee = (id: string) => !visibleNavIds || visibleNavIds.has(id);
+  const [counts, templates, spentRaw, history, pending, etiquetas, modo] = await Promise.all([
     segmentCount(db, botId, {}),
     listContentTemplates(env).catch(() => []),
     templatesSentLast24h(db, botId),
@@ -223,6 +328,8 @@ export async function renderCampanas(
     jevDisponible(env) ? new EtiquetasRepo(db, botId).list() : Promise.resolve([] as Etiqueta[]),
     modoJev(env, db, botId),
   ]);
+  // COUNT(*) de Postgres llega como texto (bigint): a número antes de restar.
+  const spent = Number(spentRaw);
   const cap = dailyTemplateCap(env);
   const pct = Math.min(100, Math.round((spent / cap) * 100));
   const channels = configuredChannels(env);
@@ -236,52 +343,77 @@ export async function renderCampanas(
   // F6: ya no se manda todo de un jalón — se encola y el tick de cada minuto
   // la va procesando en lotes, así que aquí solo se confirma que quedó en
   // cola, no cuántos ya salieron (eso lo cuenta el historial cuando termine).
+  const skipped = Number(q.skipped ?? "0");
   const banner = q.ok
-    ? `<div style="border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:12px 16px;margin-bottom:18px;font-size:12.5px">
-        ✅ Campaña encolada — <b>${esc(q.enqueued ?? "0")}</b> de ${esc(q.audience ?? "0")} personas se están enviando en los próximos minutos
-        ${Number(q.skipped ?? "0") > 0 ? ` · ${esc(q.skipped ?? "0")} ya tenían esta campaña (saltados, sin duplicar)` : ""}
-      </div>`
+    ? `<div style="margin-bottom:24px">${alertRow({
+        title: "Campaña en cola",
+        detail: `${q.enqueued ?? "0"} de ${q.audience ?? "0"} personas la reciben en los próximos minutos.${
+          skipped > 0 ? ` ${skipped} ya la tenían y se saltaron, sin duplicar.` : ""
+        }`,
+        dot: "var(--ok)",
+        attrs: 'role="status"',
+      })}</div>`
     : q.err
-      ? `<div style="border:1px solid var(--bad);background:rgba(220,120,120,.08);padding:12px 16px;margin-bottom:18px;font-size:12.5px">⚠️ ${esc(q.err)}</div>`
+      ? `<div style="margin-bottom:24px">${alertRow({ title: "No se pudo completar", detail: q.err, attrs: 'role="alert"' })}</div>`
       : "";
 
+  const hero = pageHero({
+    eyebrow: "Bandeja",
+    title: "Campañas",
+    description:
+      "Manda un mensaje a muchas personas por WhatsApp. A quien te escribió en las últimas 24 horas le llega gratis; a los demás, con una plantilla aprobada que gasta cuota.",
+    tags:
+      templates.length > 0
+        ? heroTag(`${templates.length} ${templates.length === 1 ? "plantilla aprobada" : "plantillas aprobadas"}`)
+        : heroTag("Sin plantillas", "#f0a88a"),
+    actions:
+      templates.length === 0 && canSee("conexiones")
+        ? heroBtn({ label: "Conectar Twilio", href: "/admin/conexiones?cat=canales", icon: "plug-zap", primary: true })
+        : "",
+  });
+
+  const enCola = [...pending.values()].reduce((a, n) => a + Number(n), 0);
+  const stats = statGrid([
+    statCard({ icon: "users", tone: "accent", label: "Te han escrito", value: counts.total, note: "personas en total" }),
+    statCard({ icon: "message-circle", tone: "ok", label: "En ventana", value: counts.inWindow, note: "les llega gratis hoy" }),
+    statCard({
+      icon: "gauge",
+      tone: pct > 85 ? "warn" : "neutral",
+      label: "Cuota de plantillas",
+      value: `${spent} / ${cap}`,
+      hint: `quedan ${Math.max(0, cap - spent)}`,
+      note: "usadas en las últimas 24 h",
+    }),
+    statCard({ icon: "send", label: "En cola", value: enCola, note: enCola ? "saliendo en los próximos minutos" : "nada pendiente" }),
+  ]);
+
   const presetButtons = FILTER_PRESETS.map(
-    (p, i) => `<button type="button" class="preset-btn" data-preset="${esc(p.id)}" title="${esc(p.desc)}"
-      style="border-radius:9px;padding:9px 14px;font-size:12.5px;font-weight:500;font-family:inherit;cursor:pointer;white-space:nowrap;${
-        i === 0
-          ? "border:1.5px solid var(--accent-hover);background:var(--accent-soft);color:var(--accent-2)"
-          : "border:1.5px solid var(--linelit);background:var(--panel);color:var(--muted)"
-      }">${esc(p.label)}</button>`,
+    (p, i) =>
+      `<button type="button" class="cmp-chip preset-btn" data-preset="${esc(p.id)}" title="${esc(p.desc)}" aria-pressed="${i === 0 ? "true" : "false"}">${esc(p.label)}</button>`,
   ).join("");
 
   const channelOptions = channels.map((c) => ({ value: c.id, label: c.label }));
 
-  const templateOpts =
-    templates.length > 0
-      ? templates
-          .map(
-            (t) =>
-              `<option value="${esc(t.sid)}">${esc(t.name)} — “${esc(t.body.slice(0, 70))}${t.body.length > 70 ? "…" : ""}”</option>`,
-          )
-          .join("")
-      : "";
-
   const templateSection =
     templates.length > 0
-      ? `<select name="template_sid" class="campaign-filter" style="width:100%;background:var(--panel);border:1px solid var(--line);color:inherit;padding:9px 10px;font-size:12px">
-          <option value="">— sin plantilla (solo mandar a los que están en ventana) —</option>
-          ${templateOpts}
-        </select>
-        <input name="template_vars" placeholder='Variables JSON opcional, ej {"1":"Ana"}' class="font-mono"
-          style="width:100%;margin-top:8px;background:var(--panel);border:1px solid var(--line);color:inherit;padding:8px 10px;font-size:11.5px">`
-      : `<div style="display:flex;align-items:flex-start;gap:10px;background:#fdf4f3;border:1px solid #f0cfc9;border-radius:10px;padding:12px 14px">
-          <span style="color:#b23b1d;font-size:14px;flex:none">⚠</span>
-          <div style="font-size:12.5px;color:#7c2d12;line-height:1.5">
-            No tienes plantillas aprobadas conectadas.
-            <a href="/admin/conexiones?cat=canales" style="color:#7c2d12;font-weight:600;text-decoration:underline">Conectar Twilio y crear plantilla →</a>
-            Meta tarda horas o días en aprobar — hazlo con anticipación.
-          </div>
-        </div>`;
+      ? `<label class="cmp-label"><span>Plantilla</span>
+          <select name="template_sid" class="campaign-filter cmp-field">
+            <option value="">Sin plantilla (solo a quien está en ventana)</option>
+            ${templates
+              .map(
+                (t) =>
+                  `<option value="${esc(t.sid)}">${esc(t.name)} — “${esc(t.body.slice(0, 70))}${t.body.length > 70 ? "…" : ""}”</option>`,
+              )
+              .join("")}
+          </select></label>
+        <label class="cmp-label"><span>Variables (opcional)</span>
+          <input name="template_vars" placeholder='Ej. {"1":"Ana"}' class="font-mono cmp-field"></label>`
+      : alertRow({
+          title: "No tienes plantillas aprobadas",
+          detail: "Sin una, solo le llega a quien está en ventana. Meta tarda horas o días en aprobarlas: hazlo con anticipación.",
+          dot: "var(--warn)",
+          action: canSee("conexiones") ? { label: "Conectar Twilio", href: "/admin/conexiones?cat=canales" } : undefined,
+        });
 
   // Una campaña recién encolada puede no tener NINGÚN envío procesado todavía
   // (0 filas en template_sends) — sin esto, desaparecería del historial hasta
@@ -289,128 +421,71 @@ export async function renderCampanas(
   const soloEnCola = [...pending.keys()]
     .filter((key) => !history.some((h) => h.campaign_key === key))
     .map((key) => ({ campaign_key: key, freeform: 0, template: 0, last_at: 0 }));
-  const allRows = [...history, ...soloEnCola];
+  const allRows = [...soloEnCola, ...history];
 
-  const historyRows =
-    allRows.length === 0
-      ? `<div style="font-size:12px;color:var(--dim);text-align:center;padding:12px 0">Sin campañas todavía.</div>`
-      : `<table style="width:100%;border-collapse:collapse">
-          <thead><tr class="text-dim" style="font-size:9.5px;letter-spacing:.12em;text-transform:uppercase">
-            <th style="padding:6px 0;text-align:left">Campaña</th>
-            <th style="padding:6px 0;text-align:right">FF</th>
-            <th style="padding:6px 0;text-align:right">Plant.</th>
-          </tr></thead>
-          <tbody>${allRows
-            .map((h) => {
-              const enCurso = pending.get(h.campaign_key) ?? 0;
-              return `<tr style="border-top:1px solid var(--line)">
-                <td style="padding:6px 0;font-size:11.5px" class="font-mono">${esc(h.campaign_key)}${
-                  enCurso > 0
-                    ? ` <span style="color:var(--accent-2);font-size:10px">· ${enCurso} en curso</span>`
-                    : ""
-                }</td>
-                <td style="padding:6px 0;font-size:11.5px;text-align:right">${h.freeform}</td>
-                <td style="padding:6px 0;font-size:11.5px;text-align:right">${h.template}</td>
-              </tr>`;
-            })
-            .join("")}</tbody>
-        </table>`;
+  const step1 = stepCard(
+    1,
+    "Elige a quién le llega",
+    "Empieza con un atajo y, si quieres, afínalo con filtros.",
+    `<div class="cmp-chips" role="group" aria-label="Atajos de audiencia">${presetButtons}</div>
+      <button type="button" id="advanced-toggle" class="cmp-link-btn" aria-expanded="false" aria-controls="advanced-panel">
+        <i data-lucide="chevron-right" width="15" height="15" class="cmp-chev"></i>Filtros avanzados
+      </button>
+      <div id="advanced-panel" class="cmp-adv" hidden>
+        ${facet("lead_status", "Estado del lead", LEAD_STATUS_OPTIONS)}
+        ${facet("sentiment", "Sentimiento detectado por la IA", SENTIMENT_OPTIONS)}
+        ${channelOptions.length > 1 ? facet("channels", "Canal", channelOptions) : ""}
+        ${etiquetas.length ? facet("etiquetas", "Etiquetas", etiquetas.map((e) => ({ value: e.id, label: e.nombre }))) : ""}
+        ${facet("recency", "Actividad", RECENCY_OPTIONS, true)}
+        <label class="cmp-check">
+          <input type="hidden" name="exclude_busy" value="0">
+          <input type="checkbox" name="exclude_busy" value="1" class="campaign-filter" checked>
+          <span>Excluir a quien tenga un ticket abierto o el bot en pausa: ya hay una persona atendiéndolo.</span>
+        </label>
+      </div>
+      ${renderAudienceBanner(counts)}`,
+  );
+
+  const step2 = stepCard(
+    2,
+    "Mensaje libre",
+    "Para quien te escribió en las últimas 24 horas. Es gratis.",
+    `<textarea name="freeform_text" rows="4" class="cmp-field" aria-label="Mensaje libre"
+        placeholder="Se manda tal cual. Déjalo vacío para no mandarles nada."></textarea>`,
+  );
+
+  const step3 = stepCard(3, "Plantilla aprobada", "Para quien no te ha escrito en 24 horas. Gasta cuota.", templateSection);
+
+  const step4 = stepCard(
+    4,
+    "Nombre de la campaña",
+    "Con él se evita mandar dos veces lo mismo.",
+    `<label class="cmp-label" style="max-width:360px"><span>Nombre</span>
+        <input name="campaign_key" required placeholder="ej: recordatorio-cita-26jul" class="font-mono campaign-filter cmp-field" aria-describedby="campaign-key-help"></label>
+      <p id="campaign-key-help" class="cmp-help">Es un candado anti-duplicados: si lo reintentas con el mismo nombre, no le vuelve a llegar a nadie.</p>`,
+  );
 
   const body = `
+  ${hero}
   ${banner}
+  ${stats}
+  ${CMP_CSS}
+  <div class="cmp-layout">
+    <form method="post" action="/admin/campanas/send" id="campaign-form" class="cmp-form"
+      hx-post="/admin/campanas/preview" hx-trigger="change" hx-target="#audience-banner" hx-swap="outerHTML"
+      onsubmit="return confirm('¿Mandar la campaña a esta audiencia? Los envíos free-form salen de inmediato y las plantillas gastan cuota.')">
+      ${step1}
+      ${step2}
+      ${step3}
+      ${step4}
+    </form>
 
-  <div style="display:flex;gap:24px;align-items:flex-start">
-
-    <!-- IZQUIERDA: wizard -->
-    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:16px;max-width:700px">
-
-      <div class="bg-panel border border-line" style="padding:14px 18px;display:flex;flex-direction:column;gap:8px">
-        <div style="display:flex;align-items:center;justify-content:space-between">
-          <span class="font-mono" style="font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)">Cuota de plantillas · últimas 24h</span>
-          <span class="font-mono" style="font-size:13px;font-weight:600">${spent} / ${cap}</span>
-        </div>
-        <div style="height:6px;border-radius:3px;background:var(--raise);overflow:hidden">
-          <div style="height:100%;border-radius:3px;width:${pct}%;background:${pct > 85 ? "var(--bad)" : "var(--accent)"}"></div>
-        </div>
-        <div class="text-dim" style="font-size:11.5px;line-height:1.5">
-          Mensajes a gente en ventana (te escribió hace &lt;24h) son free-form y no gastan cuota. Solo las plantillas a gente fuera de ventana cuentan.
-        </div>
-      </div>
-
-      <form method="post" action="/admin/campanas/send" id="campaign-form"
-        hx-post="/admin/campanas/preview" hx-trigger="change" hx-target="#audience-banner" hx-swap="outerHTML"
-        onsubmit="return confirm('¿Mandar la campaña a esta audiencia? Los envíos free-form salen de inmediato y las plantillas gastan cuota.')">
-
-        <div class="bg-panel border border-line" style="padding:18px;display:flex;flex-direction:column;gap:14px">
-          <div style="display:flex;align-items:center;gap:9px">
-            <span style="width:22px;height:22px;border-radius:50%;background:var(--cream);color:var(--accent);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none">1</span>
-            <span style="font-size:15px;font-weight:600">Elige a quién le llega</span>
-          </div>
-
-          <div style="display:flex;gap:8px;flex-wrap:wrap">${presetButtons}</div>
-
-          <button type="button" id="advanced-toggle"
-                  style="align-self:flex-start;display:flex;align-items:center;gap:6px;background:transparent;border:0;padding:2px 0;font-size:12.5px;font-weight:500;color:var(--accent-2);cursor:pointer;font-family:inherit">
-            <span id="advanced-icon">▸</span> Filtros avanzados
-          </button>
-
-          <div id="advanced-panel" style="display:none;flex-direction:column;gap:14px;padding:14px;background:var(--panel2);border:1px solid var(--line);border-radius:11px">
-            ${facet("lead_status", "Estado del lead", LEAD_STATUS_OPTIONS)}
-            ${facet("sentiment", "Sentimiento detectado por la IA", SENTIMENT_OPTIONS)}
-            ${channelOptions.length > 1 ? facet("channels", "Canal", channelOptions) : ""}
-            ${etiquetas.length ? facet("etiquetas", "Etiquetas", etiquetas.map((e) => ({ value: e.id, label: e.nombre }))) : ""}
-            ${facet("recency", "Actividad", RECENCY_OPTIONS, true)}
-            <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;padding-top:8px;border-top:1px solid var(--line)">
-              <input type="hidden" name="exclude_busy" value="0">
-              <input type="checkbox" name="exclude_busy" value="1" class="campaign-filter" checked>
-              Excluir a quien tenga un ticket abierto o el bot en pausa — ya hay una persona atendiéndolo
-            </label>
-          </div>
-
-          ${renderAudienceBanner(counts)}
-        </div>
-
-        <div class="bg-panel border border-line" style="padding:18px;display:flex;flex-direction:column;gap:10px;margin-top:16px">
-          <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
-            <span style="width:22px;height:22px;border-radius:50%;background:var(--cream);color:var(--accent);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none">2</span>
-            <span style="font-size:15px;font-weight:600">Mensaje free-form</span>
-            <span style="font-size:11.5px;color:var(--dim)">— para los que están en ventana</span>
-          </div>
-          <textarea name="freeform_text" rows="4" placeholder="Se manda tal cual a quienes te escribieron hace <24h. Déjalo vacío para no mandarles nada."
-            style="width:100%;background:var(--panel);border:1px solid var(--line);color:inherit;padding:11px 13px;font-size:13px;line-height:1.5"></textarea>
-        </div>
-
-        <div class="bg-panel border border-line" style="padding:18px;display:flex;flex-direction:column;gap:10px;margin-top:16px">
-          <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
-            <span style="width:22px;height:22px;border-radius:50%;background:var(--cream);color:var(--accent);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none">3</span>
-            <span style="font-size:15px;font-weight:600">Plantilla HSM</span>
-            <span style="font-size:11.5px;color:var(--dim)">— para los que están fuera de ventana</span>
-          </div>
-          ${templateSection}
-        </div>
-
-        <div class="bg-panel border border-line" style="padding:18px;display:flex;flex-direction:column;gap:10px;margin-top:16px">
-          <div style="display:flex;align-items:center;gap:9px">
-            <span style="width:22px;height:22px;border-radius:50%;background:var(--cream);color:var(--accent);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none">4</span>
-            <span style="font-size:15px;font-weight:600">Nombre de la campaña</span>
-          </div>
-          <input name="campaign_key" required placeholder="ej: recordatorio-cita-26jul" class="font-mono campaign-filter"
-            style="background:var(--panel);border:1px solid var(--line);color:inherit;padding:10px 13px;font-size:13.5px;max-width:360px">
-          <span class="text-dim" style="font-size:11.5px">Es candado anti-duplicados: reintentar con el mismo nombre no vuelve a enviar a nadie.</span>
-        </div>
-      </form>
-      ${jevDisponible(env) ? seccionDeEtiquetas(etiquetas, modo !== "apagado") : ""}
-    </div>
-
-    <!-- DERECHA: resumen fijo -->
-    <div style="width:280px;flex:none;position:sticky;top:20px;display:flex;flex-direction:column;gap:14px">
+    <div class="cmp-side">
       <div id="send-summary-wrap">${renderSendSummary(counts, blockers)}</div>
-
-      <div class="bg-panel border border-line" style="padding:16px 18px;display:flex;flex-direction:column;gap:10px">
-        <span style="font-size:13px;font-weight:600">Historial</span>
-        ${historyRows}
-      </div>
+      ${sectionCard({ icon: "history", title: "Historial", subtitle: "Las campañas más recientes", body: renderHistory(allRows, pending) })}
     </div>
+
+    ${jevDisponible(env) ? seccionDeEtiquetas(etiquetas, modo !== "apagado") : ""}
   </div>
 
   <script>
@@ -419,20 +494,17 @@ export async function renderCampanas(
     var form = document.getElementById("campaign-form");
     var advToggle = document.getElementById("advanced-toggle");
     var advPanel = document.getElementById("advanced-panel");
-    var advIcon = document.getElementById("advanced-icon");
 
     function setAdvanced(open) {
-      advPanel.style.display = open ? "flex" : "none";
-      advIcon.textContent = open ? "▾" : "▸";
+      advPanel.hidden = !open;
+      advToggle.setAttribute("aria-expanded", open ? "true" : "false");
     }
-    advToggle.addEventListener("click", function () { setAdvanced(advPanel.style.display === "none"); });
+    advToggle.addEventListener("click", function () { setAdvanced(advPanel.hidden); });
 
     document.querySelectorAll(".preset-btn").forEach(function (btn) {
       btn.addEventListener("click", function () {
-        document.querySelectorAll(".preset-btn").forEach(function (b) {
-          b.style.border = "1.5px solid var(--linelit)"; b.style.background = "var(--panel)"; b.style.color = "var(--muted)";
-        });
-        btn.style.border = "1.5px solid var(--accent-hover)"; btn.style.background = "var(--accent-soft)"; btn.style.color = "var(--accent-2)";
+        document.querySelectorAll(".preset-btn").forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+        btn.setAttribute("aria-pressed", "true");
 
         var preset = PRESETS.filter(function (p) { return p.id === btn.getAttribute("data-preset"); })[0];
         if (!preset) return;
@@ -455,5 +527,5 @@ export async function renderCampanas(
   })();
   </script>`;
 
-  return layout({ title: "Campañas", activeTab: "campanas", body, visibleNavIds });
+  return layout({ title: "Campañas", activeTab: "campanas", body, visibleNavIds, hero: true });
 }

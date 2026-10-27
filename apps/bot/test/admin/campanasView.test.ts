@@ -48,6 +48,17 @@ describe("GET /campanas", () => {
     expect(html).toContain("audience-banner");
     expect(html).toContain("Resumen del envío");
   });
+
+  it("trae el hero, las métricas y el botón de envío bloqueado mientras falte el nombre", async () => {
+    const res = await adminApp.request("/campanas", { headers: AUTH }, env);
+    const html = await res.text();
+    expect(html.match(/<h1/g)).toHaveLength(1);
+    expect(html).toContain("page-hero");
+    expect(html).toContain("stat-card");
+    expect(html).toContain("Cuota de plantillas");
+    expect(html).toMatch(/class="cmp-send" disabled/);
+    expect(html).toContain("Falta el nombre de la campaña");
+  });
 });
 
 describe("POST /campanas/preview", () => {
@@ -66,7 +77,7 @@ describe("POST /campanas/preview", () => {
       env,
     );
     const htmlAll = await resAll.text();
-    expect(htmlAll).toContain('font-weight:700">1</span>');
+    expect(htmlAll).toMatch(/data-testid="audiencia-total"[^>]*>1</);
     expect(htmlAll).toContain(">Audiencia<");
     expect(htmlAll).toContain("Falta el nombre de la campaña"); // bloqueador: campaign_key no viene en este POST
 
