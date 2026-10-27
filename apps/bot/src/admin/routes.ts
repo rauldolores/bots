@@ -1461,6 +1461,7 @@ adminApp.get("/mejoras", async (c) =>
         found: c.req.query("found") ?? undefined,
         applied: c.req.query("applied") === "1",
         dismissed: c.req.query("dismissed") === "1",
+        crm: c.req.query("crm") ?? undefined,
       },
       visibleNavIds(c.get("kontroliaClaims")),
     ),
