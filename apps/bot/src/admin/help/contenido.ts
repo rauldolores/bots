@@ -68,10 +68,13 @@ export const GUIA: Seccion[] = [
         cuerpo: [
           { tipo: "lista", items: [
             "**Inicio → Resumen**: cómo va el día, la salud del bot y lo que te toca hacer.",
-            "**Bandeja**: lo que pasa con tus clientes cada día — Conversaciones, Leads, Tickets, Calendario, Campañas y Seguimientos.",
-            "**Mi Agente**: cómo piensa y responde el bot — Flujo, Conocimiento, Habilidades, Entrenamiento, Mejoras, Conexiones, Tu número y Configuración.",
-            "**Organización**: tus organizaciones y las personas de tu equipo que entran al panel.",
-            "**Análisis**: Insights (qué dicen tus clientes), Estadísticas, Costos y Plan y facturación.",
+            "**Bandeja**: lo que pasa con tus clientes cada día — Conversaciones, Leads, Tickets y Calendario.",
+            "**Campañas**: escribirle tú primero a tus clientes — Campañas y Seguimientos.",
+            "**Mi Agente**: cómo piensa y responde el bot — Flujo, Habilidades y Configuración.",
+            "**Entrenar**: lo que sabe y cómo mejora — Conocimiento, Entrenamiento y Mejoras.",
+            "**Canales**: por dónde te escriben — Conexiones y Tu número.",
+            "**Análisis**: Insights (qué dicen tus clientes), Estadísticas y Costos.",
+            "**Cuenta**: tus organizaciones, las personas de tu equipo que entran al panel, y Plan y facturación.",
             "**Soporte → Ayuda**: esta guía. También está el botón «?» arriba a la derecha.",
           ] },
           { tipo: "p", texto: "Si a alguien de tu equipo le faltan opciones en el menú, es por su rol: cada persona ve solo lo que su rol le permite. Lo administras en [Equipo](/admin/usuarios)." },
@@ -274,7 +277,7 @@ export const GUIA: Seccion[] = [
             "En **Llaves de acceso**, crea una llave con **Crear llave** y cópiala en ese momento: por seguridad no se vuelve a mostrar. Esa llave es la que el otro sistema usa. **Revocar** la anula.",
             "La sección **Cómo se llama** muestra el ejemplo listo para quien la conecte, y **Últimas corridas** el historial.",
           ] },
-          { tipo: "nota", texto: "Si ves en rojo «La API está apagada», enciéndela desde Conexiones. Si no vas a usar habilidades, puedes ignorar esta pantalla por completo." },
+          { tipo: "nota", texto: "Si ves el aviso «La API está apagada», enciéndela desde Conexiones. Si no vas a usar habilidades, puedes ignorar esta pantalla por completo." },
         ],
       },
       {
@@ -422,7 +425,7 @@ export const GUIA: Seccion[] = [
         resumen: "Las pestañas, qué significa cada estado y el patrón que se repite en todas las conexiones.",
         ruta: "/admin/conexiones",
         cuerpo: [
-          { tipo: "p", texto: "Arriba hay cinco pestañas: **Canales** (por dónde te escriben o llaman), **CRM**, **Tickets**, **Calendario** y **Conectores MCP**. Cada tarjeta muestra **● CONECTADO**, **○ SIN CONECTAR** o **PRÓXIMAMENTE**." },
+          { tipo: "p", texto: "Arriba hay cinco pestañas: **Canales** (por dónde te escriben o llaman), **CRM**, **Tickets**, **Calendario** y **Conectores MCP**. Cada tarjeta muestra **Conectado**, **Sin conectar** o **Próximamente**; arriba ves cuántos canales y herramientas tienes conectados." },
           { tipo: "pasos", items: [
             "Presiona **Conectar** en la tarjeta. Se abre una ventana con los pasos numerados y los datos que hay que pegar. Los pasos te dicen exactamente dónde conseguir cada dato en el sitio del proveedor.",
             "Pega los datos y presiona **Conectar**.",

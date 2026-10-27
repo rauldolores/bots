@@ -347,3 +347,19 @@ describe("aislamiento por bot", () => {
     expect(otherGrid).toContain("Canales conectados: 0");
   });
 });
+
+describe("la página de Conexiones", () => {
+  it("trae el hero, las métricas, las pestañas y un solo h1", async () => {
+    const { renderConexiones } = await import("../../src/admin/views/conexiones");
+    await connectChannel(env, TEST_BOT_ID, "telegram", form({ token: "123:ABC" }));
+    const html = await renderConexiones(env, TEST_BOT_ID, "canales");
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    expect(html).toContain("Conexiones");
+    expect(html).toContain("Conectores MCP");
+    expect(html).toContain('aria-current="page"');
+    // El resumen y la grilla conservan sus id: los refresca htmx (hx-swap-oob) al conectar.
+    expect(html).toContain('<span id="conexiones-summary">Canales conectados: 1 de');
+    expect(html).toContain('id="conexiones-grid"');
+    expect(html).toContain("Conectado");
+  });
+});

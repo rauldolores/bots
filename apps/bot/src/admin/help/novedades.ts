@@ -19,6 +19,14 @@ export interface Novedad {
 export const NOVEDADES: Novedad[] = [
   {
     fecha: "2026-10-27",
+    titulo: "Mejoras te confirma lo que pasó con un cambio a tu CRM",
+    texto:
+      "Cuando apruebas o descartas un cambio a los datos de un cliente en Mejoras, ahora ves arriba si se escribió en tu CRM, si se descartó o si algo falló, en lugar de que la página vuelva a cargar sin decir nada.",
+    tipo: "Corrección",
+    ruta: "/admin/mejoras",
+  },
+  {
+    fecha: "2026-10-27",
     titulo: "Ayuda en cada pantalla y esta lista de novedades",
     texto:
       "El botón de ayuda (el signo ? de arriba a la derecha) ahora abre un panel con la guía y las preguntas frecuentes de la pantalla donde estás, sin salirte de ella. Y aquí te contamos cada cambio del panel: cuando haya algo nuevo verás un punto en ese botón.",
@@ -36,7 +44,7 @@ export const NOVEDADES: Novedad[] = [
     fecha: "2026-10-27",
     titulo: "Pantallas renovadas para entender todo de un vistazo",
     texto:
-      "Flujo, Habilidades, Conocimiento, Entrenamiento, Campañas, Seguimientos y Configuración estrenan diseño: arriba ves los números importantes y abajo cada cosa en su tarjeta.",
+      "Flujo, Habilidades, Conocimiento, Entrenamiento, Mejoras, Conexiones, Campañas, Seguimientos y Configuración estrenan diseño: arriba ves los números importantes y abajo cada cosa en su tarjeta.",
     tipo: "Mejora",
     ruta: "/admin/agente",
   },
