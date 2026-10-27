@@ -1740,6 +1740,7 @@ function renderMcpConnectedCard(c: BotConnector, prefix: string): string {
              <b>El agente no pudo conectarse</b> (${esc(new Date(falloAt).toLocaleString("es-MX"))}). Mientras siga así, no tiene estas herramientas.
              El acceso se renueva solo cada minuto; si el aviso sigue aquí, es que el proveedor ya no acepta la renovación — te revocó el permiso o expiró del todo.
              Eso sí necesita que lo autorices otra vez: dale a <b>Reconectar</b>.
+             Para que no vuelva a pasar, cámbialo a <b>token</b> en <b>Editar</b>: con OAuth, cerrar sesión se lleva esta autorización.
              <div class="font-mono text-[10.5px]" style="color:var(--dim);margin-top:5px;word-break:break-word">${esc(fallo)}</div>
            </div>`
       : `<div class="text-[11.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;line-height:1.5">
@@ -1819,6 +1820,16 @@ export async function renderMcpEditModal(env: Env, botId: string, provider: stri
         <p class="text-dim text-[11px]" style="margin:0">Esto se le pasa al agente tal cual. El servidor ya le dice qué HACE cada herramienta;
           aquí le dices cuándo TÚ quieres que las use.</p>
       </div>
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+        <label class="font-display font-semibold text-[12.5px] text-cream">${connector.config.authMode === "oauth" ? "Cambiar a token (recomendado)" : "Token de acceso"}</label>
+        <input type="password" name="token" value="" autocomplete="off" placeholder="${connector.config.authMode === "oauth" ? "Pega aquí el token de tu organización" : "Déjalo vacío para conservar el actual"}"
+               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;font-family:'JetBrains Mono',ui-monospace,monospace;outline:none;width:100%">
+        <p class="text-dim text-[11px]" style="margin:0">${
+          connector.config.authMode === "oauth"
+            ? "Hoy esta conexión usa OAuth: depende de la sesión de quien la autorizó, y se pierde cuando esa sesión se cierra. Con un token de la organización (en Vinqulia: API y webhooks → Claves de API) la conexión no depende de nadie y no se cae sola. Se conservan el nombre, las herramientas y lo que escribiste arriba."
+            : "Solo si tu servidor te dio un token nuevo. Vacío, se queda el que ya tiene."
+        }</p>
+      </div>
       <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:10px">Guardar</button>
     </form>`,
   );
@@ -1844,6 +1855,7 @@ export async function renderMcpEditModal(env: Env, botId: string, provider: stri
 export async function saveMcpPurpose(env: Env, botId: string, provider: string, form: FormData): Promise<string> {
   const purpose = String(form.get("purpose") ?? "").trim();
   const url = String(form.get("url") ?? "").trim();
+  const token = String(form.get("token") ?? "").trim();
   const db = new Db(env.DB);
   const repo = new BotConnectorsRepo(db);
   const connector = await repo.getByBotAndProvider(botId, provider);
@@ -1860,6 +1872,16 @@ export async function saveMcpPurpose(env: Env, botId: string, provider: string, 
     );
   }
 
+  if (token && (/\s/.test(token) || token.length > 4000)) {
+    return modalShell(
+      "plug",
+      "Token inválido",
+      `<div class="text-[12.5px]" style="color:var(--bad);margin:0 0 14px">El token no puede llevar espacios. Cópialo de nuevo, completo.</div>
+       <button type="button" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:9px"
+               hx-get="/admin/conexiones/connectors/mcp/${encodeURIComponent(provider)}/editar" hx-target="#modal-root" hx-swap="innerHTML">Volver</button>`,
+    );
+  }
+
   const patch: Record<string, string> = { purpose };
   if (cambioUrl) {
     patch.url = url;
@@ -1869,6 +1891,33 @@ export async function saveMcpPurpose(env: Env, botId: string, provider: string, 
     patch.mcpLastError = "";
     patch.mcpLastErrorAt = "";
   }
+
+  // Pasar a token (o cambiarlo). Una conexión OAuth cuelga de la sesión de
+  // quien la autorizó: cerrar sesión en el ecosistema es global y se lleva la
+  // autorización con ella — un bot se quedó así un mes sin su CRM. Un token
+  // de la organización no depende de nadie. Se reemplaza el secreto EN SU
+  // LUGAR (el juego de tokens de OAuth que había ahí ya no sirve) y se borra
+  // todo rastro de OAuth para que la conexión vaya por Bearer; el nombre, el
+  // propósito y las herramientas apagadas se quedan como estaban.
+  const pasoAToken = token !== "" && connector !== null;
+  if (pasoAToken) {
+    if (connector.secret_ref) {
+      await updateSecret(db, connector.secret_ref, token);
+    } else {
+      const secretRef = await createSecret(db, token, `mcp:${botId}:${connector.name ?? provider}`);
+      await repo.upsert({ botId, category: connector.category, provider, name: connector.name, secretRef });
+    }
+    Object.assign(patch, {
+      authMode: "",
+      oauthClientInfo: "",
+      oauthServerInfo: "",
+      oauthExpiresAt: "",
+      oauthRefreshedAt: "",
+      mcpLastError: "",
+      mcpLastErrorAt: "",
+      mcpSinAutorizacionAvisadoAt: "",
+    });
+  }
   await repo.mergeConfig(botId, provider, patch);
 
   return modalShell(
@@ -1876,7 +1925,10 @@ export async function saveMcpPurpose(env: Env, botId: string, provider: string, 
     "Guardado",
     `<div class="text-[13px]" style="color:var(--ok);font-weight:600;margin-bottom:12px">✓ Listo</div>
      ${
-       cambioUrl
+       pasoAToken
+         ? `<p class="text-[12.5px]" style="color:var(--muted);margin:0 0 14px">La conexión ahora usa el token y ya no depende de ninguna sesión.
+              El agente la usa desde su próximo mensaje; si el token no sirve, la tarjeta te lo va a decir.</p>`
+         : cambioUrl
          ? `<p class="text-[12.5px]" style="color:var(--muted);margin:0 0 14px">La dirección quedó en <span class="font-mono" style="color:var(--cream)">${esc(url)}</span>.
               Ahora dale a <b>Reconectar</b> en la tarjeta para autorizar el acceso en el dominio nuevo — hasta entonces el agente no tiene estas herramientas.</p>`
          : `<p class="text-[12.5px]" style="color:var(--muted);margin:0 0 14px">El agente va a tomarlo en cuenta desde su próximo mensaje.</p>`

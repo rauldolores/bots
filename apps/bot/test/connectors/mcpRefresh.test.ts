@@ -33,7 +33,15 @@ vi.mock("../../src/db/vault", () => ({
   deleteSecret: vi.fn(),
 }));
 
-const { tocaRenovar, renovarConectorMcp, refrescarTokensMcp } = await import("../../src/connectors/mcpRefresh");
+// El aviso al dueño sale por su canal (Telegram, correo…): aquí solo se cuenta.
+const notifyOwnerMock = vi.fn();
+vi.mock("../../src/tools/handoffHuman", () => ({
+  notifyOwner: (...args: unknown[]) => notifyOwnerMock(...args),
+}));
+
+const { tocaRenovar, renovarConectorMcp, refrescarTokensMcp, MOTIVO_SIN_AUTORIZACION } = await import(
+  "../../src/connectors/mcpRefresh"
+);
 
 const SECRET_REF = "11111111-2222-3333-4444-555555555555";
 const HORA = 3600_000;
@@ -62,6 +70,7 @@ beforeEach(async () => {
     JSON.stringify({ access_token: "viejo", refresh_token: "rt-viejo", expires_in: 3600 }),
   );
   updateSecretMock.mockReset().mockResolvedValue(undefined);
+  notifyOwnerMock.mockReset().mockResolvedValue(undefined);
 });
 
 describe("tocaRenovar", () => {
@@ -215,5 +224,67 @@ describe("refrescarTokensMcp — la pasada del tick", () => {
     });
     const resumen = await refrescarTokensMcp(env);
     expect(resumen.revisados).toBe(0);
+  });
+});
+
+// Lo que pasó del 2026-09-24 al 2026-10-27: cerrar sesión en el ecosistema es
+// GLOBAL y se llevó la sesión de la que colgaba la autorización del MCP. Desde
+// ahí cada renovación respondía "Refresh Token Not Found" — y como eso no se
+// anotaba en ningún lado, el panel decía CONECTADO y nadie se enteró en un mes.
+describe("renovarConectorMcp — cuando el proveedor ya no acepta la renovación", () => {
+  it("lo deja escrito: el panel lo muestra y el turno deja de ofrecer esas herramientas", async () => {
+    const c = await conectorMcp({ oauthExpiresAt: String(Date.now() - 1) });
+    authMock.mockResolvedValue("REDIRECT");
+
+    const r = await renovarConectorMcp(env, db, c);
+
+    expect(r.estado).toBe("requiere_autorizacion");
+    const row = await new BotConnectorsRepo(db).getByBotAndProvider(TEST_BOT_ID, "vinqulia-mcp");
+    expect(row!.config.mcpLastError).toBe(MOTIVO_SIN_AUTORIZACION);
+    expect(Number(row!.config.mcpLastErrorAt)).toBeGreaterThan(0);
+  });
+
+  it("le avisa al dueño, con a dónde ir para arreglarlo", async () => {
+    const c = await conectorMcp({ oauthExpiresAt: String(Date.now() - 1) });
+    authMock.mockResolvedValue("REDIRECT");
+
+    await renovarConectorMcp(env, db, c);
+
+    expect(notifyOwnerMock).toHaveBeenCalledTimes(1);
+    const [, aviso, botId] = notifyOwnerMock.mock.calls[0];
+    expect(botId).toBe(TEST_BOT_ID);
+    expect(aviso.reason).toContain("Vinqulia");
+    expect(aviso.ruta).toBe("/admin/conexiones");
+    expect(aviso.summary).toContain("token");
+  });
+
+  it("no le repite el aviso cada 5 minutos: una vez al día como mucho", async () => {
+    authMock.mockResolvedValue("REDIRECT");
+    await renovarConectorMcp(env, db, await conectorMcp({ oauthExpiresAt: String(Date.now() - 1) }));
+    const repo = new BotConnectorsRepo(db);
+    await renovarConectorMcp(env, db, (await repo.getByBotAndProvider(TEST_BOT_ID, "vinqulia-mcp"))!);
+
+    expect(notifyOwnerMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("sin refresh_token también queda escrito (y avisado)", async () => {
+    const c = await conectorMcp();
+    readSecretMock.mockResolvedValue(JSON.stringify({ access_token: "solo-acceso" }));
+
+    await renovarConectorMcp(env, db, c);
+
+    const row = await new BotConnectorsRepo(db).getByBotAndProvider(TEST_BOT_ID, "vinqulia-mcp");
+    expect(row!.config.mcpLastError).toBe(MOTIVO_SIN_AUTORIZACION);
+    expect(notifyOwnerMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("si el aviso falla, la renovación no truena por eso", async () => {
+    const c = await conectorMcp({ oauthExpiresAt: String(Date.now() - 1) });
+    authMock.mockResolvedValue("REDIRECT");
+    notifyOwnerMock.mockRejectedValue(new Error("Telegram caído"));
+
+    const r = await renovarConectorMcp(env, db, c);
+
+    expect(r.estado).toBe("requiere_autorizacion");
   });
 });

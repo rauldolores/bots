@@ -54,6 +54,20 @@ const REINTENTO_MS = 5 * 60_000;
 const ERR_KEY = "mcpLastError";
 const ERR_AT_KEY = "mcpLastErrorAt";
 const EXPIRES_KEY = "oauthExpiresAt";
+/** Cuándo se le avisó al dueño que este conector perdió la autorización. */
+const AVISADO_AT_KEY = "mcpSinAutorizacionAvisadoAt";
+/** Un aviso al dueño por conector y por día, como mucho. */
+const AVISO_CADA_MS = 24 * 60 * 60_000;
+
+/**
+ * Lo que se guarda (y se ve en el panel) cuando el proveedor ya no acepta la
+ * renovación. Dice la causa real que vimos: no es que "expire", es que la
+ * sesión de quien autorizó se cerró — y cerrar sesión en el ecosistema es
+ * global, así que se lleva esta autorización con ella.
+ */
+export const MOTIVO_SIN_AUTORIZACION =
+  "El servidor ya no acepta la renovación: la sesión de quien autorizó esta conexión se cerró o se revocó (cerrar sesión borra también esta autorización). " +
+  "Dale a Reconectar, o conéctalo con un token de la organización para que no dependa de ninguna sesión.";
 /** Cuándo se renovó por última vez — solo para el panel y para depurar. */
 const REFRESHED_AT_KEY = "oauthRefreshedAt";
 
@@ -107,6 +121,53 @@ async function guardarTokens(db: Db, connector: BotConnector, provider: McpOAuth
   await new BotConnectorsRepo(db).mergeConfig(connector.bot_id, connector.provider, patch);
 }
 
+/**
+ * El proveedor ya no acepta la renovación: se deja ESCRITO.
+ *
+ * Antes esto devolvía "requiere_autorizacion" y nada más. Sin marca, el panel
+ * decía CONECTADO, el turno seguía ofreciendo herramientas que fallaban, el
+ * tick reintentaba cada minuto contra un token muerto, y nadie se enteraba:
+ * el conector de un bot pasó así un mes entero (2026-09-24 → 2026-10-27).
+ *
+ * La marca hace tres cosas a la vez: el panel muestra el aviso con
+ * "Reconectar", el turno deja de ofrecer esas herramientas (enfriamiento de
+ * mcpTools.ts) y el tick espera antes de reintentar (enEspera). Y al dueño se
+ * le avisa por su canal, una vez al día como mucho.
+ */
+async function marcarSinAutorizacion(env: Env, db: Db, connector: BotConnector): Promise<void> {
+  const repo = new BotConnectorsRepo(db);
+  const ahora = Date.now();
+  const yaAvisado = Number(connector.config[AVISADO_AT_KEY] ?? "");
+  const tocaAvisar = !Number.isFinite(yaAvisado) || yaAvisado <= 0 || ahora - yaAvisado > AVISO_CADA_MS;
+  await repo
+    .mergeConfig(connector.bot_id, connector.provider, {
+      [ERR_KEY]: MOTIVO_SIN_AUTORIZACION,
+      [ERR_AT_KEY]: String(ahora),
+      ...(tocaAvisar ? { [AVISADO_AT_KEY]: String(ahora) } : {}),
+    })
+    .catch((e) => console.error(`[mcpRefresh] no se pudo marcar ${connector.provider} sin autorización:`, e));
+  if (!tocaAvisar) return;
+  try {
+    const { notifyOwner } = await import("../tools/handoffHuman");
+    const nombre = connector.name ?? "un conector MCP";
+    await notifyOwner(
+      env,
+      {
+        reason: `Tu bot perdió la conexión con ${nombre}`,
+        summary:
+          `El agente ya no puede usar las herramientas de ${nombre}: la autorización se perdió (pasa cuando se cierra la sesión de quien la conectó). ` +
+          "Entra a Conexiones y dale a Reconectar, o conéctalo con un token para que no vuelva a pasar.",
+        ticketId: `mcp-sin-autorizacion-${connector.provider}`,
+        titulo: "Conexión perdida",
+        ruta: "/admin/conexiones",
+      },
+      connector.bot_id,
+    );
+  } catch (e) {
+    console.warn("[mcpRefresh] no se pudo avisar al dueño:", e);
+  }
+}
+
 export type ResultadoRenovacion =
   | { estado: "renovado" }
   | { estado: "requiere_autorizacion" }
@@ -131,6 +192,7 @@ export async function renovarConectorMcp(
       connectorToSnapshot(connector, mcpOAuthRedirectUrl(env), tokenJson),
     );
     if (!provider.snapshot.tokens?.refresh_token) {
+      await marcarSinAutorizacion(env, db, connector);
       return { estado: "requiere_autorizacion" };
     }
 
@@ -147,7 +209,10 @@ export async function renovarConectorMcp(
       await guardarTokens(db, connector, provider);
     }
 
-    if (resultado !== "AUTHORIZED") return { estado: "requiere_autorizacion" };
+    if (resultado !== "AUTHORIZED") {
+      await marcarSinAutorizacion(env, db, connector);
+      return { estado: "requiere_autorizacion" };
+    }
 
     // Se renovó: se limpia el aviso del panel para que deje de decir que está
     // caído algo que ya no lo está.
