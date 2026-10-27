@@ -122,7 +122,7 @@ export function sectionCard(opts: {
   return `<section style="border-radius:var(--radius);background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-md);overflow:hidden">
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding:20px 24px;border-bottom:1px solid var(--line)">
       ${opts.icon ? iconTile(opts.icon, "neutral") : ""}
-      <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+      <div style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 180px">
         <h2 style="margin:0;font-size:16px;font-weight:900;letter-spacing:-.02em;color:var(--cream)">${escUi(opts.title)}</h2>
         ${opts.subtitle ? `<div style="font-size:13px;font-weight:500;color:var(--dim)">${opts.subtitle}</div>` : ""}
       </div>

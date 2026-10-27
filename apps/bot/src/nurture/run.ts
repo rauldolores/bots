@@ -32,7 +32,7 @@ import type { ChannelId } from "../channels/shared";
 import { textParts } from "../channels/parts";
 import { gatherContactContext, hasRepliedSince, isFreeformWindow, nextAllowedTime } from "./brakes";
 
-const DEFAULT_DAILY_CAP = 30; // mismo criterio conservador que followup/run.ts
+export const DEFAULT_DAILY_CAP = 30; // mismo criterio conservador que followup/run.ts
 const RESCHEDULE_DELAY_MS = 30 * 60_000; // tope diario u horario: reintenta pronto, no falla
 
 export interface EnrollResult {

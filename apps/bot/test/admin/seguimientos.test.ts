@@ -40,6 +40,46 @@ function post(path: string, body: string) {
   );
 }
 
+describe("GET /seguimientos", () => {
+  it("trae el hero, las métricas y la tarjeta de cada secuencia", async () => {
+    await new NurtureSequencesRepo(db, TEST_BOT_ID).create({
+      name: "Cotización de O'Brien",
+      goal: "Cerrar la venta",
+      steps: [{ afterHours: 0, instruction: "Saluda" }, { afterHours: 48, instruction: "Pregunta si tiene dudas" }],
+      autoEnroll: true,
+    });
+    const res = await adminApp.request("/seguimientos", { headers: AUTH }, env);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    expect(html).toContain("page-hero");
+    expect(html).toContain("Secuencias activas");
+    expect(html).toContain("Toques hoy");
+    expect(html).toContain("Cotización de O&#39;Brien");
+    expect(html).toContain("Automática");
+    expect(html).toContain("2 días después");
+    // El nombre viaja en data-confirm, no dentro de un string de JS: un
+    // apóstrofo ya no puede cerrar la cadena del confirm().
+    expect(html).toContain('onsubmit="return confirm(this.dataset.confirm)"');
+  });
+
+  it("sin secuencias muestra el estado vacío con sus dos salidas", async () => {
+    const res = await adminApp.request("/seguimientos", { headers: AUTH }, env);
+    const html = await res.text();
+    expect(html).toContain("Todavía no tienes secuencias.");
+    expect(html).toContain('href="/admin/seguimientos/nueva"');
+    expect(html).toContain('hx-get="/admin/seguimientos/plantillas"');
+  });
+
+  it("el formulario de una secuencia nueva trae su propio hero y un solo h1", async () => {
+    const res = await adminApp.request("/seguimientos/nueva", { headers: AUTH }, env);
+    const html = await res.text();
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    expect(html).toContain("Nueva secuencia");
+    expect(html).toContain("Crear secuencia");
+  });
+});
+
 describe("crear secuencia", () => {
   it("la guarda con nombre, objetivo y pasos", async () => {
     const body = new URLSearchParams();
