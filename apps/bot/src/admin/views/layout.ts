@@ -27,59 +27,104 @@ interface Item {
 }
 
 interface Section {
+  /** Clave del grupo plegable (estado abierto/cerrado en el navegador). */
+  id: string;
   label: string;
+  /** Ícono del grupo; los sub-ítems llevan un punto, como en AduaniaX. */
+  icon: string;
+  /** Un solo ítem que va directo en el menú, sin grupo (Resumen, Ayuda). */
+  flat?: boolean;
   items: Item[];
 }
 
 // Navigation model. The item ids + hrefs are load-bearing (views and tests
 // depend on them) — do not rename them. Icons are lucide names.
+//
+// 2026-10-27: de 6 secciones siempre abiertas (22 renglones + títulos) a 9
+// entradas con submenú plegable, como AduaniaX. Son los MISMOS 22 ítems: si
+// agregas o quitas uno, cuéntalos — ninguno debe quedarse fuera.
 const NAV: Section[] = [
   {
+    id: "inicio",
     label: "Inicio",
+    icon: "layout-dashboard",
+    flat: true,
     items: [{ id: "overview", label: "Resumen", href: "/admin/overview", icon: "layout-dashboard" }],
   },
   {
+    id: "bandeja",
     label: "Bandeja",
+    icon: "inbox",
     items: [
       { id: "conversations", label: "Conversaciones", href: "/admin/conversations", icon: "messages-square" },
       { id: "leads", label: "Leads", href: "/admin/leads", icon: "user-plus" },
       { id: "tickets", label: "Tickets", href: "/admin/tickets", icon: "life-buoy" },
       { id: "calendario", label: "Calendario", href: "/admin/calendario", icon: "calendar-clock" },
+    ],
+  },
+  {
+    id: "campanas",
+    label: "Campañas",
+    icon: "megaphone",
+    items: [
       { id: "campanas", label: "Campañas", href: "/admin/campanas", icon: "megaphone" },
       { id: "seguimientos", label: "Seguimientos", href: "/admin/seguimientos", icon: "route" },
     ],
   },
   {
+    id: "agente",
     label: "Mi Agente",
+    icon: "bot",
     items: [
       { id: "agente", label: "Flujo", href: "/admin/agente", icon: "workflow" },
-      { id: "kb", label: "Conocimiento", href: "/admin/kb", icon: "book-open" },
       { id: "habilidades", label: "Habilidades", href: "/admin/habilidades", icon: "square-function" },
-      { id: "entrenamiento", label: "Entrenamiento", href: "/admin/entrenamiento", icon: "graduation-cap" },
-      { id: "mejoras", label: "Mejoras", href: "/admin/mejoras", icon: "sparkles" },
-      { id: "conexiones", label: "Conexiones", href: "/admin/conexiones", icon: "plug-zap" },
-      { id: "telefono", label: "Tu número", href: "/admin/telefono", icon: "phone-forwarded" },
       { id: "config", label: "Configuración", href: "/admin/config", icon: "sliders-horizontal" },
     ],
   },
   {
-    label: "Organización",
+    id: "entrenar",
+    label: "Entrenar",
+    icon: "graduation-cap",
     items: [
-      { id: "organizaciones", label: "Organizaciones", href: "/admin/organizaciones", icon: "building-2" },
-      { id: "usuarios", label: "Equipo", href: "/admin/usuarios", icon: "users" },
+      { id: "kb", label: "Conocimiento", href: "/admin/kb", icon: "book-open" },
+      { id: "entrenamiento", label: "Entrenamiento", href: "/admin/entrenamiento", icon: "graduation-cap" },
+      { id: "mejoras", label: "Mejoras", href: "/admin/mejoras", icon: "sparkles" },
     ],
   },
   {
+    id: "canales",
+    label: "Canales",
+    icon: "plug-zap",
+    items: [
+      { id: "conexiones", label: "Conexiones", href: "/admin/conexiones", icon: "plug-zap" },
+      { id: "telefono", label: "Tu número", href: "/admin/telefono", icon: "phone-forwarded" },
+    ],
+  },
+  {
+    id: "analisis",
     label: "Análisis",
+    icon: "bar-chart-3",
     items: [
       { id: "insights", label: "Insights", href: "/admin/insights", icon: "scan-eye" },
       { id: "stats", label: "Estadísticas", href: "/admin/stats", icon: "bar-chart-3" },
       { id: "costs", label: "Costos", href: "/admin/costs", icon: "receipt" },
+    ],
+  },
+  {
+    id: "cuenta",
+    label: "Cuenta",
+    icon: "building-2",
+    items: [
+      { id: "organizaciones", label: "Organizaciones", href: "/admin/organizaciones", icon: "building-2" },
+      { id: "usuarios", label: "Equipo", href: "/admin/usuarios", icon: "users" },
       { id: "plan", label: "Plan y facturación", href: "/admin/plan", icon: "credit-card" },
     ],
   },
   {
+    id: "soporte",
     label: "Soporte",
+    icon: "circle-help",
+    flat: true,
     items: [{ id: "ayuda", label: "Ayuda", href: "/admin/ayuda", icon: "circle-help" }],
   },
 ];
@@ -203,10 +248,34 @@ const GLOBAL_STYLE = `
   @keyframes toastIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
   @keyframes toastOut{to{opacity:0;transform:translateY(8px);visibility:hidden}}
 
-  /* sidebar nav (fondo tinta: hover en blanco translúcido, ícono ámbar) */
-  .navlink{border-radius:var(--radius-sm);transition:background .12s ease,color .12s ease}
-  .navlink:hover{background:var(--sb-panel);color:var(--sb-ink) !important}
-  .navlink:hover [data-lucide],.navlink:hover svg{color:var(--accent) !important}
+  /* sidebar nav (fondo tinta: hover en blanco translúcido, ícono ámbar).
+     Activo = blanco translúcido con texto claro e ícono ámbar (como AduaniaX,
+     con tinta cálida). Va por clase/atributo y no inline: al navegar sin
+     recargar (NAV_SCRIPT) el script solo mueve aria-current. */
+  .navlink,.sb-grp-btn{display:flex;align-items:center;gap:11px;width:100%;padding:9px 12px;font-size:13px;font-weight:600;color:var(--sb-text);
+    border-radius:var(--radius-sm);transition:background .12s ease,color .12s ease}
+  .navlink [data-lucide],.navlink svg,.sb-grp-btn>[data-lucide],.sb-grp-btn>svg{color:var(--sb-dim);flex:none}
+  .navlink:hover,.sb-grp-btn:hover{background:var(--sb-panel);color:var(--sb-ink) !important}
+  .navlink:hover [data-lucide],.navlink:hover svg,.sb-grp-btn:hover>[data-lucide],.sb-grp-btn:hover>svg{color:var(--accent) !important}
+  .navlink[aria-current="page"]{color:var(--sb-ink);background:var(--sb-active);font-weight:700}
+  .navlink[aria-current="page"] [data-lucide],.navlink[aria-current="page"] svg{color:var(--accent)}
+  /* grupo plegable: botón con ícono + flecha; el cuerpo se abre con
+     grid-template-rows (0fr → 1fr) para animar sin medir alturas. */
+  .sb-grp-btn{border:0;background:none;font-family:inherit;cursor:pointer;text-align:left}
+  .sb-grp-btn>span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sb-grp-btn .sb-chev{color:var(--sb-dim);transition:transform .2s ease,color .2s ease}
+  .sb-grp.activo>.sb-grp-btn{color:var(--sb-ink)}
+  .sb-grp.activo>.sb-grp-btn>[data-lucide]:first-child,.sb-grp.activo>.sb-grp-btn>svg:first-child{color:var(--accent)}
+  .sb-grp[data-open]>.sb-grp-btn .sb-chev{transform:rotate(90deg);color:var(--accent)}
+  .sb-grp-body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .22s cubic-bezier(.2,.8,.2,1)}
+  .sb-grp[data-open]>.sb-grp-body{grid-template-rows:1fr}
+  /* cerrado = invisible también para el teclado (visibility saca del Tab);
+     el retraso deja terminar la animación antes de esconderlo. */
+  .sb-grp-body>div{overflow:hidden;min-height:0;display:flex;flex-direction:column;gap:2px;visibility:hidden;transition:visibility 0s linear .22s}
+  .sb-grp[data-open]>.sb-grp-body>div{visibility:visible;transition-delay:0s;padding:2px 0 4px}
+  .navlink.sb-sub{padding:7px 12px 7px 40px;font-size:12.5px;font-weight:500;gap:10px}
+  .sb-dot{width:5px;height:5px;border-radius:999px;background:rgba(244,241,234,.22);flex:none}
+  .navlink.sb-sub[aria-current="page"] .sb-dot{background:var(--accent)}
 
   /* entrance + botones (estilo Kontrolia: relieve suave, nada brutalista) */
   .card{animation:rise .4s cubic-bezier(.16,1,.3,1) both}
@@ -261,7 +330,6 @@ const GLOBAL_STYLE = `
   .sb-nav{padding:12px;display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto}
   .sb-nav::-webkit-scrollbar-track{background:var(--sb-bg)}
   .sb-nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12)}
-  .sb-sec{font-size:9px;font-weight:900;letter-spacing:.2em;text-transform:uppercase;padding:14px 12px 6px}
   /* Consumo del plan en el sidebar (se pinta con /admin/plan/uso): un bloque
      apenas más claro que la tinta de la sidebar. Sus colores de texto ya eran
      para fondo oscuro desde que la sidebar era clara.
@@ -328,9 +396,15 @@ const GLOBAL_STYLE = `
     .sb{position:sticky;top:var(--kontrolia-band-height,0px);height:auto;flex-direction:row;align-items:center;overflow-x:auto}
     .sb-brand{flex:none;border-bottom:none !important;border-right:1px solid var(--sb-line)}
     .sb-nav{flex-direction:row;align-items:center;gap:4px;padding:8px 10px;overflow-y:visible;overflow-x:auto}
-    .sb-sec{display:none}
     .sb-foot{display:none}
-    .navlink{white-space:nowrap}
+    .navlink{white-space:nowrap;width:auto}
+    /* en el celular la barra es una fila que se desliza: sin grupos, todos
+       los ítems en línea (como antes) */
+    .sb-grp,.sb-grp-body,.sb-grp-body>div{display:contents}
+    .sb-grp-body>div{visibility:visible !important}
+    .sb-grp-btn{display:none}
+    .navlink.sb-sub{padding:9px 12px;font-size:13px}
+    .sb-dot{display:none}
   }
 
   /* "Estoy trabajando": botón ocupado, barra arriba y, si tarda, una capa que
@@ -355,7 +429,7 @@ const GLOBAL_STYLE = `
   @media (prefers-reduced-motion:reduce){
     .nb-spin,#nb-barra::before{animation-duration:2.4s}
     .card,.toast,.modal-backdrop,.modal-card{animation:none}
-    .bigbtn,.ghostbtn,.convrow,.leadrow,.datarow,.kbrow,.tkcard,.subtab,.chip,.cfgcard,.node,.node-card,.bar,.navlink{transition:none}
+    .bigbtn,.ghostbtn,.convrow,.leadrow,.datarow,.kbrow,.tkcard,.subtab,.chip,.cfgcard,.node,.node-card,.bar,.navlink,.sb-grp-btn,.sb-grp-btn .sb-chev,.sb-grp-body,.sb-grp-body>div{transition:none}
     .bigbtn:hover,.node:hover,.node-card:hover,.tkcard:hover{transform:none}
     .animate-pulse,[style*="animation"]{animation:none !important}
   }
@@ -482,12 +556,174 @@ const ESPERA_SCRIPT = `
   // Volver con "atrás": el navegador puede restaurar la página tal como quedó,
   // con el botón girando. Se limpia.
   window.addEventListener("pageshow", function () { terminar(); });
+  // NAV_SCRIPT cambia de pantalla sin recargar: no hay "pageshow" que limpie.
+  window.__nbTerminar = terminar;
+})();
+</script>`;
+
+// Menú plegable + cambiar de pantalla SIN recargar (como AduaniaX, que es una
+// SPA de Next.js). Aquí cada pantalla la sigue armando el servidor: al dar clic
+// en un enlace del panel se pide esa página con fetch, y de ella solo se toman
+// <main id="nb-main">, el título del encabezado y cuál ítem del menú va
+// activo. El menú, el encabezado (selector de bot, cuenta), la banda de
+// KontrolIA y el consumo del plan se quedan quietos.
+//
+// Los <script> que trae el contenido se vuelven a crear en su mismo lugar
+// para que corran (document.currentScript y previousElementSibling siguen
+// sirviendo). Los scripts de las vistas que cuelgan listeners de document ya
+// traen guarda (window.__xxxInit) porque htmx también re-pinta fragmentos.
+//
+// Ante cualquier duda se recarga como antes: redirección (sesión vencida,
+// plan bloqueado, OAuth), respuesta que no es HTML (descargas), página sin el
+// layout (login) o un error al correr los scripts nuevos. data-recarga en un
+// enlace lo excluye.
+const NAV_SCRIPT = `
+<script>
+(function () {
+  if (window.__nbNav) return;
+  window.__nbNav = true;
+  var nav = document.querySelector(".sb-nav");
+  var main = document.getElementById("nb-main");
+
+  // ── Grupos del menú ──────────────────────────────────────────────
+  // Como AduaniaX: al cambiar de pantalla queda abierto SOLO el grupo de la
+  // pantalla actual; la flecha abre o cierra cualquier otro a mano.
+  function abrir(g, si) {
+    if (si) g.setAttribute("data-open", ""); else g.removeAttribute("data-open");
+    var b = g.querySelector(".sb-grp-btn"); if (b) b.setAttribute("aria-expanded", si ? "true" : "false");
+  }
+  if (nav) nav.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest(".sb-grp-btn");
+    if (!b) return;
+    var g = b.closest(".sb-grp");
+    abrir(g, !g.hasAttribute("data-open"));
+  });
+  function marcarActivo(href) {
+    if (!nav) return;
+    nav.querySelectorAll(".navlink").forEach(function (a) {
+      if (href && a.getAttribute("href") === href) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+    });
+    nav.querySelectorAll(".sb-grp").forEach(function (g) {
+      var activo = !!g.querySelector('.navlink[aria-current="page"]');
+      g.classList.toggle("activo", activo);
+      abrir(g, activo);
+    });
+  }
+
+  // ── Cambiar de pantalla sin recargar ─────────────────────────────
+  if (!main || !window.fetch || !window.DOMParser || !history.pushState) return;
+  var NO_HTML = /\\.(csv|pdf|xlsx|json|zip|txt|js|png|jpe?g|webp|svg)$/i;
+  var actual = location.pathname + location.search;
+  var turno = 0;
+  var previa = {}; // href -> { t, p }: lo que se pidió al pasar el mouse por el menú
+  try { history.replaceState(Object.assign({}, history.state, { nb: 1 }), ""); } catch (e) {}
+
+  function sirve(a) {
+    if (!a || (a.target && a.target !== "_self") || a.hasAttribute("download") || a.hasAttribute("data-recarga")) return false;
+    if (a.hasAttribute("hx-get") || a.hasAttribute("hx-post") || a.hasAttribute("hx-put") || a.hasAttribute("hx-patch") || a.hasAttribute("hx-delete")) return false;
+    var h = a.getAttribute("href") || "";
+    if (!h || h.charAt(0) === "#" || /^(mailto|tel|javascript):/i.test(h)) return false;
+    if (a.origin !== location.origin || a.pathname.indexOf("/admin") !== 0 || NO_HTML.test(a.pathname)) return false;
+    if (a.pathname + a.search === actual && a.hash) return false; // ancla dentro de la misma página
+    return true;
+  }
+  function traer(url) {
+    // redirect:"manual": una redirección (login, plan, OAuth) se resuelve
+    // recargando de verdad, no siguiéndola a ciegas desde fetch.
+    return fetch(url, { credentials: "same-origin", redirect: "manual", headers: { "X-Nodia-Nav": "1" } }).then(function (r) {
+      if (r.type === "opaqueredirect" || r.status === 0) throw new Error("redireccion");
+      if ((r.headers.get("content-type") || "").indexOf("text/html") === -1) throw new Error("no-html");
+      return r.text();
+    });
+  }
+  function pedir(url) {
+    var p = previa[url];
+    delete previa[url];
+    if (p && Date.now() - p.t < 10000) return p.p;
+    return traer(url);
+  }
+
+  function ir(url, empujar, y) {
+    var mio = ++turno;
+    var barra = document.getElementById("nb-barra");
+    if (barra) barra.classList.add("on");
+    pedir(url).then(function (html) {
+      if (mio !== turno) return;
+      var doc = new DOMParser().parseFromString(html, "text/html");
+      var nuevo = doc.getElementById("nb-main");
+      if (!nuevo) throw new Error("sin-layout");
+      if (empujar) history.pushState({ nb: 1 }, "", url);
+      actual = location.pathname + location.search;
+      document.title = doc.title;
+      var t = doc.getElementById("nb-hdr-title"), tv = document.getElementById("nb-hdr-title");
+      if (t && tv) tv.innerHTML = t.innerHTML;
+      var act = doc.querySelector('.sb-nav [aria-current="page"]');
+      marcarActivo(act ? act.getAttribute("href") : null);
+      var modal = document.getElementById("modal-root");
+      if (modal) modal.innerHTML = "";
+
+      main.innerHTML = nuevo.innerHTML;
+      var fallo = false;
+      function alFallar() { fallo = true; }
+      window.addEventListener("error", alFallar);
+      main.querySelectorAll("script").forEach(function (viejo) {
+        var s = document.createElement("script");
+        for (var i = 0; i < viejo.attributes.length; i++) s.setAttribute(viejo.attributes[i].name, viejo.attributes[i].value);
+        s.text = viejo.text;
+        viejo.parentNode.replaceChild(s, viejo);
+      });
+      window.removeEventListener("error", alFallar);
+      if (fallo) { location.reload(); return; }
+
+      if (window.htmx) window.htmx.process(main);
+      if (window.lucide) window.lucide.createIcons();
+      window.scrollTo(0, y || 0);
+      try { main.focus({ preventScroll: true }); } catch (e) {}
+    }).catch(function () {
+      if (mio !== turno) return;
+      if (empujar) location.assign(url); else location.reload();
+    }).then(function () {
+      if (mio === turno && window.__nbTerminar) window.__nbTerminar();
+    });
+  }
+
+  document.addEventListener("click", function (e) {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var a = e.target.closest && e.target.closest("a[href]");
+    if (!sirve(a)) return;
+    e.preventDefault();
+    try { history.replaceState(Object.assign({}, history.state, { nb: 1, y: window.scrollY }), ""); } catch (err) {}
+    ir(a.pathname + a.search, true, 0);
+  });
+
+  // Al pasar el mouse por el MENÚ se adelanta la petición: al dar clic ya
+  // viene en camino. Solo el menú: son pantallas de lista sin efectos (abrir
+  // una conversación, por ejemplo, podría marcarla como leída).
+  var espera = null;
+  if (nav) nav.addEventListener("mouseover", function (e) {
+    var a = e.target.closest && e.target.closest("a.navlink");
+    if (!sirve(a)) return;
+    var url = a.pathname + a.search;
+    if (url === actual || previa[url]) return;
+    clearTimeout(espera);
+    espera = setTimeout(function () {
+      var p = traer(url);
+      previa[url] = { t: Date.now(), p: p };
+      p.catch(function () { if (previa[url] && previa[url].p === p) delete previa[url]; });
+    }, 70);
+  });
+
+  window.addEventListener("popstate", function (e) {
+    var url = location.pathname + location.search;
+    if (url === actual) return; // solo cambió el #ancla
+    ir(url, false, e.state && e.state.y);
+  });
 })();
 </script>`;
 
 // Re-run lucide after every htmx swap (fragments bring fresh icons) and close
 // any open modal with Escape.
-const GLOBAL_SCRIPT = `${ESPERA_SCRIPT}
+const GLOBAL_SCRIPT = `${ESPERA_SCRIPT}${NAV_SCRIPT}
 <script>
   function drawIcons(){ if (window.lucide) window.lucide.createIcons(); }
   document.addEventListener("DOMContentLoaded", drawIcons);
@@ -503,18 +739,28 @@ const GLOBAL_SCRIPT = `${ESPERA_SCRIPT}
   });
 </script>`;
 
+// Los colores (normal / hover / activo) viven en GLOBAL_STYLE (.navlink).
 function navItem(item: Item, active: boolean): string {
-  const base =
-    "display:flex;align-items:center;gap:11px;padding:9px 12px;font-size:13px;";
-  // Activo = blanco translúcido con texto claro e ícono ámbar (como AduaniaX,
-  // con tinta cálida). La píldora ámbar sólida gritaba más que el contenido.
-  const style = active
-    ? base + "color:var(--sb-ink);background:var(--sb-active);font-weight:700"
-    : base + "color:var(--sb-text);font-weight:600";
-  const iconColor = active ? "var(--accent)" : "var(--sb-dim)";
-  return `<a href="${item.href}" class="navlink" style="${style}"${active ? ' aria-current="page"' : ""}>
-    <i data-lucide="${item.icon}" width="17" height="17" style="color:${iconColor}"></i> ${item.label}
+  return `<a href="${item.href}" class="navlink"${active ? ' aria-current="page"' : ""}>
+    <i data-lucide="${item.icon}" width="17" height="17"></i> ${item.label}
   </a>`;
+}
+
+function navSubItem(item: Item, active: boolean): string {
+  return `<a href="${item.href}" class="navlink sb-sub"${active ? ' aria-current="page"' : ""}><span class="sb-dot"></span>${item.label}</a>`;
+}
+
+// Grupo plegable. Nace abierto solo si trae la pantalla actual (NAV_SCRIPT
+// hace lo mismo al cambiar de pantalla sin recargar).
+function navGroup(sec: Section, items: Item[], activeTab: string): string {
+  const active = items.some((i) => i.id === activeTab);
+  const body = items.map((i) => navSubItem(i, i.id === activeTab)).join("");
+  return `<div class="sb-grp${active ? " activo" : ""}" data-grp="${sec.id}"${active ? " data-open" : ""}>
+    <button type="button" class="sb-grp-btn" aria-expanded="${active}" aria-controls="sbg-${sec.id}">
+      <i data-lucide="${sec.icon}" width="17" height="17"></i><span>${sec.label}</span><i data-lucide="chevron-right" class="sb-chev" width="14" height="14"></i>
+    </button>
+    <div class="sb-grp-body" id="sbg-${sec.id}"><div>${body}</div></div>
+  </div>`;
 }
 
 // El pack de nicho re-etiqueta el item "leads" (ej. "Leads" → "Reservaciones").
@@ -536,19 +782,13 @@ function sidebar(activeTab: string, niche: NichePack | null, visibleIds: Set<str
   // Plan) se colaban siempre — y con la organización bloqueada por plan,
   // "Resumen" era un enlace que rebotaba a Plan y facturación.
   const visible = (id: string) => visibleIds === null || visibleIds.has(id);
+  // Un grupo sin ningún ítem visible no aparece; uno con un solo ítem visible
+  // sigue siendo grupo, para que el menú no cambie de forma según el rol.
   const sections = NAV.map((sec) => {
-    const shown = sec.items.filter((i) => visible(i.id));
+    const shown = sec.items.filter((i) => visible(i.id)).map((raw) => applyNiche(raw, niche));
     if (shown.length === 0) return "";
-    const hasActive = shown.some((i) => i.id === activeTab);
-    // Títulos de sección en ámbar apagado; el de la sección activa, vivo.
-    const labelColor = hasActive ? "var(--accent)" : "var(--sb-label)";
-    const items = shown
-      .map((raw) => {
-        const i = applyNiche(raw, niche);
-        return navItem(i, i.id === activeTab);
-      })
-      .join("");
-    return `<div class="sb-sec" style="color:${labelColor}">${sec.label}</div>${items}`;
+    if (sec.flat) return shown.map((i) => navItem(i, i.id === activeTab)).join("");
+    return navGroup(sec, shown, activeTab);
   }).join("");
 
   return `<aside class="sb">
@@ -601,7 +841,7 @@ export function layout(opts: {
     ${sidebar(opts.activeTab, niche, visibleNavIds)}
     <div style="display:flex;flex-direction:column;min-width:0">
       <header style="position:sticky;top:var(--kontrolia-band-height,0px);z-index:30;min-height:64px;background:rgba(255,255,255,.82);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:8px 28px;display:flex;align-items:center;gap:16px">
-        <div style="min-width:0">
+        <div id="nb-hdr-title" style="min-width:0">
           <div style="font-size:10px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;font-weight:800">
             ${section.label} / ${item.label}
           </div>
@@ -621,7 +861,7 @@ export function layout(opts: {
           <i data-lucide="circle-help" width="18" height="18"></i>
         </a>
       </header>
-      <main style="padding:28px;min-width:0">${opts.body}</main>
+      <main id="nb-main" tabindex="-1" style="padding:28px;min-width:0;outline:none">${opts.body}</main>
     </div>
   </div>
   <div id="modal-root"></div>
