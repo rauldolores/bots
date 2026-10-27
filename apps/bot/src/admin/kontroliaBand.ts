@@ -34,6 +34,12 @@ import type { Env } from "../env";
 export const BAND_API_BASE = "/kontrolia";
 /** Ruta (relativa a /admin) del proxy de GET /api/branding. */
 export const BAND_BRANDING_PATH = `${BAND_API_BASE}/api/branding`;
+/**
+ * Ruta (relativa a /admin) del proxy de POST /api/active-organization: la banda
+ * lo usa cuando alguien elige una app que solo tiene en otra de sus
+ * organizaciones — cambia la organización activa y luego abre esa app.
+ */
+export const BAND_SWITCH_PATH = `${BAND_API_BASE}/api/active-organization`;
 /** Lo que devuelve getToken en el navegador. NO es un secreto: el proxy no lo usa. */
 export const BAND_TOKEN_PLACEHOLDER = "session";
 /** Igual que el TIMEOUT_MS de band.v1.js: si el auth-server tarda más, la banda no pinta. */
@@ -91,6 +97,36 @@ export async function fetchBranding(
   try {
     const res = await fetch(`${authServer}/api/branding`, {
       headers: { authorization: `Bearer ${accessToken}`, accept: "application/json", ...(origin ? { origin } : {}) },
+      signal: ctrl.signal,
+    });
+    const body = await res.json().catch(() => undefined);
+    if (body === undefined) return { status: 502, body: { error: "Respuesta inválida del auth-server" } };
+    return { status: res.status, body };
+  } catch {
+    return { status: 504, body: { error: "El auth-server no respondió" } };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * POST /api/active-organization del auth-server, desde el servidor, a nombre de
+ * la sesión. Igual que fetchBranding: status + JSON tal cual, y cualquier falla
+ * es un no-200 (la banda muestra "no se pudo cambiar" y no sale de la página).
+ */
+export async function switchOrganizationViaBand(
+  authServer: string,
+  accessToken: string,
+  organizationId: string,
+  timeoutMs = BRANDING_TIMEOUT_MS * 4,
+): Promise<{ status: number; body: unknown }> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${authServer}/api/active-organization`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ organizationId }),
       signal: ctrl.signal,
     });
     const body = await res.json().catch(() => undefined);
