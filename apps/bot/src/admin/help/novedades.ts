@@ -19,6 +19,13 @@ export interface Novedad {
 export const NOVEDADES: Novedad[] = [
   {
     fecha: "2026-10-27",
+    titulo: "El menú ahora tiene secciones",
+    texto:
+      "El menú de la izquierda separa las pantallas en cuatro secciones con su título: Operación (Bandeja y Campañas), Tu agente (Mi Agente, Entrenar y Canales), Negocio (Análisis y Cuenta) y Sistema (Ayuda). Así encuentras más rápido lo que buscas.",
+    tipo: "Mejora",
+  },
+  {
+    fecha: "2026-10-27",
     titulo: "Mejoras te confirma lo que pasó con un cambio a tu CRM",
     texto:
       "Cuando apruebas o descartas un cambio a los datos de un cliente en Mejoras, ahora ves arriba si se escribió en tu CRM, si se descartó o si algo falló, en lugar de que la página vuelva a cargar sin decir nada.",

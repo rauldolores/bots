@@ -35,6 +35,9 @@ interface Section {
   icon: string;
   /** Un solo ítem que va directo en el menú, sin grupo (Resumen, Ayuda). */
   flat?: boolean;
+  /** Título de sección (OPERACIÓN, TU AGENTE…) que agrupa varias entradas
+   *  seguidas, como en Faqturia. Sin zona = va arriba, sin título. */
+  zona?: string;
   items: Item[];
 }
 
@@ -54,6 +57,7 @@ const NAV: Section[] = [
   },
   {
     id: "bandeja",
+    zona: "Operación",
     label: "Bandeja",
     icon: "inbox",
     items: [
@@ -65,6 +69,7 @@ const NAV: Section[] = [
   },
   {
     id: "campanas",
+    zona: "Operación",
     label: "Campañas",
     icon: "megaphone",
     items: [
@@ -74,6 +79,7 @@ const NAV: Section[] = [
   },
   {
     id: "agente",
+    zona: "Tu agente",
     label: "Mi Agente",
     icon: "bot",
     items: [
@@ -84,6 +90,7 @@ const NAV: Section[] = [
   },
   {
     id: "entrenar",
+    zona: "Tu agente",
     label: "Entrenar",
     icon: "graduation-cap",
     items: [
@@ -94,6 +101,7 @@ const NAV: Section[] = [
   },
   {
     id: "canales",
+    zona: "Tu agente",
     label: "Canales",
     icon: "plug-zap",
     items: [
@@ -103,6 +111,7 @@ const NAV: Section[] = [
   },
   {
     id: "analisis",
+    zona: "Negocio",
     label: "Análisis",
     icon: "bar-chart-3",
     items: [
@@ -113,6 +122,7 @@ const NAV: Section[] = [
   },
   {
     id: "cuenta",
+    zona: "Negocio",
     label: "Cuenta",
     icon: "building-2",
     items: [
@@ -123,6 +133,7 @@ const NAV: Section[] = [
   },
   {
     id: "soporte",
+    zona: "Sistema",
     label: "Soporte",
     icon: "circle-help",
     flat: true,
@@ -277,6 +288,9 @@ const GLOBAL_STYLE = `
   .navlink.sb-sub{padding:7px 12px 7px 40px;font-size:12.5px;font-weight:500;gap:10px}
   .sb-dot{width:5px;height:5px;border-radius:999px;background:rgba(244,241,234,.22);flex:none}
   .navlink.sb-sub[aria-current="page"] .sb-dot{background:var(--accent)}
+  /* título de zona (OPERACIÓN, TU AGENTE…), como las secciones de Faqturia:
+     solo agrupa, no se pliega ni se puede clicar. */
+  .sb-zona{padding:18px 12px 6px;font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);opacity:.85;user-select:none}
 
   /* entrance + botones (estilo Kontrolia: relieve suave, nada brutalista) */
   .card{animation:rise .4s cubic-bezier(.16,1,.3,1) both}
@@ -429,7 +443,7 @@ const GLOBAL_STYLE = `
     .sb-grp-body>div{visibility:visible !important}
     .sb-grp-btn{display:none}
     .navlink.sb-sub{padding:9px 12px;font-size:13px}
-    .sb-dot{display:none}
+    .sb-dot,.sb-zona{display:none}
   }
 
   /* "Estoy trabajando": botón ocupado, barra arriba y, si tarda, una capa que
@@ -916,11 +930,16 @@ function sidebar(activeTab: string, niche: NichePack | null, visibleIds: Set<str
   const visible = (id: string) => visibleIds === null || visibleIds.has(id);
   // Un grupo sin ningún ítem visible no aparece; uno con un solo ítem visible
   // sigue siendo grupo, para que el menú no cambie de forma según el rol.
+  // El título de zona sale antes de la primera entrada VISIBLE de esa zona: si
+  // el rol no ve nada de una zona, tampoco ve su título.
+  let zonaActual: string | undefined;
   const sections = NAV.map((sec) => {
     const shown = sec.items.filter((i) => visible(i.id)).map((raw) => applyNiche(raw, niche));
     if (shown.length === 0) return "";
-    if (sec.flat) return shown.map((i) => navItem(i, i.id === activeTab)).join("");
-    return navGroup(sec, shown, activeTab);
+    const titulo = sec.zona && sec.zona !== zonaActual ? `<div class="sb-zona">${sec.zona}</div>` : "";
+    zonaActual = sec.zona;
+    if (sec.flat) return titulo + shown.map((i) => navItem(i, i.id === activeTab)).join("");
+    return titulo + navGroup(sec, shown, activeTab);
   }).join("");
 
   return `<aside class="sb">
