@@ -206,6 +206,46 @@ export async function listMemberships(
   }
 }
 
+/** kontrolia_auth.sessions_context vía PostgREST — una fila por usuario, RLS `user_id = auth.uid()`. */
+function sessionsContextUrl(cfg: KontroliaAuthConfig): string {
+  return `${cfg.supabaseUrl}/rest/v1/sessions_context`;
+}
+
+/** Con el propio access_token del usuario: RLS scopea todo a su fila, sin service_role. */
+function userRestHeaders(cfg: KontroliaAuthConfig, accessToken: string): Record<string, string> {
+  return { apikey: cfg.supabaseAnonKey, authorization: `Bearer ${accessToken}` };
+}
+
+/**
+ * La organización activa del usuario TAL COMO ESTÁ AHORA en
+ * kontrolia_auth.sessions_context — no la del JWT, que se congela al emitirse.
+ * Es la misma lectura que hace KontroliaClient.syncActiveOrganization() del
+ * SDK (select active_organization_id where user_id = sub, maybeSingle), que
+ * también es browser-only.
+ *
+ * null = no hay fila o no tiene organización activa. Lanza si PostgREST no
+ * responde bien: el caller decide (el guard lo registra y sigue con el token
+ * que ya tenía — esta lectura nunca debe sacar a nadie del panel).
+ */
+export async function readActiveOrganizationId(
+  cfg: KontroliaAuthConfig,
+  accessToken: string,
+  userId: string,
+): Promise<string | null> {
+  const params = new URLSearchParams({ select: "active_organization_id", user_id: `eq.${userId}`, limit: "1" });
+  const res = await fetch(`${sessionsContextUrl(cfg)}?${params.toString()}`, {
+    headers: {
+      ...userRestHeaders(cfg, accessToken),
+      accept: "application/json",
+      // GET → Accept-Profile (Content-Profile es para escrituras, ver switchActiveOrganization).
+      "accept-profile": "kontrolia_auth",
+    },
+  });
+  if (!res.ok) throw new Error(`sessions_context respondió ${res.status}`);
+  const rows = (await res.json()) as Array<{ active_organization_id: string | null }>;
+  return rows[0]?.active_organization_id ?? null;
+}
+
 /**
  * Cambia la organización activa de la sesión. Reimplementa el mismo PATCH que
  * hace KontroliaClient.switchOrganization() (dist/client.js: un upsert a
@@ -221,11 +261,10 @@ export async function switchActiveOrganization(
   userId: string,
   organizationId: string,
 ): Promise<boolean> {
-  const res = await fetch(`${cfg.supabaseUrl}/rest/v1/sessions_context`, {
+  const res = await fetch(sessionsContextUrl(cfg), {
     method: "POST",
     headers: {
-      apikey: cfg.supabaseAnonKey,
-      authorization: `Bearer ${accessToken}`,
+      ...userRestHeaders(cfg, accessToken),
       "content-type": "application/json",
       "content-profile": "kontrolia_auth",
       prefer: "resolution=merge-duplicates,return=minimal",

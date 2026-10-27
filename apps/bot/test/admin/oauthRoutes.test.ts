@@ -13,6 +13,7 @@ const exchangeCodeMock = vi.fn();
 const refreshSessionMock = vi.fn();
 const listMembershipsMock = vi.fn();
 const switchActiveOrganizationMock = vi.fn();
+const readActiveOrganizationIdMock = vi.fn();
 const revokeSessionMock = vi.fn();
 const listRolesMock = vi.fn();
 const listInvitationsMock = vi.fn();
@@ -52,6 +53,7 @@ vi.mock("../../src/admin/kontroliaAuth", async (importOriginal) => {
     refreshSession: (...args: unknown[]) => refreshSessionMock(...args),
     listMemberships: (...args: unknown[]) => listMembershipsMock(...args),
     switchActiveOrganization: (...args: unknown[]) => switchActiveOrganizationMock(...args),
+    readActiveOrganizationId: (...args: unknown[]) => readActiveOrganizationIdMock(...args),
     revokeSession: (...args: unknown[]) => revokeSessionMock(...args),
     listRoles: (...args: unknown[]) => listRolesMock(...args),
     listInvitations: (...args: unknown[]) => listInvitationsMock(...args),
@@ -124,6 +126,7 @@ beforeEach(async () => {
   // que no existe.
   listMembershipsMock.mockReset().mockResolvedValue([]);
   switchActiveOrganizationMock.mockReset();
+  readActiveOrganizationIdMock.mockReset();
 });
 
 describe("GET /admin/login", () => {
@@ -229,6 +232,148 @@ describe("guard del panel con sesión de KontrolIA", () => {
     );
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/admin/bots/new");
+  });
+});
+
+describe("guard: sincroniza la organización activa (sessions_context) en cada página completa", () => {
+  // Navegación normal del navegador: GET que pide HTML, sin HX-Request.
+  const PAGE_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+  const FRESH = { accessToken: "at2", refreshToken: "rt2", expiresAt: Date.now() + 3600_000 };
+
+  function pageReq(path: string, extraHeaders: Record<string, string> = {}, cookieExtra = ""): Request {
+    return req(path, {
+      headers: {
+        cookie: `${SESSION_COOKIE}=${encodeURIComponent(SESSION)}${cookieExtra}`,
+        accept: PAGE_ACCEPT,
+        ...extraHeaders,
+      },
+    });
+  }
+
+  function setCookiesOf(res: Response): string {
+    return (res.headers.getSetCookie?.() ?? [res.headers.get("set-cookie") ?? ""]).join("\n");
+  }
+
+  it("sin desfase (sessions_context = organización del token): no refresca ni toca cookies", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    readActiveOrganizationIdMock.mockResolvedValue(TEST_BOT_ID);
+    const res = await adminApp.fetch(pageReq("/overview"), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+    // Una sola lectura, con el token y el sub de la sesión.
+    expect(readActiveOrganizationIdMock).toHaveBeenCalledTimes(1);
+    expect(readActiveOrganizationIdMock).toHaveBeenCalledWith(expect.anything(), "at", "u1");
+    expect(refreshSessionMock).not.toHaveBeenCalled();
+    expect(setCookiesOf(res)).not.toContain(SESSION_COOKIE);
+  });
+
+  it("sin organización activa registrada (null): no refresca", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    readActiveOrganizationIdMock.mockResolvedValue(null);
+    const res = await adminApp.fetch(pageReq("/overview"), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+    expect(refreshSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("con desfase: refresca, reescribe la cookie de sesión, borra la del bot y el request sigue con el token nuevo", async () => {
+    const db = await createTestDb();
+    const oldOrgBot = await createSecondTestBot(db); // organización anterior (organization_id = oldOrgBot)
+    verifyAccessTokenMock.mockImplementation(async (_cfg: unknown, token: string) => ({
+      claims: claimsFor(token === "at2" ? TEST_BOT_ID : oldOrgBot),
+      user: { id: "u1" },
+    }));
+    readActiveOrganizationIdMock.mockResolvedValue(TEST_BOT_ID); // se cambió a otra organización en otro lado
+    refreshSessionMock.mockResolvedValue(FRESH);
+
+    const res = await adminApp.fetch(pageReq("/overview", {}, `; ${BOT_COOKIE}=${oldOrgBot}`), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+    expect(refreshSessionMock).toHaveBeenCalledTimes(1);
+    expect(refreshSessionMock).toHaveBeenCalledWith(expect.anything(), "rt");
+
+    const cookies = setCookiesOf(res);
+    expect(cookies).toContain(`${SESSION_COOKIE}=${encodeURIComponent(JSON.stringify(FRESH))}`);
+    expect(cookies).toMatch(new RegExp(`${BOT_COOKIE}=;`)); // como /switch-org: el bot era de la org anterior
+    // Y el bot que queda es el de la organización NUEVA, no el de la cookie vieja.
+    expect(cookies).toContain(`${BOT_COOKIE}=${TEST_BOT_ID}`);
+    expect(cookies).not.toContain(`${BOT_COOKIE}=${oldOrgBot}`);
+    // El resto del request ya corre con el token nuevo (p. ej. los entitlements).
+    expect(entitlementsDeMock).toHaveBeenCalledWith(expect.anything(), "at2");
+  });
+
+  it("si tras refrescar el token sigue con otra organización: continúa con él, sin reintentar (cero bucles)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // GoTrue entrega un token nuevo, pero todavía con la organización de antes.
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    readActiveOrganizationIdMock.mockResolvedValue("00000000-0000-0000-0000-0000000000bb");
+    refreshSessionMock.mockResolvedValue(FRESH);
+    const res = await adminApp.fetch(pageReq("/overview"), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+    expect(readActiveOrganizationIdMock).toHaveBeenCalledTimes(1);
+    expect(refreshSessionMock).toHaveBeenCalledTimes(1);
+    expect(entitlementsDeMock).toHaveBeenCalledWith(expect.anything(), "at2");
+    // La organización no cambió: la cookie del bot se queda.
+    expect(setCookiesOf(res)).not.toMatch(new RegExp(`${BOT_COOKIE}=;`));
+    warn.mockRestore();
+  });
+
+  it("htmx (HX-Request), fetch sin HTML y POST: no consultan sessions_context", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    readActiveOrganizationIdMock.mockResolvedValue("00000000-0000-0000-0000-0000000000bb");
+
+    await adminApp.fetch(pageReq("/overview", { "hx-request": "true" }), KONTROLIA_ENV);
+    await adminApp.fetch(pageReq("/overview", { accept: "application/json" }), KONTROLIA_ENV);
+    await adminApp.fetch(
+      req("/switch-bot", {
+        method: "POST",
+        headers: {
+          cookie: `${SESSION_COOKIE}=${encodeURIComponent(SESSION)}`,
+          accept: PAGE_ACCEPT,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: `bot_id=${TEST_BOT_ID}`,
+      }),
+      KONTROLIA_ENV,
+    );
+    expect(readActiveOrganizationIdMock).not.toHaveBeenCalled();
+    expect(refreshSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("si la lectura de sessions_context falla: se registra y sigue con el token que había (nunca saca del panel)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    readActiveOrganizationIdMock.mockRejectedValue(new Error("sessions_context respondió 503"));
+    const res = await adminApp.fetch(pageReq("/overview"), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+    expect(refreshSessionMock).not.toHaveBeenCalled();
+    expect(entitlementsDeMock).toHaveBeenCalledWith(expect.anything(), "at");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("[org-sync]"), expect.stringContaining("503"));
+    warn.mockRestore();
+  });
+
+  it("si GoTrue no refresca: sigue con el token que había, sin tocar cookies", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    readActiveOrganizationIdMock.mockResolvedValue("00000000-0000-0000-0000-0000000000bb");
+    refreshSessionMock.mockResolvedValue(null);
+    const res = await adminApp.fetch(pageReq("/overview", {}, `; ${BOT_COOKIE}=${TEST_BOT_ID}`), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+    expect(entitlementsDeMock).toHaveBeenCalledWith(expect.anything(), "at");
+    const cookies = setCookiesOf(res);
+    expect(cookies).not.toContain(SESSION_COOKIE);
+    expect(cookies).not.toMatch(new RegExp(`${BOT_COOKIE}=;`));
+    warn.mockRestore();
+  });
+
+  it("token recién refrescado por expiración: ya trae la organización activa, no se consulta sessions_context", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    refreshSessionMock.mockResolvedValue(FRESH);
+    const expired = JSON.stringify({ accessToken: "at", refreshToken: "rt", expiresAt: Date.now() - 1000 });
+    const res = await adminApp.fetch(
+      req("/overview", { headers: { cookie: `${SESSION_COOKIE}=${encodeURIComponent(expired)}`, accept: PAGE_ACCEPT } }),
+      KONTROLIA_ENV,
+    );
+    expect(res.status).toBe(200);
+    expect(refreshSessionMock).toHaveBeenCalledTimes(1);
+    expect(readActiveOrganizationIdMock).not.toHaveBeenCalled();
   });
 });
 

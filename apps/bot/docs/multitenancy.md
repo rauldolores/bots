@@ -321,6 +321,18 @@ Cada fase queda **verde y desplegable** antes de la siguiente.
      enteraba — parecía que el selector "no hacía nada". `refreshSession()`
      ya usa el endpoint correcto.
 
+  **Organización activa cambiada en otro lado.** `sessions_context` es una
+  fila GLOBAL por usuario: si la persona cambia de organización en otra app
+  o en el portal de su empresa (p. ej. idi.kontrolia.io), el JWT de este
+  panel seguía con la anterior hasta expirar. Ahora `guardAdmin()`, en cada
+  navegación de página completa (GET que pide HTML, sin `HX-Request`), lee
+  `sessions_context` con el token del usuario (`readActiveOrganizationId()`,
+  un GET a PostgREST) y, si difiere del `organization_id` del token, refresca
+  la sesión y sigue el request con el token nuevo — mismos efectos que
+  `POST /switch-org` (cookie de sesión nueva, fuera `nodia_current_bot`). Un
+  intento por carga, y cualquier error se registra y se sigue con el token
+  que había. htmx, `fetch()` del header y POST no pagan esa lectura.
+
   **Alta del primer bot.** `GET /admin/bots/new` + `POST /admin/bots`
   (`src/admin/views/onboarding.ts`, `BotsRepo.create()`) — cuando la
   organización activa no tiene ningún bot, el guard redirige aquí en vez de
