@@ -16,6 +16,7 @@ import { loadMcpTools } from "../../tools/mcpTools";
 import { resolveProvider, modelIdFor } from "../../llm/provider";
 import { channelLabel, configuredChannels } from "../../channels/labels";
 import { layout } from "./layout";
+import { heroTag, iconTile, pageHero, sectionCard, statCard, statGrid, statusPill } from "./ui";
 
 function esc(s: string): string {
   return s.replace(
@@ -247,22 +248,26 @@ interface NodeSpec {
   port?: "in" | "out" | "both";
 }
 
+/** Chip chico de estado dentro de un nodo: punto de color + palabra, fondo neutro. */
+function nodeChip(label: string, color: string): string {
+  return `<span class="ml-auto flex-none inline-flex items-center" style="gap:5px;border-radius:999px;background:var(--panel2);padding:2px 8px;font-size:10px;font-weight:800;color:var(--cream)"><span style="width:6px;height:6px;border-radius:50%;background:${color}"></span>${label}</span>`;
+}
+
 function nodeHtml(n: NodeSpec): string {
   const big = !!n.big;
   const box = big ? 30 : 24;
   const icon = big ? 16 : 13;
 
-  // Tarjeta: blanca con sombra suave; verde si el canal trae tráfico; ámbar si
-  // es el nodo protagonista (Agente). El hover lo da .node-card (shell).
-  const cardStyle = n.on
-    ? "background:linear-gradient(135deg, rgba(22,163,74,.13), rgba(22,163,74,.03)), var(--panel);border:1px solid var(--ok);box-shadow:0 0 0 1px rgba(22,163,74,.16), 0 0 24px -8px rgba(22,163,74,.5);"
-    : n.id === "brain"
-      ? "background:linear-gradient(135deg, rgba(245,158,11,.12), rgba(245,158,11,.03)), var(--panel);border:1px solid var(--accent);box-shadow:var(--shadow-sm);"
+  // Tarjeta blanca con sombra suave; ámbar solo el nodo protagonista (Agente).
+  // Un canal con tráfico ya no se pinta todo de verde: lleva un punto verde
+  // junto a su conteo, igual que el resto del panel. El hover lo da .node-card.
+  const cardStyle =
+    n.id === "brain"
+      ? "background:linear-gradient(135deg, rgba(245,158,11,.12), rgba(245,158,11,.03)), var(--panel);border:1px solid var(--accent);box-shadow:var(--shadow-md);"
       : "background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-sm);";
 
-  const iconStyle = n.on
-    ? "background:rgba(22,163,74,.14);border:1px solid var(--ok)"
-    : n.id === "brain"
+  const iconStyle =
+    n.id === "brain"
       ? "background:var(--accent-soft);border:1px solid var(--accent)"
       : "background:var(--panel2);border:1px solid var(--line)";
 
@@ -270,9 +275,10 @@ function nodeHtml(n: NodeSpec): string {
   const portColor = n.on ? "var(--ok)" : "var(--line)";
 
   return `
-  <div class="node-card absolute cursor-pointer"
+  <div class="node-card absolute cursor-pointer" role="button" tabindex="0" aria-label="Configurar ${esc(n.title)}"
        style="left:${n.x}px;top:${n.y}px;width:${n.w}px;padding:${big ? "13px 15px" : "10px 12px"};${cardStyle}${offStyle}"
        hx-get="/admin/agente/node/${encodeURIComponent(n.id)}" hx-target="#modal-root" hx-swap="innerHTML"
+       hx-trigger="click, keyup[key=='Enter']"
        title="Configurar">
     ${n.port === "in" || n.port === "both"
       ? `<span class="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full" style="left:-5px;background:var(--panel);border:1.5px solid ${portColor}"></span>`
@@ -284,11 +290,14 @@ function nodeHtml(n: NodeSpec): string {
       <span class="flex-none flex items-center justify-center" style="width:${box}px;height:${box}px;border-radius:9px;${iconStyle}">
         <i data-lucide="${n.icon}" width="${icon}" height="${icon}" style="color:${n.accent}"></i>
       </span>
-      <span class="font-display font-semibold text-cream min-w-0 truncate" style="font-size:${big ? "14px" : "12.5px"}">${esc(n.title)}</span>
-      ${n.off ? `<span class="ml-auto flex-none text-[8.5px] font-semibold tracking-[.1em]" style="color:var(--dim);border:1px solid var(--linelit);padding:1px 7px;border-radius:999px">OFF</span>` : ""}
-      ${n.on ? `<span class="ml-auto flex-none text-[8.5px] font-semibold tracking-[.08em]" style="color:var(--ok);border:1px solid var(--ok);background:rgba(22,163,74,.1);padding:1px 7px;border-radius:999px">● ACTIVO</span>` : ""}
+      <span class="text-cream min-w-0 truncate" style="font-weight:800;letter-spacing:-.01em;font-size:${big ? "14.5px" : "12.5px"}">${esc(n.title)}</span>
+      ${n.off ? nodeChip("OFF", "var(--dim)") : ""}
     </div>
-    <div class="text-[10.5px] mt-1.5 leading-snug" style="color:var(--muted)">${n.caption}</div>
+    <div class="text-[10.5px] mt-1.5 leading-snug" style="color:var(--muted)">${
+      // Canal con tráfico: punto verde junto al conteo (el texto ya dice cuántas).
+      // Un chip "Activo" en la línea del título dejaba el nombre en "W…".
+      n.on ? `<span aria-hidden="true" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:5px;vertical-align:1px"></span>` : ""
+    }${n.caption}</div>
     ${n.count ? `<div class="text-[9.5px] mt-2 inline-flex items-center gap-1.5" style="color:var(--accent-2)"><span class="inline-block w-1 h-1 rounded-full" style="background:var(--accent)"></span>${esc(n.count)}</div>` : ""}
     ${n.live ? `<span class="absolute -top-1.5 -right-1.5 w-[11px] h-[11px] rounded-full" style="background:var(--ok);border:2px solid var(--panel);box-shadow:0 0 0 3px rgba(22,163,74,.18);animation:pulse 1.8s ease-in-out infinite"></span>` : ""}
   </div>`;
@@ -339,8 +348,8 @@ function resPath(d: string, on: boolean): string {
   return `<path d="${d}" fill="none" stroke="${on ? "var(--muted)" : "var(--linelit)"}" stroke-width="1.6" stroke-linecap="round" stroke-dasharray="3 5"/>`;
 }
 
-export async function renderAgenteCanvas(env: Env, botId: string): Promise<string> {
-  const d = await loadAgenteData(env, botId);
+export async function renderAgenteCanvas(env: Env, botId: string, preloaded?: AgenteData): Promise<string> {
+  const d = preloaded ?? (await loadAgenteData(env, botId));
   const now = Date.now();
 
   // --- geometry ---
@@ -402,7 +411,7 @@ export async function renderAgenteCanvas(env: Env, botId: string): Promise<strin
     id: "brain",
     x: BRAIN.x, y: midY - BRAIN.h / 2, w: BRAIN.w,
     icon: "cpu",
-    title: d.cfg.botPaused ? "Agente ⏸" : "Agente",
+    title: d.cfg.botPaused ? "Agente · en pausa" : "Agente",
     caption: `${d.settings[SETTING_KEYS.systemPromptOverride]?.trim() ? "prompt personalizado" : "prompt automático"} · máx 6 pasos`,
     accent: "var(--accent)",
     live: brainLive,
@@ -471,7 +480,7 @@ export async function renderAgenteCanvas(env: Env, botId: string): Promise<strin
   });
 
   return `
-  <div class="overflow-x-auto border border-line bg-panel">
+  <div class="overflow-x-auto" tabindex="0" role="region" aria-label="Diagrama del flujo del agente">
     <div class="relative" style="min-width:${width}px;height:${height}px;background:
         radial-gradient(1000px 520px at 22% 16%, rgba(245,158,11,.07), transparent 55%),
         radial-gradient(1000px 520px at 78% 42%, rgba(124,58,237,.05), transparent 55%),
@@ -484,25 +493,52 @@ export async function renderAgenteCanvas(env: Env, botId: string): Promise<strin
 
 // --- Page ---------------------------------------------------------------------
 
+const LEGEND_CHIP = "display:inline-flex;align-items:center;gap:6px;border-radius:999px;background:var(--panel2);padding:4px 10px;font-size:11.5px;font-weight:700;color:var(--muted);white-space:nowrap";
+
 export async function renderAgentePage(env: Env, botId: string, visibleNavIds: Set<string> | null = null): Promise<string> {
-  const canvas = await renderAgenteCanvas(env, botId);
-  const pageDb = new Db(env.DB);
+  const d = await loadAgenteData(env, botId);
+  const canvas = await renderAgenteCanvas(env, botId, d);
+
+  const conTrafico = d.channels.filter((c) => c.convs > 0).length;
+  const encendidas = d.toolNames.length - d.disabled.length;
+  const vivo = !!d.lastAssistantAt && Date.now() - d.lastAssistantAt < LIVE_MS;
+
+  const hero = pageHero({
+    eyebrow: "Mi Agente",
+    title: "Flujo",
+    description:
+      "Así funciona tu bot por dentro: una radiografía en vivo, de dónde llega cada mensaje a cómo se responde. Toca cualquier nodo para ver y ajustar su configuración.",
+    tags: d.cfg.botPaused
+      ? heroTag("En pausa", "#f0a88a")
+      : heroTag(vivo ? "Respondiendo ahora" : "Activo", "#3fb8c4"),
+  });
+
+  const stats = statGrid([
+    statCard({ icon: "radio", tone: "ok", label: "Canales con tráfico", value: conTrafico, note: `de ${d.channels.length} en el flujo` }),
+    statCard({ icon: "message-square-reply", tone: "accent", label: "Respuestas", value: d.turns30d, note: "del agente, últimos 30 días" }),
+    statCard({ icon: "wrench", tone: "neutral", label: "Herramientas", value: `${encendidas} / ${d.toolNames.length}`, note: "encendidas" }),
+    statCard({ icon: "clock", tone: "neutral", label: "Última respuesta", value: ago(d.lastAssistantAt), note: vivo ? "hay actividad ahora mismo" : "del agente" }),
+  ]);
+
+  const legend = `
+    <span style="${LEGEND_CHIP}"><span style="display:inline-block;width:16px;height:2px;border-radius:2px;background:linear-gradient(90deg,#fbbf24,#b45309)"></span>Mensajes</span>
+    <span style="${LEGEND_CHIP}"><span style="display:inline-block;width:16px;border-top:1.5px dashed var(--muted)"></span>Recursos</span>
+    <span style="${LEGEND_CHIP}"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok)"></span>Actividad en 5 min</span>`;
+
   const body = `
-    <div class="flex flex-col gap-3.5">
-      <div class="flex flex-wrap items-center gap-3.5">
-        <p class="text-[12px] max-w-[520px] leading-relaxed" style="color:var(--muted)">Así funciona tu bot por dentro — una radiografía en vivo. Haz clic en cualquier nodo para ver y ajustar su configuración.</p>
-        <div class="ml-auto flex flex-wrap items-center gap-2 text-[10.5px]" style="color:var(--dim)">
-          <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1" style="background:var(--panel);border:1px solid var(--line)"><span class="inline-block w-4 h-0.5 align-middle" style="background:linear-gradient(90deg,#fbbf24,#b45309)"></span>flujo de mensajes</span>
-          <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1" style="background:var(--panel);border:1px solid var(--line)"><span class="inline-block w-4 align-middle" style="border-top:1.5px dashed var(--muted)"></span>recursos del agente</span>
-          <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1" style="background:var(--panel);border:1px solid var(--line)"><span class="inline-block w-2 h-2 rounded-full align-middle" style="background:var(--ok);box-shadow:0 0 0 2px rgba(22,163,74,.15)"></span>actividad en los últimos 5 min</span>
-        </div>
-      </div>
-      <div id="canvas-wrap" hx-get="/admin/agente/canvas" hx-trigger="every 15s, canvas-refresh from:body" hx-swap="innerHTML">
+    ${hero}
+    ${stats}
+    ${sectionCard({
+      icon: "workflow",
+      title: "Cómo viaja un mensaje",
+      subtitle: "Canal → espera → agente → respuesta",
+      actions: legend,
+      body: `<div id="canvas-wrap" hx-get="/admin/agente/canvas" hx-trigger="every 15s, canvas-refresh from:body" hx-swap="innerHTML">
         ${canvas}
-      </div>
-      <p class="text-[10.5px]" style="color:var(--dim)">El flujo es fijo — es una radiografía honesta, no un editor. Los cambios de cada nodo aplican desde el siguiente mensaje.</p>
-    </div>`;
-  return layout({ title: "Mi Agente", activeTab: "agente", body, visibleNavIds });
+      </div>`,
+      footer: `<p style="margin:0;font-size:12px;font-weight:500;color:var(--dim)">El flujo es fijo: es una radiografía honesta, no un editor. Los cambios de cada nodo aplican desde el siguiente mensaje.</p>`,
+    })}`;
+  return layout({ title: "Flujo", activeTab: "agente", body, visibleNavIds, hero: true });
 }
 
 // --- Node modal (pop-up, editable) ---------------------------------------------
@@ -512,24 +548,22 @@ export function toastOob(msg: string): string {
   return `<div id="toast-root" hx-swap-oob="innerHTML"><div class="toast text-[12.5px] px-4 py-2.5">${esc(msg)}</div></div>`;
 }
 
-const SAVED_BANNER = `<div class="px-3 py-2 text-[12.5px] mb-4" style="border:1px solid var(--ok);background:rgba(127,183,126,.08);color:var(--ok)">✓ Guardado — aplica desde el siguiente mensaje.</div>`;
+const SAVED_BANNER = `<div role="status" style="display:flex;align-items:center;gap:10px;margin-bottom:16px;border-radius:12px;border:1px solid var(--line);background:var(--row-hover);padding:12px 14px;font-size:13px;font-weight:700;color:var(--cream)"><span style="width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none"></span>Guardado. Aplica desde el siguiente mensaje.</div>`;
 
 function modalShell(icon: string, title: string, badge: string, inner: string, saved = false): string {
   return `
   <div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
-    <div class="modal-card w-full max-w-lg max-h-[85vh] overflow-y-auto">
-      <div class="flex items-center gap-2.5 sticky top-0 z-10" style="padding:16px 18px;border-bottom:1px solid var(--line);background:var(--panel)">
-        <span class="w-[26px] h-[26px] flex-none flex items-center justify-center" style="border:1px solid var(--accent);background:var(--accent-soft)">
-          <i data-lucide="${icon}" width="15" height="15" style="color:var(--accent-2)"></i>
-        </span>
-        <span class="font-display font-bold text-[15px] text-cream">${title}</span>${badge}
+    <div class="modal-card w-full max-w-lg max-h-[85vh] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="agente-modal-title">
+      <div class="flex items-center sticky top-0 z-10" style="gap:12px;padding:16px 20px;border-bottom:1px solid var(--line);background:var(--panel)">
+        ${iconTile(icon, "accent", 36)}
+        <h2 id="agente-modal-title" style="margin:0;font-size:16px;font-weight:900;letter-spacing:-.02em;color:var(--cream);min-width:0">${title}</h2>${badge}
         <button type="button" aria-label="Cerrar"
-                class="ml-auto cursor-pointer" style="color:var(--dim)"
+                class="ml-auto cursor-pointer flex-none flex items-center justify-center" style="width:36px;height:36px;border-radius:10px;border:1px solid var(--linelit);background:var(--panel);color:var(--muted)"
                 onclick="document.getElementById('modal-root').innerHTML=''">
-          <i data-lucide="x" width="18" height="18"></i>
+          <i data-lucide="x" width="16" height="16"></i>
         </button>
       </div>
-      <div class="p-[18px]">${saved ? SAVED_BANNER : ""}${inner}</div>
+      <div style="padding:20px">${saved ? SAVED_BANNER : ""}${inner}</div>
     </div>
   </div>`;
 }
@@ -558,7 +592,11 @@ function slider(opts: {
   </div>`;
 }
 
-const SAVE_BTN = `<button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:8px 16px">Guardar</button>`;
+/** Botones del modal, 40px como en el resto del panel. */
+const BTN_PRIMARY = "background:var(--accent);border:0;color:var(--cream);height:40px;padding:0 16px;border-radius:12px;font-size:13px;font-weight:800";
+const BTN_GHOST = "background:var(--panel);border:1px solid var(--linelit);color:var(--cream);height:40px;padding:0 16px;border-radius:12px;font-size:13px;font-weight:700";
+
+const SAVE_BTN = `<button type="submit" class="cursor-pointer inline-flex items-center" style="${BTN_PRIMARY}">Guardar</button>`;
 
 function saveForm(nodeId: string, inner: string): string {
   return `
@@ -610,9 +648,9 @@ export async function renderNodeModal(env: Env, botId: string, nodeId: string, s
     return modalShell("brain-circuit", "Modelo de IA", "", saveForm("model", `
       <p class="text-[12.5px] mb-3" style="color:var(--muted)">Qué cerebro usa tu bot: <span class="font-mono text-[11px]" style="color:var(--dim)">${esc(modelLabel(env, d.cfg))}</span></p>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-5">
-        ${card("auto", "scale", "⚡ Auto", "Rápido para lo cotidiano, inteligente cuando se complica. Mejor costo/calidad.")}
-        ${card("haiku", "feather", "🪶 Rápido", "Siempre el modelo barato. Máximo ahorro.")}
-        ${card("sonnet", "brain", "🧠 Inteligente", "Siempre el modelo potente. Máxima calidad, cuesta más.")}
+        ${card("auto", "scale", "Auto", "Rápido para lo cotidiano, inteligente cuando se complica. Mejor costo/calidad.")}
+        ${card("haiku", "feather", "Rápido", "Siempre el modelo barato. Máximo ahorro.")}
+        ${card("sonnet", "brain", "Inteligente", "Siempre el modelo potente. Máxima calidad, cuesta más.")}
       </div>
       ${slider({
         name: "temperature", label: "Temperatura (creatividad)",
@@ -623,9 +661,7 @@ export async function renderNodeModal(env: Env, botId: string, nodeId: string, s
 
   if (nodeId === "brain") {
     const hasOverride = !!d.settings[SETTING_KEYS.systemPromptOverride]?.trim();
-    const badge = d.cfg.botPaused
-      ? `<span class="text-[9.5px]" style="color:var(--dim);border:1px solid var(--linelit);padding:1px 8px">⏸ pausado</span>`
-      : `<span class="text-[9.5px]" style="color:var(--ok);border:1px solid var(--ok);padding:1px 8px">● activo</span>`;
+    const badge = d.cfg.botPaused ? statusPill("Pausado", "var(--dim)") : statusPill("Activo", "var(--ok)");
     return modalShell("cpu", "Agente (el cerebro)", badge, `
       <div class="text-[12.5px] space-y-1 mb-4" style="color:var(--muted)">
         <div><b class="text-cream">Modelo:</b> <span class="font-mono text-[11px]">${esc(modelLabel(env, d.cfg))}</span></div>
@@ -635,10 +671,8 @@ export async function renderNodeModal(env: Env, botId: string, nodeId: string, s
 
       <form hx-post="/admin/agente/node/brain/save" hx-target="#modal-root" hx-swap="innerHTML" class="mb-5">
         <input type="hidden" name="bot_paused" value="${d.cfg.botPaused ? "0" : "1"}">
-        <button type="submit" class="${d.cfg.botPaused ? "bigbtn font-display font-bold" : "ghostbtn"} text-[12.5px] cursor-pointer inline-flex items-center gap-2"
-                style="${d.cfg.botPaused
-                  ? "background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 16px"
-                  : "background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:9px 16px"}">
+        <button type="submit" class="cursor-pointer inline-flex items-center gap-2"
+                style="${d.cfg.botPaused ? BTN_PRIMARY : BTN_GHOST}">
           <i data-lucide="${d.cfg.botPaused ? "play" : "pause"}" width="14" height="14"></i>
           ${d.cfg.botPaused ? "Reactivar el bot" : "Pausar el bot (todas las conversaciones)"}
         </button>
@@ -647,21 +681,21 @@ export async function renderNodeModal(env: Env, botId: string, nodeId: string, s
       <form hx-post="/admin/agente/node/brain/save" hx-target="#modal-root" hx-swap="innerHTML">
         <div class="flex items-center justify-between mb-1.5">
           <label for="system_prompt_override" class="text-[12.5px] font-medium text-cream">Prompt del agente</label>
-          <span class="text-[9.5px] tracking-[.05em]" style="color:${hasOverride ? "var(--accent-2)" : "var(--info)"};border:1px solid ${hasOverride ? "var(--accent-2)" : "var(--info)"};padding:1px 7px">${hasOverride ? "✍ manual" : "⚙ automático"}</span>
+          ${statusPill(hasOverride ? "manual" : "automático", hasOverride ? "var(--accent)" : "var(--info)")}
         </div>
         <p class="text-[11px] mb-2 leading-relaxed" style="color:var(--dim)">Este es el prompt efectivo — exactamente lo que Claude recibe HOY, letra por letra (el mismo texto que verías si lo revisaras en /admin/config → Instrucciones avanzadas). ${hasOverride
           ? "Estás en modo manual: el texto de abajo se usa tal cual, y las pestañas de /admin/config (negocio, tono, palabras de escalamiento…) dejaron de tener efecto sobre él."
           : "Se genera solo con lo que llenaste en /admin/config (negocio, tono, instrucciones) — de solo lectura aquí a propósito, para que nadie lo congele sin querer con un cambio suelto. Para tocarlo, ajusta esas pestañas; si de verdad quieres escribirlo tú mismo, usa \"Editar manualmente\" de abajo."}</p>
         <textarea id="system_prompt_override" name="system_prompt_override" rows="14" required ${hasOverride ? "" : "readonly"}
                   class="w-full font-mono text-[11px] p-3 outline-none resize-y"
-                  style="background:var(--bg);border:1px solid var(--line);color:var(--cream)${hasOverride ? "" : ";opacity:.7;cursor:not-allowed"}">${esc(d.cfg.systemPrompt)}</textarea>
+                  style="background:var(--panel);border:1px solid var(--linelit);border-radius:12px;color:var(--cream)${hasOverride ? "" : ";opacity:.7;cursor:not-allowed"}">${esc(d.cfg.systemPrompt)}</textarea>
         <div class="flex flex-wrap gap-2 mt-3">
           ${hasOverride
-            ? `<button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:8px 16px">Guardar prompt manual</button>
-               <button type="submit" name="action" value="reset" formnovalidate class="ghostbtn text-[12.5px] cursor-pointer" style="background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:8px 16px">⚙ Volver al automático</button>`
-            : `<button type="button" id="brain-unlock-btn" class="ghostbtn text-[12.5px] cursor-pointer" style="background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:8px 16px"
-                       onclick="var t=document.getElementById('system_prompt_override');t.removeAttribute('readonly');t.style.opacity='1';t.style.cursor='text';t.focus();this.style.display='none';document.getElementById('brain-save-btn').style.display='inline-flex';">✍ Editar manualmente (se congela)</button>
-               <button type="submit" id="brain-save-btn" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer" style="display:none;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:8px 16px">Guardar prompt manual</button>`
+            ? `<button type="submit" class="cursor-pointer inline-flex items-center" style="${BTN_PRIMARY}">Guardar prompt manual</button>
+               <button type="submit" name="action" value="reset" formnovalidate class="cursor-pointer inline-flex items-center" style="${BTN_GHOST}">Volver al automático</button>`
+            : `<button type="button" id="brain-unlock-btn" class="cursor-pointer inline-flex items-center" style="${BTN_GHOST}"
+                       onclick="var t=document.getElementById('system_prompt_override');t.removeAttribute('readonly');t.style.opacity='1';t.style.cursor='text';t.focus();this.style.display='none';document.getElementById('brain-save-btn').style.display='inline-flex';">Editar manualmente (se congela)</button>
+               <button type="submit" id="brain-save-btn" class="cursor-pointer items-center" style="display:none;${BTN_PRIMARY}">Guardar prompt manual</button>`
           }
         </div>
       </form>`, saved);
@@ -681,7 +715,7 @@ export async function renderNodeModal(env: Env, botId: string, nodeId: string, s
         <div><b class="text-cream">Conversaciones:</b> ${ch.convs}</div>
         <div><b class="text-cream">Última actividad:</b> ${ago(ch.last)}</div>
       </div>
-      <a href="/admin/conversations" class="text-[12.5px] hover:underline">Ver conversaciones →</a>`);
+      <a href="/admin/conversations" class="inline-flex items-center gap-1.5" style="font-size:13px;font-weight:700;color:var(--accent-2);text-decoration:none">Ver conversaciones<i data-lucide="arrow-right" width="14" height="14"></i></a>`);
   }
 
   if (nodeId.startsWith("tool:")) {
@@ -695,9 +729,7 @@ export async function renderNodeModal(env: Env, botId: string, nodeId: string, s
     return modalShell(
       meta.icon,
       `${esc(meta.label)} <span class="font-mono text-[11px]" style="color:var(--dim)">(${esc(name)})</span>`,
-      off
-        ? `<span class="text-[9.5px]" style="color:var(--dim);border:1px solid var(--linelit);padding:1px 8px">apagada</span>`
-        : `<span class="text-[9.5px]" style="color:var(--ok);border:1px solid var(--ok);padding:1px 8px">encendida</span>`,
+      off ? statusPill("Apagada", "var(--dim)") : statusPill("Encendida", "var(--ok)"),
       `
       <p class="text-[12.5px] mb-2 leading-relaxed" style="color:var(--muted)">${esc(meta.desc)}</p>
       <div class="text-[12.5px] space-y-1 mb-3" style="color:var(--muted)">
@@ -706,10 +738,7 @@ export async function renderNodeModal(env: Env, botId: string, nodeId: string, s
       </div>
       ${meta.critical && !off ? `<div class="text-[11px] mb-3.5 flex items-start gap-2 leading-relaxed" style="color:var(--accent-2);border:1px solid rgba(245,166,35,.35);background:rgba(245,166,35,.08);padding:10px"><i data-lucide="triangle-alert" width="14" height="14" class="flex-none mt-0.5"></i> No recomendamos apagar esta tool: el bot la necesita para funcionar bien.</div>` : ""}
       <form hx-post="/admin/agente/tools/${encodeURIComponent(name)}/toggle" hx-target="#modal-root" hx-swap="innerHTML" class="inline">
-        <button class="${off ? "bigbtn font-display font-bold" : "ghostbtn"} text-[12.5px] cursor-pointer"
-                style="${off
-                  ? "background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 16px"
-                  : "background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:9px 16px"}">
+        <button class="cursor-pointer inline-flex items-center" style="${off ? BTN_PRIMARY : BTN_GHOST}">
           ${off ? "Encender tool" : "Apagar tool"}
         </button>
       </form>

@@ -63,6 +63,19 @@ describe("Mi Agente — page and canvas", () => {
     expect(html).toContain("8 s");
   });
 
+  it("trae el hero, las métricas y los nodos alcanzables con teclado", async () => {
+    const res = await adminApp.request("/agente", { headers: AUTH }, env);
+    const html = await res.text();
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    expect(html).toContain("page-hero");
+    expect(html).toContain("Canales con tráfico");
+    expect(html).toContain("Herramientas");
+    expect(html).toContain('id="canvas-wrap"');
+    // Cada nodo es un botón: se enfoca con Tab y se abre con Enter.
+    expect(html).toContain('role="button" tabindex="0" aria-label="Configurar Buffer"');
+    expect(html).toContain(`hx-trigger="click, keyup[key=='Enter']"`);
+  });
+
   it("shows real channels from the conversations table", async () => {
     const convs = new ConversationsRepo(new Db(env.DB), TEST_BOT_ID);
     await convs.getOrCreate("telegram", "u1");
