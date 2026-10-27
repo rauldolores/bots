@@ -7,6 +7,7 @@ import {
   refreshSession,
   listMemberships,
   switchActiveOrganization,
+  readActiveOrganizationId,
 } from "../../src/admin/kontroliaAuth";
 import type { Env } from "../../src/env";
 
@@ -144,6 +145,35 @@ describe("exchangeCode / refreshSession", () => {
     fetchMock.mockResolvedValue(new Response("forbidden", { status: 403 }));
     const ok = await switchActiveOrganization(CFG, "at", "u", "org");
     expect(ok).toBe(false);
+  });
+
+  it("readActiveOrganizationId: GET a sessions_context con el token del usuario, filtrado por su user_id", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify([{ active_organization_id: "org-789" }]), { status: 200 }));
+    expect(await readActiveOrganizationId(CFG, "user-access-token", "user-123")).toBe("org-789");
+
+    const [url, opts] = fetchMock.mock.calls[0];
+    const parsed = new URL(url as string);
+    expect(parsed.origin + parsed.pathname).toBe("https://proj.supabase.co/rest/v1/sessions_context");
+    expect(parsed.searchParams.get("select")).toBe("active_organization_id");
+    expect(parsed.searchParams.get("user_id")).toBe("eq.user-123");
+    expect(opts.method ?? "GET").toBe("GET");
+    const headers = opts.headers as Record<string, string>;
+    expect(headers.authorization).toBe("Bearer user-access-token");
+    expect(headers.apikey).toBe("anon-key");
+    // Lectura → Accept-Profile (no Content-Profile, que es para escrituras).
+    expect(headers["accept-profile"]).toBe("kontrolia_auth");
+  });
+
+  it("readActiveOrganizationId: null si el usuario no tiene fila o no tiene organización activa", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("[]", { status: 200 }));
+    expect(await readActiveOrganizationId(CFG, "at", "u")).toBeNull();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify([{ active_organization_id: null }]), { status: 200 }));
+    expect(await readActiveOrganizationId(CFG, "at", "u")).toBeNull();
+  });
+
+  it("readActiveOrganizationId: lanza si PostgREST responde con error (el guard lo registra y sigue)", async () => {
+    fetchMock.mockResolvedValue(new Response("boom", { status: 503 }));
+    await expect(readActiveOrganizationId(CFG, "at", "u")).rejects.toThrow(/503/);
   });
 
   it("listMemberships: [] en vez de lanzar cuando el access_token no es válido", async () => {

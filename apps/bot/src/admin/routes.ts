@@ -174,6 +174,7 @@ import {
   verifyAccessToken,
   listMemberships,
   switchActiveOrganization,
+  readActiveOrganizationId,
   registerUrl,
   listRoles,
   listInvitations,
@@ -185,6 +186,7 @@ import {
   SESSION_COOKIE,
   VERIFIER_COOKIE,
   type KontroliaSession,
+  type KontroliaAuthConfig,
 } from "./kontroliaAuth";
 import { BAND_BRANDING_PATH, bandAuthServerUrl, bandSnippet, fetchBranding, injectBand, panelOrigin } from "./kontroliaBand";
 import {
@@ -283,6 +285,85 @@ type GuardResult =
   | { kind: "check-basic" } // sin sesión de KontrolIA — que decida el Basic Auth clásico
   | { kind: "redirect"; to: string };
 
+function setSessionCookie(c: HonoContext, session: KontroliaSession): void {
+  setCookie(c, SESSION_COOKIE, JSON.stringify(session), {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    maxAge: 60 * 60 * 24 * 30,
+  });
+}
+
+/**
+ * Navegación de página completa: GET que pide HTML y NO viene de htmx. Solo
+ * ahí se paga la lectura de sessions_context (syncActiveOrganization, abajo):
+ * los fragmentos de htmx, los fetch() del header (/projects, /plan/uso) y los
+ * POST no la necesitan — viven dentro de una página que ya se sincronizó al
+ * cargar, y cambiar de organización a mitad de un fragmento dejaría la página
+ * mezclando datos de dos organizaciones.
+ */
+function isFullPageNavigation(c: HonoContext): boolean {
+  if (c.req.method !== "GET") return false;
+  if (c.req.header("hx-request")) return false;
+  return (c.req.header("accept") ?? "").includes("text/html");
+}
+
+/**
+ * Sincroniza la organización activa (la misma idea que
+ * KontroliaClient.syncActiveOrganization() del SDK, del lado del servidor).
+ *
+ * El JWT trae `organization_id` congelado al emitirse; la organización activa
+ * de verdad vive en kontrolia_auth.sessions_context y es GLOBAL por usuario.
+ * Si la persona se cambió de organización en otro lado (otra app, o el portal
+ * de su empresa — p. ej. idi.kontrolia.io), este panel seguía mostrando la
+ * anterior hasta que expirara el access_token. Aquí, si no coinciden, se
+ * refresca la sesión (el token nuevo ya trae la activa) y el request sigue con
+ * ella — con los mismos efectos que POST /switch-org: cookie de sesión nueva y
+ * fuera la cookie del bot, que era de la organización anterior.
+ *
+ * Un solo intento por carga de página: si tras refrescar el token sigue con
+ * otra organización, se continúa así (nada de bucles). Cualquier error se
+ * registra y se sigue con el token que ya había — esta comprobación nunca
+ * saca a nadie del panel. null = no hubo cambio (seguir con lo que había).
+ */
+async function syncActiveOrganization(
+  c: HonoContext,
+  cfg: KontroliaAuthConfig,
+  session: KontroliaSession,
+  claims: KontroliaTokenClaims,
+): Promise<{ claims: KontroliaTokenClaims; accessToken: string } | null> {
+  try {
+    const activeOrgId = await readActiveOrganizationId(cfg, session.accessToken, claims.sub);
+    if (!activeOrgId || activeOrgId === (claims.organization_id ?? null)) return null;
+
+    const refreshed = await refreshSession(cfg, session.refreshToken);
+    if (!refreshed) {
+      console.warn("[org-sync] la organización activa cambió, pero GoTrue no refrescó la sesión; se sigue con el token actual");
+      return null;
+    }
+    // Se escribe ya: GoTrue rota el refresh_token, el de la cookie vieja dejó de servir.
+    setSessionCookie(c, refreshed);
+    const fresh = await verifyAccessToken(cfg, refreshed.accessToken);
+    if (!fresh) {
+      console.warn("[org-sync] el token refrescado no se pudo verificar; se sigue con el token actual");
+      return null;
+    }
+    if ((fresh.claims.organization_id ?? null) !== (claims.organization_id ?? null)) {
+      // Igual que /switch-org: el bot elegido era de la organización anterior.
+      // En ESTE request setTenantContext() tampoco lo usa — solo acepta un
+      // bot de la organización nueva y, si no, toma el primero de ella.
+      deleteCookie(c, BOT_COOKIE);
+    }
+    if ((fresh.claims.organization_id ?? null) !== activeOrgId) {
+      console.warn("[org-sync] tras refrescar, el token sigue sin la organización activa; se continúa con él");
+    }
+    return { claims: fresh.claims, accessToken: refreshed.accessToken };
+  } catch (e) {
+    console.warn("[org-sync] no se pudo comprobar la organización activa; se sigue con el token actual:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 async function guardAdmin(c: HonoContext): Promise<GuardResult> {
   const env = c.env;
   if (env.DASHBOARD_PUBLIC === "1") return { kind: "pass-public" };
@@ -298,21 +379,26 @@ async function guardAdmin(c: HonoContext): Promise<GuardResult> {
     if (raw) {
       const session = JSON.parse(raw) as KontroliaSession;
       let accessToken = session.accessToken;
+      let justRefreshed = false;
       if (session.expiresAt < Date.now()) {
         const refreshed = await refreshSession(cfg, session.refreshToken);
         accessToken = refreshed?.accessToken ?? "";
         if (refreshed) {
-          setCookie(c, SESSION_COOKIE, JSON.stringify(refreshed), {
-            httpOnly: true,
-            secure: true,
-            sameSite: "Lax",
-            maxAge: 60 * 60 * 24 * 30,
-          });
+          setSessionCookie(c, refreshed);
+          justRefreshed = true;
         }
       }
       if (accessToken) {
         const verified = await verifyAccessToken(cfg, accessToken);
-        if (verified) return { kind: "pass", claims: verified.claims, accessToken };
+        if (verified) {
+          // Un token recién emitido ya trae la organización activa de ahora:
+          // no hace falta preguntarle a sessions_context.
+          if (!justRefreshed && isFullPageNavigation(c)) {
+            const synced = await syncActiveOrganization(c, cfg, session, verified.claims);
+            if (synced) return { kind: "pass", ...synced };
+          }
+          return { kind: "pass", claims: verified.claims, accessToken };
+        }
       }
     }
   }
