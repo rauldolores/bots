@@ -45,6 +45,25 @@ async function postConfig(fields: Record<string, string>) {
   );
 }
 
+describe("GET /admin/config — estructura", () => {
+  it("trae el hero, un solo h1, el menú de secciones y las seis secciones dentro del mismo formulario", async () => {
+    const res = await adminApp.request("/config", { headers: AUTH }, env);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    expect(html).toContain("page-hero");
+    expect(html).toContain('aria-label="Secciones de configuración"');
+    for (const id of ["personalidad", "modelo", "negocio", "correo", "aviso", "instrucciones"]) {
+      expect(html).toContain(`id="cfg-pane-${id}"`);
+      expect(html).toContain(`aria-controls="cfg-pane-${id}"`);
+    }
+    // La primera sección arranca marcada; el resto, no.
+    expect(html).toMatch(/data-target="personalidad" aria-controls="cfg-pane-personalidad" aria-current="true"/);
+    expect(html).toMatch(/data-target="modelo" aria-controls="cfg-pane-modelo" aria-current="false"/);
+    expect(html).toContain('id="cfg-save-bar"');
+  });
+});
+
 describe("POST /admin/config — negocio (giro, idioma, país, moneda, campos dinámicos, catálogo)", () => {
   it("guarda niche y bot_language en las columnas de bots, no en settings", async () => {
     const res = await postConfig({ niche: "barbería", bot_language: "en" });

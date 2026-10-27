@@ -18,6 +18,7 @@ import {
   type ControlDef,
 } from "../control-levels";
 import { layout } from "./layout";
+import { heroTag, iconTile, MICRO_LABEL, pageHero } from "./ui";
 import { leerActivoEn, type UsoActivable } from "../../ai/jev";
 import { listaDeDestinatarios } from "../../tools/handoffHuman";
 import { VOCES_ELEVENLABS, VOZ_POR_DEFECTO } from "../../channels/voice/elevenlabsSetup";
@@ -30,14 +31,15 @@ function esc(s: string): string {
   );
 }
 
-// Brand accent = orange (Horizontes retro-terminal theme). The selected card
-// lights up accent; the hidden radio drives the highlight via Tailwind's `peer`
-// utilities so the whole card is clickable (it's a <label>). The checkmark
+// Brand accent = ámbar. The selected card lights up accent-soft, with its label
+// and icon in the darker accent2 (amber text on cream is too faint to read);
+// the hidden radio drives the highlight via Tailwind's `peer` utilities so the
+// whole card is clickable (it's a <label>). The checkmark
 // badge (top-right circle) is a second, independent selected-signal — border/bg
 // alone reads as "hover", the badge is what says "this one is picked".
 const CARD_BASE =
   "peer-checked:border-accent peer-checked:bg-accent-soft " +
-  "peer-checked:[&_.card-icon]:text-accent peer-checked:[&_.card-label]:text-accent " +
+  "peer-checked:[&_.card-icon]:text-accent2 peer-checked:[&_.card-label]:text-accent2 " +
   "peer-checked:[&_.card-check]:opacity-100 " +
   "cfgcard relative flex flex-col gap-1 h-full border border-line bg-panel2 p-4 cursor-pointer";
 
@@ -72,8 +74,21 @@ function renderCardGroup(control: ControlDef, settings: Record<string, string>):
     </fieldset>`;
 }
 
+// Mismo control que el resto del panel (AduaniaX): 40px de alto, borde visible
+// y fondo del panel. min-height y no height: también lo usan los <textarea>.
 const INPUT_STYLE =
-  "background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%";
+  "background:var(--panel);border:1px solid var(--linelit);color:var(--cream);padding:9px 14px;font-size:13px;outline:none;width:100%;min-height:40px";
+
+/** Encabezado de una tarjeta de Configuración: mosaico con ícono, título y una línea opcional. */
+function cfgHead(icon: string, title: string, desc?: string): string {
+  return `<div style="display:flex;align-items:flex-start;gap:14px">
+      ${iconTile(icon, "neutral")}
+      <div style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 180px">
+        <h3 style="margin:0;font-size:16px;font-weight:900;letter-spacing:-.02em;color:var(--cream)">${esc(title)}</h3>
+        ${desc ? `<p style="margin:0;font-size:13px;font-weight:500;line-height:1.5;color:var(--dim)">${esc(desc)}</p>` : ""}
+      </div>
+    </div>`;
+}
 
 /** Render a labeled single-line text field. */
 function renderTextField(opts: {
@@ -113,7 +128,7 @@ function renderTextArea(opts: {
 }
 
 const SELECT_STYLE =
-  "background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%";
+  "background:var(--panel);border:1px solid var(--linelit);color:var(--cream);padding:0 12px;font-size:13px;outline:none;width:100%;height:40px";
 
 /** Curado, no exhaustivo — LATAM es el mercado principal de este starter (ver CLAUDE.md). */
 const LANGUAGE_OPTIONS = [
@@ -253,8 +268,8 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string, ia
     }
     const { titulo, detalle, alerta } = explicacionDeIa(ia);
     const color = alerta ? "var(--bad)" : "var(--ok)";
-    const fondo = alerta ? "rgba(220,38,38,.08)" : "rgba(127,183,126,.08)";
-    return `<div data-testid="estado-ia" data-modo="${esc(ia.modo)}" style="display:flex;align-items:flex-start;gap:10px;background:${fondo};border:1px solid ${color};border-radius:var(--radius-sm);padding:13px 15px">
+    // El color va solo en el punto (como en el resto del panel); la caja, neutra.
+    return `<div data-testid="estado-ia" data-modo="${esc(ia.modo)}" style="display:flex;align-items:flex-start;gap:10px;background:var(--row-hover);border:1px solid var(--line);border-radius:12px;padding:14px 16px">
         <span style="width:8px;height:8px;border-radius:50%;background:${color};margin-top:5px;flex:none"></span>
         <div style="display:flex;flex-direction:column;gap:3px">
           <div class="font-display font-semibold text-[13px] text-cream">${esc(titulo)}</div>
@@ -265,13 +280,11 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string, ia
 
   return `
     <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:18px">
-      <div style="display:flex;flex-direction:column;gap:2px">
-        <h3 class="font-display font-semibold text-[13.5px] text-cream">🧠 Modelo de IA</h3>
-      </div>
+      ${cfgHead("brain", "Modelo de IA", "Qué inteligencia usa tu bot y con qué llave.")}
       ${estadoDeIa}
       ${degradedBanner}
       ${testBanner}
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="cfg-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
         <div style="display:flex;flex-direction:column;gap:6px">
           <label class="font-display font-semibold text-[12.5px] text-cream">Proveedor</label>
           <select name="${SETTING_KEYS.llmProvider}" style="${SELECT_STYLE}">${providerOpts}</select>
@@ -310,7 +323,7 @@ function renderLlmSection(settings: Record<string, string>, llmTest?: string, ia
           <label class="font-display font-semibold text-[12.5px] text-cream">Respaldo si el proveedor de arriba falla (opcional)</label>
           <p class="text-dim text-[11px]">Si dos intentos con tu proveedor fallan, el bot ya prueba solo con otro modelo del MISMO proveedor. Si quieres que además pueda saltar a un proveedor totalmente distinto, captura aquí su API key — sin esto, un fallo del proveedor principal termina en "Algo falló de mi lado" en vez de una respuesta real.</p>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div class="cfg-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
           <div style="display:flex;flex-direction:column;gap:6px">
             <label class="font-display font-semibold text-[12.5px] text-cream">Proveedor de respaldo</label>
             <select name="${SETTING_KEYS.llmBackupProvider}" style="${SELECT_STYLE}">${backupProviderOpts}</select>
@@ -376,10 +389,7 @@ function renderJevSection(settings: Record<string, string>): string {
     .join("");
   return `
     <div class="bg-panel border border-line" data-testid="revisor-rapido" style="padding:20px;display:flex;flex-direction:column;gap:14px">
-      <div style="display:flex;flex-direction:column;gap:4px">
-        <h3 class="font-display font-semibold text-[13.5px] text-cream">⚡ Revisor rápido</h3>
-        <p class="text-muted text-[12px]" style="margin:0">Un segundo modelo, especializado en decidir sí o no en milésimas de segundo, que revisa lo que el bot va a hacer. No escribe respuestas y no cambia el modelo de arriba.</p>
-      </div>
+      ${cfgHead("zap", "Revisor rápido", "Un segundo modelo, especializado en decidir sí o no en milésimas de segundo, que revisa lo que el bot va a hacer. No escribe respuestas y no cambia el modelo de arriba.")}
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">${tarjetas}</div>
       <div data-testid="jev-activo-en" style="display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:14px">
         <span class="font-display font-semibold text-[12.5px] text-cream">En "Activo", qué puede cambiar</span>
@@ -407,9 +417,7 @@ function renderCorreoSalienteSection(settings: Record<string, string>): string {
 
   return `
     <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:18px">
-      <div style="display:flex;flex-direction:column;gap:2px">
-        <h3 class="font-display font-semibold text-[13.5px] text-cream">✉️ Correo saliente</h3>
-      </div>
+      ${cfgHead("mail", "Correo saliente", "Con qué proveedor y desde qué dirección contesta tu bot.")}
       <div style="display:flex;align-items:flex-start;gap:9px;background:var(--accent-soft);border:1px solid rgba(245,197,24,.35);border-radius:var(--radius-sm);padding:13px 15px">
         <span style="color:var(--accent-2);flex:none;line-height:1">◆</span>
         <p class="text-[12px]" style="color:var(--muted);margin:0">Desde qué dirección y con qué proveedor contesta tu bot, y abajo, qué correos le tocan. Conectar la recepción es aparte, en <a href="/admin/conexiones" style="color:var(--accent-2)">Conexiones → Correo entrante</a> — puedes recibir por un proveedor y responder por otro.</p>
@@ -422,7 +430,7 @@ function renderCorreoSalienteSection(settings: Record<string, string>): string {
           <option value="mailgun" ${provider === "mailgun" ? "selected" : ""}>Mailgun</option>
         </select>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="cfg-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
         ${renderTextField({
           name: SETTING_KEYS.emailFromName,
           label: "Nombre del remitente",
@@ -524,16 +532,14 @@ function renderAvisoAlDuenoSection(
 
   return `
     <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:20px">
-      <div style="display:flex;flex-direction:column;gap:2px">
-        <h3 class="font-display font-semibold text-[13.5px] text-cream">🔔 Aviso al dueño</h3>
-      </div>
+      ${cfgHead("bell-ring", "Aviso al dueño", "Quién se entera cuando el bot escala o registra una oportunidad.")}
       <div style="display:flex;align-items:flex-start;gap:9px;background:var(--accent-soft);border:1px solid rgba(245,197,24,.35);border-radius:var(--radius-sm);padding:13px 15px">
         <span style="color:var(--accent-2);flex:none;line-height:1">◆</span>
         <p class="text-[12px]" style="color:var(--muted);margin:0">Cuando el bot escala a alguien del equipo (un ticket) o registra una oportunidad, aquí decides quién se entera y por dónde. Puedes activar más de uno.</p>
       </div>
 
       <div style="border-top:1px solid var(--line);padding-top:18px;display:flex;flex-direction:column;gap:10px">
-        <label class="font-display font-semibold text-[12.5px] text-cream">✉️ Correo</label>
+        <label class="font-display font-semibold text-[12.5px] text-cream" style="display:flex;align-items:center;gap:8px"><i data-lucide="mail" width="15" height="15" style="color:var(--dim)"></i>Correo</label>
         ${
           outboundReady
             ? ""
@@ -544,7 +550,7 @@ function renderAvisoAlDuenoSection(
       </div>
 
       <div style="border-top:1px solid var(--line);padding-top:18px;display:flex;flex-direction:column;gap:10px">
-        <label class="font-display font-semibold text-[12.5px] text-cream">✈️ Telegram <span class="text-dim" style="font-weight:400">— el más rápido</span></label>
+        <label class="font-display font-semibold text-[12.5px] text-cream" style="display:flex;align-items:center;gap:8px"><i data-lucide="send" width="15" height="15" style="color:var(--dim)"></i>Telegram <span class="text-dim" style="font-weight:400">· el más rápido</span></label>
         <p class="text-dim text-[11px]" style="margin:0">Llega como notificación al instante, y —a diferencia de WhatsApp— no necesita ninguna plantilla aprobada.</p>
         ${
           telegramChatId && !claimVigente
@@ -575,7 +581,7 @@ function renderAvisoAlDuenoSection(
       </div>
 
       <details style="border-top:1px solid var(--line);padding-top:18px">
-        <summary class="font-display font-semibold text-[12.5px] text-cream" style="cursor:pointer">📱 WhatsApp — avanzado</summary>
+        <summary class="font-display font-semibold text-[12.5px] text-cream" style="cursor:pointer">WhatsApp · avanzado</summary>
         <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
           <p class="text-dim text-[11px]" style="margin:0">Manda una plantilla APROBADA por Meta (no un mensaje libre), así que sí funciona aunque hayan pasado más de 24h desde el último contacto — pero conseguir esa aprobación toma días y necesita un número de WhatsApp Business de Twilio ya activo. No es algo que se resuelva solo desde aquí.</p>
           <label class="text-dim text-[11.5px]">Tu WhatsApp (con lada de país, ej. +5215512345678)</label>
@@ -613,7 +619,7 @@ function renderVoiceSection(
   if (voz && !voz.incluida) {
     return `
     <div class="bg-panel border border-line" data-testid="voz-sin-plan" style="padding:20px;display:flex;flex-direction:column;gap:12px">
-      <h3 class="font-display font-semibold text-[13.5px] text-cream">🎙️ Voz — llamadas telefónicas en tiempo real</h3>
+      ${cfgHead("phone-call", "Voz", "Llamadas telefónicas en tiempo real.")}
       <p class="text-[12.5px]" style="color:var(--muted);margin:0">Tu plan no incluye minutos de voz. Con <b>Pro</b> tu bot contesta el teléfono con una voz natural, agenda y registra igual que por chat — con minutos incluidos cada mes.</p>
       <a href="/admin/plan" class="text-[12px] font-display font-semibold" style="width:fit-content;border:1px solid var(--line);color:var(--cream);padding:9px 14px;text-decoration:none">Ver planes →</a>
     </div>`;
@@ -636,9 +642,7 @@ function renderVoiceSection(
 
   return `
     <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:18px">
-      <div style="display:flex;flex-direction:column;gap:2px">
-        <h3 class="font-display font-semibold text-[13.5px] text-cream">🎙️ Voz — llamadas telefónicas en tiempo real</h3>
-      </div>
+      ${cfgHead("phone-call", "Voz", "Llamadas telefónicas en tiempo real.")}
       <div style="border-top:1px solid var(--line);padding-top:18px;display:flex;flex-direction:column;gap:14px">
         ${llaveAviso}
         ${
@@ -770,24 +774,58 @@ function renderCatalogRow(item: BotCatalogItem): string {
 }
 
 const SECTIONS = [
-  { id: "personalidad", label: "Personalidad" },
-  { id: "modelo", label: "Modelo de IA" },
-  { id: "negocio", label: "Información del negocio" },
-  { id: "correo", label: "Correo saliente" },
-  { id: "aviso", label: "Aviso al dueño" },
-  { id: "instrucciones", label: "Instrucciones avanzadas" },
+  { id: "personalidad", label: "Personalidad", icon: "smile" },
+  { id: "modelo", label: "Modelo de IA", icon: "brain" },
+  { id: "negocio", label: "Información del negocio", icon: "store" },
+  { id: "correo", label: "Correo saliente", icon: "mail" },
+  { id: "aviso", label: "Aviso al dueño", icon: "bell-ring" },
+  { id: "instrucciones", label: "Instrucciones avanzadas", icon: "file-text" },
 ] as const;
 
-/** Barra lateral de secciones — un botón por pane, cambia con JS (sin recargar). */
+const CFG_CSS = `<style>
+  .cfg-layout{display:grid;grid-template-columns:232px minmax(0,1fr);gap:24px;align-items:start}
+  .cfg-nav{position:sticky;top:148px;display:flex;flex-direction:column;gap:2px;padding:8px;border-radius:var(--radius);background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-md)}
+  .cfg-nav-label{padding:10px 12px 6px;${MICRO_LABEL}}
+  .cfg-nav-item{display:flex;align-items:center;gap:10px;width:100%;min-height:40px;padding:0 12px;border:0;border-radius:12px;background:transparent;color:var(--muted);font-family:inherit;font-size:13px;font-weight:600;text-align:left;cursor:pointer;transition:background .12s ease,color .12s ease}
+  .cfg-nav-item:hover{background:var(--row-hover);color:var(--cream)}
+  .cfg-nav-item[aria-current="true"]{background:var(--accent-soft);color:var(--accent-ink);font-weight:800}
+  .cfg-nav-item svg{flex:none}
+  .cfg-panes{display:flex;flex-direction:column;gap:24px;min-width:0}
+  .cfg-pane>.bg-panel{border-radius:var(--radius);box-shadow:var(--shadow-md);padding:24px !important}
+  .cfg-save{position:sticky;top:72px;z-index:20;display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;margin-bottom:24px;padding:12px 12px 12px 18px;border-radius:var(--radius);background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-md)}
+  .cfg-btn{height:40px;padding:0 16px;border-radius:12px;border:0;background:var(--accent);color:var(--cream);font-size:13px;font-weight:800;font-family:inherit;display:inline-flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap}
+  .cfg-btn:hover{background:var(--accent-hover)}
+  .cfg-btn-ghost{height:40px;padding:0 14px;border-radius:12px;border:1px solid var(--linelit);background:var(--panel);color:var(--cream);font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap}
+  .cfg-btn-ghost:hover{background:var(--row-hover)}
+  @media (max-width:900px){
+    .cfg-layout{grid-template-columns:minmax(0,1fr)}
+    .cfg-nav{position:static;flex-direction:row;overflow-x:auto;padding:6px;gap:4px;scrollbar-width:thin}
+    .cfg-nav-label{display:none}
+    .cfg-nav-item{width:auto;flex:none;white-space:nowrap}
+  }
+  @media (max-width:640px){
+    .cfg-pane>.bg-panel{padding:18px !important}
+    .cfg-2col{grid-template-columns:minmax(0,1fr) !important}
+    /* Catálogo: nombre arriba, precio + SKU + quitar en una línea, descripción abajo. */
+    .catalog-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 40px !important;padding-bottom:12px;border-bottom:1px solid var(--line)}
+    .catalog-row .cat-name,.catalog-row .cat-desc{grid-column:1 / -1}
+    .catalog-row .cat-name{order:1}
+    .catalog-row .cat-price{order:2}
+    .catalog-row .cat-sku{order:3}
+    .catalog-row .cat-remove-row{order:4;width:40px !important;height:40px !important}
+    .catalog-row .cat-desc{order:5}
+  }
+</style>`;
+
+/** Menú de secciones — un botón por pane, cambia con JS (sin recargar). En teléfono se vuelve una tira horizontal. */
 function renderSectionNav(): string {
   const items = SECTIONS.map(
     (s, i) => `
-    <button type="button" class="cfg-nav-item" data-target="${s.id}"
-            style="text-align:left;width:100%;border:0;cursor:pointer;font-family:inherit;padding:9px 12px;font-size:12.5px;border-radius:var(--radius-sm);${
-              i === 0 ? "background:var(--cream);color:var(--accent);font-weight:600" : "background:transparent;color:var(--muted)"
-            }">${esc(s.label)}</button>`,
+    <button type="button" class="cfg-nav-item" data-target="${s.id}" aria-controls="cfg-pane-${s.id}" aria-current="${i === 0 ? "true" : "false"}">
+      <i data-lucide="${s.icon}" width="16" height="16"></i>${esc(s.label)}
+    </button>`,
   ).join("");
-  return `<nav style="width:196px;flex:none;display:flex;flex-direction:column;gap:2px">${items}</nav>`;
+  return `<nav class="cfg-nav" aria-label="Secciones de configuración"><div class="cfg-nav-label" aria-hidden="true">Secciones</div>${items}</nav>`;
 }
 
 /**
@@ -826,34 +864,37 @@ export function renderConfig(
   // qué sección esté abierta) — un solo submit guarda las 4 a la vez, porque
   // todas son el mismo <form>, nada más ocultas/mostradas con JS.
   const saveBar = `
-    <div id="cfg-save-bar" data-saved="${saved ? "1" : "0"}"
-         style="position:sticky;top:72px;z-index:20;display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 16px;box-shadow:var(--shadow-sm)">
-      <span id="cfg-save-dot" style="width:7px;height:7px;border-radius:50%;flex:none;background:var(--ok)"></span>
-      <span id="cfg-save-label" class="text-[12.5px]" style="color:var(--muted);font-weight:600">Todo guardado</span>
+    <div id="cfg-save-bar" class="cfg-save" data-saved="${saved ? "1" : "0"}">
+      <span id="cfg-save-dot" style="width:8px;height:8px;border-radius:50%;flex:none;background:var(--ok)"></span>
+      <span id="cfg-save-label" role="status" aria-live="polite" style="font-size:13px;font-weight:700;color:var(--muted)">Todo guardado</span>
       <div style="margin-left:auto;display:flex;gap:8px">
-        <button type="button" id="cfg-discard-btn" class="ghostbtn" style="display:none;background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:9px 16px;font-size:12.5px;cursor:pointer">Descartar</button>
-        <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
-                style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 18px;display:flex;align-items:center;gap:8px">
-          <i data-lucide="check" width="15" height="15"></i> Guardar cambios
-        </button>
+        <button type="button" id="cfg-discard-btn" class="cfg-btn-ghost" hidden>Descartar</button>
+        <button type="submit" class="cfg-btn"><i data-lucide="check" width="15" height="15"></i>Guardar cambios</button>
       </div>
     </div>`;
 
-  const body = `
-    <form method="POST" action="/admin/config" style="display:flex;flex-direction:column;gap:16px">
-      <div style="display:flex;flex-direction:column;gap:2px">
-        <h2 class="font-display font-semibold text-[15px] text-cream">Panel de control de ${esc(identity.businessName)}</h2>
-        <p class="text-muted text-[12.5px]">Ajuste cómo se comporta su bot.</p>
-      </div>
+  const modo = AGENT_MODES[settings[SETTING_KEYS.agentMode] ?? ""];
+  const idioma = LANGUAGE_OPTIONS.find((o) => o.value === bot.language)?.label ?? bot.language;
+  const hero = pageHero({
+    eyebrow: "Mi Agente",
+    title: "Configuración",
+    description: `Cómo se comporta el bot de ${identity.businessName}: su personalidad, la IA con la que piensa, lo que sabe de tu negocio y a quién avisa. Todo se guarda con un solo botón.`,
+    tags: `${heroTag(modo ? modo.label : "Modo genérico")}${heroTag(idioma, "#e9e1d4")}`,
+  });
 
+  const body = `
+    ${CFG_CSS}
+    ${hero}
+    <form method="POST" action="/admin/config">
       ${saveBar}
 
-      <div style="display:flex;gap:24px;align-items:flex-start">
+      <div class="cfg-layout">
         ${renderSectionNav()}
 
-        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:24px">
-          <div class="cfg-pane" data-pane="personalidad" style="display:flex;flex-direction:column;gap:24px">
+        <div class="cfg-panes">
+          <div class="cfg-pane" id="cfg-pane-personalidad" data-pane="personalidad" style="display:flex;flex-direction:column;gap:24px">
             <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:22px">
+              ${cfgHead("smile", "Personalidad", "En qué idioma habla, de qué trabajo se encarga y cómo suena.")}
               <div style="display:flex;flex-direction:column;gap:6px">
                 <label class="font-display font-semibold text-[12.5px] text-cream">Idioma</label>
                 <p class="text-dim text-[11px]">En qué idioma responde tu bot por default (el cliente puede escribir en otro y el bot lo detecta, pero este es el que usa para iniciar y por defecto).</p>
@@ -886,8 +927,9 @@ export function renderConfig(
             </div>
           </div>
 
-          <div class="cfg-pane" data-pane="modelo" style="display:none;flex-direction:column;gap:24px">
+          <div class="cfg-pane" id="cfg-pane-modelo" data-pane="modelo" style="display:none;flex-direction:column;gap:24px">
             <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:22px">
+              ${cfgHead("gauge", "Qué tan listo responde", "El equilibrio entre rapidez, costo e inteligencia.")}
               ${modelTierCards}
             </div>
             ${renderLlmSection(settings, llmTest, ia)}
@@ -895,8 +937,9 @@ export function renderConfig(
             ${renderVoiceSection(settings, hasEnvOpenAiKey, elevenError, voz)}
           </div>
 
-          <div class="cfg-pane" data-pane="negocio" style="display:none;flex-direction:column;gap:24px">
+          <div class="cfg-pane" id="cfg-pane-negocio" data-pane="negocio" style="display:none;flex-direction:column;gap:24px">
             <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:18px">
+              ${cfgHead("store", "Información del negocio", "Lo que tu bot sabe de ti para contestar sin inventar.")}
               ${renderTextField({
                 name: SETTING_KEYS.botName,
                 label: "Nombre del bot",
@@ -905,7 +948,7 @@ export function renderConfig(
                 placeholder: identity.name ?? "Mi asistente",
               })}
 
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+              <div class="cfg-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
                 <div style="display:flex;flex-direction:column;gap:6px">
                   <label class="font-display font-semibold text-[12.5px] text-cream">Zona horaria</label>
                   <p class="text-dim text-[11px]">En qué hora local opera el negocio.</p>
@@ -919,7 +962,7 @@ export function renderConfig(
                 <div></div>
               </div>
 
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+              <div class="cfg-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
                 ${renderTextField({
                   name: "country",
                   label: "País",
@@ -939,7 +982,7 @@ export function renderConfig(
               <div style="display:flex;flex-direction:column;gap:14px;border-top:1px solid var(--line);padding-top:16px">
                 <label class="font-display font-semibold text-[12.5px] text-cream">Datos básicos del negocio</label>
                 <p class="text-dim text-[11px]" style="margin:0">Lo más común que un cliente pregunta — el bot los usa para responder directo, sin inventar.</p>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                <div class="cfg-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
                   ${renderTextField({
                     name: "hours",
                     label: "Horario",
@@ -955,7 +998,7 @@ export function renderConfig(
                     placeholder: "Ej. 55 1234 5678",
                   })}
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                <div class="cfg-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
                   ${renderTextField({
                     name: "location",
                     label: "Ubicación / Dirección",
@@ -1067,16 +1110,17 @@ export function renderConfig(
             </div>
           </div>
 
-          <div class="cfg-pane" data-pane="correo" style="display:none;flex-direction:column;gap:24px">
+          <div class="cfg-pane" id="cfg-pane-correo" data-pane="correo" style="display:none;flex-direction:column;gap:24px">
             ${renderCorreoSalienteSection(settings)}
           </div>
 
-          <div class="cfg-pane" data-pane="aviso" style="display:none;flex-direction:column;gap:24px">
+          <div class="cfg-pane" id="cfg-pane-aviso" data-pane="aviso" style="display:none;flex-direction:column;gap:24px">
             ${renderAvisoAlDuenoSection(settings, telegramChannelConnected)}
           </div>
 
-          <div class="cfg-pane" data-pane="instrucciones" style="display:none;flex-direction:column;gap:24px">
+          <div class="cfg-pane" id="cfg-pane-instrucciones" data-pane="instrucciones" style="display:none;flex-direction:column;gap:24px">
             <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:18px">
+              ${cfgHead("file-text", "Instrucciones avanzadas", "Cómo atiende tu negocio, en tus palabras.")}
               ${renderTextArea({
                 name: SETTING_KEYS.salesPlaybook,
                 label: "Cómo atiende tu negocio",
@@ -1185,10 +1229,9 @@ export function renderConfig(
       var navItems = document.querySelectorAll(".cfg-nav-item");
       navItems.forEach(function (btn) {
         btn.addEventListener("click", function () {
-          navItems.forEach(function (b) {
-            b.style.background = "transparent"; b.style.color = "var(--muted)"; b.style.fontWeight = "400";
-          });
-          btn.style.background = "var(--cream)"; btn.style.color = "var(--accent)"; btn.style.fontWeight = "600";
+          navItems.forEach(function (b) { b.setAttribute("aria-current", b === btn ? "true" : "false"); });
+          // En teléfono el menú es una tira con scroll: que la elegida quede a la vista.
+          btn.scrollIntoView({ block: "nearest", inline: "nearest" });
           document.querySelectorAll(".cfg-pane").forEach(function (p) {
             p.style.display = p.getAttribute("data-pane") === btn.getAttribute("data-target") ? "flex" : "none";
           });
@@ -1210,7 +1253,7 @@ export function renderConfig(
         dot.style.background = "var(--accent)";
         label.textContent = "Tienes cambios sin guardar";
         label.style.color = "var(--cream)";
-        discardBtn.style.display = "inline-block";
+        discardBtn.hidden = false;
       }
       form.addEventListener("input", markDirty);
       form.addEventListener("change", markDirty);
@@ -1343,5 +1386,5 @@ export function renderConfig(
     })();
     </script>`;
 
-  return layout({ title: "Config", activeTab: "config", body, visibleNavIds });
+  return layout({ title: "Configuración", activeTab: "config", body, visibleNavIds, hero: true });
 }
