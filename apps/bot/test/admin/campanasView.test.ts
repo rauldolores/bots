@@ -52,7 +52,7 @@ describe("GET /campanas", () => {
   it("trae el hero, las métricas y el botón de envío bloqueado mientras falte el nombre", async () => {
     const res = await adminApp.request("/campanas", { headers: AUTH }, env);
     const html = await res.text();
-    expect(html.match(/<h1/g)).toHaveLength(1);
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
     expect(html).toContain("page-hero");
     expect(html).toContain("stat-card");
     expect(html).toContain("Cuota de plantillas");
