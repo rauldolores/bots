@@ -8,6 +8,7 @@ import { InsightsRepo } from "../../db/insights";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
 import { layout } from "./layout";
+import { heroTag, pageHero, sectionCard, statCard, statGrid } from "./ui";
 
 const ACCENT = "#f5c518";
 
@@ -22,7 +23,7 @@ function esc(s: string): string {
 
 function areaChart(points: { label: string; value: number }[], width = 640, height = 150): string {
   if (points.length === 0) {
-    return `<p class="text-[12.5px] text-dim py-8 text-center">Aún no hay actividad.</p>`;
+    return `<p class="st-empty">Aún no hay actividad.</p>`;
   }
   const pad = 12;
   const max = Math.max(...points.map((p) => p.value), 1);
@@ -35,15 +36,15 @@ function areaChart(points: { label: string; value: number }[], width = 640, heig
   const last = points[points.length - 1];
 
   return `
-  <div class="overflow-x-auto">
-    <svg viewBox="0 0 ${width} ${height}" class="w-full" style="min-width:480px" role="img" aria-label="Mensajes por día">
+  <div style="overflow-x:auto;padding:16px 24px 20px">
+    <svg viewBox="0 0 ${width} ${height}" style="width:100%;min-width:320px;display:block" role="img" aria-label="Mensajes por día">
       <line x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}" stroke="var(--line)" stroke-width="1"/>
       <path d="${area}" fill="${ACCENT}" opacity="0.14"/>
       <polyline points="${line}" fill="none" stroke="${ACCENT}" stroke-width="2" stroke-linejoin="round"/>
       <circle cx="${x(points.length - 1)}" cy="${y(last.value)}" r="3.5" fill="${ACCENT}"/>
-      <text x="${x(points.length - 1)}" y="${y(last.value) - 8}" text-anchor="end" font-size="12" fill="var(--cream)" font-family="'JetBrains Mono',monospace" font-weight="600">${last.value}</text>
-      <text x="${pad}" y="${height - 1}" font-size="10" fill="var(--dim)" font-family="'JetBrains Mono',monospace">${esc(points[0].label)}</text>
-      <text x="${width - pad}" y="${height - 1}" text-anchor="end" font-size="10" fill="var(--dim)" font-family="'JetBrains Mono',monospace">${esc(last.label)}</text>
+      <text x="${x(points.length - 1)}" y="${y(last.value) - 8}" text-anchor="end" font-size="12" fill="var(--cream)" font-family="ui-monospace,Menlo,monospace" font-weight="600">${last.value}</text>
+      <text x="${pad}" y="${height - 1}" font-size="10" fill="var(--dim)" font-family="ui-monospace,Menlo,monospace">${esc(points[0].label)}</text>
+      <text x="${width - pad}" y="${height - 1}" text-anchor="end" font-size="10" fill="var(--dim)" font-family="ui-monospace,Menlo,monospace">${esc(last.label)}</text>
     </svg>
   </div>`;
 }
@@ -59,18 +60,18 @@ function heatmap(cells: Map<string, number>): string {
       const n = cells.get(`${dow}:${hour}`) ?? 0;
       const alpha = n === 0 ? 0 : 0.12 + 0.8 * (n / max);
       const bg = n === 0 ? "var(--panel2)" : `rgba(234,179,8,${alpha.toFixed(2)})`;
-      return `<td class="p-0"><div style="width:13px;height:13px;background:${bg}" title="${name} ${hour}:00 — ${n} ${n === 1 ? "mensaje" : "mensajes"}"></div></td>`;
+      return `<td style="padding:0"><div style="width:14px;height:14px;border-radius:3px;background:${bg}" title="${name} ${hour}:00 — ${n} ${n === 1 ? "mensaje" : "mensajes"}"></div></td>`;
     }).join("");
-    return `<tr><td class="pr-2 text-[9px] text-dim font-mono text-right">${name}</td>${tds}</tr>`;
+    return `<tr><td style="padding:0 8px 0 0;font-size:11px;font-weight:700;color:var(--dim);text-align:right">${name}</td>${tds}</tr>`;
   }).join("");
 
   const hourLabels = Array.from({ length: 24 }, (_, h) =>
-    `<td class="text-[8px] text-dim font-mono text-center p-0">${h % 6 === 0 ? h : ""}</td>`,
+    `<td style="padding:0;font-size:10px;font-weight:600;color:var(--dim);text-align:center">${h % 6 === 0 ? h : ""}</td>`,
   ).join("");
 
   return `
-  <div class="overflow-x-auto">
-    <table class="border-separate" style="border-spacing:2px">
+  <div style="overflow-x:auto">
+    <table style="border-collapse:separate;border-spacing:2px">
       <tbody>${rows}<tr><td></td>${hourLabels}</tr></tbody>
     </table>
   </div>`;
@@ -84,16 +85,59 @@ function funnel(stages: { label: string; value: number }[]): string {
     .map((s) => {
       const pct = Math.round((s.value / base) * 100);
       return `
-    <div class="grid grid-cols-[120px_1fr_66px] gap-[10px] items-center text-[12.5px]">
-      <span class="text-muted">${esc(s.label)}</span>
-      <div style="height:22px;background:var(--panel2);border:1px solid var(--line);overflow:hidden">
-        <div style="width:${Math.max(pct, s.value > 0 ? 3 : 0)}%;height:100%;background:var(--accent);opacity:.85"></div>
-      </div>
-      <span class="text-right text-[11px] text-muted">${s.value} <span class="text-dim">· ${pct}%</span></span>
+    <div class="st-funnel" data-etapa="${esc(s.label)}" data-valor="${s.value}">
+      <span class="st-funnel-label">${esc(s.label)}</span>
+      <div class="st-bar"><div style="width:${Math.max(pct, s.value > 0 ? 3 : 0)}%"></div></div>
+      <span class="st-funnel-n">${s.value} <span style="color:var(--dim);font-weight:600">· ${pct}%</span></span>
     </div>`;
     })
     .join("");
 }
+
+/** Filas con una barra proporcional al mayor valor — para canales y herramientas. */
+function barRows(rows: { label: string; n: number; mono?: boolean }[], empty: string): string {
+  if (!rows.length) return `<p class="st-empty">${esc(empty)}</p>`;
+  const max = Math.max(...rows.map((r) => Number(r.n)), 1);
+  return `<div class="st-rows">${rows
+    .map(
+      (r) => `<div class="st-row">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px">
+          <span class="${r.mono ? "st-mono" : ""}" style="font-size:13px;font-weight:700;color:var(--cream);overflow-wrap:anywhere">${esc(r.label)}</span>
+          <span style="font-size:13px;font-weight:800;color:var(--cream)">${Number(r.n).toLocaleString("es-MX")}</span>
+        </div>
+        <div class="st-bar thin"><div style="width:${Math.max(3, Math.round((Number(r.n) / max) * 100))}%"></div></div>
+      </div>`,
+    )
+    .join("")}</div>`;
+}
+
+const ST_CSS = `<style>
+  .st-split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:start;margin-top:24px}
+  .st-empty{margin:0;padding:32px 24px;text-align:center;font-size:12.5px;font-weight:500;color:var(--dim)}
+  .st-body{padding:20px 24px;display:flex;flex-direction:column;gap:14px}
+  .st-funnel{display:grid;grid-template-columns:120px minmax(0,1fr) 80px;gap:12px;align-items:center}
+  .st-funnel-label{font-size:13px;font-weight:700;color:var(--muted)}
+  .st-funnel-n{text-align:right;font-size:13px;font-weight:800;color:var(--cream);white-space:nowrap}
+  .st-bar{height:24px;border-radius:8px;background:var(--panel2);overflow:hidden}
+  .st-bar > div{height:100%;border-radius:8px;background:var(--accent)}
+  .st-bar.thin{height:8px;border-radius:999px;margin-top:8px}
+  .st-bar.thin > div{border-radius:999px}
+  .st-rows{display:flex;flex-direction:column}
+  .st-row{padding:14px 24px;border-top:1px solid var(--line)}
+  .st-row:first-child{border-top:0}
+  .st-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px!important}
+  .st-kv{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 24px;border-top:1px solid var(--line);font-size:13px;font-weight:600;color:var(--cream)}
+  .st-kv:first-child{border-top:0}
+  .st-kv span:last-child{font-weight:800;white-space:nowrap}
+  .st-note{margin:0;padding:0 24px 18px;font-size:12px;font-weight:500;line-height:1.5;color:var(--dim)}
+  @media (max-width:1000px){ .st-split{grid-template-columns:minmax(0,1fr)} }
+  @media (max-width:640px){
+    .st-body{padding:16px}
+    .st-row,.st-kv{padding:12px 16px}
+    .st-note{padding:0 16px 16px}
+    .st-funnel{grid-template-columns:96px minmax(0,1fr) 70px;gap:8px}
+  }
+</style>`;
 
 // --- Page -------------------------------------------------------------------------
 
@@ -228,96 +272,126 @@ export async function renderStats(env: Env, botId: string, visibleNavIds: Set<st
     return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
   };
   const fmtMs = (ms: number | null) => (ms == null ? "—" : `${Math.round(ms)}ms`);
-  const bigCard = (value: string, label: string, sub: string, accent = false) => `
-    <div class="card bg-panel border border-line p-4${accent ? " border-l-[3px] border-l-accent" : ""}">
-      <div class="font-display font-bold text-[28px] leading-none">${value}</div>
-      <div class="text-[11px] text-muted mt-1">${label}</div>
-      <div class="text-[10px] text-dim mt-0.5">${sub}</div>
-    </div>`;
 
   // --- F7 fase 10: sección de Voice — solo aparece si el bot ya tiene llamadas. ---
   const failedPct = voiceCalls > 0 ? Math.round(((voiceSummary?.failed ?? 0) / voiceCalls) * 100) : 0;
   const transferPct = voiceCalls > 0 ? Math.round(((voiceSummary?.transferred ?? 0) / voiceCalls) * 100) : 0;
+  const transferidas = voiceSummary?.transferred ?? 0;
+  const kv = (label: string, value: string) => `<div class="st-kv"><span>${label}</span><span>${value}</span></div>`;
   const voiceSection =
     voiceCalls > 0
       ? `
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-        ${bigCard(String(voiceCalls), "🎙️ Llamadas", "30 días", true)}
-        ${bigCard(fmtDuration(voiceSummary?.avg_duration_ms ?? null), "Duración promedio", "por llamada · 30 días")}
-        ${bigCard(`<span class="${transferPct > 0 ? "text-accent" : ""}">${transferPct}%</span>`, "↪ Tasa de transferencia", `${voiceSummary?.transferred ?? 0} transferida${(voiceSummary?.transferred ?? 0) === 1 ? "" : "s"} · 30 días`)}
-        ${bigCard(`<span class="${failedPct > 10 ? "text-bad" : ""}">${failedPct}%</span>`, "Llamadas fallidas", `${voiceSummary?.failed ?? 0} de ${voiceCalls} · 30 días`)}
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-[14px]">
-        <div class="card bg-panel border border-line p-[18px]">
-          <div class="font-display font-semibold text-[14px] mb-2.5">⚡ Latencia de voz <span class="text-[10px] text-dim font-normal">(promedio, 30 días)</span></div>
-          <table class="w-full text-[12.5px]"><tbody>
-            <tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">Tiempo a primer audio</td><td class="text-right text-muted text-[11px]">${fmtMs(voiceSummary?.avg_ttfa_ms ?? null)}</td></tr>
-            <tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">Latencia de turno (promedio)</td><td class="text-right text-muted text-[11px]">${fmtMs(voiceSummary?.avg_turn_latency_ms ?? null)}</td></tr>
-            <tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">Duración de respuesta (promedio)</td><td class="text-right text-muted text-[11px]">${fmtMs(voiceSummary?.avg_response_duration_ms ?? null)}</td></tr>
-            <tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">Latencia de respuesta (total/llamada)</td><td class="text-right text-muted text-[11px]">${fmtMs(voiceSummary?.avg_response_latency_ms ?? null)}</td></tr>
-            <tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">Interrupciones por llamada</td><td class="text-right text-muted text-[11px]">${(voiceSummary?.avg_interruptions ?? 0).toFixed(1)}</td></tr>
-            <tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">Latencia de interrupción (promedio)</td><td class="text-right text-muted text-[11px]">${fmtMs(voiceSummary?.avg_interruption_latency_ms ?? null)}</td></tr>
-          </tbody></table>
-        </div>
-        <div class="card bg-panel border border-line p-[18px]">
-          <div class="font-display font-semibold text-[14px] mb-2.5">📞 Llamadas por número</div>
-          <table class="w-full text-[12.5px]"><tbody>
-            ${voiceByNumber.map((r) => `<tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream font-mono text-[11px]">${esc(r.called_number ?? "—")}</td><td class="text-right text-muted text-[11px]">${r.calls} · ${fmtDuration(r.avg_duration_ms)} prom.</td></tr>`).join("") || `<tr><td class="py-3 text-dim text-[12.5px]">Sin datos.</td></tr>`}
-          </tbody></table>
+      <div id="stats-voz" style="margin-bottom:24px">
+        ${statGrid([
+          statCard({ icon: "phone-call", tone: "accent", label: "Llamadas", value: voiceCalls, note: "30 días" }),
+          statCard({ icon: "timer", tone: "neutral", label: "Duración promedio", value: fmtDuration(voiceSummary?.avg_duration_ms ?? null), note: "por llamada" }),
+          statCard({ icon: "phone-forwarded", tone: "neutral", label: "Tasa de transferencia", value: `${transferPct}%`, note: `${transferidas} transferida${transferidas === 1 ? "" : "s"}` }),
+          statCard({ icon: "phone-off", tone: failedPct > 10 ? "warn" : "neutral", label: "Llamadas fallidas", value: `${failedPct}%`, note: `${voiceSummary?.failed ?? 0} de ${voiceCalls}` }),
+        ])}
+        <div class="st-split" style="margin-top:0">
+          ${sectionCard({
+            icon: "zap",
+            title: "Latencia de voz",
+            subtitle: "Promedio, 30 días",
+            body: `<div>
+              ${kv("Tiempo a primer audio", fmtMs(voiceSummary?.avg_ttfa_ms ?? null))}
+              ${kv("Latencia de turno (promedio)", fmtMs(voiceSummary?.avg_turn_latency_ms ?? null))}
+              ${kv("Duración de respuesta (promedio)", fmtMs(voiceSummary?.avg_response_duration_ms ?? null))}
+              ${kv("Latencia de respuesta (total/llamada)", fmtMs(voiceSummary?.avg_response_latency_ms ?? null))}
+              ${kv("Interrupciones por llamada", (voiceSummary?.avg_interruptions ?? 0).toFixed(1))}
+              ${kv("Latencia de interrupción (promedio)", fmtMs(voiceSummary?.avg_interruption_latency_ms ?? null))}
+            </div>`,
+          })}
+          ${sectionCard({
+            icon: "phone",
+            title: "Llamadas por número",
+            body: voiceByNumber.length
+              ? `<div>${voiceByNumber
+                  .map((r) => kv(`<span class="st-mono">${esc(r.called_number ?? "—")}</span>`, `${r.calls} · ${fmtDuration(r.avg_duration_ms)} prom.`))
+                  .join("")}</div>`
+              : `<p class="st-empty">Sin datos.</p>`,
+          })}
         </div>
       </div>`
       : "";
 
-  const body = `
-    <div class="flex flex-col gap-4" style="max-width:1080px">
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-        ${bigCard(`${savedHours.toFixed(1)}<span class="text-[16px] text-dim"> h</span>`, "⏱ Horas ahorradas", "mensajes atendidos × 2 min · 30 días", true)}
-        ${bigCard(costPerConv === null ? "—" : money(costPerConv), "Costo por conversación", "IA / conversaciones · 30 días")}
-        ${bigCard(`<span class="text-accent">${costPerLead === null ? "—" : money(costPerLead)}</span>`, "💰 Costo por lead", "IA / leads captados · 30 días")}
-        ${bigCard(`<span class="text-ok">${resolvedPct === null ? "—" : `${resolvedPct}%`}</span>`, "Resueltas sin humano", "según el análisis de IA · 30 días")}
-      </div>
+  const hero = pageHero({
+    eyebrow: "Análisis",
+    title: "Estadísticas",
+    description:
+      "Cuánto trabajo te ahorra el bot, cuánto cuesta cada conversación y cada lead, el embudo de ventas y a qué horas te escriben.",
+    tags: heroTag("Últimos 30 días", "#3fb8c4"),
+  });
 
-      ${voiceSection}
+  const stats = statGrid([
+    statCard({ icon: "clock", tone: "accent", label: "Horas ahorradas", value: `${savedHours.toFixed(1)} h`, note: "mensajes atendidos × 2 min" }),
+    statCard({ icon: "message-circle", tone: "neutral", label: "Costo por conversación", value: costPerConv === null ? "—" : money(costPerConv), note: "IA ÷ conversaciones" }),
+    statCard({ icon: "user-plus", tone: "neutral", label: "Costo por lead", value: costPerLead === null ? "—" : money(costPerLead), note: "IA ÷ leads captados" }),
+    statCard({ icon: "circle-check", tone: "ok", label: "Resueltas sin humano", value: resolvedPct === null ? "—" : `${resolvedPct}%`, note: "según el análisis de IA" }),
+  ]);
 
-      <div class="card bg-panel border border-line p-[18px]">
-        <div class="font-display font-semibold text-[14px] mb-3">📈 Mensajes por día <span class="text-[10px] text-dim font-normal">(30 días)</span></div>
-        ${areaChart(byDay.map((d) => ({ label: d.day.slice(5), value: d.msgs })))}
-      </div>
+  const mensajes = sectionCard({
+    icon: "trending-up",
+    title: "Mensajes por día",
+    subtitle: "Últimos 30 días",
+    body: areaChart(byDay.map((d) => ({ label: d.day.slice(5), value: Number(d.msgs) }))),
+  });
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-[14px]">
-        <div class="card bg-panel border border-line p-[18px]">
-          <div class="font-display font-semibold text-[14px] mb-4">🎯 Funnel de conversión <span class="text-[10px] text-dim font-normal">(30 días)</span></div>
-          <div class="flex flex-col gap-3">
-            ${funnel([
-              { label: "Conversaciones", value: nConvs },
-              { label: "💰 Leads", value: nLeads },
-              { label: "Contactados", value: nContacted },
-              { label: "✅ Vendidos", value: nSold },
-            ])}
-          </div>
-        </div>
-        <div class="card bg-panel border border-line p-[18px]">
-          <div class="font-display font-semibold text-[14px] mb-4">🔥 Horas pico <span class="text-[10px] text-dim font-normal">(mensajes de clientes, 30 días)</span></div>
-          ${heatmap(heatCells)}
-          <p class="text-[10px] text-dim mt-2.5 leading-relaxed">Las horas fuera de tu horario son donde el bot es el único que contesta.</p>
-        </div>
-      </div>
+  const embudo = sectionCard({
+    icon: "filter",
+    title: "Embudo de conversión",
+    subtitle: "Últimos 30 días",
+    body: `<div class="st-body">
+      ${funnel([
+        { label: "Conversaciones", value: Number(nConvs) },
+        { label: "Leads", value: nLeads },
+        { label: "Contactados", value: nContacted },
+        { label: "Vendidos", value: nSold },
+      ])}
+    </div>`,
+  });
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-[14px]">
-        <div class="card bg-panel border border-line p-[18px]">
-          <div class="font-display font-semibold text-[14px] mb-2.5">Por canal</div>
-          <table class="w-full text-[12.5px]"><tbody>
-            ${channels.map((c) => `<tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-cream">${esc(channelLabel(c.channel))}</td><td class="text-right text-muted text-[11px]">${c.n}</td></tr>`).join("") || `<tr><td class="py-3 text-dim text-[12.5px]">Sin datos.</td></tr>`}
-          </tbody></table>
-        </div>
-        <div class="card bg-panel border border-line p-[18px]">
-          <div class="font-display font-semibold text-[14px] mb-2.5">Tools más usadas</div>
-          <table class="w-full text-[12px]"><tbody>
-            ${tools.filter((t) => t.tool).map((t) => `<tr style="border-top:1px solid var(--line)"><td class="py-2.5 text-accent2">${esc(t.tool)}</td><td class="text-right text-muted text-[11px]">${t.n}</td></tr>`).join("") || `<tr><td class="py-3 text-dim text-[12.5px]">Aún sin tool calls registradas.</td></tr>`}
-          </tbody></table>
-        </div>
-      </div>
+  const pico = sectionCard({
+    icon: "flame",
+    title: "Horas pico",
+    subtitle: "Mensajes de clientes, 30 días (hora UTC)",
+    body: `<div class="st-body">${heatmap(heatCells)}</div>
+      <p class="st-note">Las horas fuera de tu horario son donde el bot es el único que contesta.</p>`,
+  });
+
+  const porCanal = sectionCard({
+    icon: "messages-square",
+    title: "Por canal",
+    subtitle: "Mensajes, 30 días",
+    body: barRows(
+      channels.map((c) => ({ label: channelLabel(c.channel), n: c.n })),
+      "Sin datos.",
+    ),
+  });
+
+  const herramientas = sectionCard({
+    icon: "wrench",
+    title: "Herramientas más usadas",
+    subtitle: "Veces que el agente las llamó",
+    body: barRows(
+      tools.filter((t) => t.tool).map((t) => ({ label: t.tool, n: t.n, mono: true })),
+      "Aún sin herramientas registradas.",
+    ),
+  });
+
+  const body = `${ST_CSS}
+    ${hero}
+    ${stats}
+    ${voiceSection}
+    ${mensajes}
+    <div class="st-split">
+      ${embudo}
+      ${pico}
+    </div>
+    <div class="st-split">
+      ${porCanal}
+      ${herramientas}
     </div>`;
 
-  return layout({ title: "Estadísticas", activeTab: "stats", body, visibleNavIds });
+  return layout({ title: "Estadísticas", activeTab: "stats", body, visibleNavIds, hero: true });
 }

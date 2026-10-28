@@ -77,7 +77,7 @@ describe("renderCosts — integra el costo estimado de Voice", () => {
 describe("renderStats — integra duración/transferencia/fallidas/latencia de Voice", () => {
   it("sin llamadas, no muestra la sección de Voice (no confunde con 'sin datos' en una pantalla que no aplica)", async () => {
     const html = await renderStats(env, TEST_BOT_ID);
-    expect(html).not.toContain("🎙️ Llamadas");
+    expect(html).not.toContain('id="stats-voz"');
   });
 
   it("con llamadas (incluida una fallida y una transferida), muestra duración promedio, tasa de transferencia y llamadas fallidas reales", async () => {
@@ -86,7 +86,7 @@ describe("renderStats — integra duración/transferencia/fallidas/latencia de V
     await makeCall({ calledNumber: "+18005551212", durationMs: 90_000, aiCost: 0.05, telCost: 0.01, transferStatus: "completed", interruptions: 2 });
 
     const html = await renderStats(env, TEST_BOT_ID);
-    expect(html).toContain("🎙️ Llamadas");
+    expect(html).toContain('id="stats-voz"');
     expect(html).toContain("1m 30s"); // duración promedio: (60+120+90)/3 = 90s
     expect(html).toContain("33%"); // 1 de 3 transferida
     expect(html).toContain("33%"); // 1 de 3 fallida (mismo número, calculado independiente)
@@ -103,6 +103,6 @@ describe("renderStats — integra duración/transferencia/fallidas/latencia de V
     await otherRepo.finalize(otherCallId, { durationMs: 60_000, estimatedAiCostUsd: 1, estimatedTelephonyCostUsd: 1 });
 
     const html = await renderStats(env, TEST_BOT_ID);
-    expect(html).not.toContain("🎙️ Llamadas");
+    expect(html).not.toContain('id="stats-voz"');
   });
 });

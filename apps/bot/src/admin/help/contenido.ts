@@ -623,8 +623,8 @@ export const GUIA: Seccion[] = [
           { tipo: "lista", items: [
             "**Horas ahorradas**: se calcula como mensajes atendidos × 2 minutos. Una aproximación honesta de lo que habría hecho una persona.",
             "**Costo por conversación** y **Costo por lead**: lo que gastas en IA dividido entre lo que produce.",
-            "**Funnel**: Conversaciones → Leads → Contactados → Vendidos. Solo es útil si actualizas el estado de tus leads.",
-            "**Horas pico**: un mapa de calor de cuándo te escriben. Sirve para saber cuándo tener a alguien disponible para los casos que el bot pasa a humano.",
+            "**Embudo de conversión**: Conversaciones → Leads → Contactados → Vendidos. Solo es útil si actualizas el estado de tus leads.",
+            "**Horas pico**: un mapa de calor de cuándo te escriben (en hora UTC). Sirve para saber cuándo tener a alguien disponible para los casos que el bot pasa a humano.",
             "**Por canal** y **Herramientas más usadas**: por dónde llega la gente y qué hace el bot con más frecuencia. Si hay llamadas, también duración promedio, tasa de transferencia y llamadas fallidas.",
           ] },
         ],
