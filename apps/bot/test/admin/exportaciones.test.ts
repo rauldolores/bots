@@ -96,7 +96,8 @@ describe("Conversaciones", () => {
     await m.append(conv.id, "owner", "Te confirmo yo.", { createdAt: 4000 });
 
     const t = await csv(`/conversations/${conv.id}/exportar?formato=csv`);
-    const lineas = t.trim().split("\r\n");
+    // Sin trim(): también se come la marca BOM (cuenta como espacio).
+    const lineas = t.replace(/\r\n$/, "").split("\r\n");
     expect(lineas[0]).toBe("\uFEFFFecha y hora,Quién,Mensaje");
     expect(lineas.slice(1).map((l) => l.split(",")[1])).toEqual(["Cliente", "Bot", "Tú (equipo)"]);
     expect(t).not.toContain("{interno}");
