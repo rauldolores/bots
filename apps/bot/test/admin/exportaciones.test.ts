@@ -37,10 +37,12 @@ beforeEach(async () => {
   } as unknown as Env;
 });
 
+// Se decodifica a mano con ignoreBOM: res.text() se come la marca BOM, que es
+// justo lo que hay que comprobar que va (sin ella Excel rompe los acentos).
 const csv = async (ruta: string) => {
   const res = await adminApp.request(ruta, { headers: AUTH }, env);
   expect(res.status).toBe(200);
-  return res.text();
+  return new TextDecoder("utf-8", { fatal: false, ignoreBOM: true }).decode(await res.arrayBuffer());
 };
 
 describe("Leads", () => {
