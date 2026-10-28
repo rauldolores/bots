@@ -45,7 +45,7 @@ describe("renderCosts — integra el costo estimado de Voice", () => {
   it("sin ninguna llamada, no rompe y no muestra la tarjeta de desglose de Voz", async () => {
     const html = await renderCosts(env, TEST_BOT_ID);
     expect(html).toContain("Llamadas");
-    expect(html).not.toContain("Llamadas telefónicas <span"); // la tarjeta de desglose solo aparece con datos
+    expect(html).not.toContain('id="costos-voz"'); // la tarjeta de desglose solo aparece con datos
   });
 
   it("con llamadas, suma el costo de IA + telefonía al total y a la tarjeta de Voz", async () => {
@@ -59,6 +59,8 @@ describe("renderCosts — integra el costo estimado de Voice", () => {
 
     const html = await renderCosts(env, TEST_BOT_ID);
     expect(html).toContain("2 llamadas");
+    expect(html).toContain('id="costos-voz"');
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
     // 0.07 USD de IA y 0.015 de telefonía, a 20 pesos por dólar.
     expect(html).toContain("1.40");
     expect(html).toContain("0.30");

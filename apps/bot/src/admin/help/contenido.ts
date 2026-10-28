@@ -637,12 +637,12 @@ export const GUIA: Seccion[] = [
         cuerpo: [
           { tipo: "p", texto: "Aquí NO está lo que le pagas a Nodia Agents (eso es tu plan): es lo que consumes en los proveedores con tus propias cuentas: la IA (solo si usas tu propia llave) y Twilio (mensajes y llamadas). La IA incluida y los minutos de voz del plan ya van en tu plan. Todo convertido a pesos." },
           { tipo: "lista", items: [
-            "**🧠 IA**: exacto, calculado con los tokens reales de cada respuesta.",
-            "**💬 WhatsApp / Twilio**: real, tomado de tu factura de Twilio.",
-            "**🎙️ Llamadas**: estimado (minutos × tarifa). El panel lo marca como estimado porque ElevenLabs cobra por minuto y la tarifa puede variar.",
-            "**Presupuesto mensual de IA**: escribe un **Límite mensual en US$** y presiona **Guardar**. Al alcanzarlo, el bot no se apaga: baja automáticamente al modelo económico. También ves la proyección «Al ritmo actual…».",
+            "**IA**: exacto, calculado con los tokens reales de cada respuesta.",
+            "**WhatsApp / Twilio**: real, tomado de tu factura de Twilio.",
+            "**Llamadas (estimado)**: estimado (minutos × tarifa). El panel lo marca como estimado porque ElevenLabs cobra por minuto y la tarifa puede variar.",
+            "**Presupuesto mensual de IA**: escribe un **Límite mensual (US$)** y presiona **Guardar**. Al alcanzarlo, el bot no se apaga: baja automáticamente al modelo económico. También ves la proyección «Al ritmo actual…».",
           ] },
-          { tipo: "nota", texto: "Tip: ajusta el tipo de cambio con **Fijarlo a mano** si el automático no coincide con el de tu banco." },
+          { tipo: "nota", texto: "Tip: escribe el **Tipo de cambio a mano** si el automático no coincide con el de tu banco." },
         ],
       },
       {

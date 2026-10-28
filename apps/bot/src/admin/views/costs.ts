@@ -15,6 +15,7 @@
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { layout } from "./layout";
+import { alertRow, heroTag, MICRO_LABEL, pageHero, sectionCard, statCard, statGrid, statusPill } from "./ui";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { costoPorConversacion, type Concepto } from "../../billing/costoPorConversacion";
 import { fetchTwilioUsage } from "../twilioUsage";
@@ -108,47 +109,43 @@ export async function renderCosts(env: Env, botId: string, saved = false, visibl
   const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
   const projected = dayOfMonth > 0 ? (monthToDate / dayOfMonth) * daysInMonth : 0;
   const pct = hasBudget ? Math.min(100, Math.round((monthToDate / budget) * 100)) : 0;
-  const barColor = pct >= 100 ? "var(--bad)" : pct >= 80 ? "var(--accent-2)" : "var(--accent)";
+  const barColor = pct >= 100 ? "var(--bad)" : pct >= 80 ? "var(--warn)" : "var(--accent)";
 
-  const budgetCard = `
-    <div class="card bg-panel border border-line p-[18px]">
-      ${saved ? `<div class="border border-ok text-ok px-3 py-2 text-[12.5px] mb-3" style="background:var(--panel2)">✓ Presupuesto guardado.</div>` : ""}
-      <div class="flex flex-wrap items-center gap-2 mb-2">
-        <span class="font-display font-semibold text-[14px]">🎯 Presupuesto mensual de IA</span>
-        ${hasBudget && pct >= 100 ? `<span class="text-[9px] px-1.5 py-0.5 border border-bad text-bad">límite alcanzado — el bot bajó al modelo económico</span>` : ""}
-      </div>
-      ${hasBudget
-        ? `
-      <div class="flex items-baseline justify-between text-[12.5px] mb-2">
-        <span class="text-muted">Gastado este mes: <b class="text-cream">${money(monthToDate)}</b> de ${money(budget)}</span>
-        <span class="text-[11px] font-semibold" style="color:${barColor}">${pct}%</span>
-      </div>
-      <div style="height:12px;background:var(--panel2);border:1px solid var(--line);overflow:hidden">
-        <div style="width:${pct}%;height:100%;background:${barColor}"></div>
-      </div>`
-        : `<p class="text-[12.5px] text-muted mb-2 leading-relaxed">Sin límite configurado. Ponle un tope: al alcanzarlo, el bot sigue contestando pero solo con el modelo económico — nunca se queda callado ni te lleva sorpresas.</p>`}
-      <p class="text-[11px] text-dim mt-2.5 mb-[14px]">Al ritmo actual, terminarás el mes en <b class="text-muted">${money(projected)}</b> de IA.</p>
-      <form id="cfg-costos" method="POST" action="/admin/costs/budget" class="flex items-center gap-2 flex-wrap">
-        <span class="text-[12px] text-muted">Límite mensual: US$</span>
-        <input type="number" name="monthly_budget" min="0" step="0.5" value="${hasBudget ? budget : ""}" placeholder="25"
-               style="width:90px;background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:8px 10px;font-size:12.5px;outline:none">
-        <span class="text-[10.5px] text-dim">${
-          hasBudget ? `dólares (≈ ${money(budget)} MXN)` : "dólares"
-        } · deja vacío para quitar el límite</span>
-        <button class="bigbtn font-display font-bold text-[12px] cursor-pointer"
-          style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:8px 16px">Guardar</button>
-      </form>
-      <div class="mt-3 pt-3 flex items-center gap-2 flex-wrap" style="border-top:1px solid var(--linelit)">
-        <span class="text-[11px] text-dim">${esc(explicarTipoCambio(tc))}</span>
-        <label class="text-[11px] text-muted flex items-center gap-1.5">
-          Fijarlo a mano:
-          <input type="number" name="fx_usd_mxn" form="cfg-costos" min="5" max="60" step="0.01"
-                 value="${tc.origen === "manual" ? tc.valor : ""}" placeholder="${tc.valor.toFixed(2)}"
-                 style="width:78px;background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:5px 8px;font-size:11.5px;outline:none">
+  const budgetCard = sectionCard({
+    icon: "target",
+    title: "Presupuesto mensual de IA",
+    subtitle: hasBudget
+      ? pct >= 100
+        ? statusPill("Límite alcanzado — el bot bajó al modelo económico", "var(--bad)")
+        : statusPill(`${pct}% usado`, pct >= 80 ? "var(--warn)" : "var(--ok)")
+      : statusPill("Sin límite", "var(--dim)"),
+    body: `<div class="co-body">
+      ${
+        hasBudget
+          ? `<div style="display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap">
+                <span class="co-help" style="color:var(--muted)">Gastado este mes: <b style="color:var(--cream)">${money(monthToDate)}</b> de ${money(budget)}</span>
+                <span style="font-size:13px;font-weight:800;color:var(--cream)">${pct}%</span>
+              </div>
+              <div class="co-meter" role="progressbar" aria-label="Presupuesto usado" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><div style="width:${pct}%;background:${barColor}"></div></div>
+            </div>`
+          : `<p class="co-help" style="color:var(--muted)">Sin límite configurado. Ponle un tope: al alcanzarlo, el bot sigue contestando pero solo con el modelo económico — nunca se queda callado ni te lleva sorpresas.</p>`
+      }
+      <p class="co-help">Al ritmo actual, terminarás el mes en <b style="color:var(--cream)">${money(projected)}</b> de IA.</p>
+      <form id="cfg-costos" method="POST" action="/admin/costs/budget" class="co-form">
+        <label class="co-label"><span>Límite mensual (US$)</span>
+          <input type="number" name="monthly_budget" min="0" step="0.5" value="${hasBudget ? budget : ""}" placeholder="25" class="co-field" style="width:140px" aria-describedby="budget-help">
         </label>
-        <span class="text-[10.5px] text-dim">déjalo vacío para que se actualice solo</span>
-      </div>
-    </div>`;
+        <label class="co-label"><span>Tipo de cambio a mano</span>
+          <input type="number" name="fx_usd_mxn" min="5" max="60" step="0.01"
+                 value="${tc.origen === "manual" ? tc.valor : ""}" placeholder="${tc.valor.toFixed(2)}" class="co-field" style="width:140px" aria-describedby="fx-help">
+        </label>
+        <button class="co-btn"><i data-lucide="save" width="15" height="15"></i>Guardar</button>
+      </form>
+      <p id="budget-help" class="co-help">${hasBudget ? `En dólares (≈ ${money(budget)} MXN). ` : "En dólares. "}Deja el límite vacío para quitarlo.</p>
+      <p id="fx-help" class="co-help">${esc(explicarTipoCambio(tc))} Deja el tipo de cambio vacío para que se actualice solo.</p>
+    </div>`,
+  });
 
   // --- Voz: estimado, NO exacto — ver channels/voice/callCost.ts.
   // ElevenLabs (el único proveedor de voz) cobra POR MINUTO, no por token, así
@@ -183,30 +180,25 @@ export async function renderCosts(env: Env, botId: string, saved = false, visibl
   const twMonth = tw.available ? tw.total : 0;
   const totalMonth = iaMonth + twMonth + voiceMonth;
 
-  // --- Cards resumen ---------------------------------------------------------
-  const cards = `
-    <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
-      <div class="card bg-panel border border-line border-l-[3px] border-l-accent p-5">
-        <div class="text-muted text-[11px]">Total este mes</div>
-        <div class="font-display font-bold text-[30px] mt-1 leading-none">${money(totalMonth)} <span class="text-[13px] text-dim font-normal">MXN</span></div>
-        <div class="text-[10px] text-dim mt-1">IA + Twilio + Voz</div>
-      </div>
-      <div class="card bg-panel border border-line p-5">
-        <div class="text-muted text-[11px]">🧠 IA</div>
-        <div class="font-display font-bold text-[24px] mt-1.5 leading-none">${money(iaMonth)}</div>
-        <div class="text-[10px] text-dim mt-1">hoy ${money4(iaToday)}</div>
-      </div>
-      <div class="card bg-panel border border-line p-5">
-        <div class="text-muted text-[11px]">💬 WhatsApp / Twilio</div>
-        <div class="font-display font-bold text-[24px] mt-1.5 leading-none">${tw.available ? money(twMonth) : "—"}</div>
-        <div class="text-[10px] text-dim mt-1">${tw.available ? `${tw.waConversations} conversaciones` : (tw.error ?? "no disponible")}</div>
-      </div>
-      <div class="card bg-panel border border-line p-5">
-        <div class="text-muted text-[11px]">🎙️ Llamadas <span class="text-dim">(estimado)</span></div>
-        <div class="font-display font-bold text-[24px] mt-1.5 leading-none">${money(voiceMonth)}</div>
-        <div class="text-[10px] text-dim mt-1">${voiceCallsMonth} llamada${voiceCallsMonth === 1 ? "" : "s"}</div>
-      </div>
-    </div>`;
+  // --- Tarjetas resumen ------------------------------------------------------
+  const cards = statGrid([
+    statCard({ icon: "wallet", tone: "accent", label: "Total este mes", value: `${money(totalMonth)} MXN`, note: "IA + Twilio + Voz" }),
+    statCard({ icon: "brain", tone: "neutral", label: "IA", value: money(iaMonth), note: `hoy ${money4(iaToday)}` }),
+    statCard({
+      icon: "message-circle",
+      tone: "neutral",
+      label: "WhatsApp / Twilio",
+      value: tw.available ? money(twMonth) : "—",
+      note: tw.available ? `${tw.waConversations} conversaciones` : tw.error ?? "no disponible",
+    }),
+    statCard({
+      icon: "phone-call",
+      tone: "neutral",
+      label: "Llamadas (estimado)",
+      value: money(voiceMonth),
+      note: `${voiceCallsMonth} llamada${voiceCallsMonth === 1 ? "" : "s"}`,
+    }),
+  ]);
 
   // --- Costo real por conversación (30 días) --------------------------------
   const cpc = await costoPorConversacion(db, botId, thirtyDays);
@@ -221,159 +213,217 @@ export async function renderCosts(env: Env, botId: string, saved = false, visibl
     .map(([k, nombre, detalle]) => {
       const pct = totalDesglose > 0 ? Math.round((cpc.desglose[k] / totalDesglose) * 100) : 0;
       const porConv = cpc.conversaciones ? cpc.desglose[k] / cpc.conversaciones : 0;
-      return `<tr style="border-top:1px solid var(--line)">
-        <td class="py-2 pr-2"><div class="text-[12.5px] text-cream">${esc(nombre)}</div><div class="text-[10.5px] text-dim">${esc(detalle)}</div></td>
-        <td class="text-right text-[12px] text-muted" style="font-variant-numeric:tabular-nums">${pct}%</td>
-        <td class="text-right font-semibold text-cream" style="font-variant-numeric:tabular-nums">${money4(porConv)}</td>
+      return `<tr>
+        <td><div style="font-weight:700;color:var(--cream)">${esc(nombre)}</div><div class="co-help">${esc(detalle)}</div></td>
+        <td class="num" style="color:var(--muted)">${pct}%</td>
+        <td class="num strong">${money4(porConv)}</td>
       </tr>`;
     })
     .join("");
   const filasCaras = cpc.masCaras
-    .map((c) => `<tr style="border-top:1px solid var(--line)">
-        <td class="py-2 pr-2 text-[12px]"><a href="/admin/conversations/${encodeURIComponent(c.id)}" class="text-cream" style="text-decoration:underline;text-underline-offset:2px">${esc(c.nombre || "Sin nombre")}</a> <span class="text-dim text-[10.5px]">· ${esc(c.canal)}</span></td>
-        <td class="text-right font-semibold text-cream" style="font-variant-numeric:tabular-nums">${money4(c.usd)}</td>
+    .map((c) => `<tr>
+        <td><a href="/admin/conversations/${encodeURIComponent(c.id)}" class="co-link">${esc(c.nombre || "Sin nombre")}</a> <span class="co-help" style="display:inline">· ${esc(c.canal)}</span></td>
+        <td class="num strong">${money4(c.usd)}</td>
       </tr>`)
     .join("");
-  const conversacionCard = `
-    <div class="card bg-panel border border-line p-[18px]">
-      <div class="font-display font-semibold text-[14px] mb-1">💬 Costo real por conversación <span class="text-[10px] text-dim font-normal">(30 días · medido)</span></div>
-      ${
-        cpc.conversaciones === 0
-          ? `<p class="text-[12.5px] text-dim m-0 mt-2">Todavía no hay conversaciones de clientes en los últimos 30 días.</p>`
-          : `
-      <div class="flex flex-wrap items-end gap-x-8 gap-y-2 mt-2 mb-3">
-        <div><div class="text-[10.5px] text-dim">Promedio</div><div class="font-display font-bold text-[24px] leading-none" style="font-variant-numeric:tabular-nums">${money4(cpc.promedioUsd)}</div></div>
-        <div><div class="text-[10.5px] text-dim">La típica (mediana)</div><div class="font-display font-bold text-[18px] leading-none text-muted" style="font-variant-numeric:tabular-nums">${money4(cpc.medianaUsd)}</div></div>
-        <div><div class="text-[10.5px] text-dim">Conversaciones</div><div class="font-display font-bold text-[18px] leading-none text-muted">${cpc.conversaciones}</div></div>
-      </div>
-      <table class="w-full" style="border-collapse:collapse">
-        <thead><tr class="text-[9.5px] tracking-[.1em] uppercase text-dim text-left"><th class="font-normal pb-2">En qué se va</th><th class="font-normal text-right pb-2">Del total</th><th class="font-normal text-right pb-2">Por conversación</th></tr></thead>
-        <tbody>${filasConcepto}</tbody>
-      </table>
-      ${
-        filasCaras
-          ? `<div class="text-[10.5px] text-dim uppercase tracking-[.1em] mt-4 mb-1">Las más caras</div>
-      <table class="w-full" style="border-collapse:collapse"><tbody>${filasCaras}</tbody></table>`
-          : ""
-      }
-      <p class="text-[10.5px] text-dim mt-3 mb-0 leading-relaxed">Suma lo que se gastó en cada conversación, incluido lo que se piensa después de contestar.
-        Cuando el promedio queda muy arriba de la mediana, unas pocas conversaciones largas están cargando el número: revisa las más caras.
-        ${cpc.fueraDeConversacionesUsd > 0 ? `Aparte, ${money4(cpc.fueraDeConversacionesUsd)} fueron de IA que no es de ninguna conversación de cliente (sandbox, sugerencias del panel, mejoras, habilidades).` : ""}</p>`
-      }
-    </div>`;
+  const conversacionCard = sectionCard({
+    icon: "receipt",
+    title: "Costo real por conversación",
+    subtitle: "30 días · medido",
+    body:
+      cpc.conversaciones === 0
+        ? `<p class="co-empty">Todavía no hay conversaciones de clientes en los últimos 30 días.</p>`
+        : `<div class="co-body">
+        <div class="co-kpis">
+          <div><span class="co-kpi-l">Promedio</span><span class="co-kpi-v">${money4(cpc.promedioUsd)}</span></div>
+          <div><span class="co-kpi-l">La típica (mediana)</span><span class="co-kpi-v" style="color:var(--muted)">${money4(cpc.medianaUsd)}</span></div>
+          <div><span class="co-kpi-l">Conversaciones</span><span class="co-kpi-v" style="color:var(--muted)">${cpc.conversaciones}</span></div>
+        </div>
+        <div style="overflow-x:auto"><table class="co-table" style="min-width:420px">
+          <thead><tr><th>En qué se va</th><th class="num">Del total</th><th class="num">Por conversación</th></tr></thead>
+          <tbody>${filasConcepto}</tbody>
+        </table></div>
+        ${
+          filasCaras
+            ? `<div style="display:flex;flex-direction:column;gap:6px"><span class="co-kpi-l">Las más caras</span>
+          <table class="co-table"><tbody>${filasCaras}</tbody></table></div>`
+            : ""
+        }
+        <p class="co-help">Suma lo que se gastó en cada conversación, incluido lo que se piensa después de contestar.
+          Cuando el promedio queda muy arriba de la mediana, unas pocas conversaciones largas están cargando el número: revisa las más caras.
+          ${cpc.fueraDeConversacionesUsd > 0 ? `Aparte, ${money4(cpc.fueraDeConversacionesUsd)} fueron de IA que no es de ninguna conversación de cliente (sandbox, sugerencias del panel, mejoras, habilidades).` : ""}</p>
+      </div>`,
+  });
 
   // --- Desglose IA por modelo ------------------------------------------------
-  const modelRows = [...byModel.entries()]
-    .sort((a, b) => b[1].cost - a[1].cost)
-    .map(([model, m]) => `
-      <tr style="border-top:1px solid var(--line)">
-        <td class="py-2 pr-2 text-[11px] text-accent2">${esc(model)}</td>
-        <td class="text-right text-cream">${m.msgs}</td>
-        <td class="text-right text-dim text-[11px]">${(m.input / 1000).toFixed(0)}k / ${(m.output / 1000).toFixed(0)}k</td>
-        <td class="text-right font-semibold text-cream">${money4(m.cost)}</td>
-      </tr>`).join("") ||
-    `<tr><td colspan="4" class="py-3 text-dim text-center text-[12.5px]">Aún no hay uso de IA.</td></tr>`;
+  const modelRows =
+    [...byModel.entries()]
+      .sort((a, b) => b[1].cost - a[1].cost)
+      .map(([model, m]) => `
+      <tr>
+        <td class="co-mono">${esc(model)}</td>
+        <td class="num">${m.msgs}</td>
+        <td class="num" style="color:var(--dim)">${(m.input / 1000).toFixed(0)}k / ${(m.output / 1000).toFixed(0)}k</td>
+        <td class="num strong">${money4(m.cost)}</td>
+      </tr>`)
+      .join("") || `<tr><td colspan="4" class="co-empty-cell">Aún no hay uso de IA.</td></tr>`;
 
-  const iaCard = `
-    <div class="card bg-panel border border-line p-[18px]">
-      <div class="font-display font-semibold text-[14px] mb-1">🧠 IA por modelo <span class="text-[10px] text-dim font-normal">(30 días · exacto)</span></div>
-      <table class="w-full text-[12px] mt-2">
-        <thead><tr class="text-[9.5px] tracking-[.1em] uppercase text-dim text-left"><th class="font-normal pb-2">Modelo</th><th class="font-normal text-right pb-2">Msgs</th><th class="font-normal text-right pb-2">Tokens in/out</th><th class="font-normal text-right pb-2">Costo</th></tr></thead>
+  const iaCard = sectionCard({
+    icon: "brain",
+    title: "IA por modelo",
+    subtitle: "30 días · exacto",
+    body: `<div style="overflow-x:auto"><table class="co-table edge" style="min-width:400px">
+        <thead><tr><th>Modelo</th><th class="num">Msgs</th><th class="num">Tokens in/out</th><th class="num">Costo</th></tr></thead>
         <tbody>${modelRows}</tbody>
-      </table>
-    </div>`;
+      </table></div>`,
+  });
 
   // --- Desglose Twilio (real) ------------------------------------------------
   const twRows = tw.available
-    ? (tw.categories.length
-        ? tw.categories.map((c) => `
-          <tr style="border-top:1px solid var(--line)">
-            <td class="py-2 pr-2 text-cream">${esc(c.label)}</td>
-            <td class="text-right text-dim text-[11px]">${esc(String(c.usage))} ${esc(c.unit)}</td>
-            <td class="text-right font-semibold text-cream">${money4(c.price)}</td>
-          </tr>`).join("")
-        : `<tr><td colspan="3" class="py-3 text-dim text-center text-[12.5px]">Sin cargos este mes.</td></tr>`)
-    : `<tr><td colspan="3" class="py-3 text-dim text-center text-[12.5px]">${esc(tw.error ?? "Twilio no disponible")}</td></tr>`;
+    ? tw.categories.length
+      ? tw.categories
+          .map((c) => `
+          <tr>
+            <td>${esc(c.label)}</td>
+            <td class="num" style="color:var(--dim)">${esc(String(c.usage))} ${esc(c.unit)}</td>
+            <td class="num strong">${money4(c.price)}</td>
+          </tr>`)
+          .join("")
+      : `<tr><td colspan="3" class="co-empty-cell">Sin cargos este mes.</td></tr>`
+    : `<tr><td colspan="3" class="co-empty-cell">${esc(tw.error ?? "Twilio no disponible")}</td></tr>`;
 
-  const twSubtotal = tw.available
-    ? `<div class="mt-3 text-[12px] text-muted flex justify-between" style="border-top:1px solid var(--linelit);padding-top:10px">
-         <span>Mensajería ${money4(tw.messagingTotal)} · Números ${money4(tw.numbersTotal)}</span>
-         <span class="font-bold text-cream">${money(twMonth)}</span>
-       </div>`
-    : "";
-
-  const twCard = `
-    <div class="card bg-panel border border-line p-[18px]">
-      <div class="font-display font-semibold text-[14px] mb-1">💬 Twilio este mes <span class="text-[10px] text-dim font-normal">— real, de tu factura de Twilio</span></div>
-      <table class="w-full text-[12px] mt-2">
-        <thead><tr class="text-[9.5px] tracking-[.1em] uppercase text-dim text-left"><th class="font-normal pb-2">Concepto</th><th class="font-normal text-right pb-2">Uso</th><th class="font-normal text-right pb-2">Costo</th></tr></thead>
+  const twCard = sectionCard({
+    icon: "message-circle",
+    title: "Twilio este mes",
+    subtitle: "Real, de tu factura de Twilio",
+    body: `<div style="overflow-x:auto"><table class="co-table edge" style="min-width:340px">
+        <thead><tr><th>Concepto</th><th class="num">Uso</th><th class="num">Costo</th></tr></thead>
         <tbody>${twRows}</tbody>
-      </table>
-      ${twSubtotal}
-    </div>`;
+      </table></div>`,
+    footer: tw.available
+      ? `<span class="co-help" style="color:var(--muted)">Mensajería ${money4(tw.messagingTotal)} · Números ${money4(tw.numbersTotal)}</span>
+         <span style="font-size:14px;font-weight:900;color:var(--cream)">${money(twMonth)}</span>`
+      : undefined,
+  });
 
   // --- Desglose Voz (F7 fase 10, estimado) ------------------------------------
   const voiceCard =
     voiceCallsMonth > 0
-      ? `
-    <div class="card bg-panel border border-line p-[18px]">
-      <div class="font-display font-semibold text-[14px] mb-1">🎙️ Llamadas telefónicas <span class="text-[10px] text-dim font-normal">(30 días · ESTIMADO, no tu factura real)</span></div>
-      <table class="w-full text-[12px] mt-2">
-        <thead><tr class="text-[9.5px] tracking-[.1em] uppercase text-dim text-left"><th class="font-normal pb-2">Concepto</th><th class="font-normal text-right pb-2">Costo</th></tr></thead>
-        <tbody>
-          <tr style="border-top:1px solid var(--line)"><td class="py-2 pr-2 text-cream">🧠 IA (ElevenLabs, minutos × tarifa)</td><td class="text-right font-semibold text-cream">${money4(voiceAiMonth)}</td></tr>
-          <tr style="border-top:1px solid var(--line)"><td class="py-2 pr-2 text-cream">📞 Telefonía (minutos × tarifa)</td><td class="text-right font-semibold text-cream">${money4(voiceTelMonth)}</td></tr>
-        </tbody>
-      </table>
-      <p class="text-[10.5px] text-dim mt-2.5">Ajusta la tarifa de telefonía en /admin/telefono si la real de tu operador es distinta.</p>
-    </div>`
+      ? `<div id="costos-voz">${sectionCard({
+          icon: "phone-call",
+          title: "Llamadas telefónicas",
+          subtitle: "30 días · ESTIMADO, no tu factura real",
+          body: `<table class="co-table edge">
+            <thead><tr><th>Concepto</th><th class="num">Costo</th></tr></thead>
+            <tbody>
+              <tr><td>IA (ElevenLabs, minutos × tarifa)</td><td class="num strong">${money4(voiceAiMonth)}</td></tr>
+              <tr><td>Telefonía (minutos × tarifa)</td><td class="num strong">${money4(voiceTelMonth)}</td></tr>
+            </tbody>
+          </table>
+          <p class="co-help" style="padding:12px 24px 18px">Ajusta la tarifa de telefonía en /admin/telefono si la real de tu operador es distinta.</p>`,
+        })}</div>`
       : "";
 
   // --- Costo IA por día ------------------------------------------------------
-  const dayRows = [...byDay.entries()]
-    .sort((a, b) => (a[0] < b[0] ? 1 : -1))
-    .slice(0, 30)
-    .map(([day, cost]) => `<tr style="border-top:1px solid var(--line)"><td class="py-1.5 text-muted">${esc(day)}</td><td class="text-right text-cream">${money4(cost)}</td></tr>`)
-    .join("") || `<tr><td colspan="2" class="py-3 text-dim text-center text-[12.5px]">Sin datos.</td></tr>`;
+  const dayRows =
+    [...byDay.entries()]
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .slice(0, 30)
+      .map(([day, cost]) => `<tr><td style="color:var(--muted)">${esc(day)}</td><td class="num strong">${money4(cost)}</td></tr>`)
+      .join("") || `<tr><td colspan="2" class="co-empty-cell">Sin datos.</td></tr>`;
 
-  const dayCard = `
-    <div class="card bg-panel border border-line p-[18px]">
-      <div class="font-display font-semibold text-[14px] mb-1">📅 Costo de IA por día</div>
-      <table class="w-full text-[12px] mt-2">
-        <thead><tr class="text-[9.5px] tracking-[.1em] uppercase text-dim text-left"><th class="font-normal pb-2">Día</th><th class="font-normal text-right pb-2">Costo IA</th></tr></thead>
+  const dayCard = sectionCard({
+    icon: "calendar-days",
+    title: "Costo de IA por día",
+    subtitle: "Últimos 30 días",
+    body: `<div class="co-scroll"><table class="co-table edge">
+        <thead><tr><th>Día</th><th class="num">Costo IA</th></tr></thead>
         <tbody>${dayRows}</tbody>
-      </table>
-    </div>`;
+      </table></div>`,
+  });
 
-  const note = `
-    <p class="text-[10.5px] text-dim leading-relaxed">
-      El costo de <b class="text-muted">IA</b> es exacto (calculado desde los tokens de cada mensaje).
-      El de <b class="text-muted">Twilio</b> viene de la Usage Records API de Twilio: es lo que tu cuenta
-      realmente gastó (incluye renta de números). Los precios de Meta por conversación de
-      WhatsApp aparecen dentro de las categorías de Twilio. El de <b class="text-muted">Llamadas</b>
-      es un ESTIMADO completo: ElevenLabs cobra por minuto, así que tanto la IA como la telefonía
-      salen de duración × una tarifa configurable — ninguna de las dos es tu factura real.
-    </p>
-    <p class="text-[10.5px] text-dim leading-relaxed">
-      Todas las cifras están en <b class="text-muted">pesos mexicanos</b>. Tus proveedores
-      (Anthropic, OpenAI, Twilio) facturan en dólares, así que esto es una conversión —
-      ${esc(explicarTipoCambio(tc))} Lo que termines pagando puede variar un poco según
-      el tipo de cambio que aplique tu banco o tu tarjeta el día del cargo.
-    </p>`;
+  const note = sectionCard({
+    icon: "info",
+    title: "De dónde salen estas cifras",
+    body: `<div class="co-body">
+      <p class="co-help" style="color:var(--muted)">
+        El costo de <b style="color:var(--cream)">IA</b> es exacto (calculado desde los tokens de cada mensaje).
+        El de <b style="color:var(--cream)">Twilio</b> viene de la Usage Records API de Twilio: es lo que tu cuenta
+        realmente gastó (incluye renta de números). Los precios de Meta por conversación de
+        WhatsApp aparecen dentro de las categorías de Twilio. El de <b style="color:var(--cream)">Llamadas</b>
+        es un ESTIMADO completo: ElevenLabs cobra por minuto, así que tanto la IA como la telefonía
+        salen de duración × una tarifa configurable — ninguna de las dos es tu factura real.
+      </p>
+      <p class="co-help" style="color:var(--muted)">
+        Todas las cifras están en <b style="color:var(--cream)">pesos mexicanos</b>. Tus proveedores
+        (Anthropic, OpenAI, Twilio) facturan en dólares, así que esto es una conversión —
+        ${esc(explicarTipoCambio(tc))} Lo que termines pagando puede variar un poco según
+        el tipo de cambio que aplique tu banco o tu tarjeta el día del cargo.
+      </p>
+    </div>`,
+  });
 
-  const body = `
-    <div class="flex flex-col gap-4" style="max-width:1080px">
-      ${cards}
+  const hero = pageHero({
+    eyebrow: "Análisis",
+    title: "Costos",
+    description: "Cuánto cuesta operar tu bot este mes, en pesos mexicanos: la IA, WhatsApp/Twilio y las llamadas, y cuánto sale cada conversación.",
+    tags: `${heroTag(`1 USD = $${tc.valor.toFixed(2)} MXN`, "#3fb8c4")}${
+      hasBudget && pct >= 100 ? heroTag("Límite de IA alcanzado", "#f0a88a") : ""
+    }`,
+  });
+
+  const body = `${CO_CSS}
+    ${hero}
+    ${saved ? `<div style="margin-bottom:24px">${alertRow({ title: "Presupuesto guardado", detail: "El tope y el tipo de cambio ya se aplican.", dot: "var(--ok)", attrs: 'role="status"' })}</div>` : ""}
+    ${cards}
+    <div style="display:flex;flex-direction:column;gap:24px">
       ${conversacionCard}
       ${budgetCard}
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-[14px]">
+      <div class="co-split">
         ${iaCard}
         ${twCard}
         ${voiceCard}
+        ${dayCard}
       </div>
-      ${dayCard}
       ${note}
     </div>`;
 
-  return layout({ title: "Costos", activeTab: "costs", body, visibleNavIds });
+  return layout({ title: "Costos", activeTab: "costs", body, visibleNavIds, hero: true });
 }
+
+const CO_CSS = `<style>
+  .co-body{padding:20px 24px;display:flex;flex-direction:column;gap:14px}
+  .co-help{margin:0;font-size:12px;font-weight:500;line-height:1.55;color:var(--dim)}
+  .co-empty{margin:0;padding:32px 24px;text-align:center;font-size:12.5px;font-weight:500;color:var(--dim)}
+  .co-meter{height:10px;border-radius:999px;background:var(--panel2);overflow:hidden}
+  .co-meter > div{height:100%;border-radius:999px}
+  .co-form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px}
+  .co-label{display:flex;flex-direction:column;gap:6px}
+  .co-label>span{${MICRO_LABEL}}
+  .co-field{height:40px;padding:0 12px;border:1px solid var(--linelit);background:var(--panel);color:var(--cream);font-size:13px;font-family:inherit}
+  .co-btn{height:40px;padding:0 16px;border-radius:12px;border:0;background:var(--accent);color:var(--cream);font-size:13px;font-weight:800;font-family:inherit;display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+  .co-btn:hover{background:var(--accent-hover)}
+  .co-kpis{display:flex;flex-wrap:wrap;gap:12px 40px}
+  .co-kpis > div{display:flex;flex-direction:column;gap:4px}
+  .co-kpi-l{${MICRO_LABEL}}
+  .co-kpi-v{font-size:24px;font-weight:900;letter-spacing:-.03em;color:var(--cream);font-variant-numeric:tabular-nums}
+  .co-table{width:100%;border-collapse:collapse;font-size:13px;font-weight:500;color:var(--cream)}
+  .co-table th{${MICRO_LABEL};text-align:left;padding:0 0 10px}
+  .co-table td{padding:10px 0;border-top:1px solid var(--line);vertical-align:top}
+  .co-table .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;padding-left:12px}
+  .co-table .strong{font-weight:800}
+  .co-table.edge th{padding:14px 24px 10px}
+  .co-table.edge td{padding:11px 24px}
+  .co-table.edge .num{padding-left:12px}
+  .co-empty-cell{text-align:center;color:var(--dim)!important;padding:24px!important}
+  .co-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--accent-2)}
+  .co-link{color:var(--cream);font-weight:700;text-decoration:underline;text-underline-offset:2px}
+  .co-scroll{max-height:360px;overflow-y:auto}
+  .co-split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:start}
+  @media (max-width:1000px){ .co-split{grid-template-columns:minmax(0,1fr)} }
+  @media (max-width:640px){
+    .co-body{padding:16px}
+    .co-table.edge th{padding:12px 16px 8px}
+    .co-table.edge td{padding:10px 16px}
+  }
+</style>`;
