@@ -19,6 +19,20 @@ export interface Novedad {
 export const NOVEDADES: Novedad[] = [
   {
     fecha: "2026-10-27",
+    titulo: "La píldora de arriba ya dice cómo está tu bot",
+    texto:
+      "«Bot en línea» ahora es de verdad: si tu bot está en pausa, fallando, con mensajes esperando, sin cupo en tu plan o con un conector desconectado, la píldora de arriba a la derecha te lo dice. Dale clic para ver qué pasa y llegar a donde se arregla.",
+    tipo: "Nuevo",
+  },
+  {
+    fecha: "2026-10-27",
+    titulo: "Avisos más rápidos y seguimientos durante el día",
+    texto:
+      "Si tu bot empieza a fallar, ahora te avisamos en minutos (antes solo se revisaba una vez al día). Los mensajes de seguimiento a tus clientes ahora salen a lo largo del día, en vez de todos de noche. Y al poner tu bot en pausa ya tampoco contesta llamadas.",
+    tipo: "Corrección",
+  },
+  {
+    fecha: "2026-10-27",
     titulo: "Te avisamos si algo de la plataforma falla",
     texto:
       "Revisamos cada 5 minutos los servicios de los que depende tu bot (WhatsApp, Telegram, la IA, el correo, las llamadas…). Si alguno falla, verás un aviso arriba del panel mientras lo resolvemos, y en Ayuda → Estado del servicio puedes ver cómo está cada uno y lo que pasó en los últimos 30 días.",

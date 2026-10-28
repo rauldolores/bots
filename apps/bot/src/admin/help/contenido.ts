@@ -686,7 +686,7 @@ export const FAQ: Pregunta[] = [
   ] },
   { id: "faq-no-responde", categoria: "El bot y sus respuestas", pregunta: "El bot no responde. ¿Qué reviso?", respuesta: [
     { tipo: "pasos", items: [
-      "En [Resumen](/admin/overview), ¿la píldora de arriba dice «Bot en línea»? Y en Configuración → Personalidad, ¿el **Estado** es Activo (no En pausa)?",
+      "Arriba a la derecha, ¿la píldora dice «Bot en línea»? Si dice «Bot en pausa» o «Bot con problemas», dale clic: te dice qué pasa y te lleva a la pantalla donde se arregla. La pausa se quita en [Flujo](/admin/agente).",
       "¿Esa conversación está pausada? Si alguien de tu equipo respondió desde el panel o desde el teléfono, el bot se pausa 1 hora en esa conversación. En Conversaciones verás «⏸ bot pausado»; usa **Devolver al bot**.",
       "¿El canal sigue conectado? En Conexiones debe decir **● CONECTADO**. Con Twilio y Meta, revisa que el webhook siga pegado en su sitio.",
       "¿La llave de IA funciona? Configuración → Modelo de IA → **⚡ Probar mi configuración**. Si el proveedor se quedó sin saldo, el bot no puede pensar.",

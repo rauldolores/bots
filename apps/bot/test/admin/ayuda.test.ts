@@ -175,6 +175,22 @@ describe("estado del servicio en Ayuda", () => {
   });
 });
 
+describe("GET /admin/salud", () => {
+  it("da el estado del bot elegido para la píldora de la cabecera", async () => {
+    const res = await adminApp.request("/salud", { headers: AUTH }, env);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { estado: string; hallazgos: unknown[] };
+    expect(["EN_LINEA", "AVISO", "EN_PAUSA", "PROBLEMAS"]).toContain(json.estado);
+    expect(Array.isArray(json.hallazgos)).toBe(true);
+  });
+
+  it("la cabecera ya no afirma «Bot en línea» de entrada: lo dice cuando lo sabe", async () => {
+    const html = await (await adminApp.request("/ayuda", { headers: AUTH }, env)).text();
+    expect(html).toContain('id="nb-salud-btn"');
+    expect(html).toMatch(/id="nb-salud-txt"[^>]*>Tu bot</);
+  });
+});
+
 describe("POST /admin/ayuda/soporte", () => {
   const post = (fields: Record<string, string>) =>
     adminApp.request(

@@ -6,6 +6,7 @@
 // conectarlo (eso ya sí es Node-only, ver gateway.ts).
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
+import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
 import { BotsRepo } from "../../db/bots";
 import { BotChannelsRepo } from "../../db/botChannels";
 import { VoiceNumbersRepo } from "../../db/voiceNumbers";
@@ -79,7 +80,12 @@ export async function handleIncomingVoiceCall(request: Request, rawEnv: Env, bot
   }
   // F7 fase 7 — "tenant deshabilitado": un bot pausado no debe seguir
   // recibiendo llamadas nuevas, igual que ya no procesa mensajes de texto.
-  if (bot.paused) {
+  // "Pausado" es el ajuste de Flujo (bot_paused), el mismo que respeta el
+  // turno de texto: la columna bots.paused no la escribe nada, así que
+  // pausar desde el panel no detenía las llamadas. Se sigue leyendo junto
+  // por compatibilidad.
+  const pausado = bot.paused || (await new SettingsRepo(db, botId).get(SETTING_KEYS.botPaused)) === "1";
+  if (pausado) {
     logVoiceEvent("webhook_reject", { botId, reason: "tenant_paused" });
     return new Response("tenant disabled", { status: 404 });
   }

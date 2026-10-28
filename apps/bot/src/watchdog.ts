@@ -23,15 +23,21 @@ export interface WatchdogResult {
   alerted: boolean;
 }
 
+/**
+ * Respuestas fallidas ("Algo falló…") del bot en los últimos 30 minutos. La
+ * usa también la píldora de salud del panel (estado/salud.ts).
+ */
+export async function contarFallasRecientes(db: Db, botId: string, now: number): Promise<number> {
+  const row = await db.first<{ n: number }>(
+    "SELECT COUNT(*)::int as n FROM messages WHERE bot_id = ? AND role = 'assistant' AND content LIKE 'Algo falló%' AND created_at > ?",
+    [botId, now - WINDOW_MS],
+  );
+  return row?.n ?? 0;
+}
+
 async function checkBotHealthFor(env: Env, botId: string, now: number): Promise<WatchdogResult> {
   const db = new Db(env.DB);
-  const failures =
-    (
-      await db.first<{ n: number }>(
-        "SELECT COUNT(*) as n FROM messages WHERE bot_id = ? AND role = 'assistant' AND content LIKE 'Algo falló%' AND created_at > ?",
-        [botId, now - WINDOW_MS],
-      )
-    )?.n ?? 0;
+  const failures = await contarFallasRecientes(db, botId, now);
 
   if (failures < ALERT_THRESHOLD) return { failures, alerted: false };
 

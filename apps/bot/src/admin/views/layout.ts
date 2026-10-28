@@ -393,6 +393,28 @@ const GLOBAL_STYLE = `
      que haya que descubrir); al pasar el mouse aclara para acusar recibo. */
   #sb-uso:hover .sb-uso-plan{color:#ffd95e}
   .live-pill{display:flex;align-items:center;gap:8px;height:32px;background:var(--panel2);border-radius:999px;padding:0 12px;white-space:nowrap}
+  /* Píldora de salud del bot (SALUD_SCRIPT, estado/salud.ts) */
+  #nb-salud{position:relative}
+  #nb-salud .live-pill{border:0;cursor:pointer;font:inherit}
+  #nb-salud .live-pill:hover{background:var(--raise)}
+  .nb-salud-dot{width:7px;height:7px;border-radius:50%;background:var(--dim);flex:none}
+  #nb-salud[data-estado="EN_LINEA"] .nb-salud-dot{background:var(--ok);animation:ring 2s infinite}
+  #nb-salud[data-estado="AVISO"] .nb-salud-dot{background:#d97706}
+  #nb-salud[data-estado="PROBLEMAS"] .nb-salud-dot{background:var(--bad)}
+  #nb-salud[data-estado="PROBLEMAS"] #nb-salud-txt{color:var(--bad) !important}
+  .nb-salud-pop{position:absolute;right:0;top:calc(100% + 8px);width:min(360px,calc(100vw - 32px));background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);box-shadow:var(--shadow-md);z-index:60;overflow:hidden}
+  .nb-salud-cab{padding:12px 14px;font-size:12.5px;font-weight:700;color:var(--cream);border-bottom:1px solid var(--line)}
+  .nb-salud-it{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:3px;font-size:12.5px}
+  .nb-salud-it:last-child{border-bottom:0}
+  .nb-salud-it b{color:var(--cream);font-size:13px}
+  .nb-salud-it p{margin:0;color:var(--muted);line-height:1.5}
+  .nb-salud-it a{color:var(--accent-2);font-weight:700;align-self:flex-start;margin-top:3px}
+  .nb-salud-niv{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+  .nb-salud-it[data-nivel="problema"] .nb-salud-niv{color:var(--bad)}
+  .nb-salud-it[data-nivel="aviso"] .nb-salud-niv{color:var(--warn)}
+  @media (prefers-reduced-motion:reduce){.nb-salud-dot{animation:none !important}}
+  /* En el celular la píldora no queda pegada a la orilla: la lista va a lo ancho (top lo pone SALUD_SCRIPT). */
+  @media (max-width:767px){.nb-salud-pop{position:fixed;left:16px;right:16px;width:auto}}
   .hdr-btn{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-sm);color:var(--muted)}
   .hdr-btn:hover{background:var(--panel2);color:var(--cream)}
   .hdr-btn{position:relative;border:0;background:none;cursor:pointer}
@@ -917,7 +939,68 @@ const AVISO_SCRIPT = `
 })();
 </script>`;
 
-const GLOBAL_SCRIPT = `${ESPERA_SCRIPT}${NAV_SCRIPT}${AYUDA_SCRIPT}${AVISO_SCRIPT}
+// Píldora de salud del bot (cabecera): pide /admin/salud (estado/salud.ts) al
+// cargar y cada 2 minutos y pinta En línea / Con aviso / En pausa / Con
+// problemas. Al darle clic abre la lista de qué pasa, cada cosa con su botón
+// a la pantalla donde se arregla. Hasta que llega la respuesta (o si no
+// llega) dice solo "Tu bot", sin afirmar nada.
+const SALUD_SCRIPT = `
+<script>
+(function () {
+  if (window.__nbSalud) return;
+  window.__nbSalud = true;
+  var caja = document.getElementById("nb-salud"), btn = document.getElementById("nb-salud-btn");
+  var txt = document.getElementById("nb-salud-txt"), pop = document.getElementById("nb-salud-pop");
+  if (!caja || !btn || !txt || !pop || !window.fetch) return;
+  var TEXTO = { EN_LINEA: "Bot en línea", AVISO: "Bot en línea", EN_PAUSA: "Bot en pausa", PROBLEMAS: "Bot con problemas" };
+  var NIVEL = { problema: "Problema", pausa: "En pausa", aviso: "Aviso" };
+  function pintar(d) {
+    if (!d || !TEXTO[d.estado]) return;
+    caja.setAttribute("data-estado", d.estado);
+    txt.textContent = TEXTO[d.estado];
+    btn.setAttribute("aria-label", TEXTO[d.estado] + (d.hallazgos.length ? " — ver qué pasa" : ""));
+    pop.innerHTML = "";
+    var cab = document.createElement("div");
+    cab.className = "nb-salud-cab";
+    cab.textContent = d.hallazgos.length ? "Lo que pasa con tu bot" : "Todo en orden: tu bot está contestando.";
+    pop.appendChild(cab);
+    d.hallazgos.forEach(function (h) {
+      var it = document.createElement("div");
+      it.className = "nb-salud-it";
+      it.setAttribute("data-nivel", h.nivel);
+      var n = document.createElement("span"); n.className = "nb-salud-niv"; n.textContent = NIVEL[h.nivel] || "";
+      var t = document.createElement("b"); t.textContent = h.titulo;
+      var p = document.createElement("p"); p.textContent = h.texto;
+      var a = document.createElement("a"); a.href = h.href; a.textContent = h.accion + " →";
+      it.appendChild(n); it.appendChild(t); it.appendChild(p); it.appendChild(a);
+      pop.appendChild(it);
+    });
+  }
+  function leer() {
+    fetch("/admin/salud", { credentials: "same-origin", redirect: "manual", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok && r.type !== "opaqueredirect" ? r.json() : null; })
+      .then(pintar)
+      .catch(function () {});
+  }
+  function abierto() { return !pop.hidden; }
+  function cerrar() { pop.hidden = true; btn.setAttribute("aria-expanded", "false"); }
+  btn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (abierto()) { cerrar(); return; }
+    if (window.matchMedia("(max-width:767px)").matches) pop.style.top = Math.round(btn.getBoundingClientRect().bottom + 8) + "px";
+    else pop.style.top = "";
+    pop.hidden = false; btn.setAttribute("aria-expanded", "true");
+    leer();
+  });
+  pop.addEventListener("click", function (e) { if (e.target.closest("a[href]")) cerrar(); });
+  document.addEventListener("click", function (e) { if (abierto() && !caja.contains(e.target)) cerrar(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && abierto()) { cerrar(); btn.focus(); } });
+  leer();
+  setInterval(leer, 120000);
+})();
+</script>`;
+
+const GLOBAL_SCRIPT = `${ESPERA_SCRIPT}${NAV_SCRIPT}${AYUDA_SCRIPT}${AVISO_SCRIPT}${SALUD_SCRIPT}
 <script>
   function drawIcons(){ if (window.lucide) window.lucide.createIcons(); }
   document.addEventListener("DOMContentLoaded", drawIcons);
@@ -1052,9 +1135,12 @@ export function layout(opts: {
           <div id="account-divider" style="display:none;width:1px;height:28px;background:var(--line)"></div>
           <div id="account-switcher" style="position:relative"></div>
         </div>
-        <div class="live-pill">
-          <span style="width:7px;height:7px;border-radius:50%;background:var(--ok);animation:ring 2s infinite"></span>
-          <span style="font-size:12px;font-weight:600;color:var(--muted)">Bot en línea</span>
+        <div id="nb-salud">
+          <button type="button" id="nb-salud-btn" class="live-pill" aria-haspopup="true" aria-expanded="false" aria-controls="nb-salud-pop">
+            <span class="nb-salud-dot"></span>
+            <span id="nb-salud-txt" style="font-size:12px;font-weight:600;color:var(--muted)">Tu bot</span>
+          </button>
+          <div id="nb-salud-pop" class="nb-salud-pop" hidden></div>
         </div>
         <button type="button" id="ay-btn" class="hdr-btn" title="Ayuda y soporte" aria-label="Ayuda y soporte" aria-haspopup="dialog" aria-expanded="false" aria-controls="ay-panel" data-ultima="${ULTIMA_NOVEDAD}">
           <i data-lucide="circle-help" width="18" height="18"></i><span class="ay-punto" hidden></span>

@@ -200,6 +200,7 @@ import { PERMISSION_GATE, hasAnyAppAccess, hasPermission, requirePermission, vis
 import type { KontroliaTokenClaims } from "@kontrolia/shared";
 import { renderCreateBotPage } from "./views/onboarding";
 import { incidenciasAbiertas, leerEstado } from "../estado/revisar";
+import { saludDelBot } from "../estado/salud";
 
 export const adminApp = new Hono<AdminBindings>();
 
@@ -674,6 +675,17 @@ function orgInitials(name: string): string {
 // el panel de dos columnas del selector cambia de columna derecha al elegir
 // una organización SIN otro viaje al servidor — son pocas organizaciones por
 // usuario, así que el costo de traerlas todas de una vez es bajo.
+async function botsPausados(db: Db, ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const rows = await db
+    .all<{ bot_id: string }>(
+      `SELECT bot_id FROM settings WHERE key = ? AND value = '1' AND bot_id IN (${ids.map(() => "?").join(",")})`,
+      [SETTING_KEYS.botPaused, ...ids],
+    )
+    .catch(() => []);
+  return new Set(rows.map((r) => r.bot_id));
+}
+
 adminApp.get("/projects", async (c) => {
   const db = new Db(c.env.DB);
   const botId = c.get("botId");
@@ -713,6 +725,10 @@ adminApp.get("/projects", async (c) => {
     })),
   );
 
+  // "Pausado" = el ajuste de Flujo (bot_paused), el mismo que respeta el bot.
+  // La columna bots.paused no la escribe nada; se lee junto por compatibilidad.
+  const pausados = await botsPausados(db, withBots.flatMap(({ bots }) => bots.map((b) => b.id)));
+
   return c.json({
     ...base,
     tenant: {
@@ -725,7 +741,7 @@ adminApp.get("/projects", async (c) => {
         bots: bots.map((b) => ({
           id: b.id,
           name: b.name,
-          paused: b.paused,
+          paused: b.paused || pausados.has(b.id),
           current: b.id === botId,
         })),
       })),
@@ -2087,6 +2103,18 @@ adminApp.get("/ayuda/estado", async (c) => {
   const abiertas = await incidenciasAbiertas(new Db(c.env.DB)).catch(() => []);
   c.header("Cache-Control", "no-store");
   return c.json({ abiertas: abiertas.map((i) => ({ id: i.id, titulo: i.titulo, mensaje: i.mensaje })) });
+});
+
+// La píldora de la cabecera (En línea / Con aviso / En pausa / Con problemas)
+// del bot elegido, con la lista de qué pasa y dónde se arregla
+// (estado/salud.ts). La pide el layout al cargar y cada 2 minutos.
+adminApp.get("/salud", async (c) => {
+  const denied = accesoAyudaDenegado(c);
+  if (denied) return denied;
+  const botId = c.get("botId");
+  if (!botId) return c.json({ estado: null, hallazgos: [] });
+  c.header("Cache-Control", "no-store");
+  return c.json(await saludDelBot(c.env, botId));
 });
 
 adminApp.post("/ayuda/soporte", async (c) => {
