@@ -414,6 +414,7 @@ export async function renderLeads(
     description: `Quienes le dejaron sus datos a ${bot?.name ?? "tu bot"}. Abre cada uno para ver el resumen de la IA, la conversación y su seguimiento.`,
     tags: crmConnector ? heroTag(`Conectado a ${providerLabel}`, crmErrorBanner ? "var(--bad)" : "#3fb8c4") : "",
     actions: [
+      puedeExportar ? heroBtn({ label: "Importar", href: "/admin/leads/importar", icon: "upload" }) : "",
       puedeExportar ? botonesExportar("/admin/leads/exportar") : "",
       crmConnector ? heroBtn({ label: "Gestionar conexión", href: "/admin/conexiones?cat=crm", icon: "plug-zap" }) : "",
     ].join(""),

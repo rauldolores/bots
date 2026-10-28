@@ -213,6 +213,7 @@ import { renderCreateBotPage } from "./views/onboarding";
 import { incidenciasAbiertas, leerEstado } from "../estado/revisar";
 import { saludDelBot } from "../estado/salud";
 import { formatoDe, nombreArchivo, respuestaExport } from "./exportar";
+import { registrarRutasDeImportar } from "./importarLeadsRoutes";
 import {
   columnasDeCitas,
   conversacionesParaExportar,
@@ -1857,6 +1858,9 @@ adminApp.get("/leads/exportar", async (c) => {
   const r = await leadsParaExportar(c.env, c.get("botId"));
   return respuestaExport(formato, nombreArchivo(r.plural, formato, r.timezone), r.columnas, r.filas, { hoja: r.plural, total: r.total });
 });
+
+// Importar contactos (Excel/CSV) a Leads: el asistente vive en su propio archivo.
+registrarRutasDeImportar(adminApp);
 
 adminApp.get("/tickets/exportar", async (c) => {
   const denied = requirePermission(c, "nodia-agents.tickets.administrar");

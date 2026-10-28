@@ -176,6 +176,7 @@ function renderAudienceBanner(counts: FilterCounts): string {
       <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:8px">
         ${statusPill(`${counts.inWindow} en ventana · gratis`, "var(--ok)")}
         ${statusPill(`${counts.outWindow} necesitan plantilla`, "var(--warn)")}
+        ${counts.optedOut > 0 ? statusPill(`${counts.optedOut} pidieron no recibir mensajes · se omiten`, "var(--muted)") : ""}
       </div>
     </div>`;
 }

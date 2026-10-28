@@ -20,6 +20,8 @@
  */
 import { Db } from "./db/client";
 import { UMBRAL_DE_ETIQUETA } from "./db/etiquetas";
+import { SettingsRepo, SETTING_KEYS } from "./db/settings";
+import { optOutKeysFor, regionForTimezone } from "./contacts/normalize";
 
 export type LeadStatusFilter = "new" | "contacted" | "sold" | "lost" | "none";
 export type SentimentFilter = "positive" | "neutral" | "frustrated" | "angry" | "none";
@@ -172,13 +174,42 @@ function whereFor(filters: CampaignFilters, botId: string, now: number): { sql: 
   return { sql: conds.join(" AND "), params };
 }
 
-/** Miembros que cumplen los filtros, cada uno con su estado de ventana de 24h. */
+/**
+ * ¿Pidió esta persona que no le escribiéramos? Se arma con la lista de bajas
+ * del bot y se consulta con las mismas claves con que runner.ts las registra
+ * (optOutKeysFor, con la región de la zona del negocio).
+ */
+export async function optOutChecker(db: Db, botId: string): Promise<(channel: string, channelUserId: string) => boolean> {
+  const [rows, tz] = await Promise.all([
+    db.all<{ address_norm: string }>("SELECT address_norm FROM opt_outs WHERE bot_id = ?", [botId]),
+    new SettingsRepo(db, botId).get(SETTING_KEYS.timezone),
+  ]);
+  if (rows.length === 0) return () => false;
+  const bajas = new Set(rows.map((r) => r.address_norm));
+  const region = regionForTimezone(tz);
+  return (channel, channelUserId) => optOutKeysFor(channel, channelUserId, region).some((k) => bajas.has(k));
+}
+
+/**
+ * Miembros que cumplen los filtros, cada uno con su estado de ventana de 24h.
+ * Quien pidió "no me escriban" (opt_outs) nunca sale: una campaña es salida
+ * proactiva, igual que los seguimientos (nurture/run.ts).
+ */
 export async function segmentMembers(
   db: Db,
   botId: string,
   filters: CampaignFilters,
   now = Date.now(),
 ): Promise<SegmentMember[]> {
+  return (await audiencia(db, botId, filters, now)).members;
+}
+
+async function audiencia(
+  db: Db,
+  botId: string,
+  filters: CampaignFilters,
+  now: number,
+): Promise<{ members: SegmentMember[]; optedOut: number }> {
   const { sql, params } = whereFor(filters, botId, now);
   const recency = filters.recency && filters.recency !== "any" ? filters.recency : null;
   const havingSql = recency ? `HAVING MAX(m.created_at) > ?` : "";
@@ -201,16 +232,22 @@ export async function segmentMembers(
      ORDER BY "lastUserAt" DESC`,
     [...params, ...havingParams],
   );
-  return rows.map((r) => ({
-    ...r,
-    inWindow: WHATSAPP_WINDOW_CHANNELS.has(r.channel) ? now - r.lastUserAt < WINDOW_SAFE_MS : true,
-  }));
+  const dadoDeBaja = await optOutChecker(db, botId);
+  const members = rows
+    .filter((r) => !dadoDeBaja(r.channel, r.channelUserId))
+    .map((r) => ({
+      ...r,
+      inWindow: WHATSAPP_WINDOW_CHANNELS.has(r.channel) ? now - r.lastUserAt < WINDOW_SAFE_MS : true,
+    }));
+  return { members, optedOut: rows.length - members.length };
 }
 
 export interface FilterCounts {
   total: number;
   inWindow: number;
   outWindow: number;
+  /** Cumplían los filtros pero pidieron que no les escribiéramos: no cuentan en total. */
+  optedOut: number;
 }
 
 /** Conteos de una combinación de filtros (para la vista previa en vivo del panel). */
@@ -220,9 +257,9 @@ export async function segmentCount(
   filters: CampaignFilters,
   now = Date.now(),
 ): Promise<FilterCounts> {
-  const members = await segmentMembers(db, botId, filters, now);
+  const { members, optedOut } = await audiencia(db, botId, filters, now);
   const inW = members.filter((m) => m.inWindow).length;
-  return { total: members.length, inWindow: inW, outWindow: members.length - inW };
+  return { total: members.length, inWindow: inW, outWindow: members.length - inW, optedOut };
 }
 
 /** Interpreta los campos del formulario de /admin/campanas (checkboxes + radio) a CampaignFilters. */

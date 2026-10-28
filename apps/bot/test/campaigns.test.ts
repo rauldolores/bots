@@ -4,6 +4,8 @@ import { Db } from "../src/db/client";
 import { ConversationsRepo } from "../src/db/conversations";
 import { LeadsRepo } from "../src/db/leads";
 import { InsightsRepo } from "../src/db/insights";
+import { OptOutsRepo } from "../src/db/optOuts";
+import { optOutKeysFor } from "../src/contacts/normalize";
 
 // Capturamos free-forms sin red
 const freeformSends = vi.hoisted(() => [] as { userId: string; text: string }[]);
@@ -277,5 +279,41 @@ describe("enqueueCampaign + processCampaignJobs (F6: cola async)", () => {
     // Sigue en la cola para el siguiente tick.
     const stillQueued = await db.first<{ n: number }>("SELECT COUNT(*) as n FROM campaign_jobs");
     expect(stillQueued?.n).toBe(1);
+  });
+});
+
+describe("campañas y la lista de no molestar", () => {
+  const darDeBaja = async (channel: string, userId: string) => {
+    for (const k of optOutKeysFor(channel, userId)) await new OptOutsRepo(db, TEST_BOT_ID).add(k, "prueba");
+  };
+
+  it("quien pidió que no le escribieran no entra a la audiencia, y el conteo dice cuántos se omiten", async () => {
+    await seedConv("+5213312345678", NOW - 2 * H);
+    await seedConv("+5213387654321", NOW - 2 * H);
+    await seedConv("998877", NOW - 2 * H, "telegram");
+    // Se dio de baja escribiendo desde otra forma del mismo número (sin el 1 viejo).
+    await darDeBaja("twilio", "+523312345678");
+    await darDeBaja("telegram", "998877");
+
+    const counts = await segmentCount(db, TEST_BOT_ID, {}, NOW);
+    expect(counts.total).toBe(1);
+    expect(counts.optedOut).toBe(2);
+
+    const enq = await enqueueCampaign(env, { filters: {}, campaignKey: "con-bajas", freeformText: "promo", now: NOW });
+    expect(enq.enqueued).toBe(1);
+    await processCampaignJobs(env, 10);
+    expect(freeformSends.map((f) => f.userId)).toEqual(["+5213387654321"]);
+  });
+
+  it("si se da de baja después de encolada la campaña, ya no se le manda", async () => {
+    await seedConv("+5213311112222", NOW - 2 * H);
+    await enqueueCampaign(env, { filters: {}, campaignKey: "tarde", freeformText: "promo", now: NOW });
+    await darDeBaja("twilio", "+5213311112222");
+    const proc = await processCampaignJobs(env, 10);
+    expect(proc.skippedOptOut).toBe(1);
+    expect(proc.sentFreeform).toBe(0);
+    expect(freeformSends).toEqual([]);
+    const quedan = await db.first<{ n: number }>("SELECT COUNT(*) as n FROM campaign_jobs");
+    expect(Number(quedan?.n)).toBe(0);
   });
 });

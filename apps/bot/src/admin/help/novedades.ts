@@ -19,6 +19,22 @@ export interface Novedad {
 export const NOVEDADES: Novedad[] = [
   {
     fecha: "2026-10-28",
+    titulo: "Importa tu lista de clientes desde Excel",
+    texto:
+      "En Leads, el botón «Importar» sube tu lista de clientes en Excel o CSV. Eliges qué es cada columna (o le pides a la IA que lo adivine), ves antes de guardar cuántos son nuevos, cuántos ya tenías y qué filas tienen error, y si te equivocas lo deshaces. Nadie recibe mensajes por importarlo, y cuando uno de ellos le escribe a tu bot, el bot ya sabe quién es.",
+    tipo: "Nuevo",
+    ruta: "/admin/leads/importar",
+  },
+  {
+    fecha: "2026-10-28",
+    titulo: "Las campañas ya respetan a quien pidió que no le escribas",
+    texto:
+      "Si un cliente le escribió a tu bot «ya no me manden mensajes», ahora tampoco le llegan tus campañas (antes solo se detenían los seguimientos). Al armar una campaña verás cuántas personas se omiten por eso.",
+    tipo: "Corrección",
+    ruta: "/admin/campanas",
+  },
+  {
+    fecha: "2026-10-28",
     titulo: "Cerrar sesión en KontrolIA también te saca del panel",
     texto:
       "Si cierras sesión en el portal o en otra app de KontrolIA y entras con otra cuenta, el panel ya no se queda con la cuenta anterior: en cuanto abres una página te pide entrar de nuevo, o entra solo con la cuenta que tengas abierta en KontrolIA.",

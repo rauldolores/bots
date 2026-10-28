@@ -25,7 +25,7 @@ import type { Env } from "./env";
 import { Db } from "./db/client";
 import { MessagesRepo } from "./db/messages";
 import { resolveBotId } from "./tenant";
-import { segmentMembers, type CampaignFilters } from "./segments";
+import { optOutChecker, segmentMembers, type CampaignFilters } from "./segments";
 import { pickAdapter } from "./replies/sender";
 import type { ChannelId } from "./channels/shared";
 import { textParts } from "./channels/parts";
@@ -163,6 +163,8 @@ export interface ProcessJobsResult {
   releasedForQuota: number;
   failed: number;
   abandoned: number;
+  /** Se dieron de baja entre que se encoló la campaña y su turno de envío. */
+  skippedOptOut: number;
 }
 
 /** Tras este número de intentos fallidos, el trabajo se abandona (no es cuota — un fallo real). */
@@ -185,13 +187,27 @@ export async function processCampaignJobs(env: Env, limit = 20): Promise<Process
     releasedForQuota: 0,
     failed: 0,
     abandoned: 0,
+    skippedOptOut: 0,
   };
 
   // La cuota es por bot y cambia mientras se procesa el lote — se recalcula
   // una vez por bot visto en este lote, no una vez por job.
   const capByBot = new Map<string, { cap: number; spent: number }>();
+  // Una campaña grande tarda horas en salir: quien pide "no me escriban" a
+  // media campaña ya no debe recibirla. Se vuelve a revisar justo antes.
+  const bajasByBot = new Map<string, (channel: string, channelUserId: string) => boolean>();
 
   for (const job of claimed) {
+    let dadoDeBaja = bajasByBot.get(job.bot_id);
+    if (!dadoDeBaja) {
+      dadoDeBaja = await optOutChecker(db, job.bot_id);
+      bajasByBot.set(job.bot_id, dadoDeBaja);
+    }
+    if (dadoDeBaja(job.channel, job.channel_user_id)) {
+      await jobs.complete(job.id);
+      result.skippedOptOut++;
+      continue;
+    }
     if (job.kind === "template") {
       let c = capByBot.get(job.bot_id);
       if (!c) {

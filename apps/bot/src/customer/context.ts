@@ -35,6 +35,8 @@ import { NurtureEnrollmentsRepo } from "../db/nurtureEnrollments";
 import { readCrmSnapshot, renderCrmSnapshot } from "./crmSnapshot";
 import { lineaDeContactoMcp, resolverContactoEnMcp, type ContactoResuelto } from "./contactoMcp";
 import type { CrmCustomerSnapshot } from "../connectors/types";
+import { normalizeEmail, normalizePhone, phoneVariants, regionForTimezone } from "../contacts/normalize";
+import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 
 /**
  * Cuánto se deja entrar. El objetivo es contexto ÚTIL, no exhaustivo: cada
@@ -165,9 +167,32 @@ async function resolverLead(db: Db, botId: string, input: CustomerContextInput):
     if (porConversacion) return porConversacion;
   }
   if (input.channelUserId) {
-    return repo.findLatestByChannelUserId(input.channelUserId).catch(() => null);
+    const porCanal = await repo.findLatestByChannelUserId(input.channelUserId).catch(() => null);
+    if (porCanal) return porCanal;
+    return leadImportadoQueEscribe(db, botId, input.channelUserId, input.conversationId ?? null).catch(() => null);
   }
   return null;
+}
+
+/**
+ * Alguien que el dueño importó de su Excel (/admin/leads/importar) y que
+ * escribe por primera vez: su lead no tiene conversación ni channel_user_id,
+ * así que solo se le encuentra por su teléfono o correo en lead_contacts.
+ * Al encontrarlo se le pega esta conversación, para que de aquí en adelante
+ * sea un lead como cualquier otro (y "Deshacer" ya no lo borre).
+ */
+async function leadImportadoQueEscribe(db: Db, botId: string, channelUserId: string, conversationId: string | null): Promise<Lead | null> {
+  const region = regionForTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
+  const telefono = normalizePhone(channelUserId, region);
+  const claves = telefono ? phoneVariants(telefono) : [normalizeEmail(channelUserId)].filter((v): v is string => !!v);
+  if (claves.length === 0) return null;
+  const lead = await new LeadsRepo(db, botId).findOpenByContactAddress(claves);
+  if (!lead || lead.conversation_id || !conversationId) return lead;
+  await db.run(
+    "UPDATE leads SET conversation_id = ?, channel_user_id = ?, updated_at = ? WHERE id = ? AND bot_id = ? AND conversation_id IS NULL",
+    [conversationId, channelUserId, Date.now(), lead.id, botId],
+  );
+  return { ...lead, conversation_id: conversationId, channel_user_id: channelUserId };
 }
 
 async function ticketsDelLead(db: Db, botId: string, lead: Lead): Promise<Ticket[]> {

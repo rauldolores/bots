@@ -730,6 +730,9 @@ export async function runScheduledJobs(env: Env, cron?: string, now = Date.now()
   // F7 fase 10: política de retención de llamadas (configurable por bot —
   // ver SETTING_KEYS.voiceCallRetentionDays). No debe tumbar el resto de la purga.
   await purgeOldVoiceCalls(env).catch((e) => console.error("purgeOldVoiceCalls:", e));
+  // Importaciones de contactos que se quedaron a medias (guardan la tabla del archivo).
+  const { purgarBorradoresDeImportacion } = await import("./db/leadImports");
+  await purgarBorradoresDeImportacion(new Db(env.DB)).catch((e) => console.error("borradores de importación:", e));
   // Insights, flywheel y copiloto son POR BOT (a diferencia de purgeOldMessages/
   // purgeOldVoiceCalls, que ya recorren todos los bots por dentro): sin este
   // loop, con 2+ bots en el despliegue analyzeConversations/runFlywheel caían
