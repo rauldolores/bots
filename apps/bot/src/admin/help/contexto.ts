@@ -48,7 +48,7 @@ function norm(s: string): string {
   return s
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036F]/g, "")
     .replace(/\*\*/g, "")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
 }

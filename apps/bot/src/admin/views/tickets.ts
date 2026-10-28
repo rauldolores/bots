@@ -8,7 +8,7 @@ import { TICKET_ADAPTERS, TICKET_PROVIDERS } from "../../connectors/registry";
 import type { TicketRecord } from "../../connectors/types";
 import { resolveTimezone } from "../../datetime";
 import { layout } from "./layout";
-import { alertRow, heroBtn, heroTag, iconTile, pageHero, sectionCard, statCard, statGrid, statusPill } from "./ui";
+import { alertRow, botonesExportar, heroBtn, heroTag, iconTile, pageHero, sectionCard, statCard, statGrid, statusPill } from "./ui";
 
 function esc(s: string): string {
   return s.replace(
@@ -182,7 +182,14 @@ function emptyState(text: string): string {
     </div>`;
 }
 
-export async function renderTickets(env: Env, botId: string, visibleNavIds: Set<string> | null = null): Promise<string> {
+export async function renderTickets(
+  env: Env,
+  botId: string,
+  visibleNavIds: Set<string> | null = null,
+  /** Exportar pide nodia-agents.tickets.administrar; sin él, el botón no sale. */
+  puedeExportar = true,
+): Promise<string> {
+  const exportar = puedeExportar ? botonesExportar("/admin/tickets/exportar") : "";
   const db = new Db(env.DB);
   const timezone = resolveTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
   const canSee = (id: string) => !visibleNavIds || visibleNavIds.has(id);
@@ -233,7 +240,7 @@ export async function renderTickets(env: Env, botId: string, visibleNavIds: Set<
           title: "Tickets",
           description,
           tags: heroTag(`Conectado a ${providerLabel}`),
-          actions: manageBtn,
+          actions: exportar + manageBtn,
         })}
         <div style="display:flex;flex-direction:column;gap:24px">
           ${sectionCard({
@@ -274,6 +281,7 @@ export async function renderTickets(env: Env, botId: string, visibleNavIds: Set<
     description,
     tags: connectedTag,
     actions: [
+      exportar,
       manageBtn,
       !ticketsConnector && canSee("conexiones")
         ? heroBtn({ label: "Conectar Zendesk o Jira", href: "/admin/conexiones?cat=tickets", icon: "plug-zap" })

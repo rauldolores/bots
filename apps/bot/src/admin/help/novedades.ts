@@ -18,6 +18,14 @@ export interface Novedad {
 
 export const NOVEDADES: Novedad[] = [
   {
+    fecha: "2026-10-28",
+    titulo: "Descarga tus conversaciones, tickets y citas en Excel",
+    texto:
+      "Ahora puedes bajar a Excel o CSV tus conversaciones (con el filtro que tengas puesto), cada conversación completa, tus tickets y las citas del mes. Y la descarga de leads ya abre bien en Excel, con acentos, columnas en español y los datos de tu giro cada uno en su columna.",
+    tipo: "Nuevo",
+    ruta: "/admin/conversations",
+  },
+  {
     fecha: "2026-10-27",
     titulo: "Plan y facturación, más claro",
     texto:

@@ -12,7 +12,8 @@ import { resolveTimezone } from "../../datetime";
 import { NurtureSequencesRepo, type NurtureSequence } from "../../db/nurtureSequences";
 import { NurtureEnrollmentsRepo, type NurtureEnrollment } from "../../db/nurtureEnrollments";
 import { layout } from "./layout";
-import { avatarTile, heroBtn, heroTag, pageHero, sectionCard, statCard, statGrid, statusPill, TH_STYLE } from "./ui";
+import { fechaHora, TOPE_EXPORTAR, type Columna } from "../exportar";
+import { avatarTile, botonesExportar, heroBtn, heroTag, pageHero, sectionCard, statCard, statGrid, statusPill, TH_STYLE } from "./ui";
 
 // Escapa texto del LLM/cliente antes de meterlo en HTML (el intent y las notas
 // pueden traer <, &, links pegados por el cliente, etc.).
@@ -299,7 +300,13 @@ function renderLeadRow(
   </div>`;
 }
 
-export async function renderLeads(env: Env, botId: string, visibleNavIds: Set<string> | null = null): Promise<string> {
+export async function renderLeads(
+  env: Env,
+  botId: string,
+  visibleNavIds: Set<string> | null = null,
+  /** Exportar pide nodia-agents.leads.administrar; sin él, el botón no sale. */
+  puedeExportar = true,
+): Promise<string> {
   const db = new Db(env.DB);
   const bot = await new BotsRepo(db).getById(botId);
   const niche = getNiche(bot?.niche);
@@ -407,7 +414,7 @@ export async function renderLeads(env: Env, botId: string, visibleNavIds: Set<st
     description: `Quienes le dejaron sus datos a ${bot?.name ?? "tu bot"}. Abre cada uno para ver el resumen de la IA, la conversación y su seguimiento.`,
     tags: crmConnector ? heroTag(`Conectado a ${providerLabel}`, crmErrorBanner ? "var(--bad)" : "#3fb8c4") : "",
     actions: [
-      heroBtn({ label: "Exportar CSV", href: "/admin/leads/export.csv", icon: "download", primary: true }),
+      puedeExportar ? botonesExportar("/admin/leads/exportar") : "",
       crmConnector ? heroBtn({ label: "Gestionar conexión", href: "/admin/conexiones?cat=crm", icon: "plug-zap" }) : "",
     ].join(""),
   });
@@ -476,15 +483,60 @@ export async function renderLeads(env: Env, botId: string, visibleNavIds: Set<st
   return layout({ title: niche.recordPlural, activeTab: "leads", body, visibleNavIds, hero: true });
 }
 
-export async function exportLeadsCsv(env: Env, botId: string): Promise<string> {
+/**
+ * Lo que sale en Exportar: lo mismo que la tabla. Con un CRM conectado que
+ * responde, sus registros recientes (los mismos que se ven) cruzados con la
+ * copia local para no perder los datos del giro; sin CRM, toda la copia
+ * local hasta el tope.
+ */
+export async function leadsParaExportar(
+  env: Env,
+  botId: string,
+): Promise<{ columnas: Columna<DisplayLead>[]; filas: DisplayLead[]; total: number; timezone: string; plural: string }> {
   const db = new Db(env.DB);
+  const bot = await new BotsRepo(db).getById(botId);
+  const niche = getNiche(bot?.niche);
+  const timezone = resolveTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
   const leads = new LeadsRepo(db, botId);
-  const list = await leads.list(10_000);
-  const header = "fecha,nombre,contacto,intent,status,notas,metadata\n";
-  const rows = list.map((l) => {
-    const date = new Date(l.created_at).toISOString();
-    const esc = (v: string | null) => `"${(v ?? "").replace(/"/g, '""')}"`;
-    return `${date},${esc(l.name)},${esc(l.contact)},${esc(l.intent)},${l.status},${esc(l.notes)},${esc(l.metadata)}`;
-  }).join("\n");
-  return header + rows;
+
+  let filas: DisplayLead[] | null = null;
+  const crm = await new BotConnectorsRepo(db).getActiveByCategory(botId, "crm");
+  if (crm) {
+    const adapter = CRM_ADAPTERS[crm.provider];
+    const creds = adapter ? await resolveConnectorCreds(db, crm, env) : null;
+    const result = adapter && creds ? await adapter.listRecent(creds, 100).catch(() => null) : null;
+    if (result?.ok) {
+      const locales = await leads.list(200);
+      const porExterno = new Map(locales.filter((l) => l.exported_to === crm.provider && l.external_id).map((l) => [l.external_id as string, l] as const));
+      filas = result.items.map((r) => {
+        const local = porExterno.get(r.id);
+        return local ? displayFromCrmMatch(r, local) : displayFromCrmOnly(r, botId, crm.provider);
+      });
+    }
+  }
+  if (!filas) filas = (await leads.list(TOPE_EXPORTAR + 1)).map(displayFromLocal);
+  const total = filas.length;
+  filas = filas.slice(0, TOPE_EXPORTAR);
+
+  const meta = new Map(filas.map((l) => [l.id, leadMetadata(l)] as const));
+  const delGiro = new Set(niche.columns.map((c) => c.key));
+  const columnas: Columna<DisplayLead>[] = [
+    { titulo: "Fecha", valor: (l) => fechaHora(l.created_at, timezone) },
+    { titulo: "Nombre", valor: (l) => l.name },
+    { titulo: "Contacto", valor: (l) => l.contact },
+    ...niche.columns.map((c): Columna<DisplayLead> => ({ titulo: c.label, valor: (l) => meta.get(l.id)?.[c.key] })),
+    { titulo: "Qué busca", valor: (l) => l.intent },
+    { titulo: "Estado", valor: (l) => (l.status ? niche.statusLabels[l.status] : "") },
+    { titulo: "Notas", valor: (l) => l.notes },
+    {
+      titulo: "Otros datos",
+      valor: (l) =>
+        Object.entries(meta.get(l.id) ?? {})
+          .filter(([k]) => !delGiro.has(k))
+          .map(([k, v]) => `${k}: ${v}`)
+          .join("; "),
+    },
+  ];
+  if (crm) columnas.push({ titulo: "Enlace en el CRM", valor: (l) => l.crmUrl });
+  return { columnas, filas, total, timezone, plural: niche.recordPlural };
 }

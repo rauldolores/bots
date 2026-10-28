@@ -754,7 +754,12 @@ export const FAQ: Pregunta[] = [
     { tipo: "p", texto: "No: con el CRM conectado, tu CRM manda. El bot crea ahí los contactos y oportunidades, la pantalla de Leads te muestra lo que hay en el CRM, y el estado se cambia allá. El panel guarda una copia solo para seguir funcionando si el CRM se cae un rato." },
   ] },
   { id: "faq-exportar", categoria: "Clientes y ventas", pregunta: "¿Puedo sacar mis datos?", respuesta: [
-    { tipo: "p", texto: "Los leads se exportan a CSV (Excel) con **Exportar CSV** en Leads. Las conversaciones se leen completas en el panel. Si necesitas una exportación completa (por ejemplo, para cambiar de proveedor), pídela por soporte y te la preparamos." },
+    { tipo: "p", texto: "Sí, son tuyos. Cada pantalla tiene su botón para bajarlos en Excel o CSV:" },
+    { tipo: "lista", items: [
+      "[Leads](/admin/leads), [Tickets](/admin/tickets) y [Calendario](/admin/calendario): **Exportar a Excel** o **CSV**, arriba de la pantalla. En Calendario sale el mes que estás viendo.",
+      "[Conversaciones](/admin/conversations): **Exportar**, arriba de la lista, baja la lista con el filtro o la búsqueda que tengas puestos. Dentro de una conversación, **Excel** o **Texto** bajan la plática completa.",
+    ] },
+    { tipo: "nota", texto: "Los mensajes de las conversaciones se guardan 90 días; los leads, tickets y citas se conservan. Si necesitas un respaldo completo de todo (por ejemplo, para cambiar de proveedor), pídelo por soporte y te lo preparamos." },
   ] },
 
   // ── Plan y pagos ──

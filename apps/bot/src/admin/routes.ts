@@ -78,9 +78,9 @@ import { ejecutarPropuesta } from "../crm/ejecutar";
 import { renderMejoras } from "./views/mejoras";
 import { runFlywheel, getLessons, saveLessons } from "../flywheel/detect";
 import { applySuggestion, dismissSuggestion } from "../flywheel/apply";
-import { renderLeads, exportLeadsCsv } from "./views/leads";
+import { renderLeads, leadsParaExportar } from "./views/leads";
 import { renderTickets, updateTicketPriority } from "./views/tickets";
-import { renderCalendario, cancelAppointment } from "./views/calendario";
+import { renderCalendario, cancelAppointment, citasParaExportar } from "./views/calendario";
 import { renderTelefono } from "./views/telefono";
 import { renderUsuarios } from "./views/usuarios";
 import { renderOrganizaciones } from "./views/organizaciones";
@@ -201,6 +201,14 @@ import type { KontroliaTokenClaims } from "@kontrolia/shared";
 import { renderCreateBotPage } from "./views/onboarding";
 import { incidenciasAbiertas, leerEstado } from "../estado/revisar";
 import { saludDelBot } from "../estado/salud";
+import { formatoDe, nombreArchivo, respuestaExport } from "./exportar";
+import {
+  columnasDeCitas,
+  conversacionesParaExportar,
+  ticketsParaExportar,
+  transcripcionComoTexto,
+  transcripcionParaExportar,
+} from "./exportaciones";
 
 export const adminApp = new Hono<AdminBindings>();
 
@@ -1572,6 +1580,7 @@ adminApp.get("/conversations", async (c) =>
         selectedId: c.req.query("c"),
       },
       visibleNavIds(c.get("kontroliaClaims")),
+      hasPermission(c.get("kontroliaClaims"), "nodia-agents.conversaciones.responder"),
     ),
   ),
 );
@@ -1589,7 +1598,9 @@ adminApp.get("/conversations/list-fragment", async (c) =>
 );
 
 adminApp.get("/conversations/thread/:id", async (c) =>
-  c.html(await renderThreadLive(c.env, c.get("botId"), c.req.param("id"))),
+  c.html(
+    await renderThreadLive(c.env, c.get("botId"), c.req.param("id"), hasPermission(c.get("kontroliaClaims"), "nodia-agents.conversaciones.responder")),
+  ),
 );
 
 // --- Entrenamiento: el sandbox -----------------------------------------------
@@ -1698,6 +1709,67 @@ adminApp.post("/conversations/:id/corregir/guardar", async (c) => {
   return c.html(renderLeccionGuardada(r.regla, r.total, r.desplazada));
 });
 
+// --- Exportar (admin/exportar.ts + admin/exportaciones.ts) ------------------
+// Excel (?formato=xlsx, el de siempre) o CSV. Exportar saca muchos datos de
+// golpe, así que pide el permiso de administrar de cada pantalla (en
+// conversaciones, el de responder) — el mismo que ya pedía Leads. Sin él, el
+// botón ni aparece. Van antes de /conversations/:id para ganarle a esa ruta.
+
+async function zonaDelBot(c: HonoContext): Promise<string> {
+  return resolveTimezone(await new SettingsRepo(new Db(c.env.DB), c.get("botId")).get(SETTING_KEYS.timezone));
+}
+
+adminApp.get("/conversations/exportar", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.conversaciones.responder");
+  if (denied) return denied;
+  const formato = formatoDe(c.req.query("formato"));
+  const r = await conversacionesParaExportar(c.env, c.get("botId"), { search: c.req.query("q"), filter: c.req.query("f") });
+  return respuestaExport(formato, nombreArchivo("conversaciones", formato, await zonaDelBot(c)), r.columnas, r.filas, { hoja: "Conversaciones", total: r.total });
+});
+
+adminApp.get("/conversations/:id/exportar", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.conversaciones.responder");
+  if (denied) return denied;
+  const t = await transcripcionParaExportar(c.env, c.get("botId"), c.req.param("id"));
+  if (!t) return c.text("Conversación no encontrada", 404);
+  const zona = await zonaDelBot(c);
+  if (c.req.query("formato") === "txt") {
+    return new Response(transcripcionComoTexto(t), {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${nombreArchivo(`conversacion-${t.nombre}`, "csv", zona).replace(/\.csv$/, ".txt")}"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+  const formato = formatoDe(c.req.query("formato"));
+  return respuestaExport(formato, nombreArchivo(`conversacion-${t.nombre}`, formato, zona), t.columnas, t.filas, { hoja: "Conversación", total: t.total });
+});
+
+adminApp.get("/leads/exportar", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.leads.administrar");
+  if (denied) return denied;
+  const formato = formatoDe(c.req.query("formato"));
+  const r = await leadsParaExportar(c.env, c.get("botId"));
+  return respuestaExport(formato, nombreArchivo(r.plural, formato, r.timezone), r.columnas, r.filas, { hoja: r.plural, total: r.total });
+});
+
+adminApp.get("/tickets/exportar", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.tickets.administrar");
+  if (denied) return denied;
+  const formato = formatoDe(c.req.query("formato"));
+  const r = await ticketsParaExportar(c.env, c.get("botId"));
+  return respuestaExport(formato, nombreArchivo("tickets", formato, await zonaDelBot(c)), r.columnas, r.filas, { hoja: "Tickets", total: r.total });
+});
+
+adminApp.get("/calendario/exportar", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.calendario.administrar");
+  if (denied) return denied;
+  const formato = formatoDe(c.req.query("formato"));
+  const r = await citasParaExportar(c.env, c.get("botId"), c.req.query("month"));
+  return respuestaExport(formato, nombreArchivo(`citas-${r.mes}`, formato, r.timezone), columnasDeCitas(r.timezone), r.filas, { hoja: `Citas ${r.mes}` });
+});
+
 // Old detail URLs (linked from Insights, notifications, etc.) → inbox selection.
 adminApp.get("/conversations/:id", (c) =>
   c.redirect(`/admin/conversations?c=${encodeURIComponent(c.req.param("id"))}`),
@@ -1800,9 +1872,13 @@ adminApp.post("/agente/tools/:name/toggle", async (c) => {
   return c.html((await renderNodeModal(c.env, c.get("botId"), `tool:${name}`, true)) + toastOob("✓ Guardado"));
 });
 
-adminApp.get("/leads", async (c) => c.html(await renderLeads(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")))));
+adminApp.get("/leads", async (c) =>
+  c.html(await renderLeads(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")), hasPermission(c.get("kontroliaClaims"), "nodia-agents.leads.administrar"))),
+);
 
-adminApp.get("/tickets", async (c) => c.html(await renderTickets(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")))));
+adminApp.get("/tickets", async (c) =>
+  c.html(await renderTickets(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")), hasPermission(c.get("kontroliaClaims"), "nodia-agents.tickets.administrar"))),
+);
 
 // Calendario (F5 Fase 2): agenda del bot — local, o el calendario conectado si hay uno.
 adminApp.get("/calendario", async (c) =>
@@ -1813,6 +1889,7 @@ adminApp.get("/calendario", async (c) =>
       c.req.query("month"),
       c.req.query("day"),
       visibleNavIds(c.get("kontroliaClaims")),
+      hasPermission(c.get("kontroliaClaims"), "nodia-agents.calendario.administrar"),
     ),
   ),
 );
@@ -3179,16 +3256,13 @@ adminApp.post("/config", async (c) => {
 
 // --- CSV export -------------------------------------------------------------
 
+// La dirección vieja del botón de Leads: sigue dando el CSV (ya con acentos
+// bien y columnas en español), por si alguien la tiene guardada.
 adminApp.get("/leads/export.csv", async (c) => {
   const denied = requirePermission(c, "nodia-agents.leads.administrar");
   if (denied) return denied;
-  const csv = await exportLeadsCsv(c.env, c.get("botId"));
-  return new Response(csv, {
-    headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="leads-${Date.now()}.csv"`,
-    },
-  });
+  const r = await leadsParaExportar(c.env, c.get("botId"));
+  return respuestaExport("csv", nombreArchivo(r.plural, "csv", r.timezone), r.columnas, r.filas, { total: r.total });
 });
 
 // --- Mutating actions (HTMX / plain form posts) -----------------------------
