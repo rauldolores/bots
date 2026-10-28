@@ -25,6 +25,7 @@ import type { BotConfig } from "../../db/bots";
 import { renderBusinessContext } from "../../businessContext";
 import { SettingsRepo, SETTING_KEYS } from "../../db/settings";
 import { TRAINING_CHANNEL } from "./sandbox";
+import { iconTile, MICRO_LABEL, statusPill } from "./ui";
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]!));
@@ -141,6 +142,27 @@ const ETIQUETA_CANAL: Record<string, string> = {
   email: "correo",
 };
 
+const PP_CSS = `<style>
+  .pp-card{border-radius:var(--radius);background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow-md);overflow:hidden;container-type:inline-size}
+  .pp-head{display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding:20px 24px}
+  .pp-title{margin:0;font-size:16px;font-weight:900;letter-spacing:-.02em;color:var(--cream)}
+  .pp-sub{margin:2px 0 0;font-size:13px;font-weight:500;line-height:1.5;color:var(--dim)}
+  .pp-pct{margin-left:auto;font-size:28px;font-weight:900;letter-spacing:-.04em;line-height:1;color:var(--cream)}
+  .pp-bar{height:6px;background:var(--panel2);margin:0 24px 4px;border-radius:99px;overflow:hidden}
+  .pp-bar>div{height:100%;background:var(--accent);border-radius:99px;transition:width .3s ease}
+  .pp-step{display:flex;flex-wrap:wrap;align-items:center;gap:12px 14px;padding:16px 24px;border-top:1px solid var(--line)}
+  .pp-step.is-next{background:var(--row-hover)}
+  .pp-num{width:32px;height:32px;flex:none;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900}
+  .pp-text{flex:1 1 260px;min-width:0;display:flex;flex-direction:column;gap:3px}
+  .pp-step-title{font-size:13.5px;font-weight:800;color:var(--cream)}
+  .pp-why{margin:0;font-size:12.5px;font-weight:500;line-height:1.55;color:var(--muted)}
+  .pp-btn{height:40px;padding:0 16px;border-radius:12px;font-size:13px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;white-space:nowrap;flex:none}
+  .pp-btn:hover{filter:brightness(.96)}
+  .pp-link{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:700;color:var(--dim);text-decoration:none;white-space:nowrap;flex:none}
+  .pp-link:hover{color:var(--cream)}
+  @container (max-width:560px){ .pp-head,.pp-step{padding-left:16px;padding-right:16px} .pp-bar{margin-left:16px;margin-right:16px} .pp-step{display:grid;grid-template-columns:32px minmax(0,1fr);align-items:start} .pp-step>a{grid-column:2} .pp-step .pp-btn{width:100%} }
+</style>`;
+
 /**
  * La tarjeta. Devuelve "" cuando ya no hay nada que guiar — quien llama la
  * pone al principio del Resumen sin condicionales.
@@ -158,48 +180,40 @@ export function renderPrimerosPasos(estado: EstadoPrimerosPasos, botName: string
     .map((p, i) => {
       const esSiguiente = p.id === siguienteId;
       const marca = p.hecho
-        ? `<span style="width:22px;height:22px;flex:none;border-radius:50%;background:var(--ok);color:#0f1a0f;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">✓</span>`
-        : `<span style="width:22px;height:22px;flex:none;border-radius:50%;border:1px solid ${esSiguiente ? "var(--accent)" : "var(--line)"};color:${esSiguiente ? "var(--accent-2)" : "var(--dim)"};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${i + 1}</span>`;
+        ? `<span class="pp-num" style="background:var(--ok-soft);color:var(--ok)" aria-label="Hecho"><i data-lucide="check" width="16" height="16"></i></span>`
+        : `<span class="pp-num" style="background:${esSiguiente ? "var(--accent)" : "var(--panel2)"};color:${esSiguiente ? "var(--cream)" : "var(--dim)"}">${i + 1}</span>`;
+      const accion = esSiguiente
+        ? `<a href="${p.cta.href}" class="pp-btn" style="background:var(--accent);border:1px solid var(--accent);color:var(--cream)">${esc(p.cta.label)}<i data-lucide="arrow-right" width="15" height="15"></i></a>`
+        : p.hecho
+          ? ""
+          : `<a href="${p.cta.href}" class="pp-link">${esc(p.cta.label)}<i data-lucide="arrow-right" width="13" height="13"></i></a>`;
 
-      return `
-      <div style="display:flex;gap:12px;padding:14px 0;${i > 0 ? "border-top:1px solid var(--line)" : ""}">
+      return `<div class="pp-step${esSiguiente ? " is-next" : ""}">
         ${marca}
-        <div style="min-width:0;flex:1">
-          <div class="font-display font-semibold text-[13px]" style="color:${p.hecho ? "var(--dim)" : "var(--cream)"};${p.hecho ? "text-decoration:line-through" : ""}">${esc(p.titulo)}</div>
-          ${p.hecho ? "" : `<p class="text-[11.5px]" style="color:var(--muted);margin:4px 0 0;line-height:1.5">${esc(p.porQue)}</p>`}
+        <div class="pp-text">
+          <span class="pp-step-title" style="${p.hecho ? "color:var(--dim);text-decoration:line-through" : ""}">${esc(p.titulo)}</span>
+          ${p.hecho ? "" : `<p class="pp-why">${esc(p.porQue)}</p>`}
         </div>
-        ${
-          esSiguiente
-            ? `<a href="${p.cta.href}" class="font-display font-bold text-[12px]" style="flex:none;align-self:center;background:var(--accent);border:1px solid var(--accent);color:#1a1206;padding:8px 14px;text-decoration:none;white-space:nowrap">${esc(p.cta.label)}</a>`
-            : p.hecho
-              ? ""
-              : `<a href="${p.cta.href}" class="text-[11.5px]" style="flex:none;align-self:center;color:var(--dim);text-decoration:underline;white-space:nowrap">${esc(p.cta.label)}</a>`
-        }
+        ${accion}
       </div>`;
     })
     .join("");
 
-  return `
-  <div class="card bg-panel border border-line" style="padding:20px;border-color:var(--accent);animation-delay:.01s">
-    <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:6px">
-      <span style="width:30px;height:30px;flex:none;border-radius:9px;background:var(--accent-soft);border:1px solid var(--accent);display:flex;align-items:center;justify-content:center">
-        <i data-lucide="rocket" width="16" height="16" style="color:var(--accent-2)"></i>
-      </span>
-      <div style="min-width:0;flex:1">
-        <div class="font-display font-bold text-[15px] text-cream">Pon a ${esc(botName)} a trabajar</div>
-        <p class="text-[12px]" style="color:var(--muted);margin:3px 0 0">
-          Faltan ${total - estado.completos} de ${total} pasos. Toma unos minutos y no hay que programar nada.
-        </p>
+  return `${PP_CSS}<section class="pp-card" aria-label="Primeros pasos">
+    <div class="pp-head">
+      ${iconTile("rocket", "accent")}
+      <div style="min-width:0;flex:1 1 220px">
+        <h2 class="pp-title">Pon a ${esc(botName)} a trabajar</h2>
+        <p class="pp-sub">Faltan ${total - estado.completos} de ${total} pasos. Toma unos minutos y no hay que programar nada.</p>
       </div>
-      <span class="font-display font-bold text-[12px]" style="flex:none;color:var(--accent-2)">${pct}%</span>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-left:auto">
+        <span class="pp-pct">${pct}%</span>
+        <span style="${MICRO_LABEL}">avance</span>
+      </div>
     </div>
-
-    <div style="height:4px;background:var(--panel2);border-radius:99px;overflow:hidden;margin:10px 0 4px">
-      <div style="height:100%;width:${pct}%;background:var(--accent);transition:width .3s ease"></div>
-    </div>
-
-    ${filas}
-  </div>`;
+    <div class="pp-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Avance de los primeros pasos"><div style="width:${pct}%"></div></div>
+    <div style="margin-top:16px">${filas}</div>
+  </section>`;
 }
 
 /**
@@ -220,23 +234,23 @@ const MENSAJES_PARA_DEJAR_DE_SER_NUEVO = 20;
 export function renderYaOpera(estado: EstadoPrimerosPasos, botName: string): string {
   if (!estado.listo || estado.mensajesReales > MENSAJES_PARA_DEJAR_DE_SER_NUEVO) return "";
   const canal = ETIQUETA_CANAL[estado.canalConectado ?? ""] ?? "tu canal";
-  return `
-  <div class="card bg-panel border border-line" style="padding:18px;border-color:var(--ok)">
-    <div style="display:flex;align-items:flex-start;gap:12px">
-      <span style="width:30px;height:30px;flex:none;border-radius:9px;background:rgba(127,183,126,.12);border:1px solid var(--ok);display:flex;align-items:center;justify-content:center">
-        <i data-lucide="check" width="16" height="16" style="color:var(--ok)"></i>
-      </span>
-      <div style="min-width:0;flex:1">
-        <div class="font-display font-bold text-[14px]" style="color:var(--ok)">${esc(botName)} ya está atendiendo por ${esc(canal)}</div>
-        <p class="text-[12px]" style="color:var(--muted);margin:4px 0 0;line-height:1.55">
+  return `${PP_CSS}<section class="pp-card" aria-label="Tu bot ya opera">
+    <div class="pp-head" style="align-items:flex-start">
+      ${iconTile("check", "ok")}
+      <div style="min-width:0;flex:1 1 260px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px">
+          <h2 class="pp-title">${esc(botName)} ya está atendiendo por ${esc(canal)}</h2>
+          ${statusPill("Operando", "var(--ok)")}
+        </div>
+        <p class="pp-why">
           Puedes sumar los canales donde ya están tus clientes — WhatsApp, correo, Instagram, o llamadas a tu propio número.
           Cada uno se conecta igual de rápido, y todos comparten la misma memoria: si alguien te llama y luego escribe, tu bot lo reconoce.
         </p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px">
-          <a href="/admin/conexiones" class="font-display font-bold text-[12px]" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;padding:8px 14px;text-decoration:none">Conectar más canales</a>
-          <a href="/admin/entrenamiento" class="font-display text-[12px]" style="background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:8px 14px;text-decoration:none">Entrenarlo</a>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+          <a href="/admin/conexiones" class="pp-btn" style="background:var(--accent);color:var(--cream)"><i data-lucide="plug" width="15" height="15"></i>Conectar más canales</a>
+          <a href="/admin/entrenamiento" class="pp-btn" style="background:var(--panel);border:1px solid var(--dim);color:var(--cream);font-weight:700"><i data-lucide="graduation-cap" width="15" height="15"></i>Entrenarlo</a>
         </div>
       </div>
     </div>
-  </div>`;
+  </section>`;
 }

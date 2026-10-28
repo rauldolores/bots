@@ -112,7 +112,7 @@ export const NOVEDADES: Novedad[] = [
     fecha: "2026-10-27",
     titulo: "Pantallas renovadas para entender todo de un vistazo",
     texto:
-      "Flujo, Habilidades, Conocimiento, Entrenamiento, Mejoras, Conexiones, Tu número, Insights, Estadísticas, Costos, Organizaciones, Equipo, Campañas, Seguimientos y Configuración estrenan diseño: arriba ves los números importantes y abajo cada cosa en su tarjeta. En Tu número, además, tres pasos te dicen en cuál vas.",
+      "Flujo, Habilidades, Conocimiento, Entrenamiento, Mejoras, Conexiones, Tu número, Insights, Estadísticas, Costos, Organizaciones, Equipo, Campañas, Seguimientos, Configuración y la guía de Primeros pasos del Resumen estrenan diseño: arriba ves los números importantes y abajo cada cosa en su tarjeta. En Tu número, además, tres pasos te dicen en cuál vas.",
     tipo: "Mejora",
     ruta: "/admin/agente",
   },
