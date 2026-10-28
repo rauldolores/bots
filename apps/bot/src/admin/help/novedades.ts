@@ -19,6 +19,13 @@ export interface Novedad {
 export const NOVEDADES: Novedad[] = [
   {
     fecha: "2026-10-28",
+    titulo: "Cerrar sesión en KontrolIA también te saca del panel",
+    texto:
+      "Si cierras sesión en el portal o en otra app de KontrolIA y entras con otra cuenta, el panel ya no se queda con la cuenta anterior: en cuanto abres una página te pide entrar de nuevo, o entra solo con la cuenta que tengas abierta en KontrolIA.",
+    tipo: "Corrección",
+  },
+  {
+    fecha: "2026-10-28",
     titulo: "Descarga tus conversaciones, tickets y citas en Excel",
     texto:
       "Ahora puedes bajar a Excel o CSV tus conversaciones (con el filtro que tengas puesto), cada conversación completa, tus tickets y las citas del mes. Y la descarga de leads ya abre bien en Excel, con acentos, columnas en español y los datos de tu giro cada uno en su columna.",

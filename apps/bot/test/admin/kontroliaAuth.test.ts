@@ -5,6 +5,8 @@ import {
   buildAuthorizeUrl,
   exchangeCode,
   refreshSession,
+  tryRefreshSession,
+  checkSessionInGoTrue,
   listMemberships,
   switchActiveOrganization,
   readActiveOrganizationId,
@@ -122,6 +124,87 @@ describe("exchangeCode / refreshSession", () => {
     expect(body.get("grant_type")).toBe("refresh_token");
     expect(body.get("refresh_token")).toBe("old-refresh-token");
     expect(body.get("client_id")).toBe("client-123");
+  });
+
+  it("refreshSession: null (no lanza) si la red falla", async () => {
+    fetchMock.mockRejectedValue(new Error("ECONNRESET"));
+    expect(await refreshSession(CFG, "rt")).toBeNull();
+  });
+
+  it("tryRefreshSession: refresh_token revocado (400 refresh_token_not_found / invalid_grant) → revoked", async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ code: 400, error_code: "refresh_token_not_found", msg: "Invalid Refresh Token: Refresh Token Not Found" }, { status: 400 }),
+    );
+    expect(await tryRefreshSession(CFG, "rt")).toEqual({ ok: false, revoked: true });
+    // Forma OAuth del mismo error.
+    fetchMock.mockResolvedValueOnce(Response.json({ error: "invalid_grant", error_description: "Invalid Refresh Token" }, { status: 400 }));
+    expect(await tryRefreshSession(CFG, "rt")).toEqual({ ok: false, revoked: true });
+    // API 2024-01-01: el código viaja en "code".
+    fetchMock.mockResolvedValueOnce(Response.json({ code: "session_not_found", message: "Session not found" }, { status: 403 }));
+    expect(await tryRefreshSession(CFG, "rt")).toEqual({ ok: false, revoked: true });
+  });
+
+  it("tryRefreshSession: red, 5xx, 429 o un 400 sin código de sesión → NO revoked (no se saca a nadie)", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("ECONNRESET"));
+    expect(await tryRefreshSession(CFG, "rt")).toEqual({ ok: false, revoked: false });
+    fetchMock.mockResolvedValueOnce(Response.json({ error_code: "unexpected_failure" }, { status: 500 }));
+    expect(await tryRefreshSession(CFG, "rt")).toEqual({ ok: false, revoked: false });
+    fetchMock.mockResolvedValueOnce(Response.json({ error_code: "over_request_rate_limit" }, { status: 429 }));
+    expect(await tryRefreshSession(CFG, "rt")).toEqual({ ok: false, revoked: false });
+    fetchMock.mockResolvedValueOnce(Response.json({ error: "invalid_client" }, { status: 400 }));
+    expect(await tryRefreshSession(CFG, "rt")).toEqual({ ok: false, revoked: false });
+    fetchMock.mockResolvedValueOnce(new Response("expired", { status: 401 }));
+    expect(await tryRefreshSession(CFG, "rt")).toEqual({ ok: false, revoked: false });
+  });
+
+  it("tryRefreshSession: ok con la sesión nueva", async () => {
+    fetchMock.mockResolvedValue(Response.json({ access_token: "at2", refresh_token: "rt2", expires_in: 3600 }));
+    const r = await tryRefreshSession(CFG, "rt");
+    expect(r.ok && r.session.accessToken).toBe("at2");
+  });
+
+  it("checkSessionInGoTrue: GET /auth/v1/user con el Bearer del usuario y el apikey", async () => {
+    fetchMock.mockResolvedValue(Response.json({ id: "u1" }));
+    expect(await checkSessionInGoTrue(CFG, "user-access-token")).toBe("alive");
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://proj.supabase.co/auth/v1/user");
+    expect(opts.method ?? "GET").toBe("GET");
+    const headers = opts.headers as Record<string, string>;
+    expect(headers.authorization).toBe("Bearer user-access-token");
+    expect(headers.apikey).toBe("anon-key");
+    expect(opts.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("checkSessionInGoTrue: 403 session_not_found, 401, o 400 bad_jwt → revoked", async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ code: 403, error_code: "session_not_found", msg: "Session from session_id claim in JWT does not exist" }, { status: 403 }),
+    );
+    expect(await checkSessionInGoTrue(CFG, "at")).toBe("revoked");
+    fetchMock.mockResolvedValueOnce(new Response("no", { status: 401 }));
+    expect(await checkSessionInGoTrue(CFG, "at")).toBe("revoked");
+    fetchMock.mockResolvedValueOnce(Response.json({ error_code: "bad_jwt" }, { status: 400 }));
+    expect(await checkSessionInGoTrue(CFG, "at")).toBe("revoked");
+    fetchMock.mockResolvedValueOnce(Response.json({ error_code: "user_not_found" }, { status: 404 }));
+    expect(await checkSessionInGoTrue(CFG, "at")).toBe("revoked");
+  });
+
+  it("checkSessionInGoTrue: red caída, 5xx, 429 o un 4xx sin código conocido → unknown", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("ECONNRESET"));
+    expect(await checkSessionInGoTrue(CFG, "at")).toBe("unknown");
+    fetchMock.mockResolvedValueOnce(new Response("boom", { status: 502 }));
+    expect(await checkSessionInGoTrue(CFG, "at")).toBe("unknown");
+    fetchMock.mockResolvedValueOnce(Response.json({ error_code: "over_request_rate_limit" }, { status: 429 }));
+    expect(await checkSessionInGoTrue(CFG, "at")).toBe("unknown");
+    fetchMock.mockResolvedValueOnce(new Response("raro", { status: 404 }));
+    expect(await checkSessionInGoTrue(CFG, "at")).toBe("unknown");
+  });
+
+  it("checkSessionInGoTrue: corta al timeout → unknown (GoTrue lento no saca a nadie)", async () => {
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(new Error("aborted")))),
+    );
+    expect(await checkSessionInGoTrue(CFG, "at", 20)).toBe("unknown");
   });
 
   it("switchActiveOrganization: upsert a sessions_context con el propio access_token (RLS, sin service_role)", async () => {

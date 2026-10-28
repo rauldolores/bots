@@ -128,17 +128,125 @@ export async function refreshSession(
   cfg: KontroliaAuthConfig,
   refreshToken: string,
 ): Promise<KontroliaSession | null> {
-  const res = await fetch(`${cfg.supabaseUrl}/auth/v1/oauth/token`, {
-    method: "POST",
-    headers: { apikey: cfg.supabaseAnonKey, "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: cfg.clientId,
-    }),
-  });
-  if (!res.ok) return null;
-  return toSession((await res.json()) as TokenResponse);
+  const r = await tryRefreshSession(cfg, refreshToken);
+  return r.ok ? r.session : null;
+}
+
+/**
+ * Códigos de GoTrue que significan "esta sesión ya no existe" — no un tropiezo
+ * de red. Pasan cuando alguien cierra sesión en OTRA app del ecosistema (el
+ * signOut del portal es scope=global: GoTrue borra TODAS las sesiones del
+ * usuario), cuando se borra o bloquea la cuenta, o cuando la sesión venció
+ * por inactividad. GoTrue los manda como `error_code` (o `code`, según la
+ * versión de la API) y el endpoint OAuth como `error` (`invalid_grant`).
+ */
+const SESSION_GONE_CODES = new Set([
+  "session_not_found",
+  "session_expired",
+  "user_not_found",
+  "user_banned",
+  "bad_jwt",
+  "no_authorization",
+  "refresh_token_not_found",
+  "refresh_token_already_used",
+  "invalid_grant",
+]);
+
+function goTrueErrorCode(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const b = body as Record<string, unknown>;
+  for (const key of ["error_code", "code", "error"]) {
+    if (typeof b[key] === "string") return b[key] as string;
+  }
+  return null;
+}
+
+async function errorCodeOf(res: Response): Promise<string | null> {
+  try {
+    return goTrueErrorCode(await res.json());
+  } catch {
+    return null;
+  }
+}
+
+export type RefreshResult = { ok: true; session: KontroliaSession } | { ok: false; revoked: boolean };
+
+/**
+ * refreshSession, pero diciendo POR QUÉ falló. `revoked: true` = GoTrue ya no
+ * conoce ese refresh_token (refresh_token_not_found, invalid_grant…): seguir
+ * reintentando con él es inútil, y el guard borra la cookie en vez de volver
+ * a mandarlo en cada request. Sin eso, una pestaña abierta con la sesión
+ * muerta (la banda reintenta cada 60 s, la píldora de salud cada 2 min)
+ * golpeaba /oauth/token para siempre con el mismo token revocado.
+ *
+ * Red caída, timeout, 5xx o 429 → `revoked: false`: no prueban nada sobre la
+ * sesión y nunca deben sacar a nadie del panel. Nunca lanza.
+ */
+export async function tryRefreshSession(cfg: KontroliaAuthConfig, refreshToken: string): Promise<RefreshResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${cfg.supabaseUrl}/auth/v1/oauth/token`, {
+      method: "POST",
+      headers: { apikey: cfg.supabaseAnonKey, "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: cfg.clientId,
+      }),
+    });
+  } catch {
+    return { ok: false, revoked: false };
+  }
+  if (res.ok) {
+    try {
+      return { ok: true, session: toSession((await res.json()) as TokenResponse) };
+    } catch {
+      return { ok: false, revoked: false };
+    }
+  }
+  const clientError = res.status === 400 || res.status === 401 || res.status === 403;
+  const code = clientError ? await errorCodeOf(res) : null;
+  return { ok: false, revoked: code !== null && SESSION_GONE_CODES.has(code) };
+}
+
+export type SessionStatus = "alive" | "revoked" | "unknown";
+
+/**
+ * ¿GoTrue todavía reconoce la sesión de este access_token?
+ *
+ * verifyAccessToken solo revisa la firma y la expiración del JWT, y un JWT
+ * sigue "válido" hasta su exp (≤1 h) aunque la sesión detrás ya no exista:
+ * tras cerrar sesión en el portal y entrar con OTRA cuenta, el panel seguía
+ * mostrando la cuenta anterior hasta F5 o hasta que vencía el token. GET
+ * /auth/v1/user sí consulta la tabla de sesiones: responde 403
+ * session_not_found si la cerraron.
+ *
+ * - "revoked": 401/403, o un código de SESSION_GONE_CODES.
+ * - "unknown": red caída, timeout, 5xx, 429 o cualquier otra cosa. El caller
+ *   sigue como si nada — nunca se saca a alguien porque GoTrue tardó.
+ */
+export async function checkSessionInGoTrue(
+  cfg: KontroliaAuthConfig,
+  accessToken: string,
+  timeoutMs = 2000,
+): Promise<SessionStatus> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${cfg.supabaseUrl}/auth/v1/user`, {
+      headers: { apikey: cfg.supabaseAnonKey, authorization: `Bearer ${accessToken}` },
+      signal: ctrl.signal,
+    });
+    if (res.ok) return "alive";
+    if (res.status === 401 || res.status === 403) return "revoked";
+    if (res.status === 429 || res.status >= 500) return "unknown";
+    const code = await errorCodeOf(res);
+    return code !== null && SESSION_GONE_CODES.has(code) ? "revoked" : "unknown";
+  } catch {
+    return "unknown";
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
