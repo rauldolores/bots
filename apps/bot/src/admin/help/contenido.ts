@@ -606,7 +606,7 @@ export const GUIA: Seccion[] = [
         ruta: "/admin/insights",
         cuerpo: [
           { tipo: "pasos", items: [
-            "Presiona **Analizar ahora** cuando haya conversaciones pendientes (el botón te dice cuántas y que cuesta alrededor de un décimo de centavo de dólar por conversación).",
+            "Presiona **Analizar ahora** cuando haya conversaciones pendientes (junto al título ves cuántas esperan; cuesta alrededor de un décimo de centavo de dólar por conversación).",
             "Lee las tarjetas: conversaciones analizadas, **Resueltas sin humano**, **Calidad del bot** (estrellas) y **Clientes molestos**.",
             "**Radar de conocimiento**: las preguntas que el bot no supo responder en 30 días. Es la lista de lo que te falta cargar en Conocimiento (Mejoras te las propone ya redactadas).",
             "**Ventas que quedaron abiertas**: clientes que iban a comprar y se quedaron a medias. Candidatos para un seguimiento.",
