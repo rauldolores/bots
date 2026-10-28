@@ -652,10 +652,10 @@ export const GUIA: Seccion[] = [
         ruta: "/admin/plan",
         cuerpo: [
           { tipo: "lista", items: [
-            "Arriba: el **plan actual**, su estado (En prueba, Activo, Pago pendiente, Cancelado, Expirado) y cuándo se renueva. Si dice **(anual)**, pagas una vez al año.",
-            "**Portal de facturación** (solo dueño o administrador): cambiar la tarjeta, cancelar, descargar facturas. Es la página segura de Stripe; el panel nunca ve tu tarjeta.",
-            "**Consumo de tu plan**: cuántos bots, canales y conversaciones del mes llevas contra tu límite.",
-            "**Planes**: el interruptor **Mensual / Anual** muestra los dos precios y el ahorro del anual. **Empezar prueba de N días** pide tarjeta pero no cobra hasta que termina la prueba; **Elegir / Cambiar a este plan** te lleva a pagar; **Cambiar a anual** cambia el periodo del plan que ya tienes.",
+            "Arriba: tu **plan**, su estado (En prueba, Vigente, Pago pendiente, Cancelado, Expirado) y la fecha en que **se renueva** (o en que termina, si lo cancelaste). Abajo de la fecha ves si pagas **mensual o anual**, el precio y qué incluye tu plan.",
+            "**Portal de facturación** (botón de arriba, solo dueño o administrador): cambiar la tarjeta, cancelar, descargar facturas. Es la página segura de Stripe; el panel nunca ve tu tarjeta.",
+            "**Consumo de tu plan**: una barra por cada límite (bots, canales, conversaciones del mes). Se pone ámbar al pasar del 80% y roja al llegar al tope.",
+            "**Cambia de plan** (o **Elige tu plan** si aún no tienes uno): el interruptor **Mensual / Anual** muestra los dos precios y el ahorro del anual. **Empezar prueba de N días** pide tarjeta pero no cobra hasta que termina la prueba; **Elegir / Cambiar a este plan** te lleva a pagar; **Cambiar a anual** cambia el periodo del plan que ya tienes.",
             "**Enterprise**: para operaciones grandes o con datos en servidores propios; se conversa, no se compra con tarjeta.",
           ] },
           { tipo: "nota", tono: "aviso", texto: "Si llegas al límite de conversaciones del mes, el panel te avisa y el bot deja de aceptar conversaciones nuevas hasta que subas de plan o empiece el mes. Los bots y canales se topan al intentar crear uno más." },

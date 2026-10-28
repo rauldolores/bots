@@ -19,6 +19,14 @@ export interface Novedad {
 export const NOVEDADES: Novedad[] = [
   {
     fecha: "2026-10-27",
+    titulo: "Plan y facturación, más claro",
+    texto:
+      "La pantalla de tu plan ahora se ve como el resto del panel: arriba, tu plan con la fecha en que se renueva y lo que incluye; después, una barra por cada límite para ver de un vistazo cuánto llevas usado; y al final, los planes a los que puedes cambiar.",
+    tipo: "Mejora",
+    ruta: "/admin/plan",
+  },
+  {
+    fecha: "2026-10-27",
     titulo: "La píldora de arriba ya dice cómo está tu bot",
     texto:
       "«Bot en línea» ahora es de verdad: si tu bot está en pausa, fallando, con mensajes esperando, sin cupo en tu plan o con un conector desconectado, la píldora de arriba a la derecha te lo dice. Dale clic para ver qué pasa y llegar a donde se arregla.",
