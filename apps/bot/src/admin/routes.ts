@@ -170,6 +170,8 @@ import {
   buildAuthorizeUrl,
   exchangeCode,
   refreshSession,
+  tryRefreshSession,
+  checkSessionInGoTrue,
   revokeSession,
   verifyAccessToken,
   listMemberships,
@@ -274,7 +276,9 @@ function redirectUri(env: Env): string {
 
 /**
  * Guard combinado del panel (F5, docs/multitenancy.md):
- *   1. Sesión de KontrolIA Auth válida (cookie) → pasa.
+ *   1. Sesión de KontrolIA Auth válida (cookie) → pasa. Si GoTrue dice que
+ *      esa sesión ya no existe (refresh revocado, o /auth/v1/user en una
+ *      navegación completa), se borra la cookie y se sigue como sin sesión.
  *   2. Si no, pero llegó un header Basic Auth → se valida como siempre
  *      (compatibilidad: navegadores con la contraseña ya guardada, curl,
  *      scripts). Es la salida de emergencia si KontrolIA Auth falla.
@@ -306,7 +310,9 @@ function setSessionCookie(c: HonoContext, session: KontroliaSession): void {
 
 /**
  * Navegación de página completa: GET que pide HTML y NO viene de htmx. Solo
- * ahí se paga la lectura de sessions_context (syncActiveOrganization, abajo):
+ * ahí se paga preguntarle a GoTrue si la sesión sigue viva
+ * (sessionRevokedInGoTrue) y la lectura de sessions_context
+ * (syncActiveOrganization, abajo):
  * los fragmentos de htmx, los fetch() del header (/projects, /plan/uso) y los
  * POST no la necesitan — viven dentro de una página que ya se sincronizó al
  * cargar, y cambiar de organización a mitad de un fragmento dejaría la página
@@ -374,6 +380,50 @@ async function syncActiveOrganization(
   }
 }
 
+/**
+ * Margen tras emitirse el token en el que no se pregunta a GoTrue. Es un
+ * cortacircuitos: si GoTrue rechazara tokens recién emitidos (JWKS cruzado,
+ * llave mal puesta), cada login volvería a /admin/login y el auth-server lo
+ * autorizaría solo — un bucle de redirects que dejaría a todos fuera. Una
+ * sesión cerrada en sus primeros segundos se detecta en la siguiente página.
+ */
+const SESSION_CHECK_GRACE_S = 30;
+
+/**
+ * En una navegación completa, ¿la sesión de este token ya no existe en GoTrue?
+ * (cerró sesión en el portal u otra app — signOut global —, la cuenta se
+ * borró…). Ver checkSessionInGoTrue: solo "revoked" cuenta; red, timeout, 5xx
+ * y 429 dejan pasar como hasta ahora.
+ */
+async function sessionRevokedInGoTrue(
+  cfg: KontroliaAuthConfig,
+  accessToken: string,
+  claims: KontroliaTokenClaims,
+): Promise<boolean> {
+  const iat = (claims as { iat?: unknown }).iat;
+  if (typeof iat === "number" && Date.now() / 1000 - iat < SESSION_CHECK_GRACE_S) return false;
+  const status = await checkSessionInGoTrue(cfg, accessToken);
+  if (status === "revoked") {
+    console.warn("[session] GoTrue ya no reconoce la sesión del panel; se borra la cookie y se manda a login");
+    return true;
+  }
+  return false;
+}
+
+/**
+ * La sesión de la cookie está muerta en GoTrue: se olvida aquí (y el bot
+ * elegido, que era de esa cuenta) para que /admin/login entre con quien esté
+ * conectado AHORA en el auth-server, y para que los siguientes requests de
+ * esta pestaña (htmx, la banda, la píldora de salud) no vuelvan a mandar a
+ * GoTrue el mismo refresh_token revocado. A propósito NO se llama a
+ * revokeSession ni al logout del auth-server: la sesión vieja ya no existe, y
+ * un logout global ahí cerraría la de la cuenta NUEVA.
+ */
+function forgetRevokedSession(c: HonoContext): void {
+  deleteCookie(c, SESSION_COOKIE);
+  deleteCookie(c, BOT_COOKIE);
+}
+
 async function guardAdmin(c: HonoContext): Promise<GuardResult> {
   const env = c.env;
   if (env.DASHBOARD_PUBLIC === "1") return { kind: "pass-public" };
@@ -390,26 +440,37 @@ async function guardAdmin(c: HonoContext): Promise<GuardResult> {
       const session = JSON.parse(raw) as KontroliaSession;
       let accessToken = session.accessToken;
       let justRefreshed = false;
+      let revoked = false;
       if (session.expiresAt < Date.now()) {
-        const refreshed = await refreshSession(cfg, session.refreshToken);
-        accessToken = refreshed?.accessToken ?? "";
-        if (refreshed) {
-          setSessionCookie(c, refreshed);
+        const refreshed = await tryRefreshSession(cfg, session.refreshToken);
+        if (refreshed.ok) {
+          accessToken = refreshed.session.accessToken;
+          setSessionCookie(c, refreshed.session);
           justRefreshed = true;
+        } else {
+          accessToken = "";
+          revoked = refreshed.revoked;
         }
       }
       if (accessToken) {
         const verified = await verifyAccessToken(cfg, accessToken);
         if (verified) {
-          // Un token recién emitido ya trae la organización activa de ahora:
-          // no hace falta preguntarle a sessions_context.
-          if (!justRefreshed && isFullPageNavigation(c)) {
-            const synced = await syncActiveOrganization(c, cfg, session, verified.claims);
-            if (synced) return { kind: "pass", ...synced };
+          // Un token recién emitido (refresh de arriba) ya prueba que la
+          // sesión existe y trae la organización activa de ahora: no hace
+          // falta preguntarle nada más a GoTrue ni a sessions_context.
+          const fullPage = !justRefreshed && isFullPageNavigation(c);
+          if (fullPage && (await sessionRevokedInGoTrue(cfg, accessToken, verified.claims))) {
+            revoked = true;
+          } else {
+            if (fullPage) {
+              const synced = await syncActiveOrganization(c, cfg, session, verified.claims);
+              if (synced) return { kind: "pass", ...synced };
+            }
+            return { kind: "pass", claims: verified.claims, accessToken };
           }
-          return { kind: "pass", claims: verified.claims, accessToken };
         }
       }
+      if (revoked) forgetRevokedSession(c);
     }
   }
 
