@@ -37,7 +37,7 @@ describe("renderTelefono", () => {
     await new VoiceNumbersRepo(db).register({ botId: TEST_BOT_ID, phoneNumber: DESTINATION });
     await new VoiceOnboardingsRepo(db).create({ botId: TEST_BOT_ID, sourcePhoneNumber: "+5215500001111", destinationPhoneNumber: DESTINATION });
     const html = await renderTelefono(env, TEST_BOT_ID);
-    expect(html).toContain("ESPERANDO TU LLAMADA DE PRUEBA");
+    expect(html).toContain("Esperando tu llamada de prueba");
     expect(html).toContain("*21*" + DESTINATION);
     expect(html).toContain("Número detectado");
     expect(html).toContain("hx-trigger=\"every 4s\"");
@@ -49,7 +49,7 @@ describe("renderTelefono", () => {
     const row = await repo.create({ botId: TEST_BOT_ID, sourcePhoneNumber: "+5215500001111", destinationPhoneNumber: DESTINATION });
     await repo.markConnected(row.id, "CAxxx");
     const html = await renderTelefono(env, TEST_BOT_ID);
-    expect(html).toContain("CONECTADO — LISTO PARA ACTIVAR");
+    expect(html).toContain("Conectado — listo para activar");
     expect(html).toContain(`/admin/telefono/${row.id}/activate`);
   });
 
@@ -60,7 +60,7 @@ describe("renderTelefono", () => {
     await repo.markConnected(row.id, "CAxxx");
     await repo.activate(row.id, TEST_BOT_ID);
     const html = await renderTelefono(env, TEST_BOT_ID);
-    expect(html).toContain(">ACTIVO<");
+    expect(html).toContain(">Activo<");
     expect(html).not.toContain("/activate");
   });
 
@@ -100,5 +100,18 @@ describe("renderTelefono", () => {
     const html = await renderTelefono(env, TEST_BOT_ID);
     expect(html).not.toContain("+5215500009999");
     expect(html).toContain("Primero conecta un número de Twilio"); // TEST_BOT_ID no tiene nada propio
+  });
+});
+
+describe("renderTelefono — estructura", () => {
+  it("trae el hero, los tres pasos y un solo h1; el diagnóstico conserva su id para refrescarse", async () => {
+    await new VoiceNumbersRepo(db).register({ botId: TEST_BOT_ID, phoneNumber: DESTINATION });
+    await new VoiceOnboardingsRepo(db).create({ botId: TEST_BOT_ID, sourcePhoneNumber: "+5215500001111", destinationPhoneNumber: DESTINATION });
+    const html = await renderTelefono(env, TEST_BOT_ID);
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    expect(html).toContain("Canales");
+    expect(html).toContain("Número de Twilio");
+    expect(html).toContain('aria-current="step"');
+    expect(html).toContain('<div id="telefono-diagnostics" hx-get="/admin/telefono"');
   });
 });
