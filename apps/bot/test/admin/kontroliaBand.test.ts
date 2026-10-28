@@ -26,7 +26,7 @@ vi.mock("../../src/billing/kontrolia", async (importOriginal) => {
 
 const { adminApp } = await import("../../src/admin/routes");
 const { SESSION_COOKIE } = await import("../../src/admin/kontroliaAuth");
-const { bandAuthServerUrl, bandSnippet, injectBand, panelOrigin, fetchBranding, BAND_BRANDING_PATH, BAND_TOKEN_PLACEHOLDER } =
+const { bandAuthServerUrl, bandSnippet, injectBand, panelOrigin, fetchBranding, BAND_BRANDING_PATH, BAND_SWITCH_PATH, BAND_TOKEN_PLACEHOLDER } =
   await import("../../src/admin/kontroliaBand");
 
 const TOKEN = "at-secreto-123";
@@ -179,6 +179,52 @@ describe(`GET ${BAND_BRANDING_PATH} (proxy)`, () => {
     expect((await adminApp.fetch(req(BAND_BRANDING_PATH), env)).status).toBe(401);
     const wrong = { authorization: `Basic ${Buffer.from("admin:otra").toString("base64")}` };
     expect((await adminApp.fetch(req(BAND_BRANDING_PATH, wrong), env)).status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe(`POST ${BAND_SWITCH_PATH} (proxy del cambio de organización)`, () => {
+  const ORG2 = "22222222-2222-4222-8222-222222222222";
+  function post(headers: Record<string, string>, body: unknown = { organizationId: ORG2 }): Request {
+    return new Request(`https://bot.test${BAND_SWITCH_PATH}`, { method: "POST", headers, body: JSON.stringify(body) });
+  }
+  const SAME_ORIGIN = { ...SESSION_HEADERS, origin: "https://app.nodiagents.com", "content-type": "application/json" };
+
+  it("reenvía al auth-server con el Bearer de la cookie y devuelve su respuesta, sin el token", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ organizationId: ORG2 }), { status: 200 }));
+    const res = await adminApp.fetch(post(SAME_ORIGIN), BAND_ENV);
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(JSON.parse(text)).toEqual({ organizationId: ORG2 });
+    expect(text).not.toContain(TOKEN);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://auth.kontrolia.io/api/active-organization");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>).authorization).toBe(`Bearer ${TOKEN}`);
+    expect(JSON.parse(String(init.body))).toEqual({ organizationId: ORG2 });
+  });
+
+  it("rechaza un POST de otro sitio (Origin distinto) sin llamar al auth-server", async () => {
+    const res = await adminApp.fetch(post({ ...SAME_ORIGIN, origin: "https://malo.example" }), BAND_ENV);
+    expect(res.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rechaza lo que no es JSON (un formulario)", async () => {
+    const res = await adminApp.fetch(post({ ...SAME_ORIGIN, "content-type": "application/x-www-form-urlencoded" }), BAND_ENV);
+    expect(res.status).toBe(415);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("pasa el error del auth-server (p. ej. no es miembro)", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: "No perteneces a esa organización." }), { status: 403 }));
+    const res = await adminApp.fetch(post(SAME_ORIGIN), BAND_ENV);
+    expect(res.status).toBe(403);
+  });
+
+  it("404 con la banda apagada", async () => {
+    const res = await adminApp.fetch(post(SAME_ORIGIN), BASE_ENV);
+    expect(res.status).toBe(404);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

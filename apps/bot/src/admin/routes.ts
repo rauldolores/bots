@@ -190,7 +190,16 @@ import {
   type KontroliaSession,
   type KontroliaAuthConfig,
 } from "./kontroliaAuth";
-import { BAND_BRANDING_PATH, bandAuthServerUrl, bandSnippet, fetchBranding, injectBand, panelOrigin } from "./kontroliaBand";
+import {
+  BAND_BRANDING_PATH,
+  BAND_SWITCH_PATH,
+  bandAuthServerUrl,
+  bandSnippet,
+  fetchBranding,
+  injectBand,
+  panelOrigin,
+  switchOrganizationViaBand,
+} from "./kontroliaBand";
 import {
   resolveAdminTenant,
   setBotCookie,
@@ -246,8 +255,22 @@ function isAuthExempt(path: string): boolean {
 // BAND_BRANDING_PATH (el proxy de la banda de KontrolIA) tampoco necesita bot
 // ni permisos de la app: solo trae la marca de la organización de quien ya
 // inició sesión, y la banda se pinta igual en "elige tu plan" o en "acceso
-// restringido".
-const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bots", "/access-denied", "/ayuda", "/ayuda/soporte", "/ayuda/panel", "/ayuda/estado", "/plan/uso", BAND_BRANDING_PATH];
+// restringido". Su cambio de organización (BAND_SWITCH_PATH) igual: es justo
+// la salida de quien está en una organización sin acceso.
+const TENANT_EXEMPT_SUFFIXES = [
+  "/switch-org",
+  "/switch-bot",
+  "/bots/new",
+  "/bots",
+  "/access-denied",
+  "/ayuda",
+  "/ayuda/soporte",
+  "/ayuda/panel",
+  "/ayuda/estado",
+  "/plan/uso",
+  BAND_BRANDING_PATH,
+  BAND_SWITCH_PATH,
+];
 
 // Lo que sigue abierto cuando la organización NO tiene plan vivo (billing.md
 // B2): la pantalla de planes y su compra, la vuelta del pago, cambiarse de
@@ -257,7 +280,7 @@ const TENANT_EXEMPT_SUFFIXES = ["/switch-org", "/switch-bot", "/bots/new", "/bot
 // pagar — cerrarle eso sería dejarla sin salida.
 // Ayuda sigue abierta sin plan: quien no puede pagar o no entiende cómo,
 // necesita justamente la guía y el formulario de soporte.
-const BILLING_EXEMPT_PATTERNS = [/\/kontrolia\/api\/branding$/, /\/plan(\/|$)/, /\/billing\/ok$/, /\/switch-org$/, /\/projects$/, /\/logout$/, /\/organizaciones(\/|$)/, /\/usuarios(\/|$)/, /\/ayuda(\/|$)/];
+const BILLING_EXEMPT_PATTERNS = [/\/kontrolia\/api\/branding$/, /\/kontrolia\/api\/active-organization$/, /\/plan(\/|$)/, /\/billing\/ok$/, /\/switch-org$/, /\/projects$/, /\/logout$/, /\/organizaciones(\/|$)/, /\/usuarios(\/|$)/, /\/ayuda(\/|$)/];
 function isBillingExempt(path: string): boolean {
   return BILLING_EXEMPT_PATTERNS.some((re) => re.test(path));
 }
@@ -599,6 +622,26 @@ adminApp.get(BAND_BRANDING_PATH, async (c) => {
   if (!authServer || !accessToken) return c.json({ error: "Banda de KontrolIA no disponible" }, 404);
   const { status, body } = await fetchBranding(authServer, accessToken, panelOrigin(c.env, c.req.url));
   return c.json(body as object, status as 200);
+});
+
+// Proxy de POST /api/active-organization para band.v1.js: mismo trato que el de
+// arriba — el token sale de la cookie y nunca llega al navegador. Al ser un POST
+// que actúa con la cookie, además exige que venga de este mismo panel (Origin)
+// y en JSON: un formulario de otro sitio no puede cambiarle la organización a
+// nadie (la cookie es SameSite=Lax, esto es la segunda capa). No refresca la
+// sesión del panel: la banda navega enseguida a otra app, y el panel se pone al
+// día solo en su siguiente carga (syncActiveOrganization en guardAdmin).
+adminApp.post(BAND_SWITCH_PATH, async (c) => {
+  c.header("Cache-Control", "no-store");
+  const authServer = bandAuthServerUrl(c.env);
+  const accessToken = c.get("kontroliaAccessToken");
+  if (!authServer || !accessToken) return c.json({ error: "Banda de KontrolIA no disponible" }, 404);
+  if (c.req.header("origin") !== panelOrigin(c.env, c.req.url)) return c.json({ error: "Origen no permitido" }, 403);
+  if (!(c.req.header("content-type") ?? "").includes("application/json")) return c.json({ error: "Se esperaba JSON" }, 415);
+  const body = (await c.req.json().catch(() => null)) as { organizationId?: unknown } | null;
+  if (typeof body?.organizationId !== "string") return c.json({ error: "Falta organizationId" }, 400);
+  const { status, body: result } = await switchOrganizationViaBand(authServer, accessToken, body.organizationId);
+  return c.json(result as object, status as 200);
 });
 
 // --- Login con KontrolIA Auth (F5) ------------------------------------------
