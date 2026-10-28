@@ -80,6 +80,20 @@ export function heroBtn(opts: { label: string; href: string; icon?: string; prim
   return `<a href="${escUi(opts.href)}" class="hero-btn${opts.primary ? " hero-btn-primary" : ""}" ${opts.attrs ?? ""} style="height:40px;padding:0 16px;border-radius:12px;${look};font-size:13px;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;transition:background .12s ease">${opts.icon ? `<i data-lucide="${opts.icon}" width="15" height="15"></i>` : ""}${escUi(opts.label)}</a>`;
 }
 
+/**
+ * Los dos botones de exportar del hero (src/admin/exportar.ts): Excel y CSV.
+ * `href` es la ruta de exportación, con o sin query (los filtros que se
+ * estén viendo). Llevan `download`: el cambio de pantalla sin recarga del
+ * layout no los toma, el navegador baja el archivo directo.
+ */
+export function botonesExportar(href: string): string {
+  const con = (formato: string) => `${href}${href.includes("?") ? "&" : "?"}formato=${formato}`;
+  return (
+    heroBtn({ label: "Exportar a Excel", href: con("xlsx"), icon: "file-spreadsheet", attrs: 'download title="Descargar en Excel (.xlsx)"' }) +
+    heroBtn({ label: "CSV", href: con("csv"), icon: "download", attrs: 'download title="Descargar en CSV"' })
+  );
+}
+
 export function statCard(opts: {
   icon: string;
   tone?: Tone;

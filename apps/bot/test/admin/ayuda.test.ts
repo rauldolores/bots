@@ -42,7 +42,9 @@ beforeEach(async () => {
 
 describe("el contenido está íntegro", () => {
   const articulos = GUIA.flatMap((s) => s.articulos);
-  const ids = new Set([...articulos.map((a) => a.id), ...FAQ.map((p) => p.id), ...GUIA.map((s) => `guia-${s.id}`)]);
+  // Las secciones fijas de la página también son destino válido de un enlace.
+  const secciones = ["guia", "novedades", "preguntas", "glosario", "estado", "soporte"];
+  const ids = new Set([...articulos.map((a) => a.id), ...FAQ.map((p) => p.id), ...GUIA.map((s) => `guia-${s.id}`), ...secciones]);
 
   it("hay guía, preguntas y glosario de verdad (no una pantalla vacía)", () => {
     expect(GUIA.length).toBeGreaterThanOrEqual(5);
@@ -112,10 +114,80 @@ describe("GET /admin/ayuda", () => {
     expect(html).toContain('href="/admin/overview"');
   });
 
+  it("pinta las Novedades y el botón de ayuda abre el panel lateral", async () => {
+    const html = await (await adminApp.request("/ayuda", { headers: AUTH }, env)).text();
+    expect(html).toContain('id="novedades"');
+    expect(html).toContain('id="ay-btn"');
+    expect(html).toContain('id="ay-panel"');
+  });
+
   it("SUPPORT_EMAIL cambia el destino que se muestra", async () => {
     const html = await (await adminApp.request("/ayuda", { headers: AUTH }, { ...env, SUPPORT_EMAIL: "ayuda@mi-empresa.com" } as Env)).text();
     expect(html).toContain("ayuda@mi-empresa.com");
     expect(html).not.toContain("asesor@kontrolia.io");
+  });
+});
+
+describe("GET /admin/ayuda/panel", () => {
+  it("trae la ayuda de la pantalla que se le indica", async () => {
+    const res = await adminApp.request("/ayuda/panel?ruta=" + encodeURIComponent("/admin/leads"), { headers: AUTH }, env);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("De esta pantalla");
+    expect(html).toContain("Leads");
+    expect(html).not.toContain("<html");
+  });
+
+  it("con q busca en toda la ayuda", async () => {
+    const html = await (await adminApp.request("/ayuda/panel?ruta=%2Fadmin%2Fleads&q=whatsapp", { headers: AUTH }, env)).text();
+    expect(html).not.toContain("De esta pantalla");
+    expect(html.toLowerCase()).toContain("whatsapp");
+  });
+
+  it("una ruta que no es del panel no rompe: cae en Resumen", async () => {
+    const res = await adminApp.request("/ayuda/panel?ruta=https%3A%2F%2Fevil.test", { headers: AUTH }, env);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("Resumen");
+  });
+});
+
+describe("estado del servicio en Ayuda", () => {
+  it("la sección existe y, sin revisiones, dice que todo funciona", async () => {
+    const html = await (await adminApp.request("/ayuda", { headers: AUTH }, env)).text();
+    expect(html).toContain('id="estado"');
+    expect(html).toContain("Todo funciona con normalidad");
+    expect(html).toContain("Sin revisar todavía");
+  });
+
+  it("/ayuda/estado da las incidencias abiertas para la franja, y la sección las enseña", async () => {
+    await (env.DB as any).query(
+      "INSERT INTO estado_incidentes (id, servicio, titulo, mensaje, origen, inicio) VALUES ($1, 'telegram', 'Falla en Telegram', 'Los mensajes pueden tardar. Ya estamos dando seguimiento.', 'AUTOMATICA', $2)",
+      [crypto.randomUUID(), Date.now()],
+    );
+    const res = await adminApp.request("/ayuda/estado", { headers: AUTH }, env);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { abiertas: { titulo: string }[] };
+    expect(json.abiertas.map((i) => i.titulo)).toEqual(["Falla en Telegram"]);
+
+    const html = await (await adminApp.request("/ayuda", { headers: AUTH }, env)).text();
+    expect(html).toContain("Falla en Telegram");
+    expect(html).not.toContain("Todo funciona con normalidad");
+  });
+});
+
+describe("GET /admin/salud", () => {
+  it("da el estado del bot elegido para la píldora de la cabecera", async () => {
+    const res = await adminApp.request("/salud", { headers: AUTH }, env);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { estado: string; hallazgos: unknown[] };
+    expect(["EN_LINEA", "AVISO", "EN_PAUSA", "PROBLEMAS"]).toContain(json.estado);
+    expect(Array.isArray(json.hallazgos)).toBe(true);
+  });
+
+  it("la cabecera ya no afirma «Bot en línea» de entrada: lo dice cuando lo sabe", async () => {
+    const html = await (await adminApp.request("/ayuda", { headers: AUTH }, env)).text();
+    expect(html).toContain('id="nb-salud-btn"');
+    expect(html).toMatch(/id="nb-salud-txt"[^>]*>Tu bot</);
   });
 });
 

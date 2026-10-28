@@ -6,7 +6,7 @@
 // (o `npm run start:node`)
 
 import { serve } from "@hono/node-server";
-import app, { runScheduledJobs, DAILY_CRON } from "../app";
+import app, { runScheduledJobs, DAILY_CRON, ESTADO_CRON } from "../app";
 import { prepareEnv, closeDrivers } from "./env";
 import { tick } from "../queue/tick";
 import { attachVoiceGateway } from "../channels/voice/gateway";
@@ -61,24 +61,34 @@ const latido = VOICE_ONLY
     }, TICK_MS);
 
 // Los trabajos periódicos. En un servidor propio no hay cron de plataforma, así
-// que se llevan por dentro: una vez por hora, y los nocturnos se auto-filtran
-// por la hora (runScheduledJobs solo hace lo pesado con el cron diario).
+// que se llevan por dentro: los nocturnos, en la vuelta de cada hora que cae a
+// las 3am UTC (el resto —watchdog, seguimientos— va en el de 5 minutos).
 const UNA_HORA = 3_600_000;
 const periodicos = VOICE_ONLY
   ? null
   : setInterval(async () => {
-      const esLaHoraNocturna = new Date().getUTCHours() === 3;
+      if (new Date().getUTCHours() !== 3) return;
       try {
-        await runScheduledJobs(env, esLaHoraNocturna ? DAILY_CRON : "hourly");
+        await runScheduledJobs(env, DAILY_CRON);
       } catch (e) {
         console.error("[cron]", e);
       }
     }, UNA_HORA);
 
+// El estado del servicio (src/estado/), el watchdog y los seguimientos (estos,
+// una vez por hora), cada 5 minutos como en las plataformas.
+const CINCO_MINUTOS = 300_000;
+const estado = VOICE_ONLY
+  ? null
+  : setInterval(() => {
+      runScheduledJobs(env, ESTADO_CRON).catch((e) => console.error("[estado]", e));
+    }, CINCO_MINUTOS);
+
 async function apagar(senal: string) {
   console.log(`\n${senal} — cerrando…`);
   if (latido) clearInterval(latido);
   if (periodicos) clearInterval(periodicos);
+  if (estado) clearInterval(estado);
   server.close();
   await closeDrivers();
   process.exit(0);

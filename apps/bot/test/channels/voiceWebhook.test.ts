@@ -16,6 +16,7 @@ import { createHmac } from "node:crypto";
 import { createTestDb, TEST_BOT_ID, createSecondTestBot } from "../helpers/pgSetup";
 import { handleIncomingVoiceCall } from "../../src/channels/voice/webhook";
 import { BotChannelsRepo } from "../../src/db/botChannels";
+import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
 import { VoiceNumbersRepo, DuplicateVoiceNumberError } from "../../src/db/voiceNumbers";
 import { createSecret } from "../../src/db/vault";
 import type { Db } from "../../src/db/client";
@@ -145,6 +146,17 @@ describe("handleIncomingVoiceCall — webhook TwiML de la llamada entrante", () 
     await db.run("UPDATE bots SET paused = true WHERE id = ?", [TEST_BOT_ID]);
     const res = await handleIncomingVoiceCall(callRequest(TEST_BOT_ID, PARAMS, "lo-que-sea"), env, TEST_BOT_ID);
     expect(res.status).toBe(404);
+  });
+
+  it("con el bot en pausa desde el panel (ajuste de Flujo), tampoco contesta llamadas", async () => {
+    // Antes solo se miraba bots.paused, que nada escribe: pausar en el panel
+    // detenía los mensajes pero no las llamadas.
+    await new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.botPaused, "1");
+    const canonicalUrl = `${BASE_URL}/webhooks/voice/${TEST_BOT_ID}`;
+    const sig = twilioSignatureFor(canonicalUrl, PARAMS);
+    const res = await handleIncomingVoiceCall(callRequest(TEST_BOT_ID, PARAMS, sig), { ...env, TWILIO_AUTH_TOKEN: AUTH_TOKEN }, TEST_BOT_ID);
+    expect(res.status).toBe(404);
+    expect(await res.text()).toBe("tenant disabled");
   });
 
   it("con el número marcado sin registrar en voice_numbers, responde 404 aunque la firma sea válida", async () => {

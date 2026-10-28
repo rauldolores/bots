@@ -13,6 +13,7 @@ import { BotChannelsRepo } from "../../db/botChannels";
 import { FIELD_KEY_RE, FIELD_TYPES } from "../../skills/schema";
 import { SKILL_TEMPLATES } from "../../skills/templates";
 import { layout } from "./layout";
+import { alertRow, heroBtn, heroTag, iconTile, MICRO_LABEL, pageHero, sectionCard, statCard, statGrid, statusPill } from "./ui";
 
 function esc(s: string): string {
   return s.replace(
@@ -24,6 +25,16 @@ function esc(s: string): string {
 function fmtDate(ms: number | null): string {
   if (!ms) return "—";
   return new Date(ms).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" });
+}
+
+function ago(ms: number | null | undefined): string {
+  if (!ms) return "nunca";
+  const min = Math.floor((Date.now() - ms) / 60_000);
+  if (min < 1) return "ahora";
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `hace ${h} h`;
+  return `hace ${Math.floor(h / 24)} d`;
 }
 
 /** Lee los campos que vienen del formulario (arreglos paralelos key[]/type[]/…). */
@@ -63,25 +74,90 @@ export function validateFields(fields: SkillField[]): string | null {
   return null;
 }
 
-function fieldRow(f: Partial<SkillField>, i: number): string {
+const HAB_CSS = `<style>
+  .hab-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;padding:20px 24px}
+  .hab-card{display:flex;flex-direction:column;gap:12px;border-radius:var(--radius);border:1px solid var(--line);background:var(--panel);padding:18px 20px;min-width:0}
+  .hab-card.is-off{background:var(--row-hover)}
+  .hab-card.is-off .hab-name{color:var(--muted)}
+  .hab-name{margin:0;font-size:15px;font-weight:900;letter-spacing:-.02em;color:var(--cream);overflow-wrap:anywhere}
+  .hab-endpoint{font-family:var(--font-mono, ui-monospace, monospace);font-size:12px;font-weight:600;color:var(--dim);overflow-wrap:anywhere}
+  .hab-desc{margin:0;font-size:13px;font-weight:500;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+  .hab-chips{display:flex;flex-wrap:wrap;gap:6px}
+  .hab-chip{font-family:var(--font-mono, ui-monospace, monospace);font-size:11px;font-weight:600;color:var(--muted);background:var(--panel2);border-radius:8px;padding:3px 8px}
+  .hab-foot{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:auto;padding-top:12px;border-top:1px solid var(--line)}
+  .hab-btn{height:40px;padding:0 16px;border-radius:12px;border:0;background:var(--accent);color:var(--cream);font-size:13px;font-weight:800;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;white-space:nowrap;text-decoration:none}
+  .hab-btn:hover{background:var(--accent-hover)}
+  .hab-btn-ghost{height:40px;padding:0 14px;border-radius:12px;border:1px solid var(--linelit);background:var(--panel);color:var(--cream);font-size:13px;font-weight:700;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;white-space:nowrap;text-decoration:none}
+  .hab-btn-ghost:hover{background:var(--row-hover)}
+  .hab-btn-sm{height:32px;padding:0 12px;border-radius:10px;border:1px solid var(--dim);background:var(--panel);color:var(--cream);font-size:12px;font-weight:700;font-family:inherit;display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;text-decoration:none}
+  .hab-btn-sm:hover{background:var(--row-hover)}
+  .hab-split{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:24px;align-items:start}
+  .hab-table{width:100%;border-collapse:collapse}
+  .hab-table td{padding:12px 24px;border-top:1px solid var(--line);font-size:13px;font-weight:500;color:var(--cream);vertical-align:middle}
+  .hab-table td.dim{color:var(--dim);font-size:12.5px}
+  .hab-table td.mono{font-family:var(--font-mono, ui-monospace, monospace);font-size:12px}
+  .hab-table th{padding:14px 24px;${MICRO_LABEL};text-align:left}
+  .hab-body{padding:20px 24px;display:flex;flex-direction:column;gap:16px}
+  .hab-field{width:100%;height:40px;padding:0 14px;border:1px solid var(--linelit);background:var(--panel);color:var(--cream);font-size:13px;min-width:0}
+  textarea.hab-field{height:auto;min-height:96px;padding:10px 14px;line-height:1.5;resize:vertical}
+  .hab-label{display:flex;flex-direction:column;gap:6px;min-width:0}
+  .hab-label>span{${MICRO_LABEL}}
+  .hab-help{margin:0;font-size:12px;font-weight:500;line-height:1.5;color:var(--dim)}
+  .hab-code{margin:0;padding:14px 16px;border-radius:12px;border:1px solid var(--line);background:var(--row-hover);font-family:var(--font-mono, ui-monospace, monospace);font-size:12px;line-height:1.6;color:var(--cream);white-space:pre-wrap;word-break:break-all}
+  .hab-keyform{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .hab-keyform .hab-field{width:200px}
+  .hab-field-head{display:grid;grid-template-columns:minmax(0,1fr) 130px minmax(0,1.4fr) 104px 40px;gap:10px;padding:0 14px}
+  .hab-field-head span{${MICRO_LABEL}}
+  .hab-field-row{display:grid;grid-template-columns:minmax(0,1fr) 130px minmax(0,1.4fr) 104px 40px;gap:10px;align-items:center;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--row-hover)}
+  .hab-field-row .hab-key{font-family:var(--font-mono, ui-monospace, monospace)}
+  .hab-req{display:flex;align-items:center;gap:8px;height:40px;font-size:12.5px;font-weight:700;color:var(--cream);cursor:pointer;white-space:nowrap}
+  .hab-req input{margin:0;accent-color:var(--accent-2)}
+  .hab-x{width:40px;height:40px;border-radius:12px;border:1px solid var(--linelit);background:var(--panel);color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .hab-x:hover{color:var(--bad);border-color:var(--bad)}
+  .hab-x:disabled{opacity:.4;cursor:not-allowed}
+  .hab-x:disabled:hover{color:var(--muted);border-color:var(--linelit)}
+  .hab-check{display:flex;align-items:flex-start;gap:10px;font-size:13px;font-weight:600;line-height:1.5;color:var(--cream);cursor:pointer;padding:14px 16px;border-radius:12px;border:1px solid var(--line);background:var(--panel)}
+  .hab-check:has(input[type="checkbox"]:checked){border-color:var(--accent);background:var(--accent-soft)}
+  .hab-check input{margin:3px 0 0;accent-color:var(--accent-2);flex:none}
+  .hab-check small{display:block;margin-top:2px;font-size:12px;font-weight:500;color:var(--dim)}
+  .hab-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .hab-newkey{display:flex;flex-direction:column;gap:10px;border-radius:var(--radius);border:1px solid var(--accent);background:var(--accent-soft);padding:18px 20px;margin-bottom:24px}
+  .hab-tpl{display:flex;flex-direction:column;gap:10px;border-radius:var(--radius);border:1px solid var(--line);background:var(--panel);padding:16px 18px;min-width:0}
+  @media (max-width:1400px){
+    .hab-split{grid-template-columns:minmax(0,1fr)}
+  }
+  @media (max-width:760px){
+    .hab-field-head{display:none}
+    .hab-field-row{grid-template-columns:minmax(0,1fr) 40px;padding:12px}
+    .hab-field-row .hab-key{grid-column:1;grid-row:1}
+    .hab-field-row .hab-x{grid-column:2;grid-row:1}
+    .hab-field-row .hab-type{grid-column:1 / -1}
+    .hab-field-row .hab-fdesc{grid-column:1 / -1}
+    .hab-field-row .hab-req{grid-column:1 / -1}
+  }
+  @media (max-width:640px){
+    .hab-grid{grid-template-columns:minmax(0,1fr);padding:16px}
+    .hab-body{padding:16px}
+    .hab-table td,.hab-table th{padding:12px 16px}
+    .hab-keyform,.hab-keyform .hab-field{width:100%}
+  }
+</style>`;
+
+function fieldRow(f: Partial<SkillField>): string {
   const opts = FIELD_TYPES.map(
     (t) => `<option value="${t}" ${f.type === t ? "selected" : ""}>${t}</option>`,
   ).join("");
   return `
-    <div class="field-row" style="display:grid;grid-template-columns:1fr 120px 1.4fr 90px 32px;gap:8px;align-items:center">
-      <input name="field_key" value="${esc(f.key ?? "")}" placeholder="nombre_del_campo"
-             style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:8px 10px;font-size:12.5px;outline:none;width:100%">
-      <select name="field_type" style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:8px 10px;font-size:12.5px;outline:none;width:100%">${opts}</select>
-      <input name="field_desc" value="${esc(f.description ?? "")}" placeholder="para qué sirve (ayuda al agente)"
-             style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:8px 10px;font-size:12.5px;outline:none;width:100%">
-      <label class="text-[11.5px]" style="display:flex;align-items:center;gap:6px;color:var(--muted);cursor:pointer">
+    <div class="hab-field-row field-row">
+      <input name="field_key" value="${esc(f.key ?? "")}" placeholder="nombre_del_campo" class="hab-field hab-key" aria-label="Nombre del campo">
+      <select name="field_type" class="hab-field hab-type" aria-label="Tipo de dato">${opts}</select>
+      <input name="field_desc" value="${esc(f.description ?? "")}" placeholder="para qué sirve (ayuda al agente)" class="hab-field hab-fdesc" aria-label="Para qué sirve el campo">
+      <label class="hab-req">
         <input type="hidden" name="field_required" value="${f.required ? "1" : "0"}">
         <input type="checkbox" ${f.required ? "checked" : ""}
-               onchange="this.previousElementSibling.value = this.checked ? '1' : '0'"> obliga
+               onchange="this.previousElementSibling.value = this.checked ? '1' : '0'">Obligatorio
       </label>
-      <button type="button" class="text-[11px]" title="Quitar campo"
-              style="border:1px solid var(--line);color:var(--bad);background:none;padding:6px 0;cursor:pointer"
-              onclick="this.closest('.field-row').remove()">✕</button>
+      <button type="button" class="hab-x field-remove" aria-label="Quitar campo"><i data-lucide="x" width="16" height="16"></i></button>
     </div>`;
 }
 
@@ -90,69 +166,91 @@ function skillForm(skill: BotSkill | null, error?: string): string {
   const fields = skill?.output_fields ?? [{ key: "resultado", type: "string" as const, required: true }];
   const action = isNew ? "/admin/habilidades/nueva" : `/admin/habilidades/${skill!.id}`;
 
-  return `
-  <form method="POST" action="${action}" class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:16px">
-    ${
-      error
-        ? `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px;border-radius:var(--radius-sm)">${esc(error)}</div>`
-        : ""
-    }
-    <div style="display:flex;flex-direction:column;gap:6px">
-      <label class="font-display font-semibold text-[12.5px] text-cream">Nombre de la habilidad</label>
-      <p class="text-dim text-[11px]">Ej. "Calificar lead", "Extraer datos de una factura", "Clasificar un ticket".</p>
-      <input name="name" required value="${esc(skill?.name ?? "")}" placeholder="Calificar lead"
-             style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%">
-    </div>
+  const basics = sectionCard({
+    icon: "sparkles",
+    title: "La tarea",
+    subtitle: "Cómo se llama y qué debe hacer",
+    body: `<div class="hab-body">
+      <label class="hab-label"><span>Nombre de la habilidad</span>
+        <input name="name" required value="${esc(skill?.name ?? "")}" placeholder="Calificar lead" class="hab-field" aria-describedby="name-help">
+        <p id="name-help" class="hab-help">Ej. "Calificar lead", "Extraer datos de una factura", "Clasificar un ticket".</p>
+      </label>
+      <label class="hab-label"><span>Qué debe hacer</span>
+        <textarea name="instructions" required rows="5" class="hab-field" aria-describedby="instr-help"
+                  placeholder="Lee los datos del prospecto y califica qué tan probable es que compre, considerando nuestros precios y horarios.">${esc(skill?.instructions ?? "")}</textarea>
+        <p id="instr-help" class="hab-help">Explícaselo como se lo explicarías a un empleado nuevo. El agente ya conoce tu negocio y puede consultar tu base de conocimiento.</p>
+      </label>
+    </div>`,
+  });
 
-    <div style="display:flex;flex-direction:column;gap:6px">
-      <label class="font-display font-semibold text-[12.5px] text-cream">Qué debe hacer</label>
-      <p class="text-dim text-[11px]">Explícaselo como se lo explicarías a un empleado nuevo. El agente ya conoce tu negocio y puede consultar tu base de conocimiento.</p>
-      <textarea name="instructions" required rows="5" placeholder="Lee los datos del prospecto y califica qué tan probable es que compre, considerando nuestros precios y horarios."
-                style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;outline:none;width:100%;resize:vertical">${esc(skill?.instructions ?? "")}</textarea>
-    </div>
-
-    <div style="display:flex;flex-direction:column;gap:8px">
-      <label class="font-display font-semibold text-[12.5px] text-cream">Qué debe devolver</label>
-      <p class="text-dim text-[11px]">Los campos del JSON que recibirá quien la llame. Los que no marques como obligatorios llegarán como <span class="font-mono">null</span> cuando el agente no sepa el dato — nunca inventados.</p>
-      <div id="fields-list" style="display:flex;flex-direction:column;gap:8px">
-        ${fields.map((f, i) => fieldRow(f, i)).join("")}
+  const salida = sectionCard({
+    icon: "braces",
+    title: "Qué debe devolver",
+    subtitle: "Los campos del resultado que recibe quien la llame",
+    body: `<div class="hab-body">
+      <p class="hab-help">Los que no marques como obligatorios llegarán como <span class="hab-chip">null</span> cuando el agente no sepa el dato, nunca inventados.</p>
+      <div class="hab-field-head" aria-hidden="true"><span>Campo</span><span>Tipo</span><span>Para qué sirve</span><span></span><span></span></div>
+      <div id="fields-list" style="display:flex;flex-direction:column;gap:10px">
+        ${fields.map((f) => fieldRow(f)).join("")}
       </div>
-      <button type="button" id="add-field" class="text-[11.5px]"
-              style="align-self:flex-start;border:1px solid var(--line);color:var(--cream);background:none;padding:6px 12px;cursor:pointer">+ Agregar campo</button>
-    </div>
+      <button type="button" id="add-field" class="hab-btn-ghost" style="align-self:flex-start"><i data-lucide="plus" width="15" height="15"></i>Agregar campo</button>
+    </div>`,
+  });
 
-    ${
-      !isNew
-        ? `<label class="text-[12px]" style="display:flex;align-items:center;gap:8px;color:var(--muted);cursor:pointer">
-             <input type="hidden" name="enabled" value="0">
-             <input type="checkbox" name="enabled" value="1" ${skill!.enabled ? "checked" : ""}> Activa (si la apagas, la API responde 404)
-           </label>`
-        : ""
-    }
+  const estado = !isNew
+    ? sectionCard({
+        icon: "power",
+        title: "Estado",
+        body: `<div class="hab-body">
+          <label class="hab-check">
+            <input type="hidden" name="enabled" value="0">
+            <input type="checkbox" name="enabled" value="1" ${skill!.enabled ? "checked" : ""}>
+            <span>Activa<small>Si la apagas, la API responde 404 a quien la llame.</small></span>
+          </label>
+        </div>`,
+      })
+    : "";
 
-    <div style="display:flex;gap:8px;align-items:center">
-      <button type="submit" class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
-              style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 18px">
-        ${isNew ? "Crear habilidad" : "Guardar cambios"}
-      </button>
-      <a href="/admin/habilidades" class="ghostbtn text-[12.5px]"
-         style="border:1px solid var(--line);color:var(--muted);padding:9px 16px;text-decoration:none">Cancelar</a>
+  return `
+  <form method="POST" action="${action}" style="display:flex;flex-direction:column;gap:24px">
+    ${error ? alertRow({ title: "Falta algo", detail: error, attrs: 'role="alert"' }) : ""}
+    ${basics}
+    ${salida}
+    ${estado}
+    <div class="hab-actions">
+      <button type="submit" class="hab-btn"><i data-lucide="${isNew ? "plus" : "save"}" width="15" height="15"></i>${isNew ? "Crear habilidad" : "Guardar cambios"}</button>
+      <a href="/admin/habilidades" class="hab-btn-ghost">Cancelar</a>
     </div>
   </form>
 
   <script>
   (function () {
     var list = document.getElementById("fields-list");
+    // No deja quitar el último campo: "Agregar campo" clona una fila
+    // existente, y sin ninguna no habría de dónde.
+    function sync() {
+      var rows = list.querySelectorAll(".field-row");
+      rows.forEach(function (row) { row.querySelector(".field-remove").disabled = rows.length === 1; });
+    }
+    list.addEventListener("click", function (e) {
+      var x = e.target.closest(".field-remove");
+      if (!x || x.disabled) return;
+      x.closest(".field-row").remove();
+      sync();
+    });
     document.getElementById("add-field").addEventListener("click", function () {
-      var first = list.querySelector(".field-row");
-      var copy = first.cloneNode(true);
+      var copy = list.querySelector(".field-row").cloneNode(true);
       copy.querySelectorAll("input").forEach(function (i) {
         if (i.type === "checkbox") i.checked = false;
         else if (i.type === "hidden") i.value = "0";
         else i.value = "";
       });
+      copy.querySelector("select").selectedIndex = 0;
       list.appendChild(copy);
+      sync();
+      copy.querySelector("input").focus();
     });
+    sync();
   })();
   </script>`;
 }
@@ -165,46 +263,78 @@ function skillForm(skill: BotSkill | null, error?: string): string {
 export function renderSkillTemplatesModal(): string {
   const cards = SKILL_TEMPLATES.map(
     (t) => `
-    <div class="bg-panel border border-line" style="padding:14px 16px;display:flex;flex-direction:column;gap:8px">
-      <span class="font-display font-semibold text-[13px] text-cream">${esc(t.label)}</span>
-      <p class="text-dim text-[11.5px]" style="margin:0">${esc(t.description)}</p>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${t.outputFields.map((f) => `<span class="font-mono" style="font-size:10px;color:var(--muted);border:1px solid var(--line);padding:2px 7px">${esc(f.key)}</span>`).join("")}
+    <div class="hab-tpl">
+      <h3 style="margin:0;font-size:14px;font-weight:900;letter-spacing:-.01em;color:var(--cream)">${esc(t.label)}</h3>
+      <p class="hab-help" style="color:var(--muted)">${esc(t.description)}</p>
+      <div class="hab-chips">
+        ${t.outputFields.map((f) => `<span class="hab-chip">${esc(f.key)}</span>`).join("")}
       </div>
-      <form method="POST" action="/admin/habilidades/plantillas/${esc(t.slug)}/usar" style="margin-top:4px">
-        <button type="submit" class="text-[11.5px] font-display font-semibold cursor-pointer"
-                style="width:100%;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 10px">Usar esta plantilla</button>
+      <form method="POST" action="/admin/habilidades/plantillas/${esc(t.slug)}/usar" style="margin-top:auto;padding-top:4px">
+        <button type="submit" class="hab-btn-ghost" style="width:100%;border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink)">Usar esta plantilla</button>
       </form>
     </div>`,
   ).join("");
 
-  return `
+  return `${HAB_CSS}
   <div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
-    <div class="modal-card w-full max-w-2xl max-h-[85vh] overflow-y-auto">
-      <div class="flex items-center justify-between mb-1">
-        <h3 class="font-display font-semibold text-[15px] text-cream">Plantillas de habilidad</h3>
-        <button type="button" class="ghostbtn cursor-pointer" style="background:none;border:0;color:var(--muted);font-size:18px;line-height:1"
-                onclick="document.getElementById('modal-root').innerHTML=''">×</button>
+    <div class="modal-card w-full max-w-3xl max-h-[85vh] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="hab-tpl-title">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:6px">
+        ${iconTile("layout-template", "accent")}
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1">
+          <h2 id="hab-tpl-title" style="margin:0;font-size:16px;font-weight:900;letter-spacing:-.02em;color:var(--cream)">Plantillas de habilidad</h2>
+          <p class="hab-help">Elige un punto de partida y ajústalo a tu negocio después de crearlo.</p>
+        </div>
+        <button type="button" class="hab-x" aria-label="Cerrar" onclick="document.getElementById('modal-root').innerHTML=''"><i data-lucide="x" width="16" height="16"></i></button>
       </div>
-      <p class="text-muted text-[12px] mb-4">Elige un punto de partida y ajústalo a tu negocio después de crearlo.</p>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">${cards}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:16px">${cards}</div>
     </div>
   </div>`;
 }
 
+const RUN_STATUS: Record<string, { label: string; color: string }> = {
+  ok: { label: "Bien", color: "var(--ok)" },
+  error: { label: "Falló", color: "var(--bad)" },
+  running: { label: "En curso", color: "var(--accent)" },
+};
+
 function runRow(r: SkillRun, skillName: string): string {
-  const color = r.status === "ok" ? "var(--ok)" : r.status === "error" ? "var(--bad)" : "var(--muted)";
+  const st = RUN_STATUS[r.status] ?? { label: r.status, color: "var(--dim)" };
   const detail = r.status === "error" ? r.error : JSON.stringify(r.output ?? {});
   return `
-    <tr style="border-top:1px solid var(--line)">
-      <td style="padding:8px 0;font-size:11.5px;color:var(--muted)">${fmtDate(r.created_at)}</td>
-      <td style="padding:8px 0;font-size:12px">${esc(skillName)}</td>
-      <td style="padding:8px 0"><span style="font-size:10px;letter-spacing:.05em;color:${color};border:1px solid ${color};padding:2px 8px">${r.status}</span></td>
-      <td style="padding:8px 0;font-size:11px;color:var(--dim);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" class="font-mono">${esc(
-        (detail ?? "").slice(0, 160),
-      )}</td>
+    <tr>
+      <td class="dim" style="white-space:nowrap">${fmtDate(r.created_at)}</td>
+      <td style="font-weight:700">${esc(skillName)}</td>
+      <td>${statusPill(st.label, st.color)}</td>
+      <td class="dim mono" style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((detail ?? "").slice(0, 160))}</td>
     </tr>`;
 }
+
+function skillCard(s: BotSkill): string {
+  return `
+    <article class="hab-card${s.enabled ? "" : " is-off"}">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+        ${statusPill(s.enabled ? "Activa" : "Apagada", s.enabled ? "var(--ok)" : "var(--dim)")}
+        <span style="margin-left:auto;font-size:12px;font-weight:700;color:var(--dim);white-space:nowrap">${s.output_fields.length} ${s.output_fields.length === 1 ? "campo" : "campos"}</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <h3 class="hab-name">${esc(s.name)}</h3>
+        <span class="hab-endpoint">POST /v1/skills/${esc(s.slug)}</span>
+      </div>
+      <p class="hab-desc">${esc(s.instructions.slice(0, 130))}${s.instructions.length > 130 ? "…" : ""}</p>
+      <div class="hab-chips" aria-label="Campos que devuelve">
+        ${s.output_fields.map((f) => `<span class="hab-chip">${esc(f.key)}</span>`).join("")}
+      </div>
+      <div class="hab-foot">
+        <a href="/admin/habilidades/${esc(s.id)}/editar" class="hab-btn-sm"><i data-lucide="pencil" width="14" height="14"></i>Editar</a>
+        <form method="POST" action="/admin/habilidades/${esc(s.id)}/borrar" data-confirm="¿Borrar &quot;${esc(s.name)}&quot;? Los sistemas que la llamen empezarán a recibir 404."
+              onsubmit="return confirm(this.dataset.confirm)" style="margin:0">
+          <button type="submit" class="hab-btn-sm" aria-label="Borrar ${esc(s.name)}"><i data-lucide="trash-2" width="14" height="14"></i>Borrar</button>
+        </form>
+      </div>
+    </article>`;
+}
+
+const PLANTILLAS_HTMX = 'hx-get="/admin/habilidades/plantillas" hx-target="#modal-root" hx-swap="innerHTML"';
 
 export async function renderHabilidades(
   env: Env,
@@ -212,10 +342,12 @@ export async function renderHabilidades(
   opts: { newKey?: string; error?: string } = {},
 ): Promise<string> {
   const db = new Db(env.DB);
-  const skills = await new BotSkillsRepo(db, botId).list();
-  const keys = await new BotApiKeysRepo(db).listByBot(botId);
-  const runs = await new SkillRunsRepo(db, botId).listRecent(20);
-  const apiChannel = await new BotChannelsRepo(db).getByBotAndChannel(botId, "api");
+  const [skills, keys, runs, apiChannel] = await Promise.all([
+    new BotSkillsRepo(db, botId).list(),
+    new BotApiKeysRepo(db).listByBot(botId),
+    new SkillRunsRepo(db, botId).listRecent(20),
+    new BotChannelsRepo(db).getByBotAndChannel(botId, "api"),
+  ]);
   const skillNames = new Map(skills.map((s) => [s.id, s.name]));
 
   const base = (env.DASHBOARD_BASE_URL ?? "").replace(/\/$/, "");
@@ -225,139 +357,172 @@ export async function renderHabilidades(
   -H "Content-Type: application/json" \\
   -d '{"input": "los datos que quieres procesar"}'`;
 
+  const activas = skills.filter((s) => s.enabled).length;
+  const llavesActivas = keys.filter((k) => k.enabled).length;
+  const terminadas = runs.filter((r) => r.status !== "running");
+  const bien = terminadas.filter((r) => r.status === "ok").length;
+  const fallas = terminadas.length - bien;
+
+  const hero = pageHero({
+    eyebrow: "Mi Agente",
+    title: "Habilidades",
+    description:
+      "Lo que tu agente sabe hacer cuando quien le pide trabajo es otro sistema, no una persona. Recibe datos, los procesa con todo lo que sabe de tu negocio y devuelve un resultado estructurado.",
+    tags: apiChannel ? heroTag("API encendida", "#3fb8c4") : heroTag("API apagada", "#f0a88a"),
+    actions: `${heroBtn({ label: "Usar una plantilla", href: "/admin/habilidades/plantillas", icon: "layout-template", attrs: PLANTILLAS_HTMX })}
+      ${heroBtn({ label: "Nueva habilidad", href: "/admin/habilidades/nueva", icon: "plus", primary: true })}`,
+  });
+
   const apagado = !apiChannel
-    ? `<div class="text-[12.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:11px 14px;border-radius:var(--radius-sm)">
-         La API está <b>apagada</b>. Enciéndela desde <a href="/admin/conexiones" class="text-accent">Conexiones</a> para que tus llaves funcionen.
-       </div>`
+    ? alertRow({
+        title: "La API está apagada",
+        detail: "Enciéndela desde Conexiones para que tus llaves funcionen. Mientras tanto, cualquier llamada recibe un error.",
+        action: { label: "Ir a Conexiones", href: "/admin/conexiones" },
+      })
     : "";
 
   const nuevaLlave = opts.newKey
-    ? `<div style="border:1px solid var(--accent);background:var(--accent-soft);padding:14px 16px;border-radius:var(--radius-sm);display:flex;flex-direction:column;gap:8px">
-         <span class="font-display font-semibold text-[12.5px]" style="color:var(--accent-2)">Guarda esta llave ahora — no se vuelve a mostrar</span>
-         <pre class="font-mono text-[11.5px]" style="border:1px solid var(--line);background:var(--bg);padding:10px 12px;margin:0;white-space:pre-wrap;word-break:break-all">${esc(opts.newKey)}</pre>
-         <button type="button" class="text-[11px]" style="align-self:flex-start;border:1px solid var(--line);color:var(--cream);background:none;padding:5px 10px;cursor:pointer"
-                 onclick="navigator.clipboard.writeText(${esc(JSON.stringify(opts.newKey))});this.textContent='copiado ✓'">copiar</button>
+    ? `<div class="hab-newkey" role="status">
+         <div style="display:flex;align-items:center;gap:12px">
+           ${iconTile("key-round", "accent")}
+           <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+             <strong style="font-size:14px;font-weight:900;color:var(--cream)">Guarda esta llave ahora</strong>
+             <span class="hab-help" style="color:var(--muted)">No se vuelve a mostrar. Si la pierdes, revócala y crea otra.</span>
+           </div>
+         </div>
+         <pre class="hab-code" style="background:var(--panel)">${esc(opts.newKey)}</pre>
+         <button type="button" class="hab-btn-ghost" style="align-self:flex-start"
+                 onclick="navigator.clipboard.writeText(${esc(JSON.stringify(opts.newKey))});this.lastChild.textContent='Copiada'"><i data-lucide="copy" width="15" height="15"></i><span>Copiar llave</span></button>
        </div>`
     : "";
 
-  const skillCards =
-    skills.length === 0
-      ? `<div class="text-dim text-[12.5px]" style="padding:28px 0;text-align:center">Todavía no tienes habilidades. Crea la primera para que otros sistemas puedan pedirle trabajo a tu agente.</div>`
-      : skills
-          .map(
-            (s) => `
-      <div class="bg-panel border ${s.enabled ? "" : "border-line"}" style="padding:16px 18px;display:flex;flex-direction:column;gap:8px;${s.enabled ? "border-color:rgba(127,183,126,.45)" : "opacity:.65"}">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-          <span class="font-display font-semibold text-[13.5px] text-cream">${esc(s.name)}</span>
-          <span style="font-size:10px;letter-spacing:.14em;color:${s.enabled ? "var(--ok)" : "var(--dim)"};border:1px solid ${s.enabled ? "var(--ok)" : "var(--line)"};padding:3px 10px;font-weight:700">${s.enabled ? "● ACTIVA" : "○ APAGADA"}</span>
-        </div>
-        <span class="font-mono text-[11px]" style="color:var(--dim)">POST /v1/skills/${esc(s.slug)}</span>
-        <p class="text-dim text-[12px]" style="margin:0">${esc(s.instructions.slice(0, 130))}${s.instructions.length > 130 ? "…" : ""}</p>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          ${s.output_fields.map((f) => `<span class="font-mono" style="font-size:10px;color:var(--muted);border:1px solid var(--line);padding:2px 7px">${esc(f.key)}</span>`).join("")}
-        </div>
-        <div style="display:flex;gap:8px;margin-top:4px">
-          <a href="/admin/habilidades/${s.id}/editar" class="text-[11.5px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 12px;text-decoration:none">Editar</a>
-          <form method="POST" action="/admin/habilidades/${s.id}/borrar" onsubmit="return confirm('¿Borrar &quot;${esc(s.name)}&quot;? Los sistemas que la llamen empezarán a recibir 404.')">
-            <button type="submit" class="text-[11.5px]" style="border:1px solid var(--line);color:var(--bad);background:none;padding:5px 12px;cursor:pointer">Borrar</button>
-          </form>
-        </div>
-      </div>`,
-          )
-          .join("");
+  const stats = statGrid([
+    statCard({ icon: "sparkles", tone: "ok", label: "Habilidades activas", value: activas, note: `de ${skills.length} creadas` }),
+    statCard({ icon: "key-round", tone: "accent", label: "Llaves activas", value: llavesActivas, note: keys.length > llavesActivas ? `${keys.length - llavesActivas} revocadas` : "una por sistema conectado" }),
+    statCard({
+      icon: "circle-check",
+      tone: fallas > 0 ? "warn" : "neutral",
+      label: "Corridas con éxito",
+      value: terminadas.length ? `${bien} / ${terminadas.length}` : "—",
+      hint: fallas > 0 ? `${fallas} ${fallas === 1 ? "falló" : "fallaron"}` : undefined,
+      note: "de las últimas 20",
+    }),
+    statCard({ icon: "clock", tone: "neutral", label: "Última corrida", value: ago(runs[0]?.created_at), note: runs[0] ? skillNames.get(runs[0].skill_id) ?? "—" : "todavía ninguna" }),
+  ]);
 
-  const keyRows =
-    keys.length === 0
-      ? `<div class="text-dim text-[12px]" style="padding:12px 0;text-align:center">Sin llaves todavía.</div>`
-      : `<table style="width:100%;border-collapse:collapse">
-          <thead><tr class="text-dim" style="font-size:9.5px;letter-spacing:.12em;text-transform:uppercase">
-            <th style="padding:6px 0;text-align:left">Nombre</th>
-            <th style="padding:6px 0;text-align:left">Llave</th>
-            <th style="padding:6px 0;text-align:left">Último uso</th>
-            <th style="padding:6px 0;text-align:right"></th>
-          </tr></thead>
-          <tbody>${keys
-            .map(
-              (k) => `
-            <tr style="border-top:1px solid var(--line);${k.enabled ? "" : "opacity:.5"}">
-              <td style="padding:8px 0;font-size:12px">${esc(k.name)}</td>
-              <td style="padding:8px 0;font-size:11.5px" class="font-mono">na_${esc(k.key_prefix)}_••••</td>
-              <td style="padding:8px 0;font-size:11.5px;color:var(--muted)">${fmtDate(k.last_used_at)}</td>
-              <td style="padding:8px 0;text-align:right">
-                ${
-                  k.enabled
-                    ? `<form method="POST" action="/admin/habilidades/llaves/${k.id}/revocar" onsubmit="return confirm('¿Revocar esta llave? Quien la esté usando dejará de tener acceso de inmediato.')">
-                         <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);background:none;padding:4px 10px;cursor:pointer">Revocar</button>
-                       </form>`
-                    : `<span class="text-[11px]" style="color:var(--dim)">revocada</span>`
-                }
-              </td>
-            </tr>`,
-            )
-            .join("")}</tbody>
-        </table>`;
+  const habilidades = sectionCard({
+    icon: "sparkles",
+    title: "Tus habilidades",
+    subtitle: skills.length === 0 ? "Todavía no hay ninguna" : `${skills.length} ${skills.length === 1 ? "habilidad" : "habilidades"}`,
+    body:
+      skills.length === 0
+        ? `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:40px 24px;text-align:center">
+            ${iconTile("sparkles", "accent")}
+            <div style="font-size:14px;font-weight:800;color:var(--cream)">Todavía no tienes habilidades.</div>
+            <p class="hab-help" style="max-width:420px">Crea la primera para que otros sistemas puedan pedirle trabajo a tu agente.</p>
+            <div class="hab-actions" style="justify-content:center">
+              <a href="/admin/habilidades/plantillas" ${PLANTILLAS_HTMX} class="hab-btn-ghost"><i data-lucide="layout-template" width="15" height="15"></i>Usar una plantilla</a>
+              <a href="/admin/habilidades/nueva" class="hab-btn"><i data-lucide="plus" width="15" height="15"></i>Nueva habilidad</a>
+            </div>
+          </div>`
+        : `<div class="hab-grid">${skills.map(skillCard).join("")}</div>`,
+  });
 
-  const body = `
-    <div style="display:flex;flex-direction:column;gap:18px">
-      <div style="display:flex;flex-direction:column;gap:2px">
-        <h2 class="font-display font-semibold text-[15px] text-cream">Habilidades</h2>
-        <p class="text-muted text-[12.5px]">Lo que tu agente sabe hacer cuando quien le pide trabajo es otro sistema, no una persona. Recibe datos, los procesa con todo lo que sabe de tu negocio, y devuelve un resultado estructurado.</p>
+  const llaves = sectionCard({
+    icon: "key-round",
+    title: "Llaves de acceso",
+    subtitle: "Una por cada sistema que integres",
+    actions: `<form method="POST" action="/admin/habilidades/llaves" class="hab-keyform">
+        <input name="name" required placeholder="Para qué es (ej. ERP)" class="hab-field" aria-label="Para qué es la llave">
+        <button type="submit" class="hab-btn"><i data-lucide="plus" width="15" height="15"></i>Crear llave</button>
+      </form>`,
+    body: `<p class="hab-help" style="padding:16px 24px 0">Así puedes revocar una sin tumbar las demás. La llave se muestra <b style="color:var(--cream)">una sola vez</b>.</p>
+      ${
+        keys.length === 0
+          ? `<div style="padding:24px;text-align:center" class="hab-help">Sin llaves todavía.</div>`
+          : `<div style="overflow-x:auto;margin-top:8px"><table class="hab-table" style="min-width:480px">
+              <thead><tr>
+                <th scope="col">Nombre</th>
+                <th scope="col">Llave</th>
+                <th scope="col">Último uso</th>
+                <th scope="col"><span class="sr-only">Acciones</span></th>
+              </tr></thead>
+              <tbody>${keys
+                .map(
+                  (k) => `
+                <tr>
+                  <td style="font-weight:700;${k.enabled ? "" : "color:var(--muted)"}">${esc(k.name)}</td>
+                  <td class="mono" style="${k.enabled ? "" : "color:var(--dim)"}">na_${esc(k.key_prefix)}_••••</td>
+                  <td class="dim">${fmtDate(k.last_used_at)}</td>
+                  <td style="text-align:right">
+                    ${
+                      k.enabled
+                        ? `<form method="POST" action="/admin/habilidades/llaves/${esc(k.id)}/revocar" data-confirm="¿Revocar esta llave? Quien la esté usando dejará de tener acceso de inmediato."
+                                 onsubmit="return confirm(this.dataset.confirm)" style="margin:0">
+                             <button type="submit" class="hab-btn-sm" aria-label="Revocar la llave ${esc(k.name)}"><i data-lucide="ban" width="14" height="14"></i>Revocar</button>
+                           </form>`
+                        : statusPill("Revocada", "var(--dim)")
+                    }
+                  </td>
+                </tr>`,
+                )
+                .join("")}</tbody>
+            </table></div>`
+      }`,
+  });
+
+  const comoSeLlama = sectionCard({
+    icon: "terminal",
+    title: "Cómo se llama",
+    subtitle: "Ejemplo listo para copiar",
+    body: `<div class="hab-body">
+      <pre class="hab-code">${esc(curl)}</pre>
+      <p class="hab-help">Para tareas largas agrega <span class="hab-chip">"callback_url"</span>: responde de inmediato y te manda el resultado a esa dirección cuando termina, firmado para que puedas verificar que viene de aquí.</p>
+    </div>`,
+  });
+
+  const corridas = sectionCard({
+    icon: "history",
+    title: "Últimas corridas",
+    subtitle: "Lo que otros sistemas le pidieron a tu agente",
+    body:
+      runs.length === 0
+        ? `<div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:32px 24px;text-align:center">
+            ${iconTile("play", "neutral")}
+            <div style="font-size:13px;font-weight:700;color:var(--cream)">Sin corridas todavía.</div>
+            <p class="hab-help">Cuando un sistema llame a una habilidad, aquí ves qué pidió y qué devolvió.</p>
+          </div>`
+        : `<div style="overflow-x:auto"><table class="hab-table" style="min-width:640px">
+            <thead><tr>
+              <th scope="col">Cuándo</th>
+              <th scope="col">Habilidad</th>
+              <th scope="col">Estado</th>
+              <th scope="col">Resultado</th>
+            </tr></thead>
+            <tbody>${runs.map((r) => runRow(r, skillNames.get(r.skill_id) ?? "—")).join("")}</tbody>
+          </table></div>`,
+  });
+
+  const body = `${HAB_CSS}
+    ${hero}
+    ${nuevaLlave}
+    ${apagado || opts.error
+      ? `<div style="display:flex;flex-direction:column;gap:12px;margin-bottom:24px">
+          ${opts.error ? alertRow({ title: "No se pudo completar", detail: opts.error, attrs: 'role="alert"' }) : ""}
+          ${apagado}
+        </div>`
+      : ""}
+    ${stats}
+    <div style="display:flex;flex-direction:column;gap:24px">
+      ${habilidades}
+      <div class="hab-split">
+        ${llaves}
+        ${comoSeLlama}
       </div>
-
-      ${apagado}
-      ${nuevaLlave}
-      ${opts.error ? `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px;border-radius:var(--radius-sm)">${esc(opts.error)}</div>` : ""}
-
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-        <h3 class="font-display font-semibold text-[13.5px] text-cream">Tus habilidades</h3>
-        <div style="display:flex;gap:8px">
-          <button type="button" class="ghostbtn font-display font-semibold text-[12.5px] cursor-pointer"
-                  hx-get="/admin/habilidades/plantillas" hx-target="#modal-root" hx-swap="innerHTML"
-                  style="background:var(--panel2);border:1px solid var(--line);color:var(--cream);padding:8px 16px">✦ Usar una plantilla</button>
-          <a href="/admin/habilidades/nueva" class="bigbtn font-display font-bold text-[12.5px]"
-             style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:8px 16px;text-decoration:none">+ Nueva habilidad</a>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px">${skillCards}</div>
-
-      <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:12px">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-          <h3 class="font-display font-semibold text-[13.5px] text-cream">Llaves de acceso</h3>
-          <form method="POST" action="/admin/habilidades/llaves" style="display:flex;gap:8px;align-items:center">
-            <input name="name" required placeholder="Para qué es (ej. ERP)"
-                   style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:8px 10px;font-size:12px;outline:none">
-            <button type="submit" class="text-[11.5px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:8px 14px;cursor:pointer;font-weight:600">Crear llave</button>
-          </form>
-        </div>
-        <p class="text-dim text-[11px]" style="margin:0">Cada sistema que integres debe tener la suya: así puedes revocar una sin tumbar las demás. La llave se muestra <b>una sola vez</b>.</p>
-        ${keyRows}
-      </div>
-
-      <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:10px">
-        <h3 class="font-display font-semibold text-[13.5px] text-cream">Cómo se llama</h3>
-        <pre class="font-mono text-[11px]" style="border:1px solid var(--line);background:var(--bg);padding:12px 14px;margin:0;white-space:pre-wrap;word-break:break-all;color:var(--muted)">${esc(curl)}</pre>
-        <p class="text-dim text-[11px]" style="margin:0">Para tareas largas agrega <span class="font-mono">"callback_url"</span>: responde de inmediato y te manda el resultado a esa dirección cuando termina, firmado para que puedas verificar que viene de aquí.</p>
-      </div>
-
-      <div class="bg-panel border border-line" style="padding:20px;display:flex;flex-direction:column;gap:10px">
-        <h3 class="font-display font-semibold text-[13.5px] text-cream">Últimas corridas</h3>
-        ${
-          runs.length === 0
-            ? `<div class="text-dim text-[12px]" style="padding:12px 0;text-align:center">Sin corridas todavía.</div>`
-            : `<table style="width:100%;border-collapse:collapse">
-                <thead><tr class="text-dim" style="font-size:9.5px;letter-spacing:.12em;text-transform:uppercase">
-                  <th style="padding:6px 0;text-align:left">Cuándo</th>
-                  <th style="padding:6px 0;text-align:left">Habilidad</th>
-                  <th style="padding:6px 0;text-align:left">Estado</th>
-                  <th style="padding:6px 0;text-align:left">Resultado</th>
-                </tr></thead>
-                <tbody>${runs.map((r) => runRow(r, skillNames.get(r.skill_id) ?? "—")).join("")}</tbody>
-              </table>`
-        }
-      </div>
+      ${corridas}
     </div>`;
 
-  return layout({ title: "Habilidades", activeTab: "habilidades", body});
+  return layout({ title: "Habilidades", activeTab: "habilidades", body, hero: true });
 }
 
 export async function renderSkillForm(
@@ -368,15 +533,19 @@ export async function renderSkillForm(
 ): Promise<string> {
   const db = new Db(env.DB);
   const skill = skillId ? await new BotSkillsRepo(db, botId).getById(skillId) : null;
-  const body = `
-    <div style="display:flex;flex-direction:column;gap:18px;max-width:820px">
-      <div style="display:flex;flex-direction:column;gap:2px">
-        <h2 class="font-display font-semibold text-[15px] text-cream">${skill ? "Editar habilidad" : "Nueva habilidad"}</h2>
-        <p class="text-muted text-[12.5px]">Define una tarea que otros sistemas podrán pedirle a tu agente.</p>
-      </div>
+  const hero = pageHero({
+    eyebrow: "Habilidades",
+    title: skill ? "Editar habilidad" : "Nueva habilidad",
+    description: "Define una tarea que otros sistemas podrán pedirle a tu agente.",
+    tags: skill ? heroTag(skill.enabled ? "Activa" : "Apagada", skill.enabled ? "#3fb8c4" : "#f0a88a") : undefined,
+    actions: heroBtn({ label: "Volver", href: "/admin/habilidades", icon: "arrow-left" }),
+  });
+  const body = `${HAB_CSS}
+    <div style="max-width:920px">
+      ${hero}
       ${skillForm(skill, error)}
     </div>`;
-  return layout({ title: "Habilidades", activeTab: "habilidades", body});
+  return layout({ title: "Habilidades", activeTab: "habilidades", body, hero: true });
 }
 
 export { slugify };

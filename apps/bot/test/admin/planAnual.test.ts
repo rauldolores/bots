@@ -77,8 +77,8 @@ describe("interruptor Mensual / Anual", () => {
   it("solo aparece si algún plan trae yearlyPriceAmount, y arranca en Mensual", () => {
     const con = render([IMPULSO, PRO]);
     expect(con).toContain('data-interval="month"');
-    expect(con).toContain('class="plan-int" data-interval="month" aria-pressed="true"');
-    expect(con).toContain('class="plan-int" data-interval="year" aria-pressed="false"');
+    expect(con).toContain('class="plan-int pl-int" data-interval="month" aria-pressed="true"');
+    expect(con).toContain('class="plan-int pl-int" data-interval="year" aria-pressed="false"');
     expect(con).toContain("−17%");
 
     const sin = render([IMPULSO, GRATIS]);
@@ -127,16 +127,16 @@ describe("botón de compra por intervalo (B4)", () => {
   it("Pro mensual activo: en Mensual es 'Plan actual' deshabilitado, en Anual dice 'Cambiar a anual' y pasa por checkout", () => {
     const html = render([PRO], { planSlug: "pro", billingInterval: "month" });
     const mes = html.slice(html.indexOf('<div data-intervalo="month"><form'), html.indexOf('<div data-intervalo="year"><form'));
-    expect(html).toContain('disabled class="text-[12px]" style="background:none;border:1px solid var(--ok);color:var(--ok);font-weight:700;padding:9px 16px;width:100%;cursor:default">Plan actual');
+    expect(html).toMatch(/<button type="button" disabled style="[^"]*">Plan actual<\/button>/);
     expect(html).toContain("Cambiar a anual");
     expect(html).not.toContain("Cambiar a mensual");
     expect(mes).toBe(""); // el bloque mensual no lleva formulario: es el plan actual
     expect(html).toContain('name="interval" value="year"><button type="submit"');
   });
 
-  it("Pro anual activo: en Anual es 'Plan actual' y en Mensual 'Cambiar a mensual'; el estado dice (anual)", () => {
+  it("Pro anual activo: en Anual es 'Plan actual' y en Mensual 'Cambiar a mensual'; la tarjeta del plan dice que el pago es anual", () => {
     const html = render([PRO], { planSlug: "pro", billingInterval: "year" });
-    expect(html).toContain("Plan actual: <b class=\"text-cream\">Plan Pro</b> (anual)");
+    expect(html).toMatch(/>Pago<\/dt><dd[^>]*>Anual<\/dd>/);
     expect(html).toContain("Cambiar a mensual");
     expect(html).not.toContain("Cambiar a anual");
     expect(html).toContain(">Plan actual</button>");
@@ -144,7 +144,7 @@ describe("botón de compra por intervalo (B4)", () => {
 
   it("con otro plan activo, el botón dice 'Cambiar a este plan' en ambos intervalos", () => {
     const html = render([IMPULSO, PRO], { planSlug: "impulso", planName: "Plan Impulso", billingInterval: "month" });
-    expect(html).not.toContain("(anual)");
+    expect(html).toMatch(/>Pago<\/dt><dd[^>]*>Mensual<\/dd>/);
     expect(html.match(/Cambiar a este plan/g)?.length).toBe(2);
   });
 });

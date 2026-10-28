@@ -5,12 +5,14 @@
  * @kontrolia/auth/server, y el POST a /oauth/token ya lo prueba
  * kontroliaAuth.test.ts con fetch mockeado.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Env } from "../../src/env";
 
 const verifyAccessTokenMock = vi.fn();
 const exchangeCodeMock = vi.fn();
 const refreshSessionMock = vi.fn();
+const tryRefreshSessionMock = vi.fn();
+const checkSessionInGoTrueMock = vi.fn();
 const listMembershipsMock = vi.fn();
 const switchActiveOrganizationMock = vi.fn();
 const readActiveOrganizationIdMock = vi.fn();
@@ -51,6 +53,8 @@ vi.mock("../../src/admin/kontroliaAuth", async (importOriginal) => {
     verifyAccessToken: (...args: unknown[]) => verifyAccessTokenMock(...args),
     exchangeCode: (...args: unknown[]) => exchangeCodeMock(...args),
     refreshSession: (...args: unknown[]) => refreshSessionMock(...args),
+    tryRefreshSession: (...args: unknown[]) => tryRefreshSessionMock(...args),
+    checkSessionInGoTrue: (...args: unknown[]) => checkSessionInGoTrueMock(...args),
     listMemberships: (...args: unknown[]) => listMembershipsMock(...args),
     switchActiveOrganization: (...args: unknown[]) => switchActiveOrganizationMock(...args),
     readActiveOrganizationId: (...args: unknown[]) => readActiveOrganizationIdMock(...args),
@@ -120,6 +124,15 @@ beforeEach(async () => {
   verifyAccessTokenMock.mockReset();
   exchangeCodeMock.mockReset();
   refreshSessionMock.mockReset();
+  // El guard usa tryRefreshSession (que distingue "revocado" de "falló la
+  // red"); por defecto se deriva de refreshSessionMock para que las pruebas
+  // que solo configuran ese sigan describiendo lo mismo.
+  tryRefreshSessionMock.mockReset().mockImplementation(async (...args: unknown[]) => {
+    const session = await refreshSessionMock(...args);
+    return session ? { ok: true, session } : { ok: false, revoked: false };
+  });
+  // Por defecto GoTrue reconoce la sesión (el caso de todos los días).
+  checkSessionInGoTrueMock.mockReset().mockResolvedValue("alive");
   // Con valor por defecto: listMemberships nunca devuelve undefined en
   // producción (atrapa y regresa []), así que el mock tampoco debe — sin esto,
   // cualquier prueba que toque /projects sin configurarlo revienta con un 500
@@ -374,6 +387,80 @@ describe("guard: sincroniza la organización activa (sessions_context) en cada p
     expect(res.status).toBe(200);
     expect(refreshSessionMock).toHaveBeenCalledTimes(1);
     expect(readActiveOrganizationIdMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("guard: sesión cerrada en GoTrue (signOut global desde el portal u otra app)", () => {
+  // Los casos que no necesitan Postgres (refresh revocado, htmx/fetch, el
+  // orden frente a sessions_context, el margen tras emitirse el token) viven
+  // en sesionRevocada.test.ts; aquí, los que pasan por páginas con bot y por
+  // Basic Auth / DASHBOARD_PUBLIC.
+  const PAGE_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+
+  function withCookie(session: string, headers: Record<string, string> = {}, init: RequestInit = {}): RequestInit {
+    return { ...init, headers: { cookie: `${SESSION_COOKIE}=${encodeURIComponent(session)}; ${BOT_COOKIE}=${TEST_BOT_ID}`, ...headers } };
+  }
+
+  function setCookiesOf(res: Response): string {
+    return (res.headers.getSetCookie?.() ?? [res.headers.get("set-cookie") ?? ""]).join("\n");
+  }
+
+  function expectSessionForgotten(res: Response) {
+    const cookies = setCookiesOf(res);
+    expect(cookies).toMatch(new RegExp(`${SESSION_COOKIE}=;`));
+    expect(cookies).toMatch(new RegExp(`${BOT_COOKIE}=;`));
+  }
+
+  let warn: ReturnType<typeof vi.spyOn> | undefined;
+  beforeEach(() => {
+    warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    revokeSessionMock.mockReset();
+  });
+  afterEach(() => warn?.mockRestore());
+
+  it("navegación completa con sesión revocada: borra cookies y manda a /admin/login (sin cerrar la sesión nueva del auth-server)", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    checkSessionInGoTrueMock.mockResolvedValue("revoked");
+    const res = await adminApp.fetch(req("/leads", withCookie(SESSION, { accept: PAGE_ACCEPT })), KONTROLIA_ENV);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/admin/login?next=%2Fleads");
+    expectSessionForgotten(res);
+    expect(checkSessionInGoTrueMock).toHaveBeenCalledWith(expect.anything(), "at");
+    // Ni revocar en GoTrue ni logout: eso cerraría la sesión de la cuenta NUEVA.
+    expect(revokeSessionMock).not.toHaveBeenCalled();
+    // Y no se siguió con la organización ni con el resto del panel.
+    expect(readActiveOrganizationIdMock).not.toHaveBeenCalled();
+    expect(entitlementsDeMock).not.toHaveBeenCalled();
+  });
+
+  it("GoTrue no contesta, tarda, da 5xx o 429 (\"unknown\"): sigue adentro como hoy", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    readActiveOrganizationIdMock.mockResolvedValue(TEST_BOT_ID);
+    checkSessionInGoTrueMock.mockResolvedValue("unknown");
+    const res = await adminApp.fetch(req("/overview", withCookie(SESSION, { accept: PAGE_ACCEPT })), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+    const cookies = setCookiesOf(res);
+    expect(cookies).not.toMatch(new RegExp(`${SESSION_COOKIE}=;`));
+    expect(cookies).not.toMatch(new RegExp(`${BOT_COOKIE}=;`));
+  });
+
+  it("DASHBOARD_PUBLIC y Basic Auth: no le preguntan nada a GoTrue", async () => {
+    checkSessionInGoTrueMock.mockResolvedValue("revoked");
+    await adminApp.fetch(req("/overview", { headers: { accept: PAGE_ACCEPT } }), { ...KONTROLIA_ENV, DASHBOARD_PUBLIC: "1" } as Env);
+    const basic = "Basic " + Buffer.from(`admin:${KONTROLIA_ENV.DASHBOARD_PASSWORD}`).toString("base64");
+    const res = await adminApp.fetch(req("/overview", { headers: { accept: PAGE_ACCEPT, authorization: basic } }), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+    expect(checkSessionInGoTrueMock).not.toHaveBeenCalled();
+  });
+
+  it("sesión revocada + header Basic Auth: se olvida la cookie y decide el Basic Auth (salida de emergencia intacta)", async () => {
+    verifyAccessTokenMock.mockResolvedValue({ claims: claimsFor(TEST_BOT_ID), user: { id: "u1" } });
+    checkSessionInGoTrueMock.mockResolvedValue("revoked");
+    const basic = "Basic " + Buffer.from(`admin:${KONTROLIA_ENV.DASHBOARD_PASSWORD}`).toString("base64");
+    const res = await adminApp.fetch(req("/overview", withCookie(SESSION, { accept: PAGE_ACCEPT, authorization: basic })), KONTROLIA_ENV);
+    expect(res.status).toBe(200);
+    expect(setCookiesOf(res)).toMatch(new RegExp(`${SESSION_COOKIE}=;`));
   });
 });
 
@@ -942,7 +1029,8 @@ describe("/admin/organizaciones — las de la cuenta, cambiarse y crear una nuev
   it("lista las organizaciones con la activa marcada, 'Cambiar' en las demás y el alta", async () => {
     const html = await (await adminApp.fetch(conSesion("/organizaciones"), KONTROLIA_ENV)).text();
     expect(html).toContain("Mi negocio");
-    expect(html).toContain("● Activa");
+    expect(html).toContain(">Activa<");
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
     expect(html).toContain('value="org-2"');
     expect(html).toContain('action="/admin/organizaciones"');
   });

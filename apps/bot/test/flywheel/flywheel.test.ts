@@ -232,6 +232,16 @@ describe("Mejoras routes", () => {
     expect(html).toContain("Aplicar");
   });
 
+  it("trae el hero, las métricas y un solo h1; avisa el resultado de un cambio al CRM", async () => {
+    const html = await (await adminApp.request("/mejoras?crm=fallida", { headers: AUTH }, env)).text();
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    expect(html).toContain("Entrenar");
+    expect(html).toContain("Mejoras pendientes");
+    expect(html).toContain("Lecciones activas en el prompt");
+    expect(html).toContain("Cambios al CRM");
+    expect(html).toContain("No se pudo escribir en el CRM");
+  });
+
   it("apply route applies and redirects", async () => {
     const id = (await suggestions.createIfNew({
       kind: "leccion",

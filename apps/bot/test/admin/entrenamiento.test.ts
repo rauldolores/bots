@@ -58,3 +58,22 @@ describe("paso 3 — confirmación", () => {
     expect(renderLeccionGuardada("Regla", 2)).not.toContain("se quitó la más antigua");
   });
 });
+
+describe("la pantalla de entrenamiento", () => {
+  it("trae el hero, el ensayo y cuántas lecciones lleva", async () => {
+    const { createTestDb, TEST_BOT_ID } = await import("../helpers/pgSetup");
+    const { SettingsRepo, SETTING_KEYS } = await import("../../src/db/settings");
+    const { renderSandbox } = await import("../../src/admin/views/sandbox");
+    const db = await createTestDb();
+    await new SettingsRepo(db, TEST_BOT_ID).set(SETTING_KEYS.learnedLessons, JSON.stringify(["Di el precio de una vez."]));
+
+    const html = await renderSandbox({ DB: db.driver } as any, TEST_BOT_ID);
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    expect(html).toContain("Entrenar");
+    expect(html).toContain('id="sandbox-hilo"');
+    expect(html).toContain('hx-post="/admin/entrenamiento/mensaje"');
+    expect(html).toContain("Qué es real y qué no");
+    expect(html).toContain(`1 de ${MAX_LESSONS} lecciones`);
+    expect(html).toContain("Di el precio de una vez.");
+  });
+});

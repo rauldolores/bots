@@ -14,6 +14,7 @@
 // breadcrumb and page title are derived here.
 
 import type { NichePack } from "../../niches";
+import { NOVEDADES } from "../help/novedades";
 // Qué entradas del NAV se ven lo decide visibleNavIds() en admin/permissions.ts
 // (permisos del token + Resumen + Plan), o la ruta que renderiza cuando el
 // criterio no son los permisos (sin plan vivo: solo Plan). Aquí no se opina.
@@ -34,6 +35,9 @@ interface Section {
   icon: string;
   /** Un solo ítem que va directo en el menú, sin grupo (Resumen, Ayuda). */
   flat?: boolean;
+  /** Título de sección (OPERACIÓN, TU AGENTE…) que agrupa varias entradas
+   *  seguidas, como en Faqturia. Sin zona = va arriba, sin título. */
+  zona?: string;
   items: Item[];
 }
 
@@ -53,6 +57,7 @@ const NAV: Section[] = [
   },
   {
     id: "bandeja",
+    zona: "Operación",
     label: "Bandeja",
     icon: "inbox",
     items: [
@@ -64,6 +69,7 @@ const NAV: Section[] = [
   },
   {
     id: "campanas",
+    zona: "Operación",
     label: "Campañas",
     icon: "megaphone",
     items: [
@@ -73,6 +79,7 @@ const NAV: Section[] = [
   },
   {
     id: "agente",
+    zona: "Tu agente",
     label: "Mi Agente",
     icon: "bot",
     items: [
@@ -83,6 +90,7 @@ const NAV: Section[] = [
   },
   {
     id: "entrenar",
+    zona: "Tu agente",
     label: "Entrenar",
     icon: "graduation-cap",
     items: [
@@ -93,6 +101,7 @@ const NAV: Section[] = [
   },
   {
     id: "canales",
+    zona: "Tu agente",
     label: "Canales",
     icon: "plug-zap",
     items: [
@@ -102,6 +111,7 @@ const NAV: Section[] = [
   },
   {
     id: "analisis",
+    zona: "Negocio",
     label: "Análisis",
     icon: "bar-chart-3",
     items: [
@@ -112,6 +122,7 @@ const NAV: Section[] = [
   },
   {
     id: "cuenta",
+    zona: "Negocio",
     label: "Cuenta",
     icon: "building-2",
     items: [
@@ -122,6 +133,7 @@ const NAV: Section[] = [
   },
   {
     id: "soporte",
+    zona: "Sistema",
     label: "Soporte",
     icon: "circle-help",
     flat: true,
@@ -276,6 +288,9 @@ const GLOBAL_STYLE = `
   .navlink.sb-sub{padding:7px 12px 7px 40px;font-size:12.5px;font-weight:500;gap:10px}
   .sb-dot{width:5px;height:5px;border-radius:999px;background:rgba(244,241,234,.22);flex:none}
   .navlink.sb-sub[aria-current="page"] .sb-dot{background:var(--accent)}
+  /* título de zona (OPERACIÓN, TU AGENTE…), como las secciones de Faqturia:
+     solo agrupa, no se pliega ni se puede clicar. */
+  .sb-zona{padding:18px 12px 6px;font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);opacity:.85;user-select:none}
 
   /* entrance + botones (estilo Kontrolia: relieve suave, nada brutalista) */
   .card{animation:rise .4s cubic-bezier(.16,1,.3,1) both}
@@ -378,8 +393,62 @@ const GLOBAL_STYLE = `
      que haya que descubrir); al pasar el mouse aclara para acusar recibo. */
   #sb-uso:hover .sb-uso-plan{color:#ffd95e}
   .live-pill{display:flex;align-items:center;gap:8px;height:32px;background:var(--panel2);border-radius:999px;padding:0 12px;white-space:nowrap}
+  /* Píldora de salud del bot (SALUD_SCRIPT, estado/salud.ts) */
+  #nb-salud{position:relative}
+  #nb-salud .live-pill{border:0;cursor:pointer;font:inherit}
+  #nb-salud .live-pill:hover{background:var(--raise)}
+  .nb-salud-dot{width:7px;height:7px;border-radius:50%;background:var(--dim);flex:none}
+  #nb-salud[data-estado="EN_LINEA"] .nb-salud-dot{background:var(--ok);animation:ring 2s infinite}
+  #nb-salud[data-estado="AVISO"] .nb-salud-dot{background:#d97706}
+  #nb-salud[data-estado="PROBLEMAS"] .nb-salud-dot{background:var(--bad)}
+  #nb-salud[data-estado="PROBLEMAS"] #nb-salud-txt{color:var(--bad) !important}
+  .nb-salud-pop{position:absolute;right:0;top:calc(100% + 8px);width:min(360px,calc(100vw - 32px));background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);box-shadow:var(--shadow-md);z-index:60;overflow:hidden}
+  .nb-salud-cab{padding:12px 14px;font-size:12.5px;font-weight:700;color:var(--cream);border-bottom:1px solid var(--line)}
+  .nb-salud-it{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:3px;font-size:12.5px}
+  .nb-salud-it:last-child{border-bottom:0}
+  .nb-salud-it b{color:var(--cream);font-size:13px}
+  .nb-salud-it p{margin:0;color:var(--muted);line-height:1.5}
+  .nb-salud-it a{color:var(--accent-2);font-weight:700;align-self:flex-start;margin-top:3px}
+  .nb-salud-niv{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+  .nb-salud-it[data-nivel="problema"] .nb-salud-niv{color:var(--bad)}
+  .nb-salud-it[data-nivel="aviso"] .nb-salud-niv{color:var(--warn)}
+  @media (prefers-reduced-motion:reduce){.nb-salud-dot{animation:none !important}}
+  /* En el celular la píldora no queda pegada a la orilla: la lista va a lo ancho (top lo pone SALUD_SCRIPT). */
+  @media (max-width:767px){.nb-salud-pop{position:fixed;left:16px;right:16px;width:auto}}
   .hdr-btn{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-sm);color:var(--muted)}
   .hdr-btn:hover{background:var(--panel2);color:var(--cream)}
+  .hdr-btn{position:relative;border:0;background:none;cursor:pointer}
+  .hdr-btn[aria-expanded="true"]{background:var(--panel2);color:var(--cream)}
+  .ay-punto{position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px #fff}
+  /* Panel lateral de ayuda (botón "?"): la ayuda de la pantalla actual sin
+     salir de ella, como el de AduaniaX. */
+  #ay-panel{position:fixed;inset:0;z-index:70;pointer-events:none}
+  #ay-panel .ay-velo{position:absolute;inset:0;background:rgba(28,24,21,.32);opacity:0;transition:opacity .2s ease}
+  #ay-panel .ay-hoja{position:absolute;top:0;right:0;bottom:0;width:min(440px,100%);background:var(--bg);border-left:1px solid var(--line);box-shadow:var(--shadow-lg);display:flex;flex-direction:column;transform:translateX(100%);visibility:hidden;transition:transform .26s cubic-bezier(.2,.8,.2,1),visibility 0s linear .26s}
+  #ay-panel.on{pointer-events:auto}
+  #ay-panel.on .ay-velo{opacity:1}
+  #ay-panel.on .ay-hoja{transform:none;visibility:visible;transition:transform .26s cubic-bezier(.2,.8,.2,1),visibility 0s}
+  .ay-cab{padding:18px 20px 14px;border-bottom:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;gap:12px}
+  .ay-cuerpo{flex:1;overflow-y:auto;padding:14px 20px 20px;display:flex;flex-direction:column;gap:8px}
+  .ay-cuerpo[aria-busy="true"]{opacity:.55;transition:opacity .15s}
+  .ay-pie{border-top:1px solid var(--line);background:var(--panel);padding:14px 20px;display:flex;flex-direction:column;gap:8px}
+  .ay-accion{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel);font-size:13px;font-weight:600;color:var(--cream)}
+  .ay-accion:hover{border-color:var(--linelit);background:var(--row-hover)}
+  .ay-accion svg{color:var(--accent-2)}
+  .ayp-item{border:1px solid var(--line);background:var(--panel);border-radius:var(--radius-sm)}
+  .ayp-item summary::-webkit-details-marker{display:none}
+  .ayp-item summary:hover{background:var(--row-hover);border-radius:var(--radius-sm)}
+  .ayp-item[open] .ayuda-chev{transform:rotate(90deg)}
+  .ayp-item>div{padding-left:16px !important}
+  @media (prefers-reduced-motion:reduce){#ay-panel .ay-hoja,#ay-panel .ay-velo{transition:none !important}}
+  /* Franja del estado del servicio (src/estado/): algo de la plataforma falla. */
+  .nb-aviso{display:flex;align-items:flex-start;gap:10px;background:var(--warn-soft);border-bottom:1px solid #ecd49c;padding:10px 28px;font-size:13px;line-height:1.5;color:var(--cream)}
+  .nb-aviso>svg{color:var(--warn);flex:none;margin-top:2px}
+  .nb-aviso p{margin:0;flex:1;min-width:0}
+  .nb-aviso a{color:var(--accent-ink);font-weight:700;text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
+  .nb-aviso button{border:0;background:none;color:var(--warn);cursor:pointer;padding:2px;border-radius:6px;display:flex}
+  .nb-aviso button:hover{background:rgba(138,90,0,.1)}
+  @media (max-width:767px){.nb-aviso{padding:10px 16px}}
   /* piezas de ui.ts */
   .stat-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
   @media (max-width:1100px){.stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -404,7 +473,7 @@ const GLOBAL_STYLE = `
     .sb-grp-body>div{visibility:visible !important}
     .sb-grp-btn{display:none}
     .navlink.sb-sub{padding:9px 12px;font-size:13px}
-    .sb-dot{display:none}
+    .sb-dot,.sb-zona{display:none}
   }
 
   /* "Estoy trabajando": botón ocupado, barra arriba y, si tarda, una capa que
@@ -643,7 +712,8 @@ const NAV_SCRIPT = `
     return traer(url);
   }
 
-  function ir(url, empujar, y) {
+  function ir(url, empujar, y, hash) {
+    hash = hash || "";
     var mio = ++turno;
     var barra = document.getElementById("nb-barra");
     if (barra) barra.classList.add("on");
@@ -652,7 +722,7 @@ const NAV_SCRIPT = `
       var doc = new DOMParser().parseFromString(html, "text/html");
       var nuevo = doc.getElementById("nb-main");
       if (!nuevo) throw new Error("sin-layout");
-      if (empujar) history.pushState({ nb: 1 }, "", url);
+      if (empujar) history.pushState({ nb: 1 }, "", url + hash);
       actual = location.pathname + location.search;
       document.title = doc.title;
       var t = doc.getElementById("nb-hdr-title"), tv = document.getElementById("nb-hdr-title");
@@ -677,11 +747,14 @@ const NAV_SCRIPT = `
 
       if (window.htmx) window.htmx.process(main);
       if (window.lucide) window.lucide.createIcons();
-      window.scrollTo(0, y || 0);
+      // Con #ancla (p. ej. /admin/ayuda#soporte) se baja hasta ella, como haría
+      // el navegador; si no, arriba (o donde estaba, al volver con "atrás").
+      var ancla = hash ? document.getElementById(decodeURIComponent(hash.slice(1))) : null;
+      if (ancla) ancla.scrollIntoView({ block: "start" }); else window.scrollTo(0, y || 0);
       try { main.focus({ preventScroll: true }); } catch (e) {}
     }).catch(function () {
       if (mio !== turno) return;
-      if (empujar) location.assign(url); else location.reload();
+      if (empujar) location.assign(url + hash); else location.reload();
     }).then(function () {
       if (mio === turno && window.__nbTerminar) window.__nbTerminar();
     });
@@ -693,7 +766,7 @@ const NAV_SCRIPT = `
     if (!sirve(a)) return;
     e.preventDefault();
     try { history.replaceState(Object.assign({}, history.state, { nb: 1, y: window.scrollY }), ""); } catch (err) {}
-    ir(a.pathname + a.search, true, 0);
+    ir(a.pathname + a.search, true, 0, a.hash);
   });
 
   // Al pasar el mouse por el MENÚ se adelanta la petición: al dar clic ya
@@ -721,9 +794,213 @@ const NAV_SCRIPT = `
 })();
 </script>`;
 
+// ── Panel lateral de ayuda ─────────────────────────────────────────
+// El botón "?" de la cabecera abre la ayuda de la pantalla actual (artículos
+// y preguntas de help/contenido.ts que dicen pertenecerle) sin salir de ella.
+// El contenido lo trae /admin/ayuda/panel al abrir, con la ruta de ESE
+// momento: así sirve igual después de cambiar de pantalla sin recargar. El
+// punto ámbar del botón = hay una novedad (help/novedades.ts) que este
+// navegador no ha visto; abrir el panel la da por vista.
+const ULTIMA_NOVEDAD = NOVEDADES[0]?.fecha ?? "";
+
+const PANEL_AYUDA = `<div id="ay-panel" aria-hidden="true">
+  <div class="ay-velo" data-ay-cerrar></div>
+  <aside class="ay-hoja" role="dialog" aria-modal="true" aria-labelledby="ay-tit">
+    <div class="ay-cab">
+      <div style="display:flex;align-items:flex-start;gap:12px">
+        <div style="flex:1;min-width:0">
+          <div id="ay-tit" style="font-weight:900;font-size:17px;letter-spacing:-.02em;display:flex;align-items:center;gap:8px">
+            <i data-lucide="life-buoy" width="18" height="18" style="color:var(--accent-2)"></i>¿En qué te ayudamos?
+          </div>
+          <p style="font-size:12.5px;color:var(--muted);margin:3px 0 0">Primero revisa la ayuda de la pantalla donde estás.</p>
+        </div>
+        <button type="button" class="hdr-btn" data-ay-cerrar aria-label="Cerrar la ayuda" title="Cerrar (Esc)"><i data-lucide="x" width="18" height="18"></i></button>
+      </div>
+      <div style="position:relative">
+        <i data-lucide="search" width="15" height="15" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--dim);pointer-events:none"></i>
+        <input id="ay-q" type="search" autocomplete="off" aria-label="Buscar en la ayuda" placeholder="Busca tu duda: WhatsApp, citas, factura…" style="width:100%;height:40px;border:1px solid var(--line);border-radius:var(--radius-sm);padding:0 12px 0 36px;font-size:13px;background:var(--panel);color:var(--cream)">
+      </div>
+    </div>
+    <div id="ay-cuerpo" class="ay-cuerpo" aria-live="polite"></div>
+    <div class="ay-pie">
+      <div style="font-size:13px;font-weight:800">¿No encontraste la respuesta?</div>
+      <a href="/admin/ayuda#soporte" class="ay-accion"><i data-lucide="mail" width="16" height="16"></i>Escribir a soporte</a>
+      <a href="/admin/ayuda" class="ay-accion"><i data-lucide="book-open" width="16" height="16"></i>Ir al Centro de ayuda</a>
+    </div>
+  </aside>
+</div>`;
+
+const AYUDA_SCRIPT = `
+<script>
+(function () {
+  if (window.__nbAyuda) return;
+  window.__nbAyuda = true;
+  var panel = document.getElementById("ay-panel"), btn = document.getElementById("ay-btn");
+  var cuerpo = document.getElementById("ay-cuerpo"), q = document.getElementById("ay-q");
+  if (!panel || !btn || !cuerpo || !q) return;
+  var punto = btn.querySelector(".ay-punto"), ultima = btn.getAttribute("data-ultima") || "";
+  var CLAVE = "nb-novedades-vistas";
+  try { if (ultima && (localStorage.getItem(CLAVE) || "") < ultima) punto.hidden = false; } catch (e) {}
+
+  var turno = 0, cargada = null, previo = null, espera = null;
+  function clave() { return location.pathname + location.search + "|" + q.value.trim(); }
+  function cargar() {
+    var mio = ++turno, k = clave(), t = q.value.trim();
+    cuerpo.setAttribute("aria-busy", "true");
+    fetch("/admin/ayuda/panel?ruta=" + encodeURIComponent(location.pathname + location.search) + (t ? "&q=" + encodeURIComponent(t) : ""), { credentials: "same-origin", redirect: "manual" })
+      .then(function (r) { if (r.type === "opaqueredirect" || !r.ok) throw new Error("ayuda"); return r.text(); })
+      .then(function (html) {
+        if (mio !== turno) return;
+        cuerpo.innerHTML = html; cuerpo.scrollTop = 0; cargada = k;
+        if (window.lucide) window.lucide.createIcons();
+      })
+      .catch(function () {
+        if (mio !== turno) return;
+        cargada = null;
+        cuerpo.innerHTML = '<p style="font-size:13px;color:var(--muted);line-height:1.6;margin:6px 0">No pudimos cargar la ayuda. Intenta de nuevo o abre el <a href="/admin/ayuda" style="color:var(--accent-2);text-decoration:underline">Centro de ayuda</a>.</p>';
+      })
+      .then(function () { if (mio === turno) cuerpo.removeAttribute("aria-busy"); });
+  }
+  function abierto() { return panel.classList.contains("on"); }
+  function abrir() {
+    previo = document.activeElement;
+    panel.classList.add("on"); panel.setAttribute("aria-hidden", "false"); btn.setAttribute("aria-expanded", "true");
+    if (clave() !== cargada) cargar();
+    try { localStorage.setItem(CLAVE, ultima); } catch (e) {}
+    punto.hidden = true;
+    setTimeout(function () { try { q.focus({ preventScroll: true }); } catch (e) {} }, 80);
+  }
+  function cerrar(devolver) {
+    if (!abierto()) return;
+    panel.classList.remove("on"); panel.setAttribute("aria-hidden", "true"); btn.setAttribute("aria-expanded", "false");
+    if (devolver && previo && previo.focus) try { previo.focus({ preventScroll: true }); } catch (e) {}
+  }
+  btn.addEventListener("click", function () { if (abierto()) cerrar(true); else abrir(); });
+  // Un enlace del panel lleva a otra pantalla (o a otra parte de Ayuda): el
+  // panel se cierra y la navegación sigue su curso normal.
+  panel.addEventListener("click", function (e) {
+    if (e.target.closest("[data-ay-cerrar]")) { cerrar(true); return; }
+    if (e.target.closest("a[href]")) cerrar(false);
+  });
+  q.addEventListener("input", function () { clearTimeout(espera); espera = setTimeout(cargar, 220); });
+  document.addEventListener("keydown", function (e) {
+    if (!abierto()) return;
+    if (e.key === "Escape") { cerrar(true); return; }
+    if (e.key !== "Tab") return;
+    // El foco no se escapa del panel mientras está abierto.
+    var f = Array.prototype.filter.call(panel.querySelectorAll("a[href],button,input,summary"), function (el) { return el.offsetParent !== null; });
+    if (!f.length) return;
+    var primero = f[0], ultimo = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === primero) { e.preventDefault(); ultimo.focus(); }
+    else if (!e.shiftKey && document.activeElement === ultimo) { e.preventDefault(); primero.focus(); }
+  });
+})();
+</script>`;
+
 // Re-run lucide after every htmx swap (fragments bring fresh icons) and close
 // any open modal with Escape.
-const GLOBAL_SCRIPT = `${ESPERA_SCRIPT}${NAV_SCRIPT}
+// Franja de aviso: si hay una incidencia abierta en el estado del servicio
+// (src/estado/), sale arriba de todas las pantallas. Se pide al cargar y cada
+// 5 minutos; vive fuera de #nb-main, así que cambiar de pantalla sin recargar
+// no la borra. "Ocultar" vale hasta que cambie lo que está abierto.
+const AVISO_SCRIPT = `
+<script>
+(function () {
+  if (window.__nbAviso) return;
+  window.__nbAviso = true;
+  var slot = document.getElementById("nb-aviso");
+  if (!slot || !window.fetch) return;
+  var CLAVE = "nb-aviso-oculto";
+  function oculta() { try { return localStorage.getItem(CLAVE) || ""; } catch (e) { return ""; } }
+  function pintar(abiertas) {
+    var firma = abiertas.map(function (i) { return i.id; }).join(",");
+    var punto = document.querySelector("#ay-btn .ay-punto");
+    if (punto && abiertas.length) punto.hidden = false;
+    if (!abiertas.length || firma === oculta()) { slot.hidden = true; slot.innerHTML = ""; return; }
+    var i = abiertas[0];
+    slot.innerHTML = '<div class="nb-aviso" role="status"><i data-lucide="triangle-alert" width="16" height="16"></i><p><b></b> <span></span> <a href="/admin/ayuda#estado">Ver estado del servicio</a></p><button type="button" aria-label="Ocultar aviso" title="Ocultar"><i data-lucide="x" width="16" height="16"></i></button></div>';
+    slot.querySelector("b").textContent = i.titulo + ".";
+    slot.querySelector("span").textContent = i.mensaje + (abiertas.length > 1 ? " (y " + (abiertas.length - 1) + " aviso" + (abiertas.length > 2 ? "s" : "") + " más)" : "");
+    slot.querySelector("button").addEventListener("click", function () {
+      try { localStorage.setItem(CLAVE, firma); } catch (e) {}
+      slot.hidden = true;
+    });
+    slot.hidden = false;
+    if (window.lucide) window.lucide.createIcons();
+  }
+  function leer() {
+    fetch("/admin/ayuda/estado", { credentials: "same-origin", redirect: "manual" })
+      .then(function (r) { return r.ok && r.type !== "opaqueredirect" ? r.json() : null; })
+      .then(function (d) { if (d && Array.isArray(d.abiertas)) pintar(d.abiertas); })
+      .catch(function () {});
+  }
+  leer();
+  setInterval(leer, 300000);
+})();
+</script>`;
+
+// Píldora de salud del bot (cabecera): pide /admin/salud (estado/salud.ts) al
+// cargar y cada 2 minutos y pinta En línea / Con aviso / En pausa / Con
+// problemas. Al darle clic abre la lista de qué pasa, cada cosa con su botón
+// a la pantalla donde se arregla. Hasta que llega la respuesta (o si no
+// llega) dice solo "Tu bot", sin afirmar nada.
+const SALUD_SCRIPT = `
+<script>
+(function () {
+  if (window.__nbSalud) return;
+  window.__nbSalud = true;
+  var caja = document.getElementById("nb-salud"), btn = document.getElementById("nb-salud-btn");
+  var txt = document.getElementById("nb-salud-txt"), pop = document.getElementById("nb-salud-pop");
+  if (!caja || !btn || !txt || !pop || !window.fetch) return;
+  var TEXTO = { EN_LINEA: "Bot en línea", AVISO: "Bot en línea", EN_PAUSA: "Bot en pausa", PROBLEMAS: "Bot con problemas" };
+  var NIVEL = { problema: "Problema", pausa: "En pausa", aviso: "Aviso" };
+  function pintar(d) {
+    if (!d || !TEXTO[d.estado]) return;
+    caja.setAttribute("data-estado", d.estado);
+    txt.textContent = TEXTO[d.estado];
+    btn.setAttribute("aria-label", TEXTO[d.estado] + (d.hallazgos.length ? " — ver qué pasa" : ""));
+    pop.innerHTML = "";
+    var cab = document.createElement("div");
+    cab.className = "nb-salud-cab";
+    cab.textContent = d.hallazgos.length ? "Lo que pasa con tu bot" : "Todo en orden: tu bot está contestando.";
+    pop.appendChild(cab);
+    d.hallazgos.forEach(function (h) {
+      var it = document.createElement("div");
+      it.className = "nb-salud-it";
+      it.setAttribute("data-nivel", h.nivel);
+      var n = document.createElement("span"); n.className = "nb-salud-niv"; n.textContent = NIVEL[h.nivel] || "";
+      var t = document.createElement("b"); t.textContent = h.titulo;
+      var p = document.createElement("p"); p.textContent = h.texto;
+      var a = document.createElement("a"); a.href = h.href; a.textContent = h.accion + " →";
+      it.appendChild(n); it.appendChild(t); it.appendChild(p); it.appendChild(a);
+      pop.appendChild(it);
+    });
+  }
+  function leer() {
+    fetch("/admin/salud", { credentials: "same-origin", redirect: "manual", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok && r.type !== "opaqueredirect" ? r.json() : null; })
+      .then(pintar)
+      .catch(function () {});
+  }
+  function abierto() { return !pop.hidden; }
+  function cerrar() { pop.hidden = true; btn.setAttribute("aria-expanded", "false"); }
+  btn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (abierto()) { cerrar(); return; }
+    if (window.matchMedia("(max-width:767px)").matches) pop.style.top = Math.round(btn.getBoundingClientRect().bottom + 8) + "px";
+    else pop.style.top = "";
+    pop.hidden = false; btn.setAttribute("aria-expanded", "true");
+    leer();
+  });
+  pop.addEventListener("click", function (e) { if (e.target.closest("a[href]")) cerrar(); });
+  document.addEventListener("click", function (e) { if (abierto() && !caja.contains(e.target)) cerrar(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && abierto()) { cerrar(); btn.focus(); } });
+  leer();
+  setInterval(leer, 120000);
+})();
+</script>`;
+
+const GLOBAL_SCRIPT = `${ESPERA_SCRIPT}${NAV_SCRIPT}${AYUDA_SCRIPT}${AVISO_SCRIPT}${SALUD_SCRIPT}
 <script>
   function drawIcons(){ if (window.lucide) window.lucide.createIcons(); }
   document.addEventListener("DOMContentLoaded", drawIcons);
@@ -784,11 +1061,16 @@ function sidebar(activeTab: string, niche: NichePack | null, visibleIds: Set<str
   const visible = (id: string) => visibleIds === null || visibleIds.has(id);
   // Un grupo sin ningún ítem visible no aparece; uno con un solo ítem visible
   // sigue siendo grupo, para que el menú no cambie de forma según el rol.
+  // El título de zona sale antes de la primera entrada VISIBLE de esa zona: si
+  // el rol no ve nada de una zona, tampoco ve su título.
+  let zonaActual: string | undefined;
   const sections = NAV.map((sec) => {
     const shown = sec.items.filter((i) => visible(i.id)).map((raw) => applyNiche(raw, niche));
     if (shown.length === 0) return "";
-    if (sec.flat) return shown.map((i) => navItem(i, i.id === activeTab)).join("");
-    return navGroup(sec, shown, activeTab);
+    const titulo = sec.zona && sec.zona !== zonaActual ? `<div class="sb-zona">${sec.zona}</div>` : "";
+    zonaActual = sec.zona;
+    if (sec.flat) return titulo + shown.map((i) => navItem(i, i.id === activeTab)).join("");
+    return titulo + navGroup(sec, shown, activeTab);
   }).join("");
 
   return `<aside class="sb">
@@ -853,18 +1135,23 @@ export function layout(opts: {
           <div id="account-divider" style="display:none;width:1px;height:28px;background:var(--line)"></div>
           <div id="account-switcher" style="position:relative"></div>
         </div>
-        <div class="live-pill">
-          <span style="width:7px;height:7px;border-radius:50%;background:var(--ok);animation:ring 2s infinite"></span>
-          <span style="font-size:12px;font-weight:600;color:var(--muted)">Bot en línea</span>
+        <div id="nb-salud">
+          <button type="button" id="nb-salud-btn" class="live-pill" aria-haspopup="true" aria-expanded="false" aria-controls="nb-salud-pop">
+            <span class="nb-salud-dot"></span>
+            <span id="nb-salud-txt" style="font-size:12px;font-weight:600;color:var(--muted)">Tu bot</span>
+          </button>
+          <div id="nb-salud-pop" class="nb-salud-pop" hidden></div>
         </div>
-        <a href="/admin/ayuda" class="hdr-btn" title="Ayuda y soporte" aria-label="Ayuda y soporte">
-          <i data-lucide="circle-help" width="18" height="18"></i>
-        </a>
+        <button type="button" id="ay-btn" class="hdr-btn" title="Ayuda y soporte" aria-label="Ayuda y soporte" aria-haspopup="dialog" aria-expanded="false" aria-controls="ay-panel" data-ultima="${ULTIMA_NOVEDAD}">
+          <i data-lucide="circle-help" width="18" height="18"></i><span class="ay-punto" hidden></span>
+        </button>
       </header>
+      <div id="nb-aviso" hidden></div>
       <main id="nb-main" tabindex="-1" style="padding:28px;min-width:0;outline:none">${opts.body}</main>
     </div>
   </div>
   <div id="modal-root"></div>
+  ${PANEL_AYUDA}
   <script>
   // Selector de organización/bot (F5) — patrón "un solo botón": un trigger
   // combinado abre un panel de dos columnas (organizaciones | bots de la

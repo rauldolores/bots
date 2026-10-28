@@ -66,9 +66,12 @@ describe("renderStats — aislamiento por bot", () => {
     });
 
     const html = await renderStats(env, TEST_BOT_ID);
-    // 1 conversación propia, no 6 (1 propia + 5 del otro bot) — el funnel
-    // pone "<span class='text-muted'>Conversaciones</span>" justo antes del valor.
-    const match = /Conversaciones<\/span>[\s\S]{0,300}?text-right[^>]*>(\d+)/.exec(html);
+    // 1 conversación propia, no 6 (1 propia + 5 del otro bot) — cada etapa
+    // del embudo lleva su valor en data-valor.
+    const match = /data-etapa="Conversaciones" data-valor="(\d+)"/.exec(html);
     expect(match?.[1]).toBe("1");
+    // Misma estructura que el resto del panel: hero con su único h1.
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    expect(html).toContain("Horas ahorradas");
   });
 });

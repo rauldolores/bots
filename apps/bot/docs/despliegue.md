@@ -49,6 +49,7 @@ en cada actualización sin miedo.
 | `OPENAI_API_KEY` | fuera de Cloudflare | Embeddings y notas de voz |
 | `TICK_TOKEN` | Vercel | Protege `/cron/*` |
 | `KB_REINDEX_TOKEN` | sí | Protege `/kb/reindex` |
+| `ESTADO_AVISOS_CORREO` | no | Correos (separados por coma) que reciben el aviso técnico cuando un servicio de la plataforma se cae o se recupera. Sale por `RESEND_API_KEY`. Ver *Estado del servicio* en Ayuda |
 | `TELEGRAM_BOT_TOKEN`, `WHATSAPP_*`, `META_*`… | por canal | Ver `/admin/conexiones` |
 
 Fuera de Cloudflare hace falta `OPENAI_API_KEY` **aunque el cerebro sea Claude o Grok**:

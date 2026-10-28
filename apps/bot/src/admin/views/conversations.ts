@@ -192,7 +192,7 @@ function renderParts(parts: MessagePart[]): string {
     .join("");
 }
 
-interface InboxParams {
+export interface InboxParams {
   search?: string;
   filter?: string;
   selectedId?: string;
@@ -210,10 +210,12 @@ function inboxUrl(p: InboxParams, convId?: string): string {
 
 // --- Left pane: conversation list --------------------------------------------
 
-export async function renderInboxList(env: Env, botId: string, p: InboxParams): Promise<string> {
-  const db = new Db(env.DB);
-  const now = Date.now();
-
+/**
+ * El WHERE de la bandeja según la búsqueda y el filtro. Lo comparten la lista
+ * y Exportar (exportaciones.ts), para que el archivo traiga justo lo que se
+ * está viendo.
+ */
+export function condicionesBandeja(botId: string, p: InboxParams, now: number): { whereSql: string; params: (string | number)[] } {
   // El ensayo de /admin/entrenamiento vive en su propio canal y NO es un
   // cliente: mezclarlo en la bandeja haría que el dueño lo confundiera con
   // una conversación real (y lo contara como tal).
@@ -241,6 +243,13 @@ export async function renderInboxList(env: Env, botId: string, p: InboxParams): 
     );
   }
   const whereSql = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+  return { whereSql, params };
+}
+
+export async function renderInboxList(env: Env, botId: string, p: InboxParams): Promise<string> {
+  const db = new Db(env.DB);
+  const now = Date.now();
+  const { whereSql, params } = condicionesBandeja(botId, p, now);
 
   const rows = await db.all<any>(
     `SELECT c.*,
@@ -323,7 +332,13 @@ function dayLabel(ms: number, timezone: string): string {
   });
 }
 
-export async function renderThreadLive(env: Env, botId: string, convId: string): Promise<string> {
+export async function renderThreadLive(
+  env: Env,
+  botId: string,
+  convId: string,
+  /** Descargar la conversación pide conversaciones.responder (el mismo de contestar). */
+  puedeExportar = true,
+): Promise<string> {
   const db = new Db(env.DB);
   const conv = await db.first<any>("SELECT * FROM conversations WHERE id = ? AND bot_id = ?", [convId, botId]);
   if (!conv) return `<p class="nds-inbox__none">Conversación no encontrada.</p>`;
@@ -404,6 +419,12 @@ export async function renderThreadLive(env: Env, botId: string, convId: string):
         .join("")}
     </div>
     <div class="nds-chead__actions">
+      ${
+        puedeExportar
+          ? `<a href="/admin/conversations/${encodeURIComponent(convId)}/exportar?formato=xlsx" download class="nds-btn nds-btn--ghost nds-btn--sm" title="Descargar la conversación en Excel"><i data-lucide="file-spreadsheet" width="14" height="14"></i>Excel</a>
+      <a href="/admin/conversations/${encodeURIComponent(convId)}/exportar?formato=txt" download class="nds-btn nds-btn--ghost nds-btn--sm" title="Descargar la conversación como texto para leer"><i data-lucide="file-text" width="14" height="14"></i>Texto</a>`
+          : ""
+      }
       ${ticketAction}
       ${controls}
     </div>
@@ -901,7 +922,14 @@ a.nds-chip:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
 
 // --- Full page -----------------------------------------------------------------
 
-export async function renderInbox(env: Env, botId: string, p: InboxParams, visibleNavIds: Set<string> | null = null): Promise<string> {
+export async function renderInbox(
+  env: Env,
+  botId: string,
+  p: InboxParams,
+  visibleNavIds: Set<string> | null = null,
+  /** Exportar la bandeja o una conversación pide conversaciones.responder. */
+  puedeExportar = true,
+): Promise<string> {
   const db = new Db(env.DB);
   const now = Date.now();
 
@@ -949,7 +977,7 @@ export async function renderInbox(env: Env, botId: string, p: InboxParams, visib
 
   let rightPane: string;
   if (p.selectedId) {
-    const thread = await renderThreadLive(env, botId, p.selectedId);
+    const thread = await renderThreadLive(env, botId, p.selectedId, puedeExportar);
     rightPane = `
       <div id="thread-live" style="display:flex;flex-direction:column;flex:1;min-height:0"
            hx-get="/admin/conversations/thread/${encodeURIComponent(p.selectedId)}"
@@ -972,6 +1000,11 @@ export async function renderInbox(env: Env, botId: string, p: InboxParams, visib
               <h2 class="nds-inbox__title">Bandeja</h2>
               <div style="${MICRO_LABEL};margin-top:2px">${totalConvs} ${totalConvs === 1 ? "conversación" : "conversaciones"}</div>
             </div>
+            ${
+              puedeExportar
+                ? `<a href="/admin/conversations/exportar?${new URLSearchParams({ formato: "xlsx", ...(p.filter ? { f: p.filter } : {}), ...(p.search ? { q: p.search } : {}) }).toString()}" download class="nds-btn nds-btn--ghost nds-btn--sm" style="margin-left:auto" title="Descargar la lista${p.filter || p.search ? " con este filtro" : ""} en Excel"><i data-lucide="download" width="14" height="14"></i>Exportar</a>`
+                : ""
+            }
           </div>
           <form method="GET" action="/admin/conversations" class="nds-inbox__search">
             <i data-lucide="search" width="14" height="14" style="color:var(--ink-subtle);flex:none"></i>

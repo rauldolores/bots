@@ -78,14 +78,14 @@ import { ejecutarPropuesta } from "../crm/ejecutar";
 import { renderMejoras } from "./views/mejoras";
 import { runFlywheel, getLessons, saveLessons } from "../flywheel/detect";
 import { applySuggestion, dismissSuggestion } from "../flywheel/apply";
-import { renderLeads, exportLeadsCsv } from "./views/leads";
+import { renderLeads, leadsParaExportar } from "./views/leads";
 import { renderTickets, updateTicketPriority } from "./views/tickets";
-import { renderCalendario, cancelAppointment } from "./views/calendario";
+import { renderCalendario, cancelAppointment, citasParaExportar } from "./views/calendario";
 import { renderTelefono } from "./views/telefono";
 import { renderUsuarios } from "./views/usuarios";
 import { renderOrganizaciones } from "./views/organizaciones";
 import { renderPlan } from "./views/plan";
-import { renderAyuda } from "./views/ayuda";
+import { renderAyuda, renderPanelAyuda } from "./views/ayuda";
 import { correoSoporte, enviarSoporte } from "./help/soporte";
 import {
   entitlementsDe,
@@ -170,6 +170,8 @@ import {
   buildAuthorizeUrl,
   exchangeCode,
   refreshSession,
+  tryRefreshSession,
+  checkSessionInGoTrue,
   revokeSession,
   verifyAccessToken,
   listMemberships,
@@ -208,6 +210,16 @@ import {
 import { PERMISSION_GATE, hasAnyAppAccess, hasPermission, requirePermission, visibleNavIds } from "./permissions";
 import type { KontroliaTokenClaims } from "@kontrolia/shared";
 import { renderCreateBotPage } from "./views/onboarding";
+import { incidenciasAbiertas, leerEstado } from "../estado/revisar";
+import { saludDelBot } from "../estado/salud";
+import { formatoDe, nombreArchivo, respuestaExport } from "./exportar";
+import {
+  columnasDeCitas,
+  conversacionesParaExportar,
+  ticketsParaExportar,
+  transcripcionComoTexto,
+  transcripcionParaExportar,
+} from "./exportaciones";
 
 export const adminApp = new Hono<AdminBindings>();
 
@@ -253,6 +265,8 @@ const TENANT_EXEMPT_SUFFIXES = [
   "/access-denied",
   "/ayuda",
   "/ayuda/soporte",
+  "/ayuda/panel",
+  "/ayuda/estado",
   "/plan/uso",
   BAND_BRANDING_PATH,
   BAND_SWITCH_PATH,
@@ -285,7 +299,9 @@ function redirectUri(env: Env): string {
 
 /**
  * Guard combinado del panel (F5, docs/multitenancy.md):
- *   1. Sesión de KontrolIA Auth válida (cookie) → pasa.
+ *   1. Sesión de KontrolIA Auth válida (cookie) → pasa. Si GoTrue dice que
+ *      esa sesión ya no existe (refresh revocado, o /auth/v1/user en una
+ *      navegación completa), se borra la cookie y se sigue como sin sesión.
  *   2. Si no, pero llegó un header Basic Auth → se valida como siempre
  *      (compatibilidad: navegadores con la contraseña ya guardada, curl,
  *      scripts). Es la salida de emergencia si KontrolIA Auth falla.
@@ -317,7 +333,9 @@ function setSessionCookie(c: HonoContext, session: KontroliaSession): void {
 
 /**
  * Navegación de página completa: GET que pide HTML y NO viene de htmx. Solo
- * ahí se paga la lectura de sessions_context (syncActiveOrganization, abajo):
+ * ahí se paga preguntarle a GoTrue si la sesión sigue viva
+ * (sessionRevokedInGoTrue) y la lectura de sessions_context
+ * (syncActiveOrganization, abajo):
  * los fragmentos de htmx, los fetch() del header (/projects, /plan/uso) y los
  * POST no la necesitan — viven dentro de una página que ya se sincronizó al
  * cargar, y cambiar de organización a mitad de un fragmento dejaría la página
@@ -385,6 +403,50 @@ async function syncActiveOrganization(
   }
 }
 
+/**
+ * Margen tras emitirse el token en el que no se pregunta a GoTrue. Es un
+ * cortacircuitos: si GoTrue rechazara tokens recién emitidos (JWKS cruzado,
+ * llave mal puesta), cada login volvería a /admin/login y el auth-server lo
+ * autorizaría solo — un bucle de redirects que dejaría a todos fuera. Una
+ * sesión cerrada en sus primeros segundos se detecta en la siguiente página.
+ */
+const SESSION_CHECK_GRACE_S = 30;
+
+/**
+ * En una navegación completa, ¿la sesión de este token ya no existe en GoTrue?
+ * (cerró sesión en el portal u otra app — signOut global —, la cuenta se
+ * borró…). Ver checkSessionInGoTrue: solo "revoked" cuenta; red, timeout, 5xx
+ * y 429 dejan pasar como hasta ahora.
+ */
+async function sessionRevokedInGoTrue(
+  cfg: KontroliaAuthConfig,
+  accessToken: string,
+  claims: KontroliaTokenClaims,
+): Promise<boolean> {
+  const iat = (claims as { iat?: unknown }).iat;
+  if (typeof iat === "number" && Date.now() / 1000 - iat < SESSION_CHECK_GRACE_S) return false;
+  const status = await checkSessionInGoTrue(cfg, accessToken);
+  if (status === "revoked") {
+    console.warn("[session] GoTrue ya no reconoce la sesión del panel; se borra la cookie y se manda a login");
+    return true;
+  }
+  return false;
+}
+
+/**
+ * La sesión de la cookie está muerta en GoTrue: se olvida aquí (y el bot
+ * elegido, que era de esa cuenta) para que /admin/login entre con quien esté
+ * conectado AHORA en el auth-server, y para que los siguientes requests de
+ * esta pestaña (htmx, la banda, la píldora de salud) no vuelvan a mandar a
+ * GoTrue el mismo refresh_token revocado. A propósito NO se llama a
+ * revokeSession ni al logout del auth-server: la sesión vieja ya no existe, y
+ * un logout global ahí cerraría la de la cuenta NUEVA.
+ */
+function forgetRevokedSession(c: HonoContext): void {
+  deleteCookie(c, SESSION_COOKIE);
+  deleteCookie(c, BOT_COOKIE);
+}
+
 async function guardAdmin(c: HonoContext): Promise<GuardResult> {
   const env = c.env;
   if (env.DASHBOARD_PUBLIC === "1") return { kind: "pass-public" };
@@ -401,26 +463,37 @@ async function guardAdmin(c: HonoContext): Promise<GuardResult> {
       const session = JSON.parse(raw) as KontroliaSession;
       let accessToken = session.accessToken;
       let justRefreshed = false;
+      let revoked = false;
       if (session.expiresAt < Date.now()) {
-        const refreshed = await refreshSession(cfg, session.refreshToken);
-        accessToken = refreshed?.accessToken ?? "";
-        if (refreshed) {
-          setSessionCookie(c, refreshed);
+        const refreshed = await tryRefreshSession(cfg, session.refreshToken);
+        if (refreshed.ok) {
+          accessToken = refreshed.session.accessToken;
+          setSessionCookie(c, refreshed.session);
           justRefreshed = true;
+        } else {
+          accessToken = "";
+          revoked = refreshed.revoked;
         }
       }
       if (accessToken) {
         const verified = await verifyAccessToken(cfg, accessToken);
         if (verified) {
-          // Un token recién emitido ya trae la organización activa de ahora:
-          // no hace falta preguntarle a sessions_context.
-          if (!justRefreshed && isFullPageNavigation(c)) {
-            const synced = await syncActiveOrganization(c, cfg, session, verified.claims);
-            if (synced) return { kind: "pass", ...synced };
+          // Un token recién emitido (refresh de arriba) ya prueba que la
+          // sesión existe y trae la organización activa de ahora: no hace
+          // falta preguntarle nada más a GoTrue ni a sessions_context.
+          const fullPage = !justRefreshed && isFullPageNavigation(c);
+          if (fullPage && (await sessionRevokedInGoTrue(cfg, accessToken, verified.claims))) {
+            revoked = true;
+          } else {
+            if (fullPage) {
+              const synced = await syncActiveOrganization(c, cfg, session, verified.claims);
+              if (synced) return { kind: "pass", ...synced };
+            }
+            return { kind: "pass", claims: verified.claims, accessToken };
           }
-          return { kind: "pass", claims: verified.claims, accessToken };
         }
       }
+      if (revoked) forgetRevokedSession(c);
     }
   }
 
@@ -714,6 +787,17 @@ function orgInitials(name: string): string {
 // el panel de dos columnas del selector cambia de columna derecha al elegir
 // una organización SIN otro viaje al servidor — son pocas organizaciones por
 // usuario, así que el costo de traerlas todas de una vez es bajo.
+async function botsPausados(db: Db, ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const rows = await db
+    .all<{ bot_id: string }>(
+      `SELECT bot_id FROM settings WHERE key = ? AND value = '1' AND bot_id IN (${ids.map(() => "?").join(",")})`,
+      [SETTING_KEYS.botPaused, ...ids],
+    )
+    .catch(() => []);
+  return new Set(rows.map((r) => r.bot_id));
+}
+
 adminApp.get("/projects", async (c) => {
   const db = new Db(c.env.DB);
   const botId = c.get("botId");
@@ -753,6 +837,10 @@ adminApp.get("/projects", async (c) => {
     })),
   );
 
+  // "Pausado" = el ajuste de Flujo (bot_paused), el mismo que respeta el bot.
+  // La columna bots.paused no la escribe nada; se lee junto por compatibilidad.
+  const pausados = await botsPausados(db, withBots.flatMap(({ bots }) => bots.map((b) => b.id)));
+
   return c.json({
     ...base,
     tenant: {
@@ -765,7 +853,7 @@ adminApp.get("/projects", async (c) => {
         bots: bots.map((b) => ({
           id: b.id,
           name: b.name,
-          paused: b.paused,
+          paused: b.paused || pausados.has(b.id),
           current: b.id === botId,
         })),
       })),
@@ -1502,6 +1590,7 @@ adminApp.get("/mejoras", async (c) =>
         found: c.req.query("found") ?? undefined,
         applied: c.req.query("applied") === "1",
         dismissed: c.req.query("dismissed") === "1",
+        crm: c.req.query("crm") ?? undefined,
       },
       visibleNavIds(c.get("kontroliaClaims")),
     ),
@@ -1595,6 +1684,7 @@ adminApp.get("/conversations", async (c) =>
         selectedId: c.req.query("c"),
       },
       visibleNavIds(c.get("kontroliaClaims")),
+      hasPermission(c.get("kontroliaClaims"), "nodia-agents.conversaciones.responder"),
     ),
   ),
 );
@@ -1612,7 +1702,9 @@ adminApp.get("/conversations/list-fragment", async (c) =>
 );
 
 adminApp.get("/conversations/thread/:id", async (c) =>
-  c.html(await renderThreadLive(c.env, c.get("botId"), c.req.param("id"))),
+  c.html(
+    await renderThreadLive(c.env, c.get("botId"), c.req.param("id"), hasPermission(c.get("kontroliaClaims"), "nodia-agents.conversaciones.responder")),
+  ),
 );
 
 // --- Entrenamiento: el sandbox -----------------------------------------------
@@ -1721,6 +1813,67 @@ adminApp.post("/conversations/:id/corregir/guardar", async (c) => {
   return c.html(renderLeccionGuardada(r.regla, r.total, r.desplazada));
 });
 
+// --- Exportar (admin/exportar.ts + admin/exportaciones.ts) ------------------
+// Excel (?formato=xlsx, el de siempre) o CSV. Exportar saca muchos datos de
+// golpe, así que pide el permiso de administrar de cada pantalla (en
+// conversaciones, el de responder) — el mismo que ya pedía Leads. Sin él, el
+// botón ni aparece. Van antes de /conversations/:id para ganarle a esa ruta.
+
+async function zonaDelBot(c: HonoContext): Promise<string> {
+  return resolveTimezone(await new SettingsRepo(new Db(c.env.DB), c.get("botId")).get(SETTING_KEYS.timezone));
+}
+
+adminApp.get("/conversations/exportar", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.conversaciones.responder");
+  if (denied) return denied;
+  const formato = formatoDe(c.req.query("formato"));
+  const r = await conversacionesParaExportar(c.env, c.get("botId"), { search: c.req.query("q"), filter: c.req.query("f") });
+  return respuestaExport(formato, nombreArchivo("conversaciones", formato, await zonaDelBot(c)), r.columnas, r.filas, { hoja: "Conversaciones", total: r.total });
+});
+
+adminApp.get("/conversations/:id/exportar", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.conversaciones.responder");
+  if (denied) return denied;
+  const t = await transcripcionParaExportar(c.env, c.get("botId"), c.req.param("id"));
+  if (!t) return c.text("Conversación no encontrada", 404);
+  const zona = await zonaDelBot(c);
+  if (c.req.query("formato") === "txt") {
+    return new Response(transcripcionComoTexto(t), {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${nombreArchivo(`conversacion-${t.nombre}`, "csv", zona).replace(/\.csv$/, ".txt")}"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+  const formato = formatoDe(c.req.query("formato"));
+  return respuestaExport(formato, nombreArchivo(`conversacion-${t.nombre}`, formato, zona), t.columnas, t.filas, { hoja: "Conversación", total: t.total });
+});
+
+adminApp.get("/leads/exportar", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.leads.administrar");
+  if (denied) return denied;
+  const formato = formatoDe(c.req.query("formato"));
+  const r = await leadsParaExportar(c.env, c.get("botId"));
+  return respuestaExport(formato, nombreArchivo(r.plural, formato, r.timezone), r.columnas, r.filas, { hoja: r.plural, total: r.total });
+});
+
+adminApp.get("/tickets/exportar", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.tickets.administrar");
+  if (denied) return denied;
+  const formato = formatoDe(c.req.query("formato"));
+  const r = await ticketsParaExportar(c.env, c.get("botId"));
+  return respuestaExport(formato, nombreArchivo("tickets", formato, await zonaDelBot(c)), r.columnas, r.filas, { hoja: "Tickets", total: r.total });
+});
+
+adminApp.get("/calendario/exportar", async (c) => {
+  const denied = requirePermission(c, "nodia-agents.calendario.administrar");
+  if (denied) return denied;
+  const formato = formatoDe(c.req.query("formato"));
+  const r = await citasParaExportar(c.env, c.get("botId"), c.req.query("month"));
+  return respuestaExport(formato, nombreArchivo(`citas-${r.mes}`, formato, r.timezone), columnasDeCitas(r.timezone), r.filas, { hoja: `Citas ${r.mes}` });
+});
+
 // Old detail URLs (linked from Insights, notifications, etc.) → inbox selection.
 adminApp.get("/conversations/:id", (c) =>
   c.redirect(`/admin/conversations?c=${encodeURIComponent(c.req.param("id"))}`),
@@ -1823,9 +1976,13 @@ adminApp.post("/agente/tools/:name/toggle", async (c) => {
   return c.html((await renderNodeModal(c.env, c.get("botId"), `tool:${name}`, true)) + toastOob("✓ Guardado"));
 });
 
-adminApp.get("/leads", async (c) => c.html(await renderLeads(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")))));
+adminApp.get("/leads", async (c) =>
+  c.html(await renderLeads(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")), hasPermission(c.get("kontroliaClaims"), "nodia-agents.leads.administrar"))),
+);
 
-adminApp.get("/tickets", async (c) => c.html(await renderTickets(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")))));
+adminApp.get("/tickets", async (c) =>
+  c.html(await renderTickets(c.env, c.get("botId"), visibleNavIds(c.get("kontroliaClaims")), hasPermission(c.get("kontroliaClaims"), "nodia-agents.tickets.administrar"))),
+);
 
 // Calendario (F5 Fase 2): agenda del bot — local, o el calendario conectado si hay uno.
 adminApp.get("/calendario", async (c) =>
@@ -1836,6 +1993,7 @@ adminApp.get("/calendario", async (c) =>
       c.req.query("month"),
       c.req.query("day"),
       visibleNavIds(c.get("kontroliaClaims")),
+      hasPermission(c.get("kontroliaClaims"), "nodia-agents.calendario.administrar"),
     ),
   ),
 );
@@ -2101,8 +2259,43 @@ adminApp.get("/ayuda", async (c) => {
       correoSoporte: correoSoporte(c.env),
       notice: { ok: c.req.query("ok") ?? undefined, err: c.req.query("err") ?? undefined },
       visibleNavIds: navDeAyuda(c),
+      estado: await leerEstado(c.env),
     }),
   );
+});
+
+// Contenido del panel lateral de ayuda (el botón "?" de la cabecera): la
+// ayuda de la pantalla `ruta`, o resultados si viene `q`. Es un fragmento,
+// no una página: lo inserta el layout.
+adminApp.get("/ayuda/panel", async (c) => {
+  const denied = accesoAyudaDenegado(c);
+  if (denied) return denied;
+  const ruta = c.req.query("ruta") ?? "";
+  const abiertas = await incidenciasAbiertas(new Db(c.env.DB)).catch(() => []);
+  return c.html(renderPanelAyuda(ruta.startsWith("/admin") ? ruta : "/admin/overview", (c.req.query("q") ?? "").slice(0, 120), abiertas));
+});
+
+// Lo que pide la franja de aviso del layout al cargar cada pantalla: solo las
+// incidencias abiertas del estado del servicio (src/estado/), en lenguaje
+// del dueño. Sin nada abierto, una lista vacía y la franja no aparece.
+adminApp.get("/ayuda/estado", async (c) => {
+  const denied = accesoAyudaDenegado(c);
+  if (denied) return denied;
+  const abiertas = await incidenciasAbiertas(new Db(c.env.DB)).catch(() => []);
+  c.header("Cache-Control", "no-store");
+  return c.json({ abiertas: abiertas.map((i) => ({ id: i.id, titulo: i.titulo, mensaje: i.mensaje })) });
+});
+
+// La píldora de la cabecera (En línea / Con aviso / En pausa / Con problemas)
+// del bot elegido, con la lista de qué pasa y dónde se arregla
+// (estado/salud.ts). La pide el layout al cargar y cada 2 minutos.
+adminApp.get("/salud", async (c) => {
+  const denied = accesoAyudaDenegado(c);
+  if (denied) return denied;
+  const botId = c.get("botId");
+  if (!botId) return c.json({ estado: null, hallazgos: [] });
+  c.header("Cache-Control", "no-store");
+  return c.json(await saludDelBot(c.env, botId));
 });
 
 adminApp.post("/ayuda/soporte", async (c) => {
@@ -3167,16 +3360,13 @@ adminApp.post("/config", async (c) => {
 
 // --- CSV export -------------------------------------------------------------
 
+// La dirección vieja del botón de Leads: sigue dando el CSV (ya con acentos
+// bien y columnas en español), por si alguien la tiene guardada.
 adminApp.get("/leads/export.csv", async (c) => {
   const denied = requirePermission(c, "nodia-agents.leads.administrar");
   if (denied) return denied;
-  const csv = await exportLeadsCsv(c.env, c.get("botId"));
-  return new Response(csv, {
-    headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="leads-${Date.now()}.csv"`,
-    },
-  });
+  const r = await leadsParaExportar(c.env, c.get("botId"));
+  return respuestaExport("csv", nombreArchivo(r.plural, "csv", r.timezone), r.columnas, r.filas, { total: r.total });
 });
 
 // --- Mutating actions (HTMX / plain form posts) -----------------------------

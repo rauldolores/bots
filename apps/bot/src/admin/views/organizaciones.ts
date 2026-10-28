@@ -11,6 +11,7 @@
 // quién puede crear organizaciones o cambiarse lo decide KontrolIA, no esto.
 import type { KontroliaMembershipWithOrganization } from "@kontrolia/shared";
 import { layout } from "./layout";
+import { alertRow, avatarTile, heroTag, iconTile, MICRO_LABEL, pageHero, sectionCard, statusPill } from "./ui";
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]!));
@@ -18,7 +19,26 @@ function esc(s: string): string {
 
 const ROL: Record<string, string> = { owner: "Dueño", admin: "Administrador", member: "Miembro" };
 
-const inputStyle = "background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;outline:none";
+const ORG_CSS = `<style>
+  .org-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;padding:20px 24px}
+  .org-card{display:flex;flex-direction:column;gap:14px;border-radius:var(--radius);border:1px solid var(--line);background:var(--panel);padding:18px 20px;min-width:0}
+  .org-card.is-active{border-color:var(--accent);background:var(--accent-soft)}
+  .org-name{margin:0;font-size:15px;font-weight:900;letter-spacing:-.02em;color:var(--cream);overflow-wrap:anywhere}
+  .org-slug{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--dim);overflow-wrap:anywhere}
+  .org-chip{display:inline-flex;align-items:center;border-radius:8px;background:var(--panel2);padding:2px 8px;font-size:11px;font-weight:700;color:var(--muted);white-space:nowrap}
+  .org-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:auto;padding-top:12px;border-top:1px solid var(--line)}
+  .org-card.is-active .org-foot{border-top-color:rgba(0,0,0,.08)}
+  .org-btn{height:40px;padding:0 16px;border-radius:12px;border:0;background:var(--accent);color:var(--cream);font-size:13px;font-weight:800;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;white-space:nowrap}
+  .org-btn:hover{background:var(--accent-hover)}
+  .org-btn-sm{height:32px;padding:0 12px;border-radius:10px;border:1px solid var(--dim);background:var(--panel);color:var(--cream);font-size:12px;font-weight:700;font-family:inherit;display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
+  .org-btn-sm:hover{background:var(--row-hover)}
+  .org-body{padding:20px 24px;display:flex;flex-direction:column;gap:14px}
+  .org-help{margin:0;font-size:12.5px;font-weight:500;line-height:1.55;color:var(--muted)}
+  .org-label{display:flex;flex-direction:column;gap:6px;flex:1 1 260px;max-width:360px}
+  .org-label>span{${MICRO_LABEL}}
+  .org-field{width:100%;height:40px;padding:0 14px;border:1px solid var(--linelit);background:var(--panel);color:var(--cream);font-size:13px}
+  @media (max-width:640px){ .org-grid{grid-template-columns:minmax(0,1fr);padding:16px} .org-body{padding:16px} }
+</style>`;
 
 export function renderOrganizaciones(
   data: { kind: "sin-kontrolia" } | { kind: "ok"; memberships: KontroliaMembershipWithOrganization[]; activeOrgId: string | null },
@@ -26,66 +46,84 @@ export function renderOrganizaciones(
   visibleNavIds: Set<string> | null,
 ): string {
   const banner = notice.err
-    ? `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px">${esc(notice.err)}</div>`
+    ? `<div style="margin-bottom:24px">${alertRow({ title: "No se pudo completar", detail: notice.err, attrs: 'role="alert"' })}</div>`
     : notice.ok
-      ? `<div class="text-[12px]" style="color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:9px 12px">✓ ${esc(notice.ok)}</div>`
+      ? `<div style="margin-bottom:24px">${alertRow({ title: "Listo", detail: notice.ok, dot: "var(--ok)", attrs: 'role="status"' })}</div>`
       : "";
 
   let content: string;
+  let activa: KontroliaMembershipWithOrganization | undefined;
   if (data.kind === "sin-kontrolia") {
-    content = `<div style="border:1px solid var(--line);background:var(--panel);padding:18px 20px">
-      <div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:6px">Esta pantalla necesita una sesión de KontrolIA</div>
-      <p class="text-[12.5px]" style="color:var(--muted);margin:0">Las organizaciones son de tu cuenta de KontrolIA. Entraste con la contraseña del panel — sal y vuelve a entrar con tu cuenta.</p>
-    </div>`;
+    content = sectionCard({
+      icon: "lock",
+      title: "Esta pantalla necesita una sesión de KontrolIA",
+      body: `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:32px 24px;text-align:center">
+        ${iconTile("key-round", "accent", 48)}
+        <p class="org-help" style="max-width:460px">Las organizaciones son de tu cuenta de KontrolIA. Entraste con la contraseña del panel — sal y vuelve a entrar con tu cuenta.</p>
+      </div>`,
+    });
   } else {
-    const filas = data.memberships
-      .filter((m) => m.status === "active")
+    const activas = data.memberships.filter((m) => m.status === "active");
+    activa = activas.find((m) => m.organizationId === data.activeOrgId);
+    // La activa primero: es la que el dueño busca para confirmar dónde está parado.
+    const ordenadas = [...activas].sort((a, b) => Number(b.organizationId === data.activeOrgId) - Number(a.organizationId === data.activeOrgId));
+    const tarjetas = ordenadas
       .map((m) => {
-        const activa = m.organizationId === data.activeOrgId;
-        const roles = m.roles.map((r) => ROL[r] ?? r).join(", ") || "—";
-        const accion = activa
-          ? `<span class="text-[11px]" style="color:var(--ok);white-space:nowrap">● Activa</span>`
-          : `<form method="POST" action="/admin/switch-org" style="margin:0"><input type="hidden" name="organization_id" value="${esc(m.organizationId)}"><input type="hidden" name="next" value="/admin/overview"><button type="submit" class="text-[11px]" style="background:none;border:1px solid var(--line);color:var(--cream);padding:5px 12px;cursor:pointer">Cambiar</button></form>`;
-        return `<tr style="border-top:1px solid var(--line)">
-          <td style="padding:10px 12px" class="text-[12.5px] text-cream">${esc(m.organization.name)}</td>
-          <td style="padding:10px 12px" class="text-[12px] font-mono" style="color:var(--dim)">${esc(m.organization.slug)}</td>
-          <td style="padding:10px 12px" class="text-[12px]">${esc(roles)}</td>
-          <td style="padding:6px 12px;text-align:right">${accion}</td>
-        </tr>`;
+        const esActiva = m.organizationId === data.activeOrgId;
+        const roles = m.roles.map((r) => `<span class="org-chip">${esc(ROL[r] ?? r)}</span>`).join("") || `<span class="org-chip">—</span>`;
+        const accion = esActiva
+          ? statusPill("Activa", "var(--ok)")
+          : `<form method="POST" action="/admin/switch-org" style="margin:0"><input type="hidden" name="organization_id" value="${esc(m.organizationId)}"><input type="hidden" name="next" value="/admin/overview"><button type="submit" class="org-btn-sm" aria-label="Cambiarme a ${esc(m.organization.name)}"><i data-lucide="arrow-left-right" width="14" height="14"></i>Cambiar</button></form>`;
+        return `<article class="org-card${esActiva ? " is-active" : ""}">
+          <div style="display:flex;align-items:center;gap:12px;min-width:0">
+            ${avatarTile(m.organization.name, esActiva)}
+            <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+              <h3 class="org-name">${esc(m.organization.name)}</h3>
+              <span class="org-slug">${esc(m.organization.slug)}</span>
+            </div>
+          </div>
+          <div class="org-foot">
+            <div style="display:flex;flex-wrap:wrap;gap:6px" aria-label="Tu rol">${roles}</div>
+            ${accion}
+          </div>
+        </article>`;
       })
       .join("");
 
-    content = `<div style="display:flex;flex-direction:column;gap:16px">
-      <div style="border:1px solid var(--line);background:var(--panel)">
-        <div style="padding:14px 18px;border-bottom:1px solid var(--line)">
-          <div class="font-display font-semibold text-[13.5px] text-cream">Tus organizaciones</div>
-          <p class="text-[12px]" style="color:var(--muted);margin:4px 0 0">Cada organización tiene sus propios bots, su equipo y su plan. Cambia de organización para trabajar en otra.</p>
-        </div>
-        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
-          <thead><tr class="text-[11px]" style="color:var(--dim);text-align:left">
-            <th style="padding:8px 12px;font-weight:500">Nombre</th><th style="padding:8px 12px;font-weight:500">Identificador</th><th style="padding:8px 12px;font-weight:500">Tu rol</th><th></th>
-          </tr></thead>
-          <tbody>${filas || `<tr><td colspan="4" style="padding:14px 12px" class="text-[12.5px]"><span style="color:var(--dim)">No perteneces a ninguna organización.</span></td></tr>`}</tbody>
-        </table></div>
-      </div>
+    const lista = sectionCard({
+      icon: "building-2",
+      title: "Tus organizaciones",
+      subtitle: `${activas.length} ${activas.length === 1 ? "organización" : "organizaciones"} · cada una con sus bots, su equipo y su plan`,
+      body: tarjetas
+        ? `<div class="org-grid">${tarjetas}</div>`
+        : `<p class="org-help" style="padding:32px 24px;text-align:center;color:var(--dim)">No perteneces a ninguna organización.</p>`,
+      footer: `<span class="org-help" style="color:var(--dim)">El nombre, los miembros y los roles de cada organización también se administran en panel.kontrolia.io.</span>`,
+    });
 
-      <div style="border:1px solid var(--line);background:var(--panel);padding:18px 20px;display:flex;flex-direction:column;gap:10px">
-        <div>
-          <div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:4px">Nueva organización</div>
-          <p class="text-[12.5px]" style="color:var(--muted);margin:0">Para otra empresa o para un cliente al que le operas el agente. Quedas como dueño y administrador, y le contratas su propio plan.</p>
-        </div>
-        <form method="POST" action="/admin/organizaciones" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-          <div style="display:flex;flex-direction:column;gap:5px">
-            <label for="nombre" class="text-[11px]" style="color:var(--dim)">Nombre de la organización</label>
-            <input type="text" id="nombre" name="nombre" required maxlength="80" placeholder="Taquería El Buen Sazón" style="${inputStyle};width:300px">
-          </div>
-          <button type="submit" class="text-[12px]" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;font-weight:700;padding:9px 16px;cursor:pointer">Crear y cambiarme a ella</button>
+    const nueva = sectionCard({
+      icon: "plus",
+      title: "Nueva organización",
+      subtitle: "Para otra empresa o para un cliente al que le operas el agente",
+      body: `<div class="org-body">
+        <p class="org-help">Quedas como dueño y administrador, y le contratas su propio plan.</p>
+        <form method="POST" action="/admin/organizaciones" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+          <label class="org-label" for="nombre"><span>Nombre de la organización</span>
+            <input type="text" id="nombre" name="nombre" required maxlength="80" placeholder="Taquería El Buen Sazón" class="org-field">
+          </label>
+          <button type="submit" class="org-btn"><i data-lucide="plus" width="15" height="15"></i>Crear y cambiarme a ella</button>
         </form>
-      </div>
+      </div>`,
+    });
 
-      <p class="text-[11px]" style="color:var(--dim);margin:0">El nombre, los miembros y los roles de cada organización también se administran en panel.kontrolia.io.</p>
-    </div>`;
+    content = `<div style="display:flex;flex-direction:column;gap:24px">${lista}${nueva}</div>`;
   }
 
-  return layout({ title: "Organizaciones", activeTab: "organizaciones", body: `<div style="display:flex;flex-direction:column;gap:14px">${banner}${content}</div>`, visibleNavIds });
+  const hero = pageHero({
+    eyebrow: "Cuenta",
+    title: "Organizaciones",
+    description: "Cada organización es una empresa o un cliente, con sus propios bots, su equipo y su plan. Cámbiate de una a otra para trabajar en ella.",
+    tags: activa ? heroTag(`Trabajando en ${activa.organization.name}`, "#3fb8c4") : undefined,
+  });
+
+  return layout({ title: "Organizaciones", activeTab: "organizaciones", body: `${ORG_CSS}${hero}${banner}${content}`, visibleNavIds, hero: true });
 }

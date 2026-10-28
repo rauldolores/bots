@@ -3,6 +3,7 @@
 // mil líneas; kb.ts las acomoda en la página.
 import { chunkContent, type KbDoc } from "../../kb/docs";
 import { EXTENSIONES_DE_TEXTO, MAX_ARCHIVO_CHARS, MAX_CARPETA_CHARS } from "../../kb/archivos";
+import { iconTile, MICRO_LABEL } from "./ui";
 
 export function esc(s: string): string {
   return s.replace(
@@ -21,29 +22,28 @@ export function ago(ms: number): string {
 }
 
 /** Una fila del árbol: abrir para editar, o eliminar ahí mismo sin entrar. */
-function filaDeDocumento(d: KbDoc, primera: boolean): string {
+function filaDeDocumento(d: KbDoc): string {
   const chunks = chunkContent(d.content).length;
   const editar = `/admin/kb/${encodeURIComponent(d.id)}/edit`;
   const origen = d.file_name
     ? `<span title="Salió de este archivo: súbelo otra vez para actualizarlo">${esc(d.file_name)}</span> · `
     : "";
   return `
-      <div class="kbrow" style="display:flex;align-items:center;gap:12px;padding:11px 18px;${primera ? "" : "border-top:1px solid var(--line);"}transition:background .12s ease">
-        <i data-lucide="file-text" width="15" height="15" style="flex:none;color:var(--dim)"></i>
+      <div class="kbrow kb-row">
+        ${iconTile("file-text", "neutral", 32)}
         <div style="min-width:0;flex:1">
-          <a href="${editar}" class="font-display font-semibold text-[13px] text-cream" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.title)}</a>
-          <div class="text-dim text-[11.5px]" style="margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${origen}${esc(d.content.replace(/\s+/g, " ").slice(0, 90))}</div>
+          <a href="${editar}" class="kb-title">${esc(d.title)}</a>
+          <div class="kb-sub">${origen}${esc(d.content.replace(/\s+/g, " ").slice(0, 90))}</div>
         </div>
-        <div class="kbmeta text-dim text-[10.5px]" style="text-align:right;white-space:nowrap;flex:none">
+        <div class="kbmeta kb-meta">
           <div>${d.content.length.toLocaleString("es-MX")} caracteres · ${chunks} ${chunks === 1 ? "fragmento" : "fragmentos"}</div>
           <div>${ago(d.updated_at)}</div>
         </div>
-        <a href="${editar}" class="kbedit" style="border:1px solid var(--line);color:var(--muted);padding:5px 12px;font-size:11px;white-space:nowrap;transition:all .12s ease;flex:none">Editar</a>
+        <a href="${editar}" class="kbedit kb-btn-sm" aria-label="Editar ${esc(d.title)}"><i data-lucide="pencil" width="14" height="14"></i><span class="kbmeta">Editar</span></a>
         <form method="POST" action="/admin/kb/${encodeURIComponent(d.id)}/delete" style="flex:none;margin:0"
               data-confirmar="¿Eliminar «${esc(d.title)}»? El bot dejará de saber esto.">
-          <button type="submit" class="kbdel cursor-pointer" aria-label="Eliminar ${esc(d.title)}" title="Eliminar"
-                  style="display:flex;align-items:center;background:none;border:1px solid var(--line);color:var(--dim);padding:5px 7px;transition:all .12s ease">
-            <i data-lucide="trash-2" width="13" height="13"></i>
+          <button type="submit" class="kbdel kb-icon-btn" aria-label="Eliminar ${esc(d.title)}" title="Eliminar">
+            <i data-lucide="trash-2" width="14" height="14"></i>
           </button>
         </form>
       </div>`;
@@ -57,8 +57,10 @@ function filaDeDocumento(d: KbDoc, primera: boolean): string {
  */
 export function arbolDeDocumentos(docs: KbDoc[]): string {
   if (!docs.length) {
-    return `<div class="bg-panel border border-line text-dim text-[12.5px]" style="padding:34px 18px;text-align:center;margin-bottom:16px">
-         Aún no tienes documentos propios. Arrastra arriba tus archivos, o crea uno a mano — horarios, precios, políticas, promociones…
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:40px 24px;text-align:center">
+         ${iconTile("book-open", "accent")}
+         <div style="font-size:14px;font-weight:800;color:var(--cream)">Aún no tienes documentos propios.</div>
+         <p class="kb-help" style="max-width:440px">Arrastra arriba tus archivos, o crea uno a mano — horarios, precios, políticas, promociones…</p>
        </div>`;
   }
   const porCarpeta = new Map<string, KbDoc[]>();
@@ -75,22 +77,21 @@ export function arbolDeDocumentos(docs: KbDoc[]): string {
     // El botón de borrar vive FUERA del <summary>: un botón dentro abriría o
     // cerraría la carpeta además de borrarla.
     return `
-    <div class="kbfolder bg-panel border border-line" style="position:relative;margin-bottom:10px;overflow:hidden">
+    <div class="kbfolder">
       <details open data-carpeta="${esc(nombre)}">
-        <summary class="kbsum" style="display:flex;align-items:center;gap:10px;padding:12px 130px 12px 18px;cursor:pointer;list-style:none;user-select:none">
-          <i data-lucide="chevron-right" width="14" height="14" class="kbchev" style="flex:none;color:var(--dim);transition:transform .15s ease"></i>
-          <i data-lucide="folder" width="16" height="16" style="flex:none;color:var(--accent-2)"></i>
-          <span class="font-display font-semibold text-[13px] text-cream" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(nombre)}</span>
-          <span class="kbmeta text-dim text-[11px]" style="white-space:nowrap">${cuantos}</span>
+        <summary class="kbsum">
+          <i data-lucide="chevron-right" width="16" height="16" class="kbchev" style="flex:none;color:var(--dim);transition:transform .15s ease"></i>
+          ${iconTile("folder", "accent", 32)}
+          <span class="kb-title" style="flex:0 1 auto">${esc(nombre)}</span>
+          <span class="kbmeta kb-count">${cuantos}</span>
         </summary>
-        <div style="border-top:1px solid var(--line)">${hijos.map((d, i) => filaDeDocumento(d, i === 0)).join("")}</div>
+        <div>${hijos.map((d) => filaDeDocumento(d)).join("")}</div>
       </details>
-      <form method="POST" action="/admin/kb/carpeta/borrar" style="position:absolute;top:8px;right:14px;margin:0"
+      <form method="POST" action="/admin/kb/carpeta/borrar" class="kb-folder-del"
             data-confirmar="¿Eliminar la carpeta «${esc(nombre)}» y sus ${cuantos}? El bot dejará de saber todo lo que hay en ella.">
         <input type="hidden" name="carpeta" value="${esc(nombre)}">
-        <button type="submit" class="kbdel cursor-pointer text-[11px]"
-                style="display:flex;align-items:center;gap:6px;background:none;border:1px solid var(--line);color:var(--dim);padding:5px 10px;transition:all .12s ease">
-          <i data-lucide="trash-2" width="12" height="12"></i> <span class="kbmeta">Carpeta</span>
+        <button type="submit" class="kbdel kb-btn-sm" aria-label="Eliminar la carpeta ${esc(nombre)}">
+          <i data-lucide="trash-2" width="14" height="14"></i><span class="kbmeta">Carpeta</span>
         </button>
       </form>
     </div>`;
@@ -98,20 +99,33 @@ export function arbolDeDocumentos(docs: KbDoc[]): string {
 
   const bloqueSueltos = sueltos.length
     ? `
-    <div class="bg-panel border border-line" style="margin-bottom:10px;overflow:hidden">
-      ${carpetas.length ? `<div class="text-dim text-[11px]" style="padding:9px 18px;background:var(--panel2);border-bottom:1px solid var(--line)">Sin carpeta</div>` : ""}
-      ${sueltos.map((d, i) => filaDeDocumento(d, i === 0)).join("")}
+    <div class="kb-loose">
+      ${carpetas.length ? `<div class="kb-loose-head">Sin carpeta</div>` : ""}
+      ${sueltos.map((d) => filaDeDocumento(d)).join("")}
     </div>`
     : "";
 
   return `
-    <div style="margin-bottom:16px">${bloques.join("")}${bloqueSueltos}</div>
+    <div class="kb-tree">${bloques.join("")}${bloqueSueltos}</div>
     <style>
+      .kb-tree .kb-row{border-top:1px solid var(--line)}
+      .kb-tree > .kb-loose:first-child > .kb-row:first-child{border-top:0}
+      .kbfolder{position:relative;border-top:1px solid var(--line)}
+      .kbfolder:first-child{border-top:0}
       .kbfolder details[open] > summary .kbchev{transform:rotate(90deg)}
       .kbfolder summary::-webkit-details-marker{display:none}
-      .kbfolder summary:hover{background:var(--panel2)}
-      .kbdel:hover{border-color:var(--bad)!important;color:var(--bad)!important;background:rgba(220,38,38,.06)!important}
-      @media (max-width:640px){ .kbmeta{display:none} .kbsum{padding-right:64px!important} }
+      .kbsum{display:flex;align-items:center;gap:12px;padding:12px 140px 12px 24px;min-height:56px;cursor:pointer;list-style:none;user-select:none;background:var(--row-hover)}
+      .kbsum:hover{background:var(--panel2)}
+      .kb-folder-del{position:absolute;top:12px;right:24px;margin:0}
+      .kb-count{font-size:12px;font-weight:700;color:var(--dim);white-space:nowrap}
+      .kb-loose{border-top:1px solid var(--line)}
+      .kb-loose:first-child{border-top:0}
+      .kb-loose-head{padding:12px 24px;${MICRO_LABEL};background:var(--row-hover)}
+      .kbdel:hover{border-color:var(--bad)!important;color:var(--bad)!important}
+      /* Con poco ancho, el título manda: el detalle (caracteres, fecha) y las
+         etiquetas de los botones se van, y quedan solo los íconos. */
+      @media (max-width:900px){ .kbmeta{display:none} .kbsum{padding-right:72px} }
+      @media (max-width:640px){ .kbsum{padding:12px 64px 12px 16px} .kb-folder-del{right:16px} }
     </style>
     <script>
     (function () {
@@ -144,38 +158,33 @@ export function arbolDeDocumentos(docs: KbDoc[]): string {
  * lo manda a /admin/kb/subir de uno en uno. Ver la ruta para el porqué.
  */
 export function zonaDeSubida(carpetas: string[]): string {
-  const campo = "background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;outline:none;width:100%";
   return `
-    <div id="kb-subida" class="bg-panel border border-line" style="padding:18px;margin-bottom:16px;display:flex;flex-direction:column;gap:14px">
-      <label id="kb-drop" for="kb-archivos" tabindex="0"
-             style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:26px 16px;border:1.5px dashed var(--linelit);background:var(--panel2);cursor:pointer;transition:all .12s ease">
-        <i data-lucide="upload-cloud" width="26" height="26" style="color:var(--accent-2)"></i>
-        <span class="font-display font-semibold text-[13px] text-cream">Arrastra aquí tus archivos o haz clic para elegirlos</span>
-        <span class="text-dim text-[11.5px]">Varios a la vez, o una carpeta completa. Solo <b class="text-muted">texto plano</b>: ${esc(EXTENSIONES_DE_TEXTO.join(", "))}.</span>
+    <div id="kb-subida" class="kb-body">
+      <label id="kb-drop" for="kb-archivos" tabindex="0" class="kb-drop">
+        ${iconTile("upload-cloud", "accent", 48)}
+        <span style="font-size:14px;font-weight:800;color:var(--cream)">Arrastra aquí tus archivos o haz clic para elegirlos</span>
+        <span class="kb-help">Varios a la vez, o una carpeta completa. Solo <b style="color:var(--cream)">texto plano</b>: ${esc(EXTENSIONES_DE_TEXTO.join(", "))}.</span>
         <input type="file" id="kb-archivos" multiple accept="${esc(EXTENSIONES_DE_TEXTO.join(","))}" style="display:none">
       </label>
 
-      <div style="display:flex;flex-direction:column;gap:5px">
-        <label for="kb-carpeta" class="font-display font-semibold text-[12px] text-cream">Carpeta <span class="text-dim" style="font-weight:400">(opcional)</span></label>
-        <p class="text-dim text-[11px]">Para agruparlos en la lista, ej. «Precios» o «Políticas». Solo organiza: el bot busca en todo igual.</p>
-        <input type="text" id="kb-carpeta" list="kb-carpetas" maxlength="${MAX_CARPETA_CHARS}" placeholder="Sin carpeta" style="${campo}">
-        <datalist id="kb-carpetas">${carpetas.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>
-      </div>
+      <label class="kb-label"><span>Carpeta (opcional)</span>
+        <input type="text" id="kb-carpeta" list="kb-carpetas" maxlength="${MAX_CARPETA_CHARS}" placeholder="Sin carpeta" class="kb-field" aria-describedby="kb-carpeta-help">
+        <p id="kb-carpeta-help" class="kb-help">Para agruparlos en la lista, ej. «Precios» o «Políticas». Solo organiza: el bot busca en todo igual.</p>
+      </label>
+      <datalist id="kb-carpetas">${carpetas.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>
 
-      <div id="kb-cola" style="display:none;border:1px solid var(--line);max-height:280px;overflow-y:auto"></div>
+      <div id="kb-cola" class="kb-queue" style="display:none"></div>
 
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
-        <p class="text-dim text-[11px]" style="flex:1;min-width:220px;margin:0">
-          ¿Cambió algo? Sube otra vez el archivo con el mismo nombre a la misma carpeta y <b class="text-muted">reemplaza</b> al anterior.
+        <p class="kb-help" style="flex:1;min-width:220px">
+          ¿Cambió algo? Sube otra vez el archivo con el mismo nombre a la misma carpeta y <b style="color:var(--cream)">reemplaza</b> al anterior.
           Un archivo largo se parte solo en varios documentos.
         </p>
-        <button type="button" id="kb-subir" disabled class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
-                style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:var(--shadow-sm);padding:9px 16px;display:flex;align-items:center;gap:8px;opacity:.5">
-          <i data-lucide="upload" width="14" height="14"></i> <span id="kb-subir-texto">Subir e indexar</span>
+        <button type="button" id="kb-subir" disabled class="kb-btn" style="opacity:.5">
+          <i data-lucide="upload" width="15" height="15"></i> <span id="kb-subir-texto">Subir e indexar</span>
         </button>
       </div>
     </div>
-    <style>#kb-drop:hover,#kb-drop:focus-visible,#kb-drop.encima{border-color:var(--accent);background:var(--accent-soft)}</style>
 
     <script>
     (function () {
@@ -218,11 +227,11 @@ export function zonaDeSubida(carpetas: string[]): string {
           var color = a.estado === "error" ? "var(--bad)" : a.estado === "hecho" ? "var(--ok)" : "var(--dim)";
           var icono = a.estado === "error" ? "✕" : a.estado === "hecho" ? "✓" : a.estado === "subiendo" ? "…" : "•";
           var quitar = (a.estado === "listo" || a.estado === "error") && !subiendo
-            ? '<button type="button" data-quitar="' + i + '" style="background:none;border:0;color:var(--dim);cursor:pointer;font-size:12px;padding:0 4px" aria-label="Quitar de la lista">✕</button>' : "";
-          return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;font-size:12px;' + (i ? "border-top:1px solid var(--line)" : "") + '">' +
+            ? '<button type="button" data-quitar="' + i + '" style="background:none;border:0;color:var(--dim);cursor:pointer;font-size:13px;padding:4px 8px;min-width:32px;min-height:32px" aria-label="Quitar de la lista">✕</button>' : "";
+          return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;font-size:13px;font-weight:500;' + (i ? "border-top:1px solid var(--line)" : "") + '">' +
             '<span style="width:14px;text-align:center;color:' + color + '">' + icono + '</span>' +
             '<span class="text-cream" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escH(a.file.name) + '</span>' +
-            '<span style="color:' + color + ';font-size:11px;white-space:nowrap">' + escH(a.msg || peso(a.file.size)) + '</span>' + quitar + '</div>';
+            '<span style="color:' + color + ';font-size:12px;font-weight:600;white-space:nowrap">' + escH(a.msg || peso(a.file.size)) + '</span>' + quitar + '</div>';
         }).join("");
         if (terminado) return;
         var pendientes = archivos.filter(function (a) { return a.estado === "listo"; }).length;

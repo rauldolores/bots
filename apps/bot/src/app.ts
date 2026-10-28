@@ -48,10 +48,20 @@ export const DAILY_CRON = "0 3 * * *";
 /**
  * Cron de un minuto: SOLO mira la cola. Es la red de seguridad por si el
  * `waitUntil` de un webhook murió con su instancia. No arrastra seguimientos ni
- * watchdog — esos son de frecuencia horaria y correrlos 1440 veces al día
- * costaría de más sin ganar nada.
+ * watchdog — esos van en el de 5 minutos (ESTADO_CRON).
  */
 export const TICK_CRON = "* * * * *";
+
+/**
+ * Cron de 5 minutos: el estado del servicio (src/estado/), el watchdog y,
+ * una vez por hora, los seguimientos. No mira la cola: para eso ya está el de
+ * cada minuto, que coincide con este.
+ *
+ * Antes el watchdog y los seguimientos colgaban de un cron "horario" que en
+ * Vercel y Cloudflare no existía: solo corrían a las 3am UTC. Un bot caído a
+ * mediodía avisaba en la noche.
+ */
+export const ESTADO_CRON = "*/5 * * * *";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -639,6 +649,13 @@ app.on(["GET", "POST"], "/cron/tick", async (c) => {
   return c.json({ ok: true, ...(await tick(c.env)) }, 200);
 });
 
+// El estado del servicio, cada 5 minutos.
+app.on(["GET", "POST"], "/cron/estado", async (c) => {
+  if (!cronAutorizado(c)) return c.json({ ok: false, error: "unauthorized" }, 401);
+  await runScheduledJobs(c.env, ESTADO_CRON);
+  return c.json({ ok: true }, 200);
+});
+
 // Los trabajos nocturnos completos (purga, insights, flywheel).
 app.on(["GET", "POST"], "/cron/nightly", async (c) => {
   if (!cronAutorizado(c)) return c.json({ ok: false, error: "unauthorized" }, 401);
@@ -667,24 +684,44 @@ app.onError((err, c) => {
  * no la conoce. Los trabajos nocturnos solo corren en el tick diario: un
  * disparador más frecuente no debe purgar ni analizar de más.
  */
-export async function runScheduledJobs(env: Env, cron?: string): Promise<void> {
+async function seguimientos(env: Env): Promise<void> {
+  // Follow-up bot: UN mensaje breve de seguimiento a leads que lo ameritan
+  // (venta abierta / 4+ preguntas), dentro de la ventana de 24h y máximo una
+  // vez por conversación. Acotado por caps internos.
+  const { runFollowups } = await import("./followup/run");
+  await runFollowups(env).catch((e) => console.error("followups:", e));
+}
+
+async function watchdog(env: Env): Promise<void> {
+  // Watchdog: si el bot está fallando en cadena (3+ "Algo falló" en 30 min),
+  // avisa al dueño por su canal de handoff. Throttle 6h. Lo ÚNICO que debe
+  // despertarlo en la noche.
+  const { checkBotHealth } = await import("./watchdog");
+  await checkBotHealth(env).catch((e) => console.error("watchdog:", e));
+}
+
+export async function runScheduledJobs(env: Env, cron?: string, now = Date.now()): Promise<void> {
+  if (cron === ESTADO_CRON) {
+    const { revisarEstadoServicio } = await import("./estado/revisar");
+    await revisarEstadoServicio(env).catch((e) => console.error("estado:", e));
+    await watchdog(env);
+    // Los seguimientos, cada hora: la corrida que cae en los primeros 5
+    // minutos de la hora (con el cron cada 5 min, hay exactamente una).
+    if (new Date(now).getUTCMinutes() < 5) await seguimientos(env);
+    return;
+  }
+
   // La cola se mira SIEMPRE: es lo único que no puede esperar.
   await tick(env).catch((e) => console.error("tick:", e));
 
   // El cron de un minuto termina aquí.
   if (cron === TICK_CRON) return;
 
-  // Follow-up bot: UN mensaje breve de seguimiento a leads que lo ameritan
-  // (venta abierta / 4+ preguntas), dentro de la ventana de 24h y máximo una
-  // vez por conversación. Acotado por caps internos.
-  const { runFollowups } = await import("./followup/run");
-  await runFollowups(env).catch((e) => console.error("followups:", e));
-
-  // Watchdog: si el bot está fallando en cadena (3+ "Algo falló" en 30 min),
-  // avisa al dueño por su canal de handoff. Throttle 6h. Lo ÚNICO que debe
-  // despertarlo en la noche.
-  const { checkBotHealth } = await import("./watchdog");
-  await checkBotHealth(env).catch((e) => console.error("watchdog:", e));
+  // Un disparador que no dice qué cron es corre todo, como siempre.
+  if (!cron) {
+    await seguimientos(env);
+    await watchdog(env);
+  }
 
   if (cron && cron !== DAILY_CRON) return;
 

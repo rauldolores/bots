@@ -22,15 +22,22 @@ prospectos, agregas los leads.
 > a su cliente ("cómo le fue al bot"), ese es otro skill: **/reporte**. Este de aquí es el
 > **respaldo crudo** de sus datos en CSV/JSON.
 
+> **Lo más fácil primero:** desde el panel ya se exporta sin ayuda — botón **Exportar a
+> Excel** (o **CSV**) en Leads, Tickets y Calendario, **Exportar** arriba de la Bandeja (con el
+> filtro que tenga puesto) y **Excel / Texto** en cada conversación abierta. Si lo que pide cabe
+> ahí, díselo y listo. Este skill es para lo que el panel no da: un respaldo completo de golpe,
+> mensajes de todas las conversaciones juntas, un periodo a la medida o JSON.
+
 SIGUE ESTAS REGLAS AL PIE DE LA LETRA.
 
 ## PASO 0 — Revisión (no toques nada)
-1. Confirma que estás en la carpeta del bot: deben existir `package.json` y `wrangler.toml`.
-   Si no, **detente y dilo** — no adivines la carpeta.
-2. Detecta el **nivel** solo para saber qué esperar (NO para bloquear nada): corre
-   `npm run db:query -- "SELECT tier FROM bots"` (`'free'` | `'pro'`). En Starter la tabla de
-   leads casi siempre está vacía; en Pro puede tener prospectos. Esto solo ajusta lo que le
-   ofreces, **no impide exportar**.
+1. Confirma que estás en la carpeta del bot (`apps/bot`): debe existir `package.json` con el
+   script `db:query`. Si no, **detente y dilo** — no adivines la carpeta.
+2. **Elige el bot.** Una base puede tener varios bots (y de varias organizaciones): TODAS las
+   consultas de abajo filtran por `bot_id`, o el archivo mezclaría datos de negocios distintos.
+   Corre `npm run db:query -- "SELECT id, name, tier FROM bots ORDER BY created_at"` y, si hay más
+   de uno, pregúntale cuál. Usa su `id` donde dice `<BOT_ID>`. El `tier` (`'free'` | `'pro'`) solo
+   ajusta qué esperar (en Starter casi nunca hay leads), **no impide exportar**.
 3. Descubre **qué tablas existen de verdad** (no asumas). Corre:
    ```
    npm run db:query -- "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()"
@@ -52,42 +59,43 @@ SIGUE ESTAS REGLAS AL PIE DE LA LETRA.
 
 > Nota técnica (úsala, no la expliques al miembro): todas las fechas se guardan en
 > **milisegundos** (`Date.now()`). Para "últimos 30 días" el filtro es
-> `created_at >= (strftime('%s','now') - 30*86400) * 1000`; para "todo el historial" **quita el
-> `WHERE`**. Para leer una fecha en humano usa
-> `to_timestamp(<columna>/1000.0) AT TIME ZONE 'UTC'`. La consulta es de solo lectura:
-> `db:query` rechaza cualquier cosa que no sea un SELECT. Sin `DATABASE_URL`
-> consultas la base local de dev (vacía) — siempre `--remote`.
+> `created_at >= (extract(epoch from now()) * 1000)::bigint - 30*86400000`; para "todo el
+> historial" **quita esa condición** (pero nunca la de `bot_id`). Para leer una fecha en la hora
+> del negocio usa `to_timestamp(<columna>/1000.0) AT TIME ZONE 'America/Mexico_City'` (o la zona
+> que tenga el bot en `settings`, llave `timezone`). La consulta es de solo lectura: `db:query`
+> rechaza cualquier cosa que no sea un SELECT. Sin `DATABASE_URL` consultas una base vacía.
 
 ## PASO 1 — Saca los datos (consultas de solo lectura)
-Corre solo las consultas de lo que pidió. Agrega **`--json`** para que la salida sea fácil de
-volcar a un archivo (si tu `wrangler` no soporta `--json`, corre el mismo comando sin él y lee la
-tabla de resultados). Sustituye `<DESDE>` por el inicio del periodo en ms, o **quita el `WHERE`
-completo** si eligió "todo el historial". **Cuenta primero** para saber si hay algo que exportar.
+Corre solo las consultas de lo que pidió. Sustituye `<BOT_ID>` por el bot elegido y `<DESDE>` por
+el inicio del periodo en ms, o **quita la condición de fecha** si eligió "todo el historial".
+**Cuenta primero** para saber si hay algo que exportar.
 
 **Leads / prospectos** (Pro y solo si hay filas):
 ```
-npm run db:query -- "SELECT COUNT(*) AS total FROM leads;"
-npm run db:query -- "SELECT id, name, contact, channel_user_id, intent, status, notes, exported_to, external_id, metadata, to_timestamp(created_at/1000.0) AT TIME ZONE 'UTC' AS creado, to_timestamp(updated_at/1000.0) AT TIME ZONE 'UTC' AS actualizado FROM leads WHERE created_at >= <DESDE> ORDER BY created_at DESC;"
+npm run db:query -- "SELECT COUNT(*) AS total FROM leads WHERE bot_id = '<BOT_ID>';"
+npm run db:query -- "SELECT id, name, contact, channel_user_id, intent, status, notes, exported_to, external_id, metadata, to_timestamp(created_at/1000.0) AT TIME ZONE 'America/Mexico_City' AS creado, to_timestamp(updated_at/1000.0) AT TIME ZONE 'America/Mexico_City' AS actualizado FROM leads WHERE bot_id = '<BOT_ID>' AND created_at >= <DESDE> ORDER BY created_at DESC;"
 ```
 La columna `metadata` trae los campos propios del giro en formato JSON (ej. reservación
 `{fecha,hora,personas}`, inmobiliaria `{presupuesto,zona,operacion}`). Déjala tal cual como una
 columna; si el miembro quiere esos campos en columnas separadas, puedes sacarlos con
-`json_extract(metadata,'$.zona')` (cambia `zona` por el campo real del giro).
+`metadata::jsonb->>'zona'` (cambia `zona` por el campo real del giro).
 
 **Conversaciones** (lista de clientes; existe en todo bot):
 ```
-npm run db:query -- "SELECT COUNT(*) AS total FROM conversations;"
-npm run db:query -- "SELECT id, channel, channel_user_id, display_name, to_timestamp(started_at/1000.0) AT TIME ZONE 'UTC' AS primer_contacto, to_timestamp(last_message_at/1000.0) AT TIME ZONE 'UTC' AS ultima_actividad FROM conversations WHERE last_message_at >= <DESDE> ORDER BY last_message_at DESC;"
+npm run db:query -- "SELECT COUNT(*) AS total FROM conversations WHERE bot_id = '<BOT_ID>';"
+npm run db:query -- "SELECT id, channel, channel_user_id, display_name, to_timestamp(started_at/1000.0) AT TIME ZONE 'America/Mexico_City' AS primer_contacto, to_timestamp(last_message_at/1000.0) AT TIME ZONE 'America/Mexico_City' AS ultima_actividad FROM conversations WHERE bot_id = '<BOT_ID>' AND channel <> 'training' AND last_message_at >= <DESDE> ORDER BY last_message_at DESC;"
 ```
 
 **Mensajes / transcripciones** (historial de chat; puede ser grande — avísale):
 ```
-npm run db:query -- "SELECT COUNT(*) AS total FROM messages;"
-npm run db:query -- "SELECT m.conversation_id, c.channel, c.display_name, m.role, m.content, to_timestamp(m.created_at/1000.0) AT TIME ZONE 'UTC' AS fecha FROM messages m LEFT JOIN conversations c ON c.id = m.conversation_id WHERE m.created_at >= <DESDE> ORDER BY m.conversation_id, m.created_at;"
+npm run db:query -- "SELECT COUNT(*) AS total FROM messages WHERE bot_id = '<BOT_ID>';"
+npm run db:query -- "SELECT m.conversation_id, c.channel, c.display_name, m.role, m.content, to_timestamp(m.created_at/1000.0) AT TIME ZONE 'America/Mexico_City' AS fecha FROM messages m LEFT JOIN conversations c ON c.id = m.conversation_id WHERE m.bot_id = '<BOT_ID>' AND m.role <> 'tool' AND m.created_at >= <DESDE> ORDER BY m.conversation_id, m.created_at, m.seq;"
 ```
 El campo `role` viene en clave: **tradúcelo en el archivo** — `user`→cliente, `assistant`→bot,
 `owner`→dueño, `tool`→sistema. Si son muchísimos mensajes, ofrécele acotar por periodo o exportar
-**una sola conversación** filtrando `WHERE m.conversation_id = 'canal:usuario'`.
+**una sola conversación** filtrando además `AND m.conversation_id = '<id de la conversación>'`.
+Los mensajes de más de 90 días ya no existen: se borran solos (las conversaciones, leads y
+tickets sí se conservan). Si pide algo más viejo, díselo con honestidad.
 
 Lee cada resultado y guárdalo en memoria; **no le pegues el volcado crudo al miembro en el chat**
 — eso va en los archivos.
@@ -135,7 +143,7 @@ Lee cada resultado y guárdalo en memoria; **no le pegues el volcado crudo al mi
   eso están otros skills.
 - **No pegues secretos ni API keys** en el chat ni en los archivos. Los contactos de los leads
   (teléfonos/correos) SÍ van en el CSV porque son datos del miembro que él pidió exportar; pero
-  jamás credenciales, tokens del bot ni llaves de Cloudflare.
+  jamás credenciales, tokens del bot ni llaves de la plataforma.
 - **No hay candado de nivel**: esta función corre igual en gratis y en pago. Si algo no aplica
   (ej. leads vacíos en Starter), dilo con honestidad — no lo bloquees.
 - Si una consulta falla o una tabla no existe, repórtalo claro y **sigue con lo que sí se pudo**

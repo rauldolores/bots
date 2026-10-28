@@ -8,6 +8,7 @@ import { InsightsRepo, type InsightWithConversation } from "../../db/insights";
 import { countPending } from "../../insights/analyzer";
 import { channelLabel } from "../../channels/labels";
 import { layout } from "./layout";
+import { alertRow, heroTag, iconTile, pageHero, sectionCard, statCard, statGrid, statusPill } from "./ui";
 
 function esc(s: string): string {
   return s.replace(
@@ -60,31 +61,75 @@ export const OBJECTIVE_BADGE: Record<string, { txt: string; cls: string }> = {
   no_aplica: { txt: "◎ No aplicaba", cls: "border border-line text-dim bg-panel2" },
 };
 
-function badge(map: Record<string, { txt: string; cls: string }>, key: string | null): string {
+/** Estado como punto + palabra (sin emoji ni relleno de color), igual que el resto del panel. */
+const SENTIMENT_PILL: Record<string, [string, string]> = {
+  positive: ["Contento", "var(--ok)"],
+  neutral: ["Neutral", "var(--dim)"],
+  frustrated: ["Frustrado", "var(--warn)"],
+  angry: ["Enojado", "var(--bad)"],
+};
+const RESOLUTION_PILL: Record<string, [string, string]> = {
+  resolved: ["Resuelta", "var(--ok)"],
+  unresolved: ["Sin resolver", "var(--warn)"],
+  escalated: ["Escalada", "var(--accent)"],
+  abandoned: ["Abandonada", "var(--dim)"],
+};
+// "No aplicaba" va en gris a propósito: que el cliente solo saludara no es una
+// falla del bot (ver OBJECTIVE_BADGE arriba).
+const OBJECTIVE_PILL: Record<string, [string, string]> = {
+  logrado: ["Objetivo logrado", "var(--ok)"],
+  no_logrado: ["Objetivo no logrado", "var(--warn)"],
+  no_aplica: ["Objetivo: no aplicaba", "var(--dim)"],
+};
+
+function pill(map: Record<string, [string, string]>, key: string | null): string {
   if (!key || !map[key]) return "";
-  const b = map[key];
-  return `<span class="text-[9px] tracking-wide px-1.5 py-0.5 whitespace-nowrap ${b.cls}">${b.txt}</span>`;
+  const [txt, color] = map[key];
+  return statusPill(txt, color);
 }
 
 function scoreStars(score: number | null): string {
   if (!score) return "";
-  return `<span class="text-[11px] text-accent2 whitespace-nowrap" style="letter-spacing:1px" title="Calidad de las respuestas del bot">${"★".repeat(score)}${"☆".repeat(5 - score)}</span>`;
+  return `<span class="ins-stars" title="Calidad de las respuestas del bot" aria-label="Calidad ${score} de 5">${"★".repeat(score)}<span style="color:var(--line)">${"★".repeat(5 - score)}</span></span>`;
 }
 
 function convName(r: InsightWithConversation): string {
   return esc(r.display_name ?? r.channel_user_id ?? r.conversation_id);
 }
 
-const CHANNEL_CHIP: Record<string, string> = {
-  twilio: "text-info border-info",
-  whatsapp: "text-info border-info",
-  telegram: "text-accent2 border-accent2",
-};
-
 function channelChip(channel: string | null): string {
-  const cls = (channel && CHANNEL_CHIP[channel]) ?? "text-muted border-linelit";
-  return `<span class="text-[9px] tracking-wide border px-1.5 ${cls}">${esc(channelLabel(channel))}</span>`;
+  return `<span class="ins-chip">${esc(channelLabel(channel))}</span>`;
 }
+
+const INS_CSS = `<style>
+  .ins-split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:start;margin-bottom:24px}
+  .ins-intro{margin:0;padding:14px 24px;border-bottom:1px solid var(--line);font-size:12.5px;font-weight:500;line-height:1.55;color:var(--muted)}
+  .ins-item{display:flex;flex-direction:column;gap:4px;padding:14px 24px;border-top:1px solid var(--line);min-width:0}
+  .ins-item:first-child{border-top:0}
+  .ins-kicker{font-size:12px;font-weight:700;color:var(--dim)}
+  .ins-q{font-size:13.5px;font-weight:700;line-height:1.45;color:var(--cream);overflow-wrap:anywhere}
+  .ins-sum{font-size:13px;font-weight:500;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+  .ins-name{font-size:14px;font-weight:800;color:var(--cream);text-decoration:none;overflow-wrap:anywhere}
+  a.ins-name:hover{color:var(--accent-2)}
+  .ins-chip{display:inline-flex;align-items:center;border-radius:8px;background:var(--panel2);padding:2px 8px;font-size:11px;font-weight:700;color:var(--muted);white-space:nowrap}
+  .ins-stars{font-size:13px;letter-spacing:1px;color:var(--accent-2);white-space:nowrap}
+  .ins-row{display:flex;align-items:flex-start;gap:14px;padding:16px 24px;border-top:1px solid var(--line);min-width:0}
+  .ins-row:first-child{border-top:0}
+  .ins-tags{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:8px;max-width:46%}
+  .ins-tags > div{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+  .ins-empty{display:flex;flex-direction:column;align-items:center;gap:10px;padding:32px 24px;text-align:center}
+  .ins-help{margin:0;font-size:12.5px;font-weight:500;line-height:1.5;color:var(--dim)}
+  @media (max-width:1000px){
+    .ins-split{grid-template-columns:minmax(0,1fr)}
+    .ins-row{flex-direction:column;gap:10px}
+    .ins-tags{flex-direction:row;flex-wrap:wrap;align-items:center;max-width:none}
+    .ins-tags > div{justify-content:flex-start}
+  }
+  @media (max-width:640px){
+    .ins-item,.ins-row{padding:14px 16px}
+    .ins-intro{padding:12px 16px}
+  }
+</style>`;
 
 export async function renderInsights(env: Env, botId: string, analyzedParam?: string, visibleNavIds: Set<string> | null = null): Promise<string> {
   const db = new Db(env.DB);
@@ -105,130 +150,132 @@ export async function renderInsights(env: Env, botId: string, analyzedParam?: st
 
   const analyzedBanner =
     analyzedParam != null
-      ? `<div class="border border-ok text-ok px-4 py-3 text-[12.5px] mb-1" style="background:var(--panel)">
-           Análisis completado: ${esc(analyzedParam)} conversaciones calificadas ✓
-         </div>`
+      ? `<div style="margin-bottom:24px">${alertRow({ title: "Análisis completado", detail: `${analyzedParam} conversaciones calificadas.`, dot: "var(--ok)", attrs: 'role="status"' })}</div>`
       : "";
 
-  const statCard = (value: string, label: string, sub = "", accent = "") => `
-    <div class="card bg-panel border border-line p-4${accent ? ` border-l-[3px] ${accent}` : ""}">
-      <div class="font-display font-bold text-[34px] leading-none">${value}</div>
-      <div class="text-[11px] text-muted mt-1">${label}</div>
-      ${sub ? `<div class="text-[10px] text-dim mt-0.5">${sub}</div>` : ""}
-    </div>`;
+  // "Analizar ahora" es un POST: un <form> con la misma pinta que heroBtn primario.
+  const analizar = `<form method="POST" action="/admin/insights/analyze" style="margin:0">
+      <button class="hero-btn hero-btn-primary" style="height:40px;padding:0 16px;border-radius:12px;background:var(--accent);color:var(--cream);border:none;font-weight:800;font-size:13px;font-family:inherit;display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+        <i data-lucide="sparkles" width="15" height="15"></i>Analizar ahora
+      </button>
+    </form>`;
 
-  const cards = `
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      ${statCard(String(stats.analyzed), "Conversaciones analizadas", "últimos 7 días")}
-      ${statCard(resolvedPct === null ? "—" : `${resolvedPct}%`, "Resueltas sin humano", "", "border-l-ok")}
-      ${statCard(
-        stats.avgScore === null ? "—" : `${stats.avgScore.toFixed(1)}<span class="text-[16px] text-dim">/5</span>`,
-        "Calidad del bot",
-        stats.avgScore === null ? "" : "★".repeat(Math.round(stats.avgScore)) + "☆".repeat(5 - Math.round(stats.avgScore)),
-      )}
-      ${statCard(String(stats.negative), stats.negative > 0 ? "⚠ Clientes molestos" : "Clientes molestos", "", stats.negative > 0 ? "border-l-bad" : "")}
-    </div>`;
+  const hero = pageHero({
+    eyebrow: "Análisis",
+    title: "Insights",
+    description:
+      "Lo que la IA concluyó de cada conversación: si el cliente quedó contento, si se resolvió, qué no supo el bot y qué ventas quedaron abiertas. El análisis usa el modelo rápido (~$0.001 por conversación).",
+    tags:
+      pending > 0
+        ? heroTag(`${pending} ${pending === 1 ? "conversación espera" : "conversaciones esperan"} análisis`, "#f5c518")
+        : heroTag("Todo analizado", "#3fb8c4"),
+    actions: analizar,
+  });
+
+  const calidad = stats.avgScore === null ? null : Math.round(stats.avgScore);
+  const statsHtml = statGrid([
+    statCard({ icon: "scan-eye", tone: "accent", label: "Conversaciones analizadas", value: stats.analyzed, note: "últimos 7 días" }),
+    statCard({ icon: "circle-check", tone: "ok", label: "Resueltas sin humano", value: resolvedPct === null ? "—" : `${resolvedPct}%`, note: "de las analizadas" }),
+    statCard({
+      icon: "star",
+      tone: "neutral",
+      label: "Calidad del bot",
+      value: stats.avgScore === null ? "—" : `${stats.avgScore.toFixed(1)} / 5`,
+      note: calidad === null ? "sin calificaciones todavía" : `${"★".repeat(calidad)}${"☆".repeat(5 - calidad)}`,
+    }),
+    statCard({
+      icon: "frown",
+      tone: stats.negative > 0 ? "warn" : "neutral",
+      label: "Clientes molestos",
+      value: stats.negative,
+      note: stats.negative > 0 ? "revisa sus conversaciones abajo" : "ninguno esta semana",
+    }),
+  ]);
 
   // --- Radar de conocimiento --------------------------------------------------
-  const missedRows = missed.length
-    ? missed
-        .map(
-          (m) => `
-      <div class="border border-linelit p-[10px_12px] rounded-[10px]" style="background:var(--panel2)">
-        <div class="text-[10.5px] text-accent2">${m.n} ${m.n === 1 ? "cliente preguntó" : "clientes preguntaron"} · el bot no supo</div>
-        <div class="text-[12.5px] mt-[3px] text-cream">${esc(m.question)}</div>
-      </div>`,
-        )
-        .join("")
-    : `<p class="text-[12.5px] text-dim">Sin huecos detectados. El bot supo responder todo lo analizado. 🎉</p>`;
-
-  const radarCard = `
-    <div class="card bg-panel border border-line p-[18px]">
-      <div class="font-display font-semibold text-[14px] flex items-center gap-2"><i data-lucide="radar" width="16" height="16" class="text-accent2"></i> Radar de conocimiento <span class="text-[10px] text-dim font-normal">(30 días)</span></div>
-      <p class="text-[11px] text-dim my-[6px_0_12px] leading-relaxed">Preguntas que el bot no supo contestar. Agrégalas a la información del negocio o a la base de conocimiento.</p>
-      <div class="flex flex-col gap-2">${missedRows}</div>
-    </div>`;
+  const radar = sectionCard({
+    icon: "radar",
+    title: "Radar de conocimiento",
+    subtitle: "Últimos 30 días",
+    actions: `<a href="/admin/kb" style="font-size:13px;font-weight:700;color:var(--accent-2);text-decoration:none;display:inline-flex;align-items:center;gap:4px">Conocimiento<i data-lucide="arrow-right" width="14" height="14"></i></a>`,
+    body: `<p class="ins-intro">Preguntas que el bot no supo contestar. Agrégalas a la información del negocio o a la base de conocimiento.</p>
+      ${
+        missed.length
+          ? `<div>${missed
+              .map(
+                (m) => `<div class="ins-item">
+                  <span class="ins-kicker">${m.n} ${m.n === 1 ? "cliente preguntó" : "clientes preguntaron"} · el bot no supo</span>
+                  <span class="ins-q">${esc(m.question)}</span>
+                </div>`,
+              )
+              .join("")}</div>`
+          : `<div class="ins-empty">${iconTile("check", "ok")}<p class="ins-help">Sin huecos detectados. El bot supo responder todo lo analizado.</p></div>`
+      }`,
+  });
 
   // --- Ventas abiertas ---------------------------------------------------------
-  const oppRows = opportunities.length
-    ? opportunities
-        .map(
-          (o) => `
-      <div class="border border-linelit p-[10px_12px] rounded-[10px]" style="background:var(--panel2)">
-        <div class="flex items-center justify-between gap-2">
-          <a href="/admin/conversations/${encodeURIComponent(o.conversation_id)}" class="text-[12.5px] font-semibold text-accent hover:text-accent2">${convName(o)}</a>
-          <span class="text-[10px] text-dim whitespace-nowrap">${ago(o.last_message_at)}</span>
-        </div>
-        <div class="text-[11.5px] text-muted mt-[3px]">${esc(o.summary ?? "")}</div>
-      </div>`,
-        )
-        .join("")
-    : `<div class="flex-1 flex items-center justify-center text-[12.5px] text-dim" style="min-height:60px">Sin ventas abiertas detectadas.</div>`;
-
-  const oppCard = `
-    <div class="card bg-panel border border-line p-[18px] flex flex-col" style="min-height:180px">
-      <div class="font-display font-semibold text-[14px] flex items-center gap-2"><i data-lucide="dollar-sign" width="16" height="16" class="text-ok"></i> Ventas que quedaron abiertas <span class="text-[10px] text-dim font-normal">(30 días)</span></div>
-      <p class="text-[11px] text-dim my-[6px_0_12px] leading-relaxed">Clientes con interés que no cerraron. Un mensaje de seguimiento puede recuperarlos.</p>
-      <div class="flex flex-col gap-2 flex-1">${oppRows}</div>
-    </div>`;
+  const ventas = sectionCard({
+    icon: "circle-dollar-sign",
+    title: "Ventas que quedaron abiertas",
+    subtitle: "Últimos 30 días",
+    body: `<p class="ins-intro">Clientes con interés que no cerraron. Un mensaje de seguimiento puede recuperarlos.</p>
+      ${
+        opportunities.length
+          ? `<div>${opportunities
+              .map(
+                (o) => `<div class="ins-item">
+                  <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+                    <a href="/admin/conversations/${encodeURIComponent(o.conversation_id)}" class="ins-name">${convName(o)}</a>
+                    <span class="ins-kicker" style="white-space:nowrap">${ago(o.last_message_at)}</span>
+                  </div>
+                  <span class="ins-sum">${esc(o.summary ?? "")}</span>
+                </div>`,
+              )
+              .join("")}</div>`
+          : `<div class="ins-empty">${iconTile("circle-dollar-sign", "neutral")}<p class="ins-help">Sin ventas abiertas detectadas.</p></div>`
+      }`,
+  });
 
   // --- Análisis recientes --------------------------------------------------------
-  const recentRows = recent.length
-    ? recent
-        .map(
-          (r) => `
-      <div class="datarow" style="display:flex;align-items:flex-start;gap:14px;padding:13px 18px;border-top:1px solid var(--line);transition:background .12s ease">
-        <div style="min-width:0;flex:1">
-          <div style="display:flex;align-items:center;gap:7px">
-            <a href="/admin/conversations/${encodeURIComponent(r.conversation_id)}" class="text-[13px] font-semibold text-cream hover:text-accent">${convName(r)}</a>
-            ${channelChip(r.channel)}
+  const recientes = sectionCard({
+    icon: "history",
+    title: "Análisis recientes",
+    subtitle: recent.length ? `Las últimas ${recent.length} conversaciones calificadas` : "Todavía ninguna",
+    body: recent.length
+      ? `<div>${recent
+          .map(
+            (r) => `
+        <div class="ins-row datarow">
+          <div style="min-width:0;flex:1;display:flex;flex-direction:column;gap:4px">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+              <a href="/admin/conversations/${encodeURIComponent(r.conversation_id)}" class="ins-name">${convName(r)}</a>
+              ${channelChip(r.channel)}
+            </div>
+            <span class="ins-sum">${esc(r.summary ?? "")}</span>
           </div>
-          <div class="text-[11.5px] text-muted mt-[3px] leading-relaxed">${esc(r.summary ?? "")}</div>
-        </div>
-        <div style="text-align:right;flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:5px">
-          <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">
-            ${badge(SENTIMENT_BADGE, r.sentiment)}
-            ${badge(RESOLUTION_BADGE, r.resolution)}
-            ${badge(OBJECTIVE_BADGE, (r as { objective_met?: string | null }).objective_met ?? null)}
+          <div class="ins-tags">
+            <div>
+              ${pill(SENTIMENT_PILL, r.sentiment)}
+              ${pill(RESOLUTION_PILL, r.resolution)}
+              ${pill(OBJECTIVE_PILL, (r as { objective_met?: string | null }).objective_met ?? null)}
+            </div>
+            ${scoreStars(r.bot_score)}
           </div>
-          <div>${scoreStars(r.bot_score)}</div>
-        </div>
-      </div>`,
-        )
-        .join("")
-    : `<div class="py-6 text-center text-[12.5px] text-dim">Aún no hay conversaciones analizadas. Presiona "Analizar ahora".</div>`;
+        </div>`,
+          )
+          .join("")}</div>`
+      : `<div class="ins-empty">${iconTile("scan-eye", "accent")}<p class="ins-help">Aún no hay conversaciones analizadas. Presiona "Analizar ahora".</p></div>`,
+  });
 
-  const recentCard = `
-    <div class="card bg-panel border border-line">
-      <div class="font-display font-semibold text-[14px] px-[18px] pt-4 pb-[6px]">Análisis recientes</div>
-      ${recentRows}
-    </div>`;
+  const body = `${INS_CSS}
+    ${hero}
+    ${analyzedBanner}
+    ${statsHtml}
+    <div class="ins-split">
+      ${radar}
+      ${ventas}
+    </div>
+    ${recientes}`;
 
-  const analyzeBar = `
-    <div class="flex flex-wrap items-center gap-[14px]">
-      <form method="POST" action="/admin/insights/analyze">
-        <button class="bigbtn font-display font-bold text-[12.5px] cursor-pointer"
-          style="background:var(--panel);border:1px solid var(--linelit);color:var(--accent-2);box-shadow:var(--shadow-sm);padding:11px 16px;display:flex;align-items:center;gap:8px">
-          <i data-lucide="sparkles" width="16" height="16"></i> Analizar ahora
-        </button>
-      </form>
-      <span class="text-[11px] text-dim">
-        ${pending > 0 ? `${pending} conversaciones esperando análisis` : "Todo analizado ✓"}
-        · el análisis usa el modelo rápido (~$0.001 por conversación)
-      </span>
-    </div>`;
-
-  const body = `
-    <div class="flex flex-col gap-4" style="max-width:1080px">
-      ${analyzedBanner}
-      ${analyzeBar}
-      ${cards}
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-[14px]">
-        ${radarCard}
-        ${oppCard}
-      </div>
-      ${recentCard}
-    </div>`;
-
-  return layout({ title: "Insights", activeTab: "insights", body, visibleNavIds });
+  return layout({ title: "Insights", activeTab: "insights", body, visibleNavIds, hero: true });
 }

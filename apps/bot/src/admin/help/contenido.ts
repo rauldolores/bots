@@ -68,10 +68,13 @@ export const GUIA: Seccion[] = [
         cuerpo: [
           { tipo: "lista", items: [
             "**Inicio → Resumen**: cómo va el día, la salud del bot y lo que te toca hacer.",
-            "**Bandeja**: lo que pasa con tus clientes cada día — Conversaciones, Leads, Tickets, Calendario, Campañas y Seguimientos.",
-            "**Mi Agente**: cómo piensa y responde el bot — Flujo, Conocimiento, Habilidades, Entrenamiento, Mejoras, Conexiones, Tu número y Configuración.",
-            "**Organización**: tus organizaciones y las personas de tu equipo que entran al panel.",
-            "**Análisis**: Insights (qué dicen tus clientes), Estadísticas, Costos y Plan y facturación.",
+            "**Bandeja**: lo que pasa con tus clientes cada día — Conversaciones, Leads, Tickets y Calendario.",
+            "**Campañas**: escribirle tú primero a tus clientes — Campañas y Seguimientos.",
+            "**Mi Agente**: cómo piensa y responde el bot — Flujo, Habilidades y Configuración.",
+            "**Entrenar**: lo que sabe y cómo mejora — Conocimiento, Entrenamiento y Mejoras.",
+            "**Canales**: por dónde te escriben — Conexiones y Tu número.",
+            "**Análisis**: Insights (qué dicen tus clientes), Estadísticas y Costos.",
+            "**Cuenta**: tus organizaciones, las personas de tu equipo que entran al panel, y Plan y facturación.",
             "**Soporte → Ayuda**: esta guía. También está el botón «?» arriba a la derecha.",
           ] },
           { tipo: "p", texto: "Si a alguien de tu equipo le faltan opciones en el menú, es por su rol: cada persona ve solo lo que su rol le permite. Lo administras en [Equipo](/admin/usuarios)." },
@@ -274,7 +277,7 @@ export const GUIA: Seccion[] = [
             "En **Llaves de acceso**, crea una llave con **Crear llave** y cópiala en ese momento: por seguridad no se vuelve a mostrar. Esa llave es la que el otro sistema usa. **Revocar** la anula.",
             "La sección **Cómo se llama** muestra el ejemplo listo para quien la conecte, y **Últimas corridas** el historial.",
           ] },
-          { tipo: "nota", texto: "Si ves en rojo «La API está apagada», enciéndela desde Conexiones. Si no vas a usar habilidades, puedes ignorar esta pantalla por completo." },
+          { tipo: "nota", texto: "Si ves el aviso «La API está apagada», enciéndela desde Conexiones. Si no vas a usar habilidades, puedes ignorar esta pantalla por completo." },
         ],
       },
       {
@@ -422,7 +425,7 @@ export const GUIA: Seccion[] = [
         resumen: "Las pestañas, qué significa cada estado y el patrón que se repite en todas las conexiones.",
         ruta: "/admin/conexiones",
         cuerpo: [
-          { tipo: "p", texto: "Arriba hay cinco pestañas: **Canales** (por dónde te escriben o llaman), **CRM**, **Tickets**, **Calendario** y **Conectores MCP**. Cada tarjeta muestra **● CONECTADO**, **○ SIN CONECTAR** o **PRÓXIMAMENTE**." },
+          { tipo: "p", texto: "Arriba hay cinco pestañas: **Canales** (por dónde te escriben o llaman), **CRM**, **Tickets**, **Calendario** y **Conectores MCP**. Cada tarjeta muestra **Conectado**, **Sin conectar** o **Próximamente**; arriba ves cuántos canales y herramientas tienes conectados." },
           { tipo: "pasos", items: [
             "Presiona **Conectar** en la tarjeta. Se abre una ventana con los pasos numerados y los datos que hay que pegar. Los pasos te dicen exactamente dónde conseguir cada dato en el sitio del proveedor.",
             "Pega los datos y presiona **Conectar**.",
@@ -570,7 +573,7 @@ export const GUIA: Seccion[] = [
         resumen: "Cambiar entre tus organizaciones o crear una nueva (por ejemplo, para otra empresa o sucursal con plan propio).",
         ruta: "/admin/organizaciones",
         cuerpo: [
-          { tipo: "p", texto: "La tabla **Tus organizaciones** muestra cada una con tu rol (Dueño, Administrador o Miembro) y cuál está **● Activa**. Presiona **Cambiar** para trabajar en otra." },
+          { tipo: "p", texto: "En **Tus organizaciones** ves cada una con tu rol (Dueño, Administrador o Miembro); la **Activa** va primero y resaltada. Presiona **Cambiar** en otra para trabajar en ella." },
           { tipo: "p", texto: "Para crear una: escribe el **Nombre de la organización** y presiona **Crear y cambiarme a ella**. Cada organización tiene su propio plan, sus bots y su equipo." },
           { tipo: "nota", texto: "Los roles de organización (quién es dueño o administrador) se administran en panel.kontrolia.io, la cuenta central del ecosistema Kontrolia con la que entras a este panel." },
         ],
@@ -603,7 +606,7 @@ export const GUIA: Seccion[] = [
         ruta: "/admin/insights",
         cuerpo: [
           { tipo: "pasos", items: [
-            "Presiona **Analizar ahora** cuando haya conversaciones pendientes (el botón te dice cuántas y que cuesta alrededor de un décimo de centavo de dólar por conversación).",
+            "Presiona **Analizar ahora** cuando haya conversaciones pendientes (junto al título ves cuántas esperan; cuesta alrededor de un décimo de centavo de dólar por conversación).",
             "Lee las tarjetas: conversaciones analizadas, **Resueltas sin humano**, **Calidad del bot** (estrellas) y **Clientes molestos**.",
             "**Radar de conocimiento**: las preguntas que el bot no supo responder en 30 días. Es la lista de lo que te falta cargar en Conocimiento (Mejoras te las propone ya redactadas).",
             "**Ventas que quedaron abiertas**: clientes que iban a comprar y se quedaron a medias. Candidatos para un seguimiento.",
@@ -620,8 +623,8 @@ export const GUIA: Seccion[] = [
           { tipo: "lista", items: [
             "**Horas ahorradas**: se calcula como mensajes atendidos × 2 minutos. Una aproximación honesta de lo que habría hecho una persona.",
             "**Costo por conversación** y **Costo por lead**: lo que gastas en IA dividido entre lo que produce.",
-            "**Funnel**: Conversaciones → Leads → Contactados → Vendidos. Solo es útil si actualizas el estado de tus leads.",
-            "**Horas pico**: un mapa de calor de cuándo te escriben. Sirve para saber cuándo tener a alguien disponible para los casos que el bot pasa a humano.",
+            "**Embudo de conversión**: Conversaciones → Leads → Contactados → Vendidos. Solo es útil si actualizas el estado de tus leads.",
+            "**Horas pico**: un mapa de calor de cuándo te escriben (en hora UTC). Sirve para saber cuándo tener a alguien disponible para los casos que el bot pasa a humano.",
             "**Por canal** y **Herramientas más usadas**: por dónde llega la gente y qué hace el bot con más frecuencia. Si hay llamadas, también duración promedio, tasa de transferencia y llamadas fallidas.",
           ] },
         ],
@@ -634,12 +637,12 @@ export const GUIA: Seccion[] = [
         cuerpo: [
           { tipo: "p", texto: "Aquí NO está lo que le pagas a Nodia Agents (eso es tu plan): es lo que consumes en los proveedores con tus propias cuentas: la IA (solo si usas tu propia llave) y Twilio (mensajes y llamadas). La IA incluida y los minutos de voz del plan ya van en tu plan. Todo convertido a pesos." },
           { tipo: "lista", items: [
-            "**🧠 IA**: exacto, calculado con los tokens reales de cada respuesta.",
-            "**💬 WhatsApp / Twilio**: real, tomado de tu factura de Twilio.",
-            "**🎙️ Llamadas**: estimado (minutos × tarifa). El panel lo marca como estimado porque ElevenLabs cobra por minuto y la tarifa puede variar.",
-            "**Presupuesto mensual de IA**: escribe un **Límite mensual en US$** y presiona **Guardar**. Al alcanzarlo, el bot no se apaga: baja automáticamente al modelo económico. También ves la proyección «Al ritmo actual…».",
+            "**IA**: exacto, calculado con los tokens reales de cada respuesta.",
+            "**WhatsApp / Twilio**: real, tomado de tu factura de Twilio.",
+            "**Llamadas (estimado)**: estimado (minutos × tarifa). El panel lo marca como estimado porque ElevenLabs cobra por minuto y la tarifa puede variar.",
+            "**Presupuesto mensual de IA**: escribe un **Límite mensual (US$)** y presiona **Guardar**. Al alcanzarlo, el bot no se apaga: baja automáticamente al modelo económico. También ves la proyección «Al ritmo actual…».",
           ] },
-          { tipo: "nota", texto: "Tip: ajusta el tipo de cambio con **Fijarlo a mano** si el automático no coincide con el de tu banco." },
+          { tipo: "nota", texto: "Tip: escribe el **Tipo de cambio a mano** si el automático no coincide con el de tu banco." },
         ],
       },
       {
@@ -649,10 +652,10 @@ export const GUIA: Seccion[] = [
         ruta: "/admin/plan",
         cuerpo: [
           { tipo: "lista", items: [
-            "Arriba: el **plan actual**, su estado (En prueba, Activo, Pago pendiente, Cancelado, Expirado) y cuándo se renueva. Si dice **(anual)**, pagas una vez al año.",
-            "**Portal de facturación** (solo dueño o administrador): cambiar la tarjeta, cancelar, descargar facturas. Es la página segura de Stripe; el panel nunca ve tu tarjeta.",
-            "**Consumo de tu plan**: cuántos bots, canales y conversaciones del mes llevas contra tu límite.",
-            "**Planes**: el interruptor **Mensual / Anual** muestra los dos precios y el ahorro del anual. **Empezar prueba de N días** pide tarjeta pero no cobra hasta que termina la prueba; **Elegir / Cambiar a este plan** te lleva a pagar; **Cambiar a anual** cambia el periodo del plan que ya tienes.",
+            "Arriba: tu **plan**, su estado (En prueba, Vigente, Pago pendiente, Cancelado, Expirado) y la fecha en que **se renueva** (o en que termina, si lo cancelaste). Abajo de la fecha ves si pagas **mensual o anual**, el precio y qué incluye tu plan.",
+            "**Portal de facturación** (botón de arriba, solo dueño o administrador): cambiar la tarjeta, cancelar, descargar facturas. Es la página segura de Stripe; el panel nunca ve tu tarjeta.",
+            "**Consumo de tu plan**: una barra por cada límite (bots, canales, conversaciones del mes). Se pone ámbar al pasar del 80% y roja al llegar al tope.",
+            "**Cambia de plan** (o **Elige tu plan** si aún no tienes uno): el interruptor **Mensual / Anual** muestra los dos precios y el ahorro del anual. **Empezar prueba de N días** pide tarjeta pero no cobra hasta que termina la prueba; **Elegir / Cambiar a este plan** te lleva a pagar; **Cambiar a anual** cambia el periodo del plan que ya tienes.",
             "**Enterprise**: para operaciones grandes o con datos en servidores propios; se conversa, no se compra con tarjeta.",
           ] },
           { tipo: "nota", tono: "aviso", texto: "Si llegas al límite de conversaciones del mes, el panel te avisa y el bot deja de aceptar conversaciones nuevas hasta que subas de plan o empiece el mes. Los bots y canales se topan al intentar crear uno más." },
@@ -683,11 +686,12 @@ export const FAQ: Pregunta[] = [
   ] },
   { id: "faq-no-responde", categoria: "El bot y sus respuestas", pregunta: "El bot no responde. ¿Qué reviso?", respuesta: [
     { tipo: "pasos", items: [
-      "En [Resumen](/admin/overview), ¿la píldora de arriba dice «Bot en línea»? Y en Configuración → Personalidad, ¿el **Estado** es Activo (no En pausa)?",
+      "Arriba a la derecha, ¿la píldora dice «Bot en línea»? Si dice «Bot en pausa» o «Bot con problemas», dale clic: te dice qué pasa y te lleva a la pantalla donde se arregla. La pausa se quita en [Flujo](/admin/agente).",
       "¿Esa conversación está pausada? Si alguien de tu equipo respondió desde el panel o desde el teléfono, el bot se pausa 1 hora en esa conversación. En Conversaciones verás «⏸ bot pausado»; usa **Devolver al bot**.",
       "¿El canal sigue conectado? En Conexiones debe decir **● CONECTADO**. Con Twilio y Meta, revisa que el webhook siga pegado en su sitio.",
       "¿La llave de IA funciona? Configuración → Modelo de IA → **⚡ Probar mi configuración**. Si el proveedor se quedó sin saldo, el bot no puede pensar.",
       "¿Llegaste al límite de conversaciones del mes? Lo ves en [Plan y facturación](/admin/plan).",
+      "¿Hay un aviso amarillo arriba del panel? Puede que un servicio del que depende tu bot (WhatsApp, la IA…) esté fallando; en [Estado del servicio](/admin/ayuda#estado) ves cuál y ya le estamos dando seguimiento.",
       "Si nada de esto es, escríbenos abajo con el nombre del cliente y la hora aproximada.",
     ] },
   ] },
@@ -750,7 +754,12 @@ export const FAQ: Pregunta[] = [
     { tipo: "p", texto: "No: con el CRM conectado, tu CRM manda. El bot crea ahí los contactos y oportunidades, la pantalla de Leads te muestra lo que hay en el CRM, y el estado se cambia allá. El panel guarda una copia solo para seguir funcionando si el CRM se cae un rato." },
   ] },
   { id: "faq-exportar", categoria: "Clientes y ventas", pregunta: "¿Puedo sacar mis datos?", respuesta: [
-    { tipo: "p", texto: "Los leads se exportan a CSV (Excel) con **Exportar CSV** en Leads. Las conversaciones se leen completas en el panel. Si necesitas una exportación completa (por ejemplo, para cambiar de proveedor), pídela por soporte y te la preparamos." },
+    { tipo: "p", texto: "Sí, son tuyos. Cada pantalla tiene su botón para bajarlos en Excel o CSV:" },
+    { tipo: "lista", items: [
+      "[Leads](/admin/leads), [Tickets](/admin/tickets) y [Calendario](/admin/calendario): **Exportar a Excel** o **CSV**, arriba de la pantalla. En Calendario sale el mes que estás viendo.",
+      "[Conversaciones](/admin/conversations): **Exportar**, arriba de la lista, baja la lista con el filtro o la búsqueda que tengas puestos. Dentro de una conversación, **Excel** o **Texto** bajan la plática completa.",
+    ] },
+    { tipo: "nota", texto: "Los mensajes de las conversaciones se guardan 90 días; los leads, tickets y citas se conservan. Si necesitas un respaldo completo de todo (por ejemplo, para cambiar de proveedor), pídelo por soporte y te lo preparamos." },
   ] },
 
   // ── Plan y pagos ──

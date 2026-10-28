@@ -358,7 +358,7 @@ export async function renderCampanas(
       : "";
 
   const hero = pageHero({
-    eyebrow: "Bandeja",
+    eyebrow: "Campañas",
     title: "Campañas",
     description:
       "Manda un mensaje a muchas personas por WhatsApp. A quien te escribió en las últimas 24 horas le llega gratis; a los demás, con una plantilla aprobada que gasta cuota.",

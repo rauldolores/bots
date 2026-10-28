@@ -45,7 +45,7 @@ describe("renderCosts — integra el costo estimado de Voice", () => {
   it("sin ninguna llamada, no rompe y no muestra la tarjeta de desglose de Voz", async () => {
     const html = await renderCosts(env, TEST_BOT_ID);
     expect(html).toContain("Llamadas");
-    expect(html).not.toContain("Llamadas telefónicas <span"); // la tarjeta de desglose solo aparece con datos
+    expect(html).not.toContain('id="costos-voz"'); // la tarjeta de desglose solo aparece con datos
   });
 
   it("con llamadas, suma el costo de IA + telefonía al total y a la tarjeta de Voz", async () => {
@@ -59,6 +59,8 @@ describe("renderCosts — integra el costo estimado de Voice", () => {
 
     const html = await renderCosts(env, TEST_BOT_ID);
     expect(html).toContain("2 llamadas");
+    expect(html).toContain('id="costos-voz"');
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
     // 0.07 USD de IA y 0.015 de telefonía, a 20 pesos por dólar.
     expect(html).toContain("1.40");
     expect(html).toContain("0.30");
@@ -77,7 +79,7 @@ describe("renderCosts — integra el costo estimado de Voice", () => {
 describe("renderStats — integra duración/transferencia/fallidas/latencia de Voice", () => {
   it("sin llamadas, no muestra la sección de Voice (no confunde con 'sin datos' en una pantalla que no aplica)", async () => {
     const html = await renderStats(env, TEST_BOT_ID);
-    expect(html).not.toContain("🎙️ Llamadas");
+    expect(html).not.toContain('id="stats-voz"');
   });
 
   it("con llamadas (incluida una fallida y una transferida), muestra duración promedio, tasa de transferencia y llamadas fallidas reales", async () => {
@@ -86,7 +88,7 @@ describe("renderStats — integra duración/transferencia/fallidas/latencia de V
     await makeCall({ calledNumber: "+18005551212", durationMs: 90_000, aiCost: 0.05, telCost: 0.01, transferStatus: "completed", interruptions: 2 });
 
     const html = await renderStats(env, TEST_BOT_ID);
-    expect(html).toContain("🎙️ Llamadas");
+    expect(html).toContain('id="stats-voz"');
     expect(html).toContain("1m 30s"); // duración promedio: (60+120+90)/3 = 90s
     expect(html).toContain("33%"); // 1 de 3 transferida
     expect(html).toContain("33%"); // 1 de 3 fallida (mismo número, calculado independiente)
@@ -103,6 +105,6 @@ describe("renderStats — integra duración/transferencia/fallidas/latencia de V
     await otherRepo.finalize(otherCallId, { durationMs: 60_000, estimatedAiCostUsd: 1, estimatedTelephonyCostUsd: 1 });
 
     const html = await renderStats(env, TEST_BOT_ID);
-    expect(html).not.toContain("🎙️ Llamadas");
+    expect(html).not.toContain('id="stats-voz"');
   });
 });

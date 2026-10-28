@@ -45,6 +45,7 @@ import {
   type ConnectorFieldSpec,
 } from "../../connectors/registry";
 import { layout } from "./layout";
+import { alertRow, heroTag, iconTile, MICRO_LABEL, pageHero, sectionCard, statCard, statGrid, statusPill } from "./ui";
 import { WIDGET_DEFAULTS, widgetConfigFromForm } from "../../widget/config";
 import { almacenamientoDisponible, firmarSubida, tamanoReal, borrarArchivo, urlPublicaDe } from "../../media/storage";
 import { TIPOS_DE_IMAGEN, pesoLegible } from "../../media/limites";
@@ -88,7 +89,7 @@ const CHANNEL_META: Record<ConnectableChannel, ChannelMeta> = {
   meta: {
     id: "meta",
     name: "Instagram + Messenger (Meta)",
-    icon: "instagram",
+    icon: "messages-square",
     desc: "Los DMs de tu Instagram y tu página de Facebook, con la conexión oficial de Meta.",
     steps: [
       'Entra a <span class="font-mono">developers.facebook.com</span> con la cuenta que administra tu página, y crea una app: <b>Crear app → Otro → Empresa</b>.',
@@ -413,39 +414,33 @@ async function renderEmailCard(env: Env, db: Db, botId: string): Promise<string>
   const activeProvider = row?.config.inboundProvider;
   const ok = Boolean(row && activeProvider);
   const badge = ok
-    ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO — ${esc(EMAIL_PROVIDER_META[activeProvider!].name).toUpperCase()}</span>`
-    : `<span style="font-size:10px;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);padding:3px 10px;font-weight:600">○ SIN CONECTAR</span>`;
+    ? statusPill(`Conectado · ${EMAIL_PROVIDER_META[activeProvider!].name}`, "var(--ok)")
+    : statusPill("Sin conectar", "var(--dim)");
 
   const connectButtons = (["resend", "mailgun"] as const)
     .map((p) => {
       const isActive = activeProvider === p;
-      return `<button type="button" class="text-[12px]" style="border:1px solid ${isActive ? "var(--ok)" : "var(--accent)"};color:${isActive ? "var(--ok)" : "var(--accent-2)"};background:${isActive ? "rgba(127,183,126,.08)" : "var(--accent-soft)"};padding:7px 14px;cursor:pointer;font-weight:600"
-                      hx-get="/admin/conexiones/email/${p}/connect" hx-target="#modal-root" hx-swap="innerHTML">${isActive ? `✓ ${EMAIL_PROVIDER_META[p].name}` : `Conectar ${EMAIL_PROVIDER_META[p].name}`}</button>`;
+      return `<button type="button" class="${isActive ? "cx-btn-ghost" : "cx-btn"}"
+                      hx-get="/admin/conexiones/email/${p}/connect" hx-target="#modal-root" hx-swap="innerHTML">${isActive ? `<i data-lucide="check" width="15" height="15"></i>${EMAIL_PROVIDER_META[p].name}` : `Conectar ${EMAIL_PROVIDER_META[p].name}`}</button>`;
     })
     .join("");
 
   const disconnect = ok
     ? `<form method="POST" action="/admin/conexiones/email/disconnect" style="margin-top:4px" onsubmit="return confirm('¿Desconectar el correo entrante? El bot dejará de recibir correos por esta vía.')">
-         <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Desconectar</button>
+         <button type="submit" class="cx-btn-sm cx-danger">Desconectar</button>
        </form>`
     : "";
 
   return `
-    <div class="bg-panel border ${ok ? "" : "border-line"}" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;${ok ? "border-color:rgba(127,183,126,.45)" : ""}">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-        <div class="font-display font-semibold text-[13.5px] text-cream" style="display:flex;align-items:center;gap:9px">
-          <i data-lucide="mail" width="16" height="16" class="${ok ? "text-accent" : "text-dim"}"></i>
-          Correo entrante
-        </div>
-        ${badge}
-      </div>
-      <p class="text-dim text-[12px]" style="margin:0">Correos que te escriban tus clientes entran al mismo flujo que cualquier canal — leads, tickets, CRM. Elige un proveedor (solo uno activo a la vez; conectar el otro lo reemplaza). El correo de SALIDA se configura aparte, en <a href="/admin/config" class="text-accent" style="text-decoration:none">/admin/config → Correo saliente</a>.</p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">${connectButtons}</div>
+    <article class="cx-card">
+      ${cardHead("mail", "Correo entrante", ok, badge)}
+      <p class="cx-desc">Correos que te escriban tus clientes entran al mismo flujo que cualquier canal — leads, tickets, CRM. Elige un proveedor (solo uno activo a la vez; conectar el otro lo reemplaza). El correo de SALIDA se configura aparte, en <a href="/admin/config" class="text-accent" style="text-decoration:none">/admin/config → Correo saliente</a>.</p>
+      <div class="cx-actions">${connectButtons}</div>
       ${ok ? copyRow("Webhook activo", emailWebhookUrlFor(env, activeProvider!, botId)) : ""}
       ${ok ? await renderDireccionQueAtiende(db, botId) : ""}
       ${ok ? await renderCorreosFiltrados(db, botId) : ""}
       ${disconnect}
-    </div>`;
+    </article>`;
 }
 
 /**
@@ -506,11 +501,11 @@ async function renderCorreosFiltrados(db: Db, botId: string): Promise<string> {
 }
 
 function copyRow(label: string, value: string): string {
-  return `<div style="display:flex;flex-direction:column;gap:4px">
-    <span class="text-[10.5px]" style="color:var(--dim)">${esc(label)}</span>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <span class="font-mono text-[10.5px]" style="border:1px solid var(--line);padding:5px 9px;background:var(--bg);word-break:break-all">${esc(value)}</span>
-      <button type="button" class="text-[10.5px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 9px;cursor:pointer;background:none;flex:none"
+  return `<div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+    <span style="${MICRO_LABEL}">${esc(label)}</span>
+    <div style="display:flex;gap:8px;align-items:center;min-width:0">
+      <span class="cx-mono cx-value">${esc(value)}</span>
+      <button type="button" class="cx-btn-sm"
               onclick="navigator.clipboard.writeText('${esc(value)}');this.textContent='copiado ✓'">copiar</button>
     </div>
   </div>`;
@@ -518,10 +513,10 @@ function copyRow(label: string, value: string): string {
 
 /** Como copyRow(), pero para un valor multilínea (el <script> del widget) — usa <pre> para conservar el formato. */
 function copyBlock(label: string, value: string): string {
-  return `<div style="display:flex;flex-direction:column;gap:4px">
-    <span class="text-[10.5px]" style="color:var(--dim)">${esc(label)}</span>
-    <pre class="font-mono text-[10.5px]" style="border:1px solid var(--line);padding:10px 12px;background:var(--bg);white-space:pre-wrap;word-break:break-all;margin:0">${esc(value)}</pre>
-    <button type="button" class="text-[10.5px]" style="align-self:flex-start;border:1px solid var(--line);color:var(--cream);padding:5px 9px;cursor:pointer;background:none"
+  return `<div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+    <span style="${MICRO_LABEL}">${esc(label)}</span>
+    <pre class="cx-mono cx-value" style="white-space:pre-wrap;margin:0;padding:10px 12px">${esc(value)}</pre>
+    <button type="button" class="cx-btn-sm" style="align-self:flex-start"
             onclick="navigator.clipboard.writeText(${esc(JSON.stringify(value))});this.textContent='copiado ✓'">copiar</button>
   </div>`;
 }
@@ -538,18 +533,17 @@ function widgetSnippet(env: Env, botId: string, key: string): string {
 function modalShell(icon: string, title: string, inner: string): string {
   return `
   <div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
-    <div class="modal-card w-full max-w-md max-h-[85vh] overflow-y-auto">
-      <div class="flex items-center gap-2.5 sticky top-0 z-10" style="padding:16px 18px;border-bottom:1px solid var(--line);background:var(--panel)">
-        <span class="w-[26px] h-[26px] flex-none flex items-center justify-center" style="border:1px solid var(--accent);background:var(--accent-soft)">
-          <i data-lucide="${icon}" width="15" height="15" style="color:var(--accent-2)"></i>
-        </span>
-        <span class="font-display font-bold text-[15px] text-cream">${esc(title)}</span>
-        <button type="button" aria-label="Cerrar" class="ml-auto cursor-pointer" style="color:var(--dim)"
+    <div class="modal-card w-full max-w-md max-h-[85vh] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="cx-modal-title" style="padding:0">
+      <div style="display:flex;align-items:center;gap:14px;padding:18px 20px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:1">
+        ${iconTile(icon, "accent")}
+        <h2 id="cx-modal-title" style="margin:0;flex:1;min-width:0;font-size:16px;font-weight:900;letter-spacing:-.02em;color:var(--cream)">${esc(title)}</h2>
+        <button type="button" aria-label="Cerrar"
+                style="flex:none;width:36px;height:36px;border-radius:10px;border:1px solid var(--linelit);background:var(--panel);color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer"
                 onclick="document.getElementById('modal-root').innerHTML=''">
-          <i data-lucide="x" width="18" height="18"></i>
+          <i data-lucide="x" width="16" height="16"></i>
         </button>
       </div>
-      <div class="p-[18px]">${inner}</div>
+      <div style="padding:20px">${inner}</div>
     </div>
   </div>`;
 }
@@ -1062,16 +1056,21 @@ function providersFor(category: ConnectorCategory): Record<string, ConnectorMeta
   return MCP_PROVIDERS;
 }
 
+const TAB_ICON: Record<string, string> = {
+  canales: "message-circle",
+  crm: "users",
+  tickets: "life-buoy",
+  calendar: "calendar",
+  mcp: "plug",
+};
+
 function renderTabs(active: string): string {
-  return `<div style="display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:2px">
+  return `<nav class="cx-tabs" aria-label="Tipo de conexión">
     ${CATEGORY_TABS.map((t) => {
       const isActive = t.key === active;
-      return `<a href="/admin/conexiones?cat=${t.key}" class="text-[12.5px]"
-        style="padding:7px 14px;font-weight:600;text-decoration:none;border-radius:var(--radius-sm);${
-          isActive ? "background:var(--accent);color:#1a1206" : "color:var(--muted)"
-        }">${esc(t.label)}</a>`;
+      return `<a href="/admin/conexiones?cat=${t.key}" class="cx-tab${isActive ? " is-active" : ""}"${isActive ? ' aria-current="page"' : ""}><i data-lucide="${TAB_ICON[t.key] ?? "plug"}" width="15" height="15"></i>${esc(t.label)}</a>`;
     }).join("")}
-  </div>`;
+  </nav>`;
 }
 
 /** Diálogo de conexión genérico: instrucciones + API key + campos extra de config. */
@@ -1364,23 +1363,15 @@ export function categoryOfProvider(provider: string): ConnectorCategory | null {
 async function renderConnectorCard(env: Env, db: Db, botId: string, meta: ConnectorMeta): Promise<string> {
   if (meta.comingSoon) {
     return `
-    <div class="bg-panel border border-line" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;opacity:.6">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-        <div class="font-display font-semibold text-[13.5px] text-cream" style="display:flex;align-items:center;gap:9px">
-          <i data-lucide="${meta.icon}" width="16" height="16" class="text-dim"></i>
-          ${esc(meta.name)}
-        </div>
-        <span style="font-size:10px;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);padding:3px 10px;font-weight:600">PRÓXIMAMENTE</span>
-      </div>
-      <p class="text-dim text-[12px]" style="margin:0">${esc(meta.desc)}</p>
-    </div>`;
+    <article class="cx-card is-soon">
+      ${cardHead(meta.icon, meta.name, false, statusPill("Próximamente", "var(--dim)"))}
+      <p class="cx-desc">${esc(meta.desc)}</p>
+    </article>`;
   }
 
   const row = await new BotConnectorsRepo(db).getByBotAndProvider(botId, meta.id);
   const ok = Boolean(row);
-  const badge = ok
-    ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>`
-    : `<span style="font-size:10px;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);padding:3px 10px;font-weight:600">○ SIN CONECTAR</span>`;
+  const badge = ok ? statusPill("Conectado", "var(--ok)") : statusPill("Sin conectar", "var(--dim)");
 
   const disconnectWarning: Record<ConnectorCategory, string> = {
     crm: "Los leads",
@@ -1390,20 +1381,20 @@ async function renderConnectorCard(env: Env, db: Db, botId: string, meta: Connec
   };
 
   const disconnectForm = `<form method="POST" action="/admin/conexiones/connectors/${meta.id}/disconnect" onsubmit="return confirm('¿Desconectar ${esc(meta.name)}? ${esc(disconnectWarning[meta.category])} nuevos dejarán de darse de alta ahí.')">
-         <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Desconectar</button>
+         <button type="submit" class="cx-btn-sm cx-danger">Desconectar</button>
        </form>`;
 
   // Un calendario que vive DENTRO de un CRM comparte tabla con los demás
   // pendientes; el tipo es lo único que distingue una cita en el tablero.
   const taskTypeButton =
     ok && meta.category === "calendar" && CALENDAR_ADAPTERS[meta.id]?.listTaskTypes
-      ? `<button type="button" class="text-[11px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 10px;cursor:pointer;background:none"
+      ? `<button type="button" class="cx-btn-sm"
                 hx-get="/admin/conexiones/connectors/calendar/${encodeURIComponent(meta.id)}/tipo-tarea" hx-target="#modal-root" hx-swap="innerHTML">Tipo de tarea</button>`
       : "";
 
   const stageButton =
     ok && meta.category === "crm" && CRM_ADAPTERS[meta.id]?.listPipelineStages
-      ? `<button type="button" class="text-[11px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 10px;cursor:pointer;background:none"
+      ? `<button type="button" class="cx-btn-sm"
                 hx-get="/admin/conexiones/connectors/crm/${encodeURIComponent(meta.id)}/etapa" hx-target="#modal-root" hx-swap="innerHTML">Configurar etapa inicial</button>`
       : "";
 
@@ -1434,14 +1425,14 @@ async function renderConnectorCard(env: Env, db: Db, botId: string, meta: Connec
       const hayApp = await tieneAppOAuth(env, db, botId, meta.id);
       action = hayApp
         ? `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-             <a href="/admin/conexiones/oauth/${meta.id}/start" class="text-[12px]" style="display:inline-block;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600;text-decoration:none">Conectar con ${esc(meta.name)}</a>
+             <a href="/admin/conexiones/oauth/${meta.id}/start" class="cx-btn">Conectar con ${esc(meta.name)}</a>
              <button type="button" class="text-[11px]" style="border:none;background:none;color:var(--dim);cursor:pointer;text-decoration:underline;padding:0"
                      hx-get="/admin/conexiones/oauth/${meta.id}/app" hx-target="#modal-root" hx-swap="innerHTML">Cambiar la aplicación</button>
            </div>`
-        : `<button type="button" class="text-[12px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600"
+        : `<button type="button" class="cx-btn"
                    hx-get="/admin/conexiones/oauth/${meta.id}/app" hx-target="#modal-root" hx-swap="innerHTML">Conectar con ${esc(meta.name)}</button>`;
     } else {
-      action = `<button type="button" class="text-[12px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600"
+      action = `<button type="button" class="cx-btn"
                hx-get="/admin/conexiones/connectors/${meta.category}/${meta.id}/connect" hx-target="#modal-root" hx-swap="innerHTML">Conectar</button>`;
     }
   } else if (editableConfigFields(meta).length) {
@@ -1460,26 +1451,20 @@ async function renderConnectorCard(env: Env, db: Db, botId: string, meta: Connec
     !(row?.config.pipelineStage ?? "").trim() &&
     !((row?.config.dealPipeline ?? "").trim() && (row?.config.dealStage ?? "").trim());
   const avisoSinOportunidad = sinEtapa
-    ? `<div class="text-[11.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;line-height:1.5">
+    ? `<div class="cx-alert">
          <b>Solo se están creando contactos, no oportunidades.</b> Un lead sin oportunidad no le aparece a nadie en su
          embudo, así que nadie le da seguimiento. Usa "Configurar etapa inicial" aquí abajo y elige dónde deben caer.
        </div>`
     : "";
 
   return `
-    <div class="bg-panel border ${ok ? "" : "border-line"}" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;${ok ? "border-color:rgba(127,183,126,.45)" : ""}">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-        <div class="font-display font-semibold text-[13.5px] text-cream" style="display:flex;align-items:center;gap:9px">
-          <i data-lucide="${meta.icon}" width="16" height="16" class="${ok ? "text-accent" : "text-dim"}"></i>
-          ${esc(meta.name)}
-        </div>
-        ${badge}
-      </div>
-      <p class="text-dim text-[12px]" style="margin:0">${esc(meta.desc)}</p>
+    <article class="cx-card">
+      ${cardHead(meta.icon, meta.name, ok, badge)}
+      <p class="cx-desc">${esc(meta.desc)}</p>
       ${avisoSinOportunidad}
       ${limitaciones}
-      ${action}
-    </div>`;
+      <div class="cx-actions">${action}</div>
+    </article>`;
 }
 
 /**
@@ -1503,16 +1488,14 @@ function renderPostAuthForm(meta: ConnectorMeta, row: BotConnector): string {
     .map((f) => {
       const current = typeof row.config[f.name] === "string" ? row.config[f.name] : "";
       return `
-      <div style="display:flex;flex-direction:column;gap:4px">
-        <label class="text-[10.5px]" style="color:var(--dim)">${esc(f.label)}</label>
-        <input type="text" name="${f.name}" value="${esc(current)}" placeholder="${esc(f.placeholder)}"
-               style="background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:7px 9px;font-size:12px;font-family:inherit;outline:none">
-      </div>`;
+      <label class="cx-label"><span>${esc(f.label)}</span>
+        <input type="text" name="${f.name}" value="${esc(current)}" placeholder="${esc(f.placeholder)}" class="cx-field">
+      </label>`;
     })
     .join("");
-  return `<form method="POST" action="/admin/conexiones/connectors/${meta.id}/config" style="display:flex;flex-direction:column;gap:8px">
+  return `<form method="POST" action="/admin/conexiones/connectors/${meta.id}/config" style="display:flex;flex-direction:column;gap:10px;width:100%">
       ${fields}
-      <button type="submit" class="text-[11px]" style="align-self:flex-start;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:5px 10px;cursor:pointer;font-weight:600">Guardar</button>
+      <button type="submit" class="cx-btn-sm cx-primary" style="align-self:flex-start">Guardar</button>
     </form>`;
 }
 
@@ -1713,9 +1696,7 @@ function renderMcpConnectedCard(c: BotConnector, prefix: string): string {
   const fallo = (c.config.mcpLastError ?? "").trim();
   const falloAt = Number(c.config.mcpLastErrorAt ?? "");
   const falloReciente = fallo && Number.isFinite(falloAt) && falloAt > 0;
-  const estado = falloReciente
-    ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:3px 10px;font-weight:700">● SIN CONEXIÓN</span>`
-    : `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>`;
+  const estado = falloReciente ? statusPill("Sin conexión", "var(--bad)") : statusPill("Conectado", "var(--ok)");
   // El acceso OAuth se renueva SOLO, cada minuto, en el tick — antes de que
   // caduque (ver connectors/mcpRefresh.ts). Hasta hace poco no era así:
   // refrescar se intentaba dentro del turno del cliente, con un presupuesto
@@ -1731,19 +1712,19 @@ function renderMcpConnectedCard(c: BotConnector, prefix: string): string {
   const falloBlock = falloReciente
     ? isOauth
       ? seRenovoDespues
-        ? `<div class="text-[11.5px]" style="color:var(--muted);border:1px solid var(--line);padding:8px 11px;line-height:1.5">
+        ? `<div class="cx-alert cx-alert-ok">
              Hubo un fallo (${esc(new Date(falloAt).toLocaleString("es-MX"))}), pero el acceso <b>ya se renovó solo</b> después.
              No tienes que hacer nada — si vuelve a fallar, aquí te lo va a decir.
              <div class="font-mono text-[10.5px]" style="color:var(--dim);margin-top:5px;word-break:break-word">${esc(fallo)}</div>
            </div>`
-        : `<div class="text-[11.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;line-height:1.5">
+        : `<div class="cx-alert">
              <b>El agente no pudo conectarse</b> (${esc(new Date(falloAt).toLocaleString("es-MX"))}). Mientras siga así, no tiene estas herramientas.
              El acceso se renueva solo cada minuto; si el aviso sigue aquí, es que el proveedor ya no acepta la renovación — te revocó el permiso o expiró del todo.
              Eso sí necesita que lo autorices otra vez: dale a <b>Reconectar</b>.
              Para que no vuelva a pasar, cámbialo a <b>token</b> en <b>Editar</b>: con OAuth, cerrar sesión se lleva esta autorización.
              <div class="font-mono text-[10.5px]" style="color:var(--dim);margin-top:5px;word-break:break-word">${esc(fallo)}</div>
            </div>`
-      : `<div class="text-[11.5px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:8px 11px;line-height:1.5">
+      : `<div class="cx-alert">
            <b>El agente no pudo conectarse</b> (${esc(new Date(falloAt).toLocaleString("es-MX"))}). Mientras siga así, no tiene estas herramientas.
            Revisa el token o la URL en tu servidor y dale a <b>Reconectar</b> para probar sin esperar.
            <div class="font-mono text-[10.5px]" style="color:var(--dim);margin-top:5px;word-break:break-word">${esc(fallo)}</div>
@@ -1751,44 +1732,36 @@ function renderMcpConnectedCard(c: BotConnector, prefix: string): string {
     : "";
 
   return `
-    <div class="bg-panel border" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;border-color:${falloReciente ? "var(--bad)" : "rgba(127,183,126,.45)"}">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-        <div class="font-display font-semibold text-[13.5px] text-cream" style="display:flex;align-items:center;gap:9px">
-          <i data-lucide="plug" width="16" height="16" class="text-accent"></i>
-          ${esc(c.name ?? "Conector MCP")}
-        </div>
-        ${estado}
-      </div>
-      <p class="text-dim text-[12px]" style="margin:0;word-break:break-all">${esc(url)}</p>
-      <p class="font-mono text-[11px]" style="color:var(--dim);margin:0">El agente las ve como <span style="color:var(--accent-2)">${esc(prefix)}_*</span></p>
+    <article class="cx-card">
+      ${cardHead("plug", c.name ?? "Conector MCP", !falloReciente, estado)}
+      <p class="cx-desc" style="word-break:break-all">${esc(url)}</p>
+      <p class="cx-mono" style="margin:0;color:var(--dim)">El agente las ve como <span style="color:var(--accent-2)">${esc(prefix)}_*</span></p>
       ${falloBlock}
       ${purposeBlock}
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div class="cx-actions">
         ${
           falloReciente
             ? isOauth
               ? // OAuth: no es un reintento — hace falta volver a autorizar de
                 // verdad con el proveedor, así que es una navegación real, no htmx.
                 `<a href="${mcpReconnectOauthUrl(c)}"
-                    class="text-[11px] font-display font-bold"
-                    style="border:1px solid var(--accent);background:var(--accent);color:#1a1206;padding:5px 12px;cursor:pointer;text-decoration:none;display:inline-block">Reconectar</a>`
-              : `<button type="button" class="text-[11px] font-display font-bold"
-                         style="border:1px solid var(--accent);background:var(--accent);color:#1a1206;padding:5px 12px;cursor:pointer"
+                    class="cx-btn-sm cx-primary">Reconectar</a>`
+              : `<button type="button" class="cx-btn-sm cx-primary"
                          hx-post="/admin/conexiones/connectors/mcp/${encodeURIComponent(c.provider)}/reconectar"
                          hx-target="#modal-root" hx-swap="innerHTML"
                          hx-disabled-elt="this"
                          hx-indicator="this">Reconectar</button>`
             : ""
         }
-        <button type="button" class="text-[11px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 10px;cursor:pointer;background:none"
+        <button type="button" class="cx-btn-sm"
                 hx-get="/admin/conexiones/connectors/mcp/${encodeURIComponent(c.provider)}/tools" hx-target="#modal-root" hx-swap="innerHTML">Ver herramientas</button>
-        <button type="button" class="text-[11px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 10px;cursor:pointer;background:none"
+        <button type="button" class="cx-btn-sm"
                 hx-get="/admin/conexiones/connectors/mcp/${encodeURIComponent(c.provider)}/editar" hx-target="#modal-root" hx-swap="innerHTML">Editar</button>
         <form method="POST" action="/admin/conexiones/connectors/${c.provider}/disconnect" onsubmit="return confirm('¿Quitar ${esc(c.name ?? "este conector")}? El agente perderá acceso a sus tools.')">
-          <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Quitar</button>
+          <button type="submit" class="cx-btn-sm cx-danger">Quitar</button>
         </form>
       </div>
-    </div>`;
+    </article>`;
 }
 
 /** Ejemplo que se muestra bajo el campo de propósito — lo que el dueño tiene que redactar es una REGLA, no una descripción técnica. */
@@ -2094,9 +2067,11 @@ export async function reconnectMcp(env: Env, botId: string, provider: string): P
 
 function renderMcpAddCard(): string {
   return `
-    <div class="bg-panel border border-line" style="padding:18px 20px;display:flex;align-items:center;justify-content:center;min-height:118px">
-      <button type="button" class="text-[12px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600"
+    <div class="cx-card is-add">
+      ${iconTile("plus", "accent", 48)}
+      <button type="button" class="cx-btn"
               hx-get="/admin/conexiones/connectors/mcp/add" hx-target="#modal-root" hx-swap="innerHTML">+ Agregar conector MCP</button>
+      <p class="cx-desc" style="text-align:center">Cualquier servidor MCP remoto: le da más herramientas al agente.</p>
     </div>`;
 }
 
@@ -2223,7 +2198,7 @@ async function renderCategoryBody(
   if (list.length === 0) {
     return {
       summary: `${CATEGORY_LABELS[category]} — próximamente`,
-      cards: `<div style="padding:40px 18px;text-align:center" class="text-dim text-[12.5px]">Todavía no hay conectores de ${esc(CATEGORY_LABELS[category].toLowerCase())} disponibles.</div>`,
+      cards: `<div class="cx-help" style="grid-column:1 / -1;padding:24px 0;text-align:center">Todavía no hay conectores de ${esc(CATEGORY_LABELS[category].toLowerCase())} disponibles.</div>`,
     };
   }
   const repo = new BotConnectorsRepo(db);
@@ -2240,13 +2215,13 @@ export async function renderConnectorsGrid(env: Env, botId: string, category: Co
   const { summary, cards } = await renderCategoryBody(env, botId, category);
   return `
     <div id="conexiones-summary" hx-swap-oob="innerHTML">${esc(summary)}</div>
-    <div id="conexiones-grid" hx-swap-oob="innerHTML" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px">
+    <div id="conexiones-grid" hx-swap-oob="innerHTML" class="cx-grid">
       ${cards}
     </div>`;
 }
 
-const WIDGET_FIELD_STYLE = "background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:7px 9px;font-size:12px;font-family:inherit;width:100%";
-const WIDGET_LABEL_STYLE = "color:var(--dim);display:flex;flex-direction:column;gap:4px";
+const WIDGET_FIELD_STYLE = "background:var(--panel);border:1px solid var(--linelit);color:var(--cream);height:40px;padding:0 12px;font-size:13px;font-family:inherit;width:100%;min-width:0";
+const WIDGET_LABEL_STYLE = "color:var(--dim);display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;min-width:0";
 
 function widgetSelect(name: string, current: string, options: { value: string; label: string }[]): string {
   return `<select name="${name}" style="${WIDGET_FIELD_STYLE}">${options
@@ -2417,7 +2392,7 @@ function renderWidgetConfigForm(row: BotChannel, conAlmacenamiento: boolean): st
       <label class="text-[10.5px]" style="color:var(--dim);display:flex;align-items:center;gap:6px"><input type="checkbox" name="show_powered_by" ${(c.showPoweredBy ?? d.showPoweredBy) ? "checked" : ""}> Mostrar "Powered by Nodia Agents"</label>
       <label class="text-[10.5px]" style="color:var(--dim);display:flex;align-items:center;gap:6px"><input type="checkbox" name="hide_on_mobile" ${c.hideOnMobile ? "checked" : ""}> Ocultar en celulares</label>
     </div>
-    <button type="submit" class="text-[11px]" style="align-self:flex-start;border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:5px 12px;cursor:pointer;font-weight:600">Guardar</button>
+    <button type="submit" class="cx-btn-sm cx-primary" style="align-self:flex-start">Guardar</button>
   </form>${conAlmacenamiento ? WIDGET_LOGO_SCRIPT : ""}`;
 }
 
@@ -2455,11 +2430,9 @@ async function renderConnectableCard(env: Env, db: Db, botId: string, meta: Chan
     !ok &&
     ((meta.id === "meta" && Boolean(env.META_PAGE_ACCESS_TOKEN?.trim())) ||
       (meta.id === "whatsapp" && Boolean(env.WHATSAPP_ACCESS_TOKEN?.trim())))
-      ? `<p class="text-[11px]" style="color:var(--accent-2);margin:8px 0 0">Este canal ya está configurado en el servidor. Si lo conectas aquí, estos datos mandan sobre aquéllos — y podrás cambiarlos sin tocar el servidor.</p>`
+      ? `<p class="cx-help" style="color:var(--muted)">Este canal ya está configurado en el servidor. Si lo conectas aquí, estos datos mandan sobre aquéllos — y podrás cambiarlos sin tocar el servidor.</p>`
       : "";
-  const badge = ok
-    ? `<span style="font-size:10px;letter-spacing:.14em;color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:3px 10px;font-weight:700">● CONECTADO</span>`
-    : `<span style="font-size:10px;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);padding:3px 10px;font-weight:600">○ SIN CONECTAR</span>`;
+  const badge = ok ? statusPill("Conectado", "var(--ok)") : statusPill("Sin conectar", "var(--dim)");
 
   const widgetConfigForm = ok && meta.id === "widget" && row ? renderWidgetConfigForm(row, almacenamientoDisponible(env)) : "";
   const widgetApiDocs = ok && meta.id === "widget" && row ? renderWidgetApiDocs() : "";
@@ -2469,7 +2442,7 @@ async function renderConnectableCard(env: Env, db: Db, botId: string, meta: Chan
   // conectado (el destino del desvío).
   const voiceOnboardingLink =
     ok && meta.id === "voice"
-      ? `<a href="/admin/telefono" class="text-[11px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:5px 12px;text-decoration:none;font-weight:600">¿Quieres conservar tu número actual?</a>`
+      ? `<a href="/admin/telefono" class="cx-btn-sm cx-primary">¿Quieres conservar tu número actual?</a>`
       : "";
 
   // Meta pide DOS cosas al dar de alta el webhook: la dirección y un código de
@@ -2482,7 +2455,7 @@ async function renderConnectableCard(env: Env, db: Db, botId: string, meta: Chan
       : "";
 
   const action = ok
-    ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    ? `<div style="display:flex;flex-direction:column;gap:10px">
          ${meta.id === "widget" && row ? copyBlock("Código para tu sitio", widgetSnippet(env, botId, row.external_id ?? "")) : copyRow("Webhook", webhookUrlFor(env, meta.id, botId))}
        </div>
        ${codigoDeVerificacion}
@@ -2493,30 +2466,24 @@ async function renderConnectableCard(env: Env, db: Db, botId: string, meta: Chan
        ${
          meta.id === "telegram"
            ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
-                <button type="button" class="text-[11px]" style="border:1px solid var(--line);color:var(--cream);padding:5px 10px;cursor:pointer;background:none"
+                <button type="button" class="cx-btn-sm"
                         hx-post="/admin/conexiones/telegram/webhook" hx-target="#modal-root" hx-swap="innerHTML">Actualizar webhook</button>
-                <span class="text-[10.5px] text-dim">Úsalo si cambiaste el dominio del panel: le dice a Telegram a dónde mandar los mensajes, con el token que ya tienes guardado.</span>
+                <span class="cx-help">Úsalo si cambiaste el dominio del panel: le dice a Telegram a dónde mandar los mensajes, con el token que ya tienes guardado.</span>
               </div>`
            : ""
        }
-       <form method="POST" action="/admin/conexiones/${meta.id}/disconnect" style="margin-top:4px" onsubmit="return confirm('¿Desconectar ${esc(meta.name)}? El bot dejará de recibir mensajes por aquí.')">
-         <button type="submit" class="text-[11px]" style="border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer;background:none">Desconectar</button>
+       <form method="POST" action="/admin/conexiones/${meta.id}/disconnect" class="cx-actions" onsubmit="return confirm('¿Desconectar ${esc(meta.name)}? El bot dejará de recibir mensajes por aquí.')">
+         <button type="submit" class="cx-btn-sm cx-danger">Desconectar</button>
        </form>`
-    : `<button type="button" class="text-[12px]" style="border:1px solid var(--accent);color:var(--accent-2);background:var(--accent-soft);padding:7px 14px;cursor:pointer;font-weight:600"
+    : `<button type="button" class="cx-btn"
                hx-get="/admin/conexiones/${meta.id}/connect" hx-target="#modal-root" hx-swap="innerHTML">Conectar</button>`;
 
   return `
-    <div class="bg-panel border ${ok ? "" : "border-line"}" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;${ok ? "border-color:rgba(127,183,126,.45)" : ""}">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-        <div class="font-display font-semibold text-[13.5px] text-cream" style="display:flex;align-items:center;gap:9px">
-          <i data-lucide="${meta.icon}" width="16" height="16" class="${ok ? "text-accent" : "text-dim"}"></i>
-          ${esc(meta.name)}
-        </div>
-        ${badge}
-      </div>
-      <p class="text-dim text-[12px]" style="margin:0">${esc(meta.desc)}</p>
+    <article class="cx-card">
+      ${cardHead(meta.icon, meta.name, ok, badge)}
+      <p class="cx-desc">${esc(meta.desc)}</p>
       ${action}
-    </div>`;
+    </article>`;
 }
 
 async function connectableCards(env: Env, botId: string): Promise<string> {
@@ -2538,18 +2505,78 @@ export async function renderConexionesGrid(env: Env, botId: string): Promise<str
   const cards = await connectableCards(env, botId);
   return `
     <div id="conexiones-summary" hx-swap-oob="innerHTML">Canales conectados: ${connected} de ${Object.keys(CHANNEL_META).length + 1}</div>
-    <div id="conexiones-grid" hx-swap-oob="innerHTML" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px">
+    <div id="conexiones-grid" hx-swap-oob="innerHTML" class="cx-grid">
       ${cards}
     </div>`;
 }
 
 const CATEGORY_INTRO: Record<string, string> = {
-  canales: "Conecta los canales donde están tus clientes de ESTE bot. Cuando un canal queda listo, su tarjeta se pone verde.",
+  canales: "Conecta los canales donde están tus clientes de ESTE bot. Cuando un canal queda listo, su tarjeta dice «Conectado».",
   crm: "Si conectas un CRM, los leads nuevos se dan de alta ahí y /admin/leads deja de mostrar la tabla local.",
   tickets: "Si conectas una plataforma de tickets, los handoffs nuevos se crean ahí y /admin/tickets deja de mostrar la tabla local.",
   calendar: "Gestiona la agenda del negocio conectando tu propio calendario.",
   mcp: "Conecta cualquier servidor MCP remoto para darle más herramientas al agente.",
 };
+
+const CX_CSS = `<style>
+  .cx-tabs{display:flex;gap:6px;padding:6px;border-radius:16px;border:1px solid var(--line);background:var(--panel);margin-bottom:24px;overflow-x:auto;scrollbar-width:none}
+  .cx-tabs::-webkit-scrollbar{display:none}
+  .cx-tab{flex:none;height:40px;padding:0 16px;border-radius:12px;display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--muted);text-decoration:none;white-space:nowrap}
+  .cx-tab:hover{background:var(--row-hover);color:var(--cream)}
+  .cx-tab.is-active{background:var(--hero-bg);color:var(--hero-ink)}
+  .cx-intro{margin:0;padding:16px 24px;border-bottom:1px solid var(--line);font-size:13px;font-weight:500;line-height:1.55;color:var(--muted)}
+  .cx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;padding:20px 24px}
+  .cx-card{display:flex;flex-direction:column;gap:12px;border-radius:var(--radius);border:1px solid var(--line);background:var(--panel);padding:18px 20px;min-width:0}
+  .cx-card.is-soon{background:var(--row-hover)}
+  .cx-card.is-soon .cx-name{color:var(--muted)}
+  .cx-card.is-add{align-items:center;justify-content:center;border-style:dashed;border-color:var(--linelit);background:var(--row-hover);min-height:180px;text-align:center}
+  .cx-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .cx-name{flex:1 1 120px;min-width:0;font-size:15px;font-weight:900;letter-spacing:-.02em;color:var(--cream);overflow-wrap:anywhere}
+  .cx-desc{margin:0;font-size:13px;font-weight:500;line-height:1.55;color:var(--muted)}
+  .cx-desc a{color:var(--accent-2)}
+  .cx-help{margin:0;font-size:12px;font-weight:500;line-height:1.5;color:var(--dim)}
+  .cx-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0}
+  .cx-card > .cx-btn{align-self:flex-start}
+  .cx-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  .cx-value{flex:1;min-width:0;border-radius:10px;border:1px solid var(--line);background:var(--row-hover);padding:7px 10px;color:var(--cream);word-break:break-all}
+  .cx-btn{height:40px;padding:0 16px;border-radius:12px;border:0;background:var(--accent);color:var(--cream);font-size:13px;font-weight:800;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;white-space:nowrap;text-decoration:none}
+  .cx-btn:hover{background:var(--accent-hover)}
+  .cx-btn-ghost{height:40px;padding:0 14px;border-radius:12px;border:1px solid var(--linelit);background:var(--panel);color:var(--cream);font-size:13px;font-weight:700;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;white-space:nowrap;text-decoration:none}
+  .cx-btn-ghost:hover{background:var(--row-hover)}
+  .cx-btn-sm{flex:none;height:32px;padding:0 12px;border-radius:10px;border:1px solid var(--dim);background:var(--panel);color:var(--cream);font-size:12px;font-weight:700;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;white-space:nowrap;text-decoration:none}
+  .cx-btn-sm:hover{background:var(--row-hover)}
+  .cx-btn-sm.cx-primary{border-color:var(--accent);background:var(--accent);color:var(--cream)}
+  .cx-btn-sm.cx-primary:hover{background:var(--accent-hover)}
+  .cx-btn-sm.cx-danger:hover{border-color:var(--bad);color:var(--bad)}
+  .cx-alert{position:relative;border-radius:12px;border:1px solid var(--line);background:var(--row-hover);padding:10px 12px 10px 28px;font-size:12.5px;font-weight:500;line-height:1.5;color:var(--muted)}
+  .cx-alert::before{content:"";position:absolute;left:12px;top:16px;width:8px;height:8px;border-radius:50%;background:var(--bad)}
+  .cx-alert.cx-alert-ok::before{background:var(--ok)}
+  .cx-alert b{color:var(--cream)}
+  .cx-label{display:flex;flex-direction:column;gap:6px;min-width:0}
+  .cx-label>span{${MICRO_LABEL}}
+  .cx-field{width:100%;height:40px;padding:0 12px;border:1px solid var(--linelit);background:var(--panel);color:var(--cream);font-size:13px;font-family:inherit;min-width:0}
+  .cx-card details summary{list-style:none}
+  .cx-card details summary::-webkit-details-marker{display:none}
+  @media (max-width:640px){
+    .cx-grid{grid-template-columns:minmax(0,1fr);padding:16px}
+    .cx-intro{padding:14px 16px}
+    .cx-card form > div[style*="grid-template-columns:1fr 1fr"]{grid-template-columns:minmax(0,1fr)!important}
+  }
+</style>`;
+
+/** Cabecera de una tarjeta de canal o conector: mosaico de ícono, nombre y estado. */
+function cardHead(icon: string, name: string, on: boolean, badge: string): string {
+  return `<div class="cx-head">${iconTile(icon, on ? "accent" : "neutral", 40)}<h3 class="cx-name" style="margin:0">${esc(name)}</h3>${badge}</div>`;
+}
+
+/** Conectores MCP con un fallo que no se arregló solo: los que el dueño tiene que mirar. */
+function mcpConFallo(c: BotConnector): boolean {
+  const fallo = (c.config.mcpLastError ?? "").trim();
+  const falloAt = Number(c.config.mcpLastErrorAt ?? "");
+  if (!fallo || !Number.isFinite(falloAt) || falloAt <= 0) return false;
+  const renovado = Number(c.config.oauthRefreshedAt ?? "");
+  return !(c.config.authMode === "oauth" && Number.isFinite(renovado) && renovado > falloAt);
+}
 
 export async function renderConexiones(
   env: Env,
@@ -2559,24 +2586,31 @@ export async function renderConexiones(
   visibleNavIds: Set<string> | null = null,
 ): Promise<string> {
   const cat = ["crm", "tickets", "calendar", "mcp"].includes(category) ? (category as ConnectorCategory) : "canales";
+  const db = new Db(env.DB);
   const tabs = renderTabs(cat);
   const noticeBanner = notice?.err
-    ? `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px">${esc(notice.err)}</div>`
+    ? `<div style="margin-bottom:24px">${alertRow({ title: "No se pudo conectar", detail: notice.err, attrs: 'role="alert"' })}</div>`
     : notice?.ok
-      ? `<div class="text-[12px]" style="color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:9px 12px">✓ Conectado correctamente.</div>`
+      ? `<div style="margin-bottom:24px">${alertRow({ title: "Conectado correctamente", detail: "Ya quedó listo para este bot.", dot: "var(--ok)", attrs: 'role="status"' })}</div>`
       : "";
+
+  const [canalesConectados, conectores] = await Promise.all([
+    Promise.all((Object.keys(CHANNEL_META) as ConnectableChannel[]).map((id) => connectedRow(db, botId, id))).then(
+      (rows) => rows.filter(Boolean).length,
+    ),
+    new BotConnectorsRepo(db).listByBot(botId).then((l) => l.filter((c) => c.enabled)),
+  ]);
+  const correo = await new BotChannelsRepo(db).getByBotAndChannel(botId, "email");
+  const totalCanales = Object.keys(CHANNEL_META).length + 1; // + correo, que tiene su propia tarjeta
+  const canales = canalesConectados + (correo?.config.inboundProvider ? 1 : 0);
+  const deCategoria = (k: ConnectorCategory) => conectores.filter((c) => c.category === k).length;
+  const mcps = conectores.filter((c) => c.category === "mcp");
+  const mcpsConFallo = mcps.filter(mcpConFallo).length;
 
   let summary: string;
   let cards: string;
   if (cat === "canales") {
-    const db = new Db(env.DB);
-    const connected = (
-      await Promise.all(
-        (Object.keys(CHANNEL_META) as ConnectableChannel[]).map((id) => connectedRow(db, botId, id)),
-      )
-    ).filter(Boolean).length;
-    const total = Object.keys(CHANNEL_META).length + 1; // + correo, que tiene su propia tarjeta
-    summary = `Canales conectados: ${connected} de ${total}`;
+    summary = `Canales conectados: ${canalesConectados} de ${totalCanales}`;
     cards = await connectableCards(env, botId);
   } else {
     const result = await renderCategoryBody(env, botId, cat);
@@ -2584,20 +2618,48 @@ export async function renderConexiones(
     cards = result.cards;
   }
 
-  const body = `
-    <div style="display:flex;flex-direction:column;gap:18px">
-      ${tabs}
-      ${noticeBanner}
-      <div style="display:flex;flex-direction:column;gap:2px">
-        <h2 class="font-display font-semibold text-[15px] text-cream" id="conexiones-summary">${esc(summary)}</h2>
-        <p class="text-muted text-[12.5px]">${esc(CATEGORY_INTRO[cat])}</p>
-      </div>
-      <div id="conexiones-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px">
-        ${cards}
-      </div>
-    </div>`;
+  const hero = pageHero({
+    eyebrow: "Canales",
+    title: "Conexiones",
+    description: "Los canales por donde te escriben tus clientes y las herramientas con las que trabaja tu agente: CRM, tickets, calendario y servidores MCP.",
+    tags: canales
+      ? heroTag(`${canales} ${canales === 1 ? "canal activo" : "canales activos"}`, "#3fb8c4")
+      : heroTag("Sin canales conectados", "#f0a88a"),
+  });
 
-  return layout({ title: "Conexiones", activeTab: "conexiones", body, visibleNavIds });
+  const stats = statGrid([
+    statCard({ icon: "message-circle", tone: canales ? "ok" : "warn", label: "Canales", value: `${canales} / ${totalCanales}`, note: "por donde te escriben" }),
+    statCard({ icon: "users", tone: "neutral", label: "CRM y tickets", value: deCategoria("crm") + deCategoria("tickets"), note: "a donde caen leads y handoffs" }),
+    statCard({ icon: "calendar", tone: "neutral", label: "Calendario", value: deCategoria("calendar"), note: "para agendar citas" }),
+    statCard({
+      icon: "plug",
+      tone: mcpsConFallo ? "warn" : "neutral",
+      label: "Conectores MCP",
+      value: mcps.length,
+      hint: mcpsConFallo ? `${mcpsConFallo} sin conexión` : undefined,
+      note: "herramientas extra del agente",
+    }),
+  ]);
+
+  const activa = CATEGORY_TABS.find((t) => t.key === cat) ?? CATEGORY_TABS[0];
+  const card = sectionCard({
+    icon: TAB_ICON[cat] ?? "plug",
+    title: activa.label,
+    subtitle: `<span id="conexiones-summary">${esc(summary)}</span>`,
+    body: `<p class="cx-intro">${esc(CATEGORY_INTRO[cat])}</p>
+      <div id="conexiones-grid" class="cx-grid">
+        ${cards}
+      </div>`,
+  });
+
+  const body = `${CX_CSS}
+    ${hero}
+    ${noticeBanner}
+    ${stats}
+    ${tabs}
+    ${card}`;
+
+  return layout({ title: "Conexiones", activeTab: "conexiones", body, visibleNavIds, hero: true });
 }
 
 /** Resumen corto para el badge de salud del Resumen. */

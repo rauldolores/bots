@@ -8,7 +8,7 @@ import { CALENDAR_ADAPTERS, CALENDAR_PROVIDERS } from "../../connectors/registry
 import type { AppointmentRecord } from "../../connectors/types";
 import { resolveTimezone, localTimeToUtcMs } from "../../datetime";
 import { layout } from "./layout";
-import { alertRow, heroBtn, heroTag, iconTile, pageHero, sectionCard, statCard, statGrid, statusPill } from "./ui";
+import { alertRow, botonesExportar, heroBtn, heroTag, iconTile, pageHero, sectionCard, statCard, statGrid, statusPill } from "./ui";
 
 function esc(s: string): string {
   return s.replace(
@@ -295,18 +295,73 @@ function renderCalendarLayout(opts: {
     </div>`;
 }
 
+export interface CitaExportable {
+  inicio: number;
+  nombre: string;
+  contacto: string;
+  estado: string;
+  notas: string;
+  enlace: string;
+}
+
+/**
+ * Las citas del mes que se está viendo, para Exportar: del calendario
+ * conectado si responde (solo trae próximas, como la pantalla), si no de la
+ * agenda local (agendadas y canceladas, pasadas o futuras).
+ */
+export async function citasParaExportar(
+  env: Env,
+  botId: string,
+  monthParam?: string,
+): Promise<{ filas: CitaExportable[]; timezone: string; mes: string }> {
+  const db = new Db(env.DB);
+  const timezone = resolveTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
+  const { year, month } = resolveMonth(monthParam, timezone);
+  const monthStr = `${year}-${pad2(month)}`;
+  const nextMonth = shiftMonth(year, month, 1);
+  const desde = localTimeToUtcMs(`${monthStr}-01T00:00:00`, timezone);
+  const hasta = localTimeToUtcMs(`${nextMonth.year}-${pad2(nextMonth.month)}-01T00:00:00`, timezone);
+
+  const connector = await new BotConnectorsRepo(db).getActiveByCategory(botId, "calendar");
+  if (connector) {
+    const adapter = CALENDAR_ADAPTERS[connector.provider];
+    const creds = adapter ? await resolveConnectorCreds(db, connector, env) : null;
+    const result = adapter && creds ? await adapter.listUpcoming(creds, 200).catch(() => null) : null;
+    if (result?.ok) {
+      const filas = result.items
+        .filter((a) => a.startsAt >= desde && a.startsAt < hasta)
+        .sort((a, b) => a.startsAt - b.startsAt)
+        .map((a) => ({ inicio: a.startsAt, nombre: a.name, contacto: a.contact, estado: "Agendada", notas: "", enlace: a.url ?? "" }));
+      return { filas, timezone, mes: monthStr };
+    }
+  }
+  const filas = (await new AppointmentsRepo(db, botId).listForMonth(desde, hasta)).map((a) => ({
+    inicio: a.starts_at,
+    nombre: a.customer_name ?? "",
+    contacto: a.customer_contact ?? "",
+    estado: a.status === "cancelled" ? "Cancelada" : "Agendada",
+    notas: a.notes ?? "",
+    enlace: "",
+  }));
+  return { filas, timezone, mes: monthStr };
+}
+
 export async function renderCalendario(
   env: Env,
   botId: string,
   monthParam?: string,
   dayParam?: string,
   visibleNavIds: Set<string> | null = null,
+  /** Exportar pide nodia-agents.calendario.administrar; sin él, el botón no sale. */
+  puedeExportar = true,
 ): Promise<string> {
   const db = new Db(env.DB);
   const timezone = resolveTimezone(await new SettingsRepo(db, botId).get(SETTING_KEYS.timezone));
   const canSee = (id: string) => !visibleNavIds || visibleNavIds.has(id);
   const { year, month } = resolveMonth(monthParam, timezone);
   const monthStr = `${year}-${pad2(month)}`;
+  // Exporta el mes que se está viendo.
+  const exportar = puedeExportar ? botonesExportar(`/admin/calendario/exportar?month=${monthStr}`) : "";
   const nextMonth = shiftMonth(year, month, 1);
   const monthStartMs = localTimeToUtcMs(`${monthStr}-01T00:00:00`, timezone);
   const monthEndMs = localTimeToUtcMs(`${nextMonth.year}-${pad2(nextMonth.month)}-01T00:00:00`, timezone);
@@ -337,7 +392,7 @@ export async function renderCalendario(
       const monthItems = allItems.filter((i) => i.startsAt >= monthStartMs && i.startsAt < monthEndMs);
       const upcoming = allItems.filter((i) => i.startsAt > Date.now()).sort((a, b) => a.startsAt - b.startsAt).slice(0, 8);
       const body = `
-        ${pageHero({ eyebrow: "Bandeja", title: "Calendario", description, tags: heroTag(`Conectado a ${providerLabel}`), actions: manageBtn })}
+        ${pageHero({ eyebrow: "Bandeja", title: "Calendario", description, tags: heroTag(`Conectado a ${providerLabel}`), actions: exportar + manageBtn })}
         ${renderCalendarLayout({ year, month, timezone, monthItems, upcoming, selectedKey, source: `en vivo desde ${esc(providerLabel)}` })}`;
       return layout({ title: "Calendario", activeTab: "calendario", body, visibleNavIds, hero: true });
     }
@@ -377,6 +432,7 @@ export async function renderCalendario(
     description,
     tags: connectedTag,
     actions: [
+      exportar,
       manageBtn,
       !connector && canSee("conexiones")
         ? heroBtn({ label: "Conectar calendario", href: "/admin/conexiones?cat=calendar", icon: "plug-zap" })

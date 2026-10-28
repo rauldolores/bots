@@ -319,3 +319,44 @@ describe("llaves de acceso", () => {
     expect(fresh.enabled).toBe(false);
   });
 });
+
+describe("GET /habilidades — estructura", () => {
+  it("trae el hero, las métricas, la tarjeta de la habilidad y el aviso de API apagada", async () => {
+    await post(
+      "/habilidades/nueva",
+      form([
+        ["name", "Calificar a O'Brien"],
+        ["instructions", "Califica al prospecto."],
+        ["field_key", "interes"],
+        ["field_type", "string"],
+        ["field_desc", ""],
+        ["field_required", "1"],
+      ]),
+    );
+    const html = await (await adminApp.request("/habilidades", { headers: AUTH }, env)).text();
+
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    expect(html).toContain("Mi Agente");
+    expect(html).toContain("Habilidades activas");
+    expect(html).toContain("Corridas con éxito");
+    expect(html).toContain("Calificar a O&#39;Brien");
+    expect(html).toContain("POST /v1/skills/calificar-a-o-brien");
+    expect(html).toContain('data-confirm="¿Borrar');
+    // Sin canal "api" en bot_channels, la pantalla lo avisa y manda a Conexiones.
+    expect(html).toContain("La API está apagada");
+    expect(html).toContain('href="/admin/conexiones"');
+  });
+
+  it("sin habilidades muestra el estado vacío con la plantilla a la mano", async () => {
+    const html = await (await adminApp.request("/habilidades", { headers: AUTH }, env)).text();
+    expect(html).toContain("Todavía no tienes habilidades.");
+    expect(html).toContain('hx-get="/admin/habilidades/plantillas"');
+  });
+
+  it("el formulario de nueva habilidad tiene un solo h1", async () => {
+    const html = await (await adminApp.request("/habilidades/nueva", { headers: AUTH }, env)).text();
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    expect(html).toContain("Nueva habilidad");
+    expect(html).toContain('name="field_key"');
+  });
+});
