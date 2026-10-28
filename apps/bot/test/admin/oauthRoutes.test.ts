@@ -665,6 +665,15 @@ describe("/admin/usuarios — invitar al equipo (public-signup.md §2.2)", () =>
     expect(listMembersMock).toHaveBeenCalledWith(expect.anything(), "at", ORG);
   });
 
+  it("dibuja la pantalla con su hero (un solo h1), el conteo de miembros y el estado de cada uno", async () => {
+    const html = await (await adminApp.fetch(conSesion("/usuarios"), KONTROLIA_ENV)).text();
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    expect(html).toContain("2 miembros activos");
+    expect(html).toContain(">Activo<");
+    expect(html).toContain('href="#invitar"');
+    expect(html).toContain('id="invitar"');
+  });
+
   it("POST /usuarios/miembros/:id/quitar: DELETE en el auth-server con el token del usuario", async () => {
     removeMemberMock.mockResolvedValue({ ok: true });
     const res = await adminApp.fetch(conSesion("/usuarios/miembros/m-ana/quitar", { method: "POST" }), KONTROLIA_ENV);

@@ -589,6 +589,7 @@ export const GUIA: Seccion[] = [
             "La persona recibe un correo. Debe crear (o ya tener) una cuenta de KontrolIA con ese mismo correo y aceptar.",
             "En **Miembros** ves a cada persona con sus roles y estado (Activo, Invitado, Suspendido) y puedes **Quitar** a alguien. En **Invitaciones**, las pendientes se pueden **Cancelar**.",
           ] },
+          { tipo: "p", texto: "Arriba ves cuántos miembros activos hay y cuántas invitaciones siguen sin aceptar; el botón **Invitar a alguien** te lleva directo al formulario." },
           { tipo: "p", texto: "El rol define qué pantallas ve y qué puede tocar. **Usuario** puede atender (conversaciones, leads, tickets) sin cambiar la configuración; **Administrador** puede todo. Si a alguien le falta una pantalla en el menú, es su rol." },
         ],
       },

@@ -14,6 +14,7 @@ import type { Env } from "../../env";
 import type { KontroliaRole, KontroliaInvitation, KontroliaMember } from "../kontroliaAuth";
 import { authServerUrl, appSlug } from "../kontroliaAuth";
 import { layout } from "./layout";
+import { alertRow, avatarTile, heroBtn, heroTag, iconTile, MICRO_LABEL, pageHero, sectionCard, statusPill } from "./ui";
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]!));
@@ -35,41 +36,119 @@ export function ordenarRoles(roles: KontroliaRole[]): KontroliaRole[] {
   return [...roles].sort((a, b) => peso(a) - peso(b) || a.name.localeCompare(b.name, "es"));
 }
 
-const inputStyle = "background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:9px 11px;font-size:12.5px;outline:none";
-
 const ESTADO_MIEMBRO: Record<string, { text: string; color: string }> = {
   active: { text: "Activo", color: "var(--ok)" },
   invited: { text: "Invitado", color: "var(--accent)" },
   suspended: { text: "Suspendido", color: "var(--bad)" },
 };
 
+const EQ_CSS = `<style>
+  .eq-body{padding:20px 24px;display:flex;flex-direction:column;gap:16px}
+  .eq-help{margin:0;font-size:12.5px;font-weight:500;line-height:1.55;color:var(--muted)}
+  .eq-form{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+  .eq-label{display:flex;flex-direction:column;gap:6px;flex:1 1 220px;max-width:320px;min-width:0}
+  .eq-label>span{${MICRO_LABEL}}
+  .eq-field{width:100%;height:40px;padding:0 14px;border:1px solid var(--linelit);border-radius:12px;background:var(--panel);color:var(--cream);font-size:13px;font-family:inherit}
+  .eq-roles{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+  .eq-rol{display:flex;gap:12px;align-items:flex-start;border-radius:12px;border:1px solid var(--line);background:var(--row-hover);padding:12px 14px}
+  .eq-rol b{display:block;font-size:13px;font-weight:800;color:var(--cream);margin-bottom:2px}
+  .eq-btn{height:40px;padding:0 16px;border-radius:12px;border:0;background:var(--accent);color:var(--cream);font-size:13px;font-weight:800;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;white-space:nowrap}
+  .eq-btn:hover{background:var(--accent-hover)}
+  .eq-btn-sm{height:32px;padding:0 12px;border-radius:10px;border:1px solid var(--dim);background:var(--panel);color:var(--cream);font-size:12px;font-weight:700;font-family:inherit;display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
+  .eq-btn-sm:hover{background:var(--row-hover);color:var(--bad)}
+  .eq-row{display:grid;gap:8px 16px;align-items:center;padding:14px 24px;border-top:1px solid var(--line)}
+  .eq-head{${MICRO_LABEL};border-top:0;padding-top:12px;padding-bottom:12px;background:var(--row-hover)}
+  .eq-mbr{grid-template-columns:minmax(0,2fr) minmax(0,1.4fr) 130px 96px;grid-template-areas:"who roles state act"}
+  .eq-inv{grid-template-columns:minmax(0,2fr) minmax(0,1.2fr) 130px 120px 110px;grid-template-areas:"who role date state act"}
+  .eq-who{grid-area:who;display:flex;align-items:center;gap:12px;min-width:0}
+  .eq-name{font-size:13.5px;font-weight:800;color:var(--cream);overflow-wrap:anywhere}
+  .eq-mail{font-size:12px;font-weight:500;color:var(--dim);overflow-wrap:anywhere}
+  .eq-chips{grid-area:roles;display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+  .eq-inv .eq-chips{grid-area:role}
+  .eq-chip{display:inline-flex;align-items:center;border-radius:8px;background:var(--panel2);padding:2px 8px;font-size:11px;font-weight:700;color:var(--muted);overflow-wrap:anywhere}
+  .eq-state{grid-area:state}
+  .eq-date{grid-area:date;font-size:12px;font-weight:500;color:var(--muted)}
+  .eq-act{grid-area:act;display:flex;justify-content:flex-end}
+  .eq-empty{margin:0;padding:32px 24px;text-align:center;font-size:12.5px;font-weight:500;color:var(--dim)}
+  .eq-list{container-type:inline-size}
+  /* Por el ancho de la tarjeta, no de la ventana: con la barra lateral abierta la tabla se aprieta antes. */
+  @container (max-width:720px){
+    .eq-head{display:none}
+    .eq-row{padding:14px 16px}
+    .eq-mbr{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"who act" "roles state"}
+    .eq-inv{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"who act" "role state" "date date"}
+    .eq-state{justify-self:end}
+  }
+  @media (max-width:640px){ .eq-body{padding:16px} .eq-label{max-width:none} }
+</style>`;
+
+const formQuitarOCancelar = (action: string, pregunta: string, icon: string, label: string, aria: string) =>
+  `<form method="POST" action="${action}" onsubmit="return confirm('${pregunta}')" style="margin:0"><button type="submit" class="eq-btn-sm" aria-label="${aria}"><i data-lucide="${icon}" width="14" height="14"></i>${label}</button></form>`;
+
 /** Los miembros de la organización; a uno mismo no se le ofrece "Quitar" (para eso está Cerrar sesión, y el auth-server además protege al último dueño). */
 function filasMiembros(members: KontroliaMember[], miUserId: string | null): string {
-  if (!members.length) return `<tr style="border-top:1px solid var(--line)"><td colspan="4" style="padding:14px 12px" class="text-[12.5px]"><span style="color:var(--dim)">Sin miembros.</span></td></tr>`;
-  return members
-    .map((m) => {
-      const st = ESTADO_MIEMBRO[m.status] ?? { text: m.status, color: "var(--muted)" };
-      const soyYo = m.userId === miUserId;
-      const roles = m.roles.map((r) => r.name).join(", ") || "—";
-      const quitar = soyYo
-        ? `<span class="text-[11px]" style="color:var(--dim)">Tú</span>`
-        : `<form method="POST" action="/admin/usuarios/miembros/${encodeURIComponent(m.membershipId)}/quitar" onsubmit="return confirm('¿Quitar a ${esc(m.email)} de la organización? Perderá el acceso a todos los bots.')" style="margin:0">
-             <button type="submit" class="text-[11px]" style="background:none;border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer">Quitar</button>
-           </form>`;
-      return `<tr style="border-top:1px solid var(--line)">
-        <td style="padding:10px 12px"><div class="text-[12.5px] text-cream">${esc(m.name ?? m.email)}</div>${m.name ? `<div class="text-[11px]" style="color:var(--dim)">${esc(m.email)}</div>` : ""}</td>
-        <td style="padding:10px 12px" class="text-[12px]">${esc(roles)}</td>
-        <td style="padding:10px 12px" class="text-[12px]"><span style="color:${st.color}">${st.text}</span></td>
-        <td style="padding:6px 12px;text-align:right">${quitar}</td>
-      </tr>`;
-    })
-    .join("");
+  if (!members.length) return `<p class="eq-empty">Sin miembros.</p>`;
+  const head = `<div class="eq-row eq-mbr eq-head" aria-hidden="true"><span style="grid-area:who">Persona</span><span style="grid-area:roles">Roles</span><span style="grid-area:state">Estado</span><span></span></div>`;
+  return (
+    head +
+    members
+      .map((m) => {
+        const st = ESTADO_MIEMBRO[m.status] ?? { text: m.status, color: "var(--muted)" };
+        const soyYo = m.userId === miUserId;
+        const roles = m.roles.map((r) => `<span class="eq-chip">${esc(r.name)}</span>`).join("") || `<span class="eq-chip">—</span>`;
+        const quitar = soyYo
+          ? `<span class="eq-chip">Tú</span>`
+          : formQuitarOCancelar(
+              `/admin/usuarios/miembros/${encodeURIComponent(m.membershipId)}/quitar`,
+              `¿Quitar a ${esc(m.email)} de la organización? Perderá el acceso a todos los bots.`,
+              "user-minus",
+              "Quitar",
+              `Quitar a ${esc(m.email)}`,
+            );
+        return `<div class="eq-row eq-mbr">
+          <div class="eq-who">${avatarTile(m.name ?? m.email, soyYo)}<div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span class="eq-name">${esc(m.name ?? m.email)}</span>${m.name ? `<span class="eq-mail">${esc(m.email)}</span>` : ""}</div></div>
+          <div class="eq-chips" aria-label="Roles">${roles}</div>
+          <div class="eq-state">${statusPill(st.text, st.color)}</div>
+          <div class="eq-act">${quitar}</div>
+        </div>`;
+      })
+      .join("")
+  );
 }
 
 function estadoInvitacion(inv: KontroliaInvitation): { text: string; color: string } {
   if (inv.accepted_at) return { text: "Aceptada", color: "var(--ok)" };
   if (new Date(inv.expires_at).getTime() < Date.now()) return { text: "Expirada", color: "var(--bad)" };
   return { text: "Pendiente", color: "var(--accent)" };
+}
+
+function filasInvitaciones(invitations: KontroliaInvitation[]): string {
+  if (!invitations.length) return `<p class="eq-empty">Todavía no has invitado a nadie.</p>`;
+  const head = `<div class="eq-row eq-inv eq-head" aria-hidden="true"><span style="grid-area:who">Correo</span><span style="grid-area:role">Rol</span><span style="grid-area:date">Enviada</span><span style="grid-area:state">Estado</span><span></span></div>`;
+  return (
+    head +
+    invitations
+      .map((inv) => {
+        const st = estadoInvitacion(inv);
+        const cancelar = inv.accepted_at
+          ? ""
+          : formQuitarOCancelar(
+              `/admin/usuarios/${encodeURIComponent(inv.id)}/cancelar`,
+              `¿Cancelar la invitación a ${esc(inv.email)}?`,
+              "x",
+              "Cancelar",
+              `Cancelar la invitación a ${esc(inv.email)}`,
+            );
+        return `<div class="eq-row eq-inv">
+          <div class="eq-who">${iconTile("mail", "neutral", 34)}<span class="eq-name">${esc(inv.email)}</span></div>
+          <div class="eq-chips"><span class="eq-chip">${esc(inv.role?.name ?? "—")}</span></div>
+          <div class="eq-date">${esc(fmtDate(inv.created_at))}</div>
+          <div class="eq-state">${statusPill(st.text, st.color)}</div>
+          <div class="eq-act">${cancelar}</div>
+        </div>`;
+      })
+      .join("")
+  );
 }
 
 export function renderUsuarios(
@@ -81,111 +160,95 @@ export function renderUsuarios(
   notice: { ok?: string; err?: string },
   visibleNavIds: Set<string> | null,
 ): string {
-  const noticeBanner = notice.err
-    ? `<div class="text-[12px]" style="color:var(--bad);border:1px solid var(--bad);background:rgba(220,38,38,.06);padding:9px 12px">${esc(notice.err)}</div>`
+  const banner = notice.err
+    ? `<div style="margin-bottom:24px">${alertRow({ title: "No se pudo completar", detail: notice.err, attrs: 'role="alert"' })}</div>`
     : notice.ok
-      ? `<div class="text-[12px]" style="color:var(--ok);border:1px solid var(--ok);background:rgba(127,183,126,.08);padding:9px 12px">✓ ${esc(notice.ok)}</div>`
+      ? `<div style="margin-bottom:24px">${alertRow({ title: "Listo", detail: notice.ok, dot: "var(--ok)", attrs: 'role="status"' })}</div>`
       : "";
 
   let content: string;
+  let tags: string | undefined;
+  let actions: string | undefined;
 
   if (data.kind === "sin-kontrolia") {
-    content = `<div style="border:1px solid var(--line);background:var(--panel);padding:18px 20px">
-      <div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:6px">Esta pantalla necesita una sesión de KontrolIA</div>
-      <p class="text-[12.5px]" style="color:var(--muted);margin:0">Entraste con la contraseña del panel, y las invitaciones se hacen a nombre de <em>tu</em> cuenta de KontrolIA (es quien decide a qué organización entra la gente). Sal y vuelve a entrar con tu cuenta.</p>
-    </div>`;
+    content = sectionCard({
+      icon: "lock",
+      title: "Esta pantalla necesita una sesión de KontrolIA",
+      body: `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:32px 24px;text-align:center">
+        ${iconTile("key-round", "accent", 48)}
+        <p class="eq-help" style="max-width:480px">Entraste con la contraseña del panel, y las invitaciones se hacen a nombre de <em>tu</em> cuenta de KontrolIA (es quien decide a qué organización entra la gente). Sal y vuelve a entrar con tu cuenta.</p>
+      </div>`,
+    });
   } else if (data.kind === "error") {
-    content = `<div style="border:1px solid var(--line);background:var(--panel);padding:18px 20px">
-      <div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:6px">No se pudo hablar con KontrolIA Auth</div>
-      <p class="text-[12.5px]" style="color:var(--muted);margin:0 0 8px">${esc(data.error)}</p>
-      <p class="text-[11px]" style="color:var(--dim);margin:0">Servidor: <span class="font-mono">${esc(authServerUrl(env))}</span></p>
-    </div>`;
+    content = sectionCard({
+      icon: "cloud-off",
+      title: "No se pudo hablar con KontrolIA Auth",
+      body: `<div class="eq-body">
+        ${alertRow({ title: "KontrolIA Auth no respondió", detail: data.error, attrs: 'role="alert"' })}
+        <p class="eq-help" style="color:var(--dim)">Servidor: <span class="font-mono">${esc(authServerUrl(env))}</span></p>
+      </div>`,
+    });
   } else {
     const roles = ordenarRoles(data.roles);
     const opciones = roles
       .map((r, i) => `<option value="${esc(r.id)}"${i === 0 ? " selected" : ""}>${esc(r.name)}</option>`)
       .join("");
+    const activos = data.members.filter((m) => m.status === "active").length;
+    const pendientes = data.invitations.filter((i) => estadoInvitacion(i).text === "Pendiente").length;
 
-    const filas = data.invitations.length
-      ? data.invitations
-          .map((inv) => {
-            const st = estadoInvitacion(inv);
-            const cancelar = inv.accepted_at
-              ? ""
-              : `<form method="POST" action="/admin/usuarios/${encodeURIComponent(inv.id)}/cancelar" onsubmit="return confirm('¿Cancelar la invitación a ${esc(inv.email)}?')" style="margin:0">
-                   <button type="submit" class="text-[11px]" style="background:none;border:1px solid var(--line);color:var(--bad);padding:5px 10px;cursor:pointer">Cancelar</button>
-                 </form>`;
-            return `<tr style="border-top:1px solid var(--line)">
-              <td style="padding:10px 12px" class="text-[12.5px] text-cream">${esc(inv.email)}</td>
-              <td style="padding:10px 12px" class="text-[12px]">${esc(inv.role?.name ?? "—")}</td>
-              <td style="padding:10px 12px" class="text-[12px]" style="color:var(--muted)">${esc(fmtDate(inv.created_at))}</td>
-              <td style="padding:10px 12px" class="text-[12px]"><span style="color:${st.color}">${st.text}</span></td>
-              <td style="padding:6px 12px;text-align:right">${cancelar}</td>
-            </tr>`;
-          })
-          .join("")
-      : `<tr style="border-top:1px solid var(--line)"><td colspan="5" style="padding:14px 12px" class="text-[12.5px]"><span style="color:var(--dim)">Todavía no has invitado a nadie.</span></td></tr>`;
+    tags =
+      heroTag(`${activos} ${activos === 1 ? "miembro activo" : "miembros activos"}`, "var(--ok)") +
+      (pendientes ? heroTag(`${pendientes} ${pendientes === 1 ? "invitación pendiente" : "invitaciones pendientes"}`, "var(--accent)") : "");
+    if (roles.length) actions = heroBtn({ label: "Invitar a alguien", href: "#invitar", icon: "user-plus", primary: true });
 
-    content = `<div style="display:flex;flex-direction:column;gap:16px">
-      <div style="border:1px solid var(--line);background:var(--panel);padding:18px 20px;display:flex;flex-direction:column;gap:10px">
-        <div>
-          <div class="font-display font-semibold text-[13.5px] text-cream" style="margin-bottom:4px">Invitar a alguien de tu equipo</div>
-          <p class="text-[12.5px]" style="color:var(--muted);margin:0">Le llega un correo con el enlace para unirse a tu organización con el rol que elijas. "Usuario de Nodia Agents" entra sin permisos hasta que le des los suyos; "Administrador de Nodia Agents" ve y administra todo el panel.</p>
+    const invitar = sectionCard({
+      icon: "user-plus",
+      title: "Invitar a alguien de tu equipo",
+      subtitle: "Le llega un correo con el enlace para unirse a tu organización con el rol que elijas",
+      body: `<div class="eq-body">
+        <div class="eq-roles">
+          <div class="eq-rol">${iconTile("user", "neutral", 32)}<p class="eq-help"><b>Usuario de Nodia Agents</b>Entra sin permisos hasta que le des los suyos.</p></div>
+          <div class="eq-rol">${iconTile("shield-check", "accent", 32)}<p class="eq-help"><b>Administrador de Nodia Agents</b>Ve y administra todo el panel.</p></div>
         </div>
-        <form method="POST" action="/admin/usuarios/invitar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-          <div style="display:flex;flex-direction:column;gap:5px">
-            <label for="email" class="text-[11px]" style="color:var(--dim)">Correo</label>
-            <input type="email" id="email" name="email" required placeholder="persona@tu-negocio.com" style="${inputStyle};width:260px">
-          </div>
-          <div style="display:flex;flex-direction:column;gap:5px">
-            <label for="role_id" class="text-[11px]" style="color:var(--dim)">Rol</label>
-            <select id="role_id" name="role_id" required style="${inputStyle};width:260px">${opciones}</select>
-          </div>
-          <button type="submit" class="text-[12px]" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;font-weight:700;padding:9px 16px;cursor:pointer">Enviar invitación</button>
+        <form method="POST" action="/admin/usuarios/invitar" class="eq-form">
+          <label class="eq-label" for="email"><span>Correo</span>
+            <input type="email" id="email" name="email" required placeholder="persona@tu-negocio.com" class="eq-field">
+          </label>
+          <label class="eq-label" for="role_id"><span>Rol</span>
+            <select id="role_id" name="role_id" required class="eq-field">${opciones}</select>
+          </label>
+          <button type="submit" class="eq-btn"><i data-lucide="send" width="15" height="15"></i>Enviar invitación</button>
         </form>
-        ${roles.length === 0 ? `<p class="text-[11px]" style="color:var(--bad);margin:0">KontrolIA no devolvió ningún rol para tu organización — no hay con qué invitar.</p>` : ""}
-      </div>
+        ${roles.length === 0 ? alertRow({ title: "Sin roles para invitar", detail: "KontrolIA no devolvió ningún rol para tu organización — no hay con qué invitar." }) : ""}
+      </div>`,
+      footer: `<span class="eq-help" style="color:var(--dim)">Quien acepta necesita ya tener cuenta en KontrolIA con ese mismo correo. Si es alguien nuevo, que primero cree la suya en <span class="font-mono" style="overflow-wrap:anywhere">${esc(authServerUrl(env))}/register?app=${esc(appSlug(env))}</span> y luego abra el enlace de la invitación.</span>`,
+    });
 
-      <div style="border:1px solid var(--line);background:var(--panel)">
-        <div style="padding:14px 18px;border-bottom:1px solid var(--line)">
-          <div class="font-display font-semibold text-[13.5px] text-cream">Miembros</div>
-          <p class="text-[12px]" style="color:var(--muted);margin:4px 0 0">Quien ya entra a esta organización. Quitar a alguien le cierra el acceso a todos sus bots; KontrolIA no deja quitar al último dueño.</p>
-        </div>
-        <div style="overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse">
-            <thead><tr class="text-[11px]" style="color:var(--dim);text-align:left">
-              <th style="padding:8px 12px;font-weight:500">Persona</th>
-              <th style="padding:8px 12px;font-weight:500">Roles</th>
-              <th style="padding:8px 12px;font-weight:500">Estado</th>
-              <th></th>
-            </tr></thead>
-            <tbody>${filasMiembros(data.members, data.miUserId)}</tbody>
-          </table>
-        </div>
-      </div>
+    const miembros = sectionCard({
+      icon: "users",
+      title: "Miembros",
+      subtitle: "Quien ya entra a esta organización. Quitar a alguien le cierra el acceso a todos sus bots; KontrolIA no deja quitar al último dueño.",
+      body: `<div class="eq-list">${filasMiembros(data.members, data.miUserId)}</div>`,
+      footer: `<span class="eq-help" style="color:var(--dim)">Los miembros actuales y sus roles también se administran en panel.kontrolia.io.</span>`,
+    });
 
-      <div style="border:1px solid var(--line);background:var(--panel)">
-        <div style="padding:14px 18px;border-bottom:1px solid var(--line)">
-          <div class="font-display font-semibold text-[13.5px] text-cream">Invitaciones</div>
-        </div>
-        <div style="overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse">
-            <thead><tr class="text-[11px]" style="color:var(--dim);text-align:left">
-              <th style="padding:8px 12px;font-weight:500">Correo</th>
-              <th style="padding:8px 12px;font-weight:500">Rol</th>
-              <th style="padding:8px 12px;font-weight:500">Enviada</th>
-              <th style="padding:8px 12px;font-weight:500">Estado</th>
-              <th></th>
-            </tr></thead>
-            <tbody>${filas}</tbody>
-          </table>
-        </div>
-      </div>
+    const invitaciones = sectionCard({
+      icon: "mail",
+      title: "Invitaciones",
+      subtitle: `${data.invitations.length} ${data.invitations.length === 1 ? "enviada" : "enviadas"}${pendientes ? ` · ${pendientes} sin aceptar` : ""}`,
+      body: `<div class="eq-list">${filasInvitaciones(data.invitations)}</div>`,
+    });
 
-      <p class="text-[11px]" style="color:var(--dim);margin:0">Quien acepta necesita ya tener cuenta en KontrolIA con ese mismo correo. Si es alguien nuevo, que primero cree la suya en <span class="font-mono">${esc(authServerUrl(env))}/register?app=${esc(appSlug(env))}</span> y luego abra el enlace de la invitación. Los miembros actuales y sus roles se administran en panel.kontrolia.io.</p>
-    </div>`;
+    content = `<div style="display:flex;flex-direction:column;gap:24px"><div id="invitar" style="scroll-margin-top:24px">${invitar}</div>${miembros}${invitaciones}</div>`;
   }
 
-  const body = `<div style="display:flex;flex-direction:column;gap:14px">${noticeBanner}${content}</div>`;
-  return layout({ title: "Equipo", activeTab: "usuarios", body, visibleNavIds });
+  const hero = pageHero({
+    eyebrow: "Cuenta",
+    title: "Equipo",
+    description: "Invita a tu gente al panel y decide qué puede hacer cada quien. Cada persona ve solo lo que su rol le permite.",
+    tags,
+    actions,
+  });
+
+  return layout({ title: "Equipo", activeTab: "usuarios", body: `${EQ_CSS}${hero}${banner}${content}`, visibleNavIds, hero: true });
 }
