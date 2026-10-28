@@ -942,7 +942,8 @@ describe("/admin/organizaciones — las de la cuenta, cambiarse y crear una nuev
   it("lista las organizaciones con la activa marcada, 'Cambiar' en las demás y el alta", async () => {
     const html = await (await adminApp.fetch(conSesion("/organizaciones"), KONTROLIA_ENV)).text();
     expect(html).toContain("Mi negocio");
-    expect(html).toContain("● Activa");
+    expect(html).toContain(">Activa<");
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
     expect(html).toContain('value="org-2"');
     expect(html).toContain('action="/admin/organizaciones"');
   });

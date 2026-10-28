@@ -573,7 +573,7 @@ export const GUIA: Seccion[] = [
         resumen: "Cambiar entre tus organizaciones o crear una nueva (por ejemplo, para otra empresa o sucursal con plan propio).",
         ruta: "/admin/organizaciones",
         cuerpo: [
-          { tipo: "p", texto: "La tabla **Tus organizaciones** muestra cada una con tu rol (Dueño, Administrador o Miembro) y cuál está **● Activa**. Presiona **Cambiar** para trabajar en otra." },
+          { tipo: "p", texto: "En **Tus organizaciones** ves cada una con tu rol (Dueño, Administrador o Miembro); la **Activa** va primero y resaltada. Presiona **Cambiar** en otra para trabajar en ella." },
           { tipo: "p", texto: "Para crear una: escribe el **Nombre de la organización** y presiona **Crear y cambiarme a ella**. Cada organización tiene su propio plan, sus bots y su equipo." },
           { tipo: "nota", texto: "Los roles de organización (quién es dueño o administrador) se administran en panel.kontrolia.io, la cuenta central del ecosistema Kontrolia con la que entras a este panel." },
         ],
