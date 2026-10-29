@@ -733,6 +733,8 @@ export async function runScheduledJobs(env: Env, cron?: string, now = Date.now()
   // Importaciones de contactos que se quedaron a medias (guardan la tabla del archivo).
   const { purgarBorradoresDeImportacion } = await import("./db/leadImports");
   await purgarBorradoresDeImportacion(new Db(env.DB)).catch((e) => console.error("borradores de importación:", e));
+  const { purgarWebhooks } = await import("./webhooks/salientes");
+  await purgarWebhooks(new Db(env.DB)).catch((e) => console.error("bitácora de avisos:", e));
   // Insights, flywheel y copiloto son POR BOT (a diferencia de purgeOldMessages/
   // purgeOldVoiceCalls, que ya recorren todos los bots por dentro): sin este
   // loop, con 2+ bots en el despliegue analyzeConversations/runFlywheel caían

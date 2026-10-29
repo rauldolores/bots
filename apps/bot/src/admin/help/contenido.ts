@@ -427,7 +427,7 @@ export const GUIA: Seccion[] = [
         resumen: "Las pestañas, qué significa cada estado y el patrón que se repite en todas las conexiones.",
         ruta: "/admin/conexiones",
         cuerpo: [
-          { tipo: "p", texto: "Arriba hay cinco pestañas: **Canales** (por dónde te escriben o llaman), **CRM**, **Tickets**, **Calendario** y **Conectores MCP**. Cada tarjeta muestra **Conectado**, **Sin conectar** o **Próximamente**; arriba ves cuántos canales y herramientas tienes conectados." },
+          { tipo: "p", texto: "Arriba hay seis pestañas: **Canales** (por dónde te escriben o llaman), **CRM**, **Tickets**, **Calendario**, **Conectores MCP** y **Avisos (webhooks)**. Cada tarjeta muestra **Conectado**, **Sin conectar** o **Próximamente**; arriba ves cuántos canales y herramientas tienes conectados." },
           { tipo: "pasos", items: [
             "Presiona **Conectar** en la tarjeta. Se abre una ventana con los pasos numerados y los datos que hay que pegar. Los pasos te dicen exactamente dónde conseguir cada dato en el sitio del proveedor.",
             "Pega los datos y presiona **Conectar**.",
@@ -545,6 +545,29 @@ export const GUIA: Seccion[] = [
             "Si usas Vinqulia para todo, al conectar el segundo módulo marca **Usar los mismos datos de Vinqulia (CRM)**.",
           ] },
           { tipo: "nota", texto: "Cada CRM tiene limitaciones («Con {CRM} todavía no se puede: …») que se muestran en su tarjeta al conectarlo." },
+        ],
+      },
+      {
+        id: "conexion-avisos",
+        titulo: "Avisos automáticos (webhooks)",
+        resumen: "Que tu bot le avise a otro sistema (Zapier, Make, tu CRM o ERP) cada vez que entra un lead, una cita o un ticket.",
+        ruta: "/admin/conexiones",
+        cuerpo: [
+          { tipo: "p", texto: "Un **aviso** (o webhook) es un mensaje automático que tu bot le manda a otro sistema cuando algo pasa: un lead nuevo, un lead que cambia de estado, una conversación que pasa a una persona, un ticket, una cita agendada o cancelada, o una importación de contactos que termina. Así ese sistema se entera al momento, sin estar preguntando." },
+          { tipo: "pasos", items: [
+            "En **Conexiones → Avisos (webhooks)**, abre **Agregar un aviso**.",
+            "Pega la **dirección** que te dio el otro sistema (empieza con `https://`). En Zapier o Make es la del disparador «Webhook».",
+            "Marca **qué avisar** y presiona **Crear aviso**.",
+            "Copia el **secreto** que aparece: es la única vez que se muestra. Quien conecte el otro sistema lo usa para comprobar que cada aviso viene de tu bot (los detalles están en «Para quien conecta el sistema»).",
+            "Presiona **Probar** y revisa en **Últimos envíos** que diga **Entregado**.",
+          ] },
+          { tipo: "lista", items: [
+            "Si el otro sistema no contesta, se reintenta solo durante unos dos días. En **Últimos envíos** ves cada intento y su error, y puedes **Reintentar** a mano.",
+            "Si un aviso falla 50 veces seguidas se **apaga solo** y te llega un aviso. Arregla la dirección, márcalo como **Encendido** en **Editar** y guarda.",
+            "**Nuevo secreto** cambia el secreto; el anterior deja de servir en ese momento.",
+            "Puedes tener hasta 10 avisos por bot. La bitácora se guarda 30 días.",
+          ] },
+          { tipo: "nota", texto: "Los avisos llevan datos de tus clientes (nombre, teléfono o correo). Pon solo direcciones de sistemas tuyos o de confianza. Una importación de contactos manda un solo aviso con el resumen, no uno por contacto." },
         ],
       },
       {

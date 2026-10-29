@@ -214,6 +214,7 @@ import { incidenciasAbiertas, leerEstado } from "../estado/revisar";
 import { saludDelBot } from "../estado/salud";
 import { formatoDe, nombreArchivo, respuestaExport } from "./exportar";
 import { registrarRutasDeImportar } from "./importarLeadsRoutes";
+import { registrarRutasDeAvisos, tomarSecretoUnaVez } from "./avisosRoutes";
 import {
   columnasDeCitas,
   conversacionesParaExportar,
@@ -2523,9 +2524,11 @@ adminApp.get("/conexiones", async (c) =>
         err: c.req.query("err"),
       },
       visibleNavIds(c.get("kontroliaClaims")),
+      { filtro: c.req.query("aviso"), ok: c.req.query("aviso_ok"), err: c.req.query("err"), secreto: c.req.query("cat") === "avisos" ? tomarSecretoUnaVez(c) : undefined },
     ),
   ),
 );
+registrarRutasDeAvisos(adminApp);
 
 // Diálogo de conexión: instrucciones + formulario para pegar el token, sin
 // terminal (F5/F4: cada bot conecta sus propios canales desde el panel).

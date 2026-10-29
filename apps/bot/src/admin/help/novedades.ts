@@ -19,6 +19,14 @@ export interface Novedad {
 export const NOVEDADES: Novedad[] = [
   {
     fecha: "2026-10-29",
+    titulo: "Tu bot ya puede avisarle a tus otros sistemas",
+    texto:
+      "En Conexiones, la pestaña «Avisos (webhooks)» manda un aviso automático a tu CRM, tu ERP, Zapier o Make cada vez que entra un lead, cambia de estado, se agenda o cancela una cita, se abre un ticket o el bot pasa una conversación a una persona. Si el otro sistema no contesta, se reintenta solo, y ves cada envío en una bitácora.",
+    tipo: "Nuevo",
+    ruta: "/admin/conexiones?cat=avisos",
+  },
+  {
+    fecha: "2026-10-29",
     titulo: "Los textos grises se leen mejor",
     texto:
       "Subtítulos, rótulos y notas en gris claro del panel ahora son un poco más oscuros, para que se lean bien en cualquier pantalla y con poca luz.",

@@ -1,4 +1,13 @@
 import { Db } from "./client";
+import { emitirEvento, iso } from "../webhooks/salientes";
+
+/** Los estados como viajan en los avisos automáticos (webhooks). */
+export const ESTADO_EN_AVISO: Record<Lead["status"], string> = {
+  new: "nuevo",
+  contacted: "contactado",
+  sold: "vendido",
+  lost: "perdido",
+};
 
 export interface Lead {
   id: string;
@@ -85,6 +94,16 @@ export class LeadsRepo {
         now,
       ],
     );
+    await emitirEvento(this.db, this.botId, "lead.creado", {
+      lead_id: id,
+      nombre: input.name ?? null,
+      contacto: input.contact ?? null,
+      intencion: input.intent,
+      notas: input.notes ?? null,
+      datos: input.metadata ?? {},
+      conversacion_id: input.conversationId,
+      creado: iso(now),
+    });
     return id;
   }
 
@@ -126,10 +145,24 @@ export class LeadsRepo {
   }
 
   async setStatus(id: string, status: Lead["status"]): Promise<void> {
-    await this.db.run(
-      "UPDATE leads SET status = ?, updated_at = ? WHERE id = ? AND bot_id = ?",
-      [status, Date.now(), id, this.botId],
+    // El estado anterior sale de la misma sentencia: el aviso "cambió de
+    // estado" solo se manda si de verdad cambió.
+    const r = await this.db.first<{ anterior: Lead["status"]; name: string | null; contact: string | null; conversation_id: string | null }>(
+      `WITH antes AS (SELECT status FROM leads WHERE id = ? AND bot_id = ?)
+       UPDATE leads SET status = ?, updated_at = ? WHERE id = ? AND bot_id = ?
+       RETURNING (SELECT status FROM antes) AS anterior, name, contact, conversation_id`,
+      [id, this.botId, status, Date.now(), id, this.botId],
     );
+    if (r && r.anterior !== status) {
+      await emitirEvento(this.db, this.botId, "lead.estado", {
+        lead_id: id,
+        nombre: r.name,
+        contacto: r.contact,
+        estado_anterior: ESTADO_EN_AVISO[r.anterior] ?? r.anterior,
+        estado: ESTADO_EN_AVISO[status] ?? status,
+        conversacion_id: r.conversation_id,
+      });
+    }
   }
 
   async getById(id: string): Promise<Lead | null> {

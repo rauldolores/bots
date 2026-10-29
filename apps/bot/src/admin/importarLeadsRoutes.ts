@@ -34,6 +34,7 @@ import {
   sanearMapeo,
 } from "../contacts/importar";
 import { sugerirMapeoConIa } from "../contacts/importarIa";
+import { emitirEvento } from "../webhooks/salientes";
 import { respuestaExport, type Columna } from "./exportar";
 import {
   renderImportarColumnas,
@@ -265,6 +266,16 @@ export function registrarRutasDeImportar(app: Hono<AdminBindings>): void {
         completados: rev.existentes.length,
         omitidos: rev.bajas.length + rev.repetidos.length,
         errores: rev.errores.length,
+      });
+      await emitirEvento(x.db, x.botId, "importacion.terminada", {
+        importacion_id: b.imp.id,
+        archivo: b.imp.archivo,
+        filas: b.tabla.filas.length,
+        creados: r.creados,
+        ya_existian: rev.existentes.length,
+        omitidos: rev.bajas.length + rev.repetidos.length,
+        con_error: rev.errores.length,
+        con_permiso: b.imp.consentimiento,
       });
     } catch (e) {
       console.error("[importar] falló a medias:", e);

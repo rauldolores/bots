@@ -1,4 +1,5 @@
 import { Db } from "./client";
+import { emitirEvento, iso } from "../webhooks/salientes";
 
 export interface Appointment {
   id: string;
@@ -51,6 +52,14 @@ export class AppointmentsRepo {
         Date.now(),
       ],
     );
+    await emitirEvento(this.db, this.botId, "cita.agendada", {
+      cita_id: id,
+      inicia: iso(input.startsAt),
+      nombre: input.customerName ?? null,
+      contacto: input.customerContact ?? null,
+      notas: input.notes ?? null,
+      conversacion_id: input.conversationId,
+    });
     return id;
   }
 
@@ -95,6 +104,20 @@ export class AppointmentsRepo {
   }
 
   async cancel(id: string): Promise<void> {
-    await this.db.run("UPDATE appointments SET status = 'cancelled' WHERE id = ? AND bot_id = ?", [id, this.botId]);
+    // Solo la que estaba agendada: cancelar dos veces no avisa dos veces.
+    const a = await this.db.first<Appointment>(
+      "UPDATE appointments SET status = 'cancelled' WHERE id = ? AND bot_id = ? AND status <> 'cancelled' RETURNING *",
+      [id, this.botId],
+    );
+    if (a) {
+      await emitirEvento(this.db, this.botId, "cita.cancelada", {
+        cita_id: id,
+        inicia: iso(a.starts_at),
+        nombre: a.customer_name,
+        contacto: a.customer_contact,
+        notas: a.notes,
+        conversacion_id: a.conversation_id,
+      });
+    }
   }
 }

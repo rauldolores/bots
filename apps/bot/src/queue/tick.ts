@@ -16,6 +16,7 @@ import { processNurtureJobs } from "../nurture/run";
 import { processCrmAnalysisJobs } from "../crm/analizar";
 import { processLeadCapturedJobs } from "../leads/postCaptura";
 import { refrescarTokensMcp } from "../connectors/mcpRefresh";
+import { procesarEntregas } from "../webhooks/salientes";
 
 /** Cuántas conversaciones atiende un tick. */
 const DEFAULT_LIMIT = 10;
@@ -34,6 +35,9 @@ const CRM_ANALYSIS_BATCH_LIMIT = 5;
 
 /** Cuántos leads recién capturados se terminan de procesar por corrida (CRM + aviso). */
 const LEAD_CAPTURED_BATCH_LIMIT = 10;
+
+/** Cuántos avisos automáticos (webhooks) se mandan por corrida. Van en paralelo, con 10 s de espera máxima cada uno. */
+const WEBHOOK_BATCH_LIMIT = 20;
 
 /** Tras este número de intentos fallidos, el trabajo se abandona. */
 const MAX_ATTEMPTS = 5;
@@ -194,6 +198,18 @@ export async function tick(
     if (leads.procesados > 0) console.log(`[tick] ${leads.procesados} lead(s) empujados al CRM`);
   } catch (e) {
     console.error("[tick] processLeadCapturedJobs:", e);
+  }
+
+  // Avisos automáticos (webhooks salientes): lote chico y aislado. Van antes
+  // que los MCP y el CRM porque son baratos (un POST) y el receptor espera
+  // enterarse pronto.
+  try {
+    const avisos = await procesarEntregas(env, WEBHOOK_BATCH_LIMIT);
+    if (avisos.enviadas + avisos.fallidas > 0) {
+      console.log(`[tick] avisos automáticos: ${avisos.enviadas} entregados, ${avisos.fallidas} con error`);
+    }
+  } catch (e) {
+    console.error("[tick] procesarEntregas:", e);
   }
 
   // Conectores MCP por OAuth: renovar el acceso ANTES de que caduque.

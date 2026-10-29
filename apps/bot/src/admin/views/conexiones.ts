@@ -45,6 +45,9 @@ import {
   type ConnectorFieldSpec,
 } from "../../connectors/registry";
 import { layout } from "./layout";
+import { AVISOS_CSS, bitacoraDeAvisos, cuerpoDeAvisos, type DatosDeAvisos } from "./avisos";
+import { AvisosRepo, MAX_AVISOS } from "../../webhooks/salientes";
+import { resolveTimezone } from "../../datetime";
 import { alertRow, heroTag, iconTile, MICRO_LABEL, pageHero, sectionCard, statCard, statGrid, statusPill } from "./ui";
 import { WIDGET_DEFAULTS, widgetConfigFromForm } from "../../widget/config";
 import { almacenamientoDisponible, firmarSubida, tamanoReal, borrarArchivo, urlPublicaDe } from "../../media/storage";
@@ -1047,6 +1050,7 @@ const CATEGORY_TABS: { key: string; label: string }[] = [
   { key: "tickets", label: CATEGORY_LABELS.tickets },
   { key: "calendar", label: CATEGORY_LABELS.calendar },
   { key: "mcp", label: CATEGORY_LABELS.mcp },
+  { key: "avisos", label: "Avisos (webhooks)" },
 ];
 
 function providersFor(category: ConnectorCategory): Record<string, ConnectorMeta> {
@@ -1062,6 +1066,7 @@ const TAB_ICON: Record<string, string> = {
   tickets: "life-buoy",
   calendar: "calendar",
   mcp: "plug",
+  avisos: "webhook",
 };
 
 function renderTabs(active: string): string {
@@ -2516,6 +2521,7 @@ const CATEGORY_INTRO: Record<string, string> = {
   tickets: "Si conectas una plataforma de tickets, los handoffs nuevos se crean ahí y /admin/tickets deja de mostrar la tabla local.",
   calendar: "Gestiona la agenda del negocio conectando tu propio calendario.",
   mcp: "Conecta cualquier servidor MCP remoto para darle más herramientas al agente.",
+  avisos: "Cuando algo pasa en tu bot (un lead nuevo, una cita, un ticket…), le avisa al sistema que tú digas: tu CRM, un Zapier o Make, tu ERP. Así no tiene que estar preguntando.",
 };
 
 const CX_CSS = `<style>
@@ -2584,7 +2590,9 @@ export async function renderConexiones(
   category: string = "canales",
   notice?: { ok?: boolean; err?: string },
   visibleNavIds: Set<string> | null = null,
+  avisos: { filtro?: string; secreto?: DatosDeAvisos["secreto"]; ok?: string; err?: string } = {},
 ): Promise<string> {
+  if (category === "avisos") return renderPestanaAvisos(env, botId, avisos, visibleNavIds);
   const cat = ["crm", "tickets", "calendar", "mcp"].includes(category) ? (category as ConnectorCategory) : "canales";
   const db = new Db(env.DB);
   const tabs = renderTabs(cat);
@@ -2659,6 +2667,47 @@ export async function renderConexiones(
     ${tabs}
     ${card}`;
 
+  return layout({ title: "Conexiones", activeTab: "conexiones", body, visibleNavIds, hero: true });
+}
+
+/** La pestaña Avisos (webhooks salientes): mismo hero y pestañas, su propio cuerpo y la bitácora. */
+async function renderPestanaAvisos(
+  env: Env,
+  botId: string,
+  o: { filtro?: string; secreto?: DatosDeAvisos["secreto"]; ok?: string; err?: string },
+  visibleNavIds: Set<string> | null,
+): Promise<string> {
+  const db = new Db(env.DB);
+  const repo = new AvisosRepo(db, botId);
+  const [avisos, resumen, tz] = await Promise.all([
+    repo.listar(),
+    repo.resumen(),
+    new SettingsRepo(db, botId).get(SETTING_KEYS.timezone),
+  ]);
+  const filtro = o.filtro ? (avisos.find((a) => a.id === o.filtro) ?? null) : null;
+  const entregas = await repo.entregas({ webhookId: filtro?.id, limite: 50 });
+  // Solo el secreto de un aviso de ESTE bot (la cookie no sabe de bots).
+  const secreto = o.secreto && avisos.some((a) => a.id === o.secreto!.avisoId) ? o.secreto : undefined;
+  const d: DatosDeAvisos = { avisos, resumen, entregas, filtro, timezone: resolveTimezone(tz), secreto, ok: o.ok, err: o.err };
+  const encendidos = avisos.filter((a) => a.activo).length;
+
+  const hero = pageHero({
+    eyebrow: "Canales",
+    title: "Conexiones",
+    description: "Los canales por donde te escriben tus clientes y las herramientas con las que trabaja tu agente: CRM, tickets, calendario y servidores MCP.",
+    tags: heroTag(encendidos ? `${encendidos} ${encendidos === 1 ? "aviso encendido" : "avisos encendidos"}` : "Sin avisos", encendidos ? "#3fb8c4" : "#f0a88a"),
+  });
+  const card = sectionCard({
+    icon: TAB_ICON.avisos,
+    title: "Avisos (webhooks)",
+    subtitle: `<span id="conexiones-summary">${esc(avisos.length ? `${avisos.length} de ${MAX_AVISOS} avisos` : "Sin avisos todavía")}</span>`,
+    body: `<p class="cx-intro">${esc(CATEGORY_INTRO.avisos)}</p>${cuerpoDeAvisos(d)}`,
+  });
+  const body = `${CX_CSS}${AVISOS_CSS}
+    ${hero}
+    ${renderTabs("avisos")}
+    ${card}
+    ${bitacoraDeAvisos(d)}`;
   return layout({ title: "Conexiones", activeTab: "conexiones", body, visibleNavIds, hero: true });
 }
 

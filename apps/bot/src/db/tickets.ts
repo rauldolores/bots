@@ -1,4 +1,5 @@
 import { Db } from "./client";
+import { emitirEvento, iso } from "../webhooks/salientes";
 
 export type TicketPriority = "low" | "normal" | "high" | "urgent";
 
@@ -38,6 +39,7 @@ export class TicketsRepo {
 
   async create(input: CreateTicketInput): Promise<string> {
     const id = crypto.randomUUID();
+    const now = Date.now();
     await this.db.run(
       `INSERT INTO tickets (id, bot_id, conversation_id, category, summary, transcript, priority, requester_name, requester_contact, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -51,9 +53,19 @@ export class TicketsRepo {
         input.priority ?? "normal",
         input.requesterName ?? null,
         input.requesterContact ?? null,
-        Date.now(),
+        now,
       ],
     );
+    await emitirEvento(this.db, this.botId, "ticket.creado", {
+      ticket_id: id,
+      categoria: input.category,
+      resumen: input.summary,
+      prioridad: input.priority ?? "normal",
+      nombre: input.requesterName ?? null,
+      contacto: input.requesterContact ?? null,
+      conversacion_id: input.conversationId,
+      creado: iso(now),
+    });
     return id;
   }
 

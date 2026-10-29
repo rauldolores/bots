@@ -5,6 +5,7 @@ import type { Env } from "../env";
 import { Db } from "../db/client";
 import { TicketsRepo, type TicketPriority } from "../db/tickets";
 import { ConversationsRepo } from "../db/conversations";
+import { emitirEvento } from "../webhooks/salientes";
 import { MessagesRepo } from "../db/messages";
 import { BotsRepo } from "../db/bots";
 import { LeadsRepo } from "../db/leads";
@@ -151,6 +152,15 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
         const convs = new ConversationsRepo(db, botId);
         await convs.setOpenTicket(convId, ticketId);
       }
+      await emitirEvento(db, botId, "conversacion.escalada", {
+        conversacion_id: convId,
+        ticket_id: ticketId,
+        motivo: reason,
+        resumen: summary,
+        prioridad: priority,
+        nombre: requesterName,
+        contacto: requesterContact,
+      });
 
       // El ticket SIEMPRE queda local primero (por eso el link de conversación
       // de arriba funciona sin depender de una plataforma externa). Si hay una
