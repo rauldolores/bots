@@ -40,7 +40,7 @@ color** (for `class="…"`). Use whichever fits; they resolve to the same hex.
 | `--accent-ink` | — | `#5c4400` | texto/ícono sobre `--accent-soft` |
 | `--cream` | `text-cream` | `#1c1815` | primary text — tinta cálida (nombre histórico, ver arriba) |
 | `--muted` | `text-muted` | `#5c534a` | secondary text |
-| `--dim` | `text-dim` | `#8c7f6d` | tertiary text, labels, captions |
+| `--dim` | `text-dim` | `#6e6459` | tertiary text, labels, captions — el más claro permitido para texto (5.8:1 sobre blanco; antes `#8c7f6d`, 3.9:1) |
 | `--ok` | `text-ok` `border-ok` | `#0b6e7a` | positivo (teal): resuelto, en línea. Sobre tinta usa `#3fb8c4` |
 | `--warn` | — | `#8a5a00` | atención (como punto o texto) |
 | `--info` | `text-info` `border-info` | `#2563eb` | info / blue (WhatsApp, escalated) |

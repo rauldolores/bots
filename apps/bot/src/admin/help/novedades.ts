@@ -18,6 +18,13 @@ export interface Novedad {
 
 export const NOVEDADES: Novedad[] = [
   {
+    fecha: "2026-10-29",
+    titulo: "Los textos grises se leen mejor",
+    texto:
+      "Subtítulos, rótulos y notas en gris claro del panel ahora son un poco más oscuros, para que se lean bien en cualquier pantalla y con poca luz.",
+    tipo: "Mejora",
+  },
+  {
     fecha: "2026-10-28",
     titulo: "Importa tu lista de clientes desde Excel",
     texto:

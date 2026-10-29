@@ -165,7 +165,7 @@ const HEAD_ASSETS = `
             accent2: "#8a6a00",
             cream: "#1c1815",
             muted: "#5c534a",
-            dim: "#8c7f6d",
+            dim: "#6e6459",
             ok: "#0b6e7a",
             info: "#2563eb",
             bad: "#b3261e",
@@ -195,7 +195,7 @@ const GLOBAL_STYLE = `
     --bg:#efeae1; --panel:#ffffff; --panel2:#f3eee6; --raise:#ebe4d8;
     --line:#e3dacb; --linelit:#d3c7b4;
     --accent:#f2b705; --accent-hover:#d9a404; --accent-2:#8a6a00; --accent-soft:#fdf0c8; --accent-ink:#5c4400;
-    --cream:#1c1815; --muted:#5c534a; --dim:#8c7f6d;
+    --cream:#1c1815; --muted:#5c534a; --dim:#6e6459;
     --ok:#0b6e7a; --ok-soft:rgba(11,110,122,.12); --warn:#8a5a00; --warn-soft:#f6e7c8; --info:#2563eb; --bad:#b3261e; --violet:#7c3aed;
     /* encabezado oscuro de página (ui.ts pageHero) y fila resaltada de tabla */
     --hero-bg:#26211b; --hero-ink:#fbf8f3; --hero-muted:#cfc5b6; --hero-line:rgba(255,255,255,.14);
