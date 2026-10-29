@@ -25,7 +25,7 @@
     "bot:config": "tsx --env-file-if-exists=.env scripts/set-bot-config.ts",
     "channel:connect": "tsx --env-file-if-exists=.env scripts/connect-channel.ts",
     "kontrolia:register-app": "tsx --env-file-if-exists=.env scripts/register-nodia-agents-application.ts",
-    "build": "esbuild src/runtime/vercel.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/vercel.js --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\""
+    "build": "esbuild src/runtime/vercel.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/vercel.js --banner:js=\"import{createRequire as __bannerCreateRequire}from'module';const require=__bannerCreateRequire(import.meta.url);\""
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.0",
