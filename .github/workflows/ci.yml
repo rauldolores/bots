@@ -39,6 +39,10 @@ jobs:
           cache-dependency-path: apps/bot/package-lock.json
       - run: npm ci
       - run: npm run typecheck
+      # Arma el bundle de Vercel y lo carga en Node. Las pruebas no tocan
+      # dist/vercel.js: un bundle que Node rechaza pasaba CI en verde y tumbaba
+      # producción (2026-10-28, ~15 h de 500 por un createRequire duplicado).
+      - run: npm run build:check
       - run: npm test
         env:
           # El puerto de la base que abre `supabase db start` (config.toml → [db] port).

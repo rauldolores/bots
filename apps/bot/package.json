@@ -25,6 +25,7 @@
     "bot:config": "tsx --env-file-if-exists=.env scripts/set-bot-config.ts",
     "channel:connect": "tsx --env-file-if-exists=.env scripts/connect-channel.ts",
     "kontrolia:register-app": "tsx --env-file-if-exists=.env scripts/register-nodia-agents-application.ts",
+    "build:check": "npm run build && node scripts/check-bundle.mjs",
     "build": "esbuild src/runtime/vercel.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/vercel.js --banner:js=\"import{createRequire as __bannerCreateRequire}from'module';const require=__bannerCreateRequire(import.meta.url);\""
   },
   "dependencies": {
